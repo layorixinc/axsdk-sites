@@ -1,0 +1,7 @@
+{
+  "name": "보안 모듈",
+  "group": "security-modules",
+  "abstract": null,
+  "metadata": null,
+  "enable": true
+}

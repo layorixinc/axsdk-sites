@@ -4,5 +4,5 @@
 
 ## Sites
 
-- [블루문소프트](http://bluemoonsoft.com): [`bluemoonsoft/`](bluemoonsoft/)
-- [다큐레이](http://docuray.com): [`docuray/`](docuray/)
+- [bluemoonsoft](http://bluemoonsoft.com): 블루문소프트
+- [docuray](http://docuray.com): 다큐레이

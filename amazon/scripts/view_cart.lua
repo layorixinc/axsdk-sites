@@ -6,13 +6,7 @@ end
 function AX_view_cart(args)
   args = args or {}
 
-  local navigated = M.navigate_cart_if_needed()
-  if navigated then
-    return {
-      pending = true,
-      error = "navigation_pending"
-    }
-  end
+  M.navigate_cart()
 
   dom.wait_for_selector(M.CART_READY_SELECTOR, { timeout = 30000 })
 

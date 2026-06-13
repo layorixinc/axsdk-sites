@@ -12,21 +12,9 @@ function AX_view_product(args)
     }
   end
 
-  local navigated = M.navigate_product_if_needed(product_id)
-  if navigated then
-    return {
-      product_id = product_id,
-      error = "navigation_pending"
-    }
-  end
-
-  dom.wait_for_selector(M.PRODUCT_READY_SELECTOR, { timeout = 30000 })
-
-  if dom.exists('form[action*="validateCaptcha"]') then
-    return {
-      product_id = product_id,
-      error = "captcha_required"
-    }
+  local page_error = M.ensure_product_page(product_id)
+  if page_error then
+    return page_error
   end
 
   return M.read_product_view(product_id)

@@ -107,15 +107,7 @@ function AX_update_cart(args)
     }
   end
 
-  local navigated = M.navigate_cart_if_needed()
-  if navigated then
-    return {
-      product_id = product_id,
-      quantity = quantity,
-      pending = true,
-      error = "navigation_pending"
-    }
-  end
+  M.navigate_cart()
 
   dom.wait_for_selector(M.CART_READY_SELECTOR, { timeout = 30000 })
 

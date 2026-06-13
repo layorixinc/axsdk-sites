@@ -116,5 +116,139 @@
       ],
       "type": "object"
     }
+  },
+  {
+    "name": "AX_resolve_zip",
+    "description": "Resolve a US ZIP code from an address string for Thumbtack searches.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "address": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_search_service",
+    "description": "Search Thumbtack services and local pros by query and ZIP code or address.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "zip_code": {
+          "minLength": 5,
+          "type": "string"
+        },
+        "address": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "cursor": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "filters": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "zip_code"
+          ]
+        },
+        {
+          "required": [
+            "address"
+          ]
+        }
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_view_service",
+    "description": "View a Thumbtack pro profile from a search result URL, including ratings, overview, services, photos, reviews, credentials, FAQs, and available actions.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "service_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_update_project",
+    "description": "Fill Thumbtack project request fields using generic selector-based answers and form value maps.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "answers": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "form_values": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_request_quote",
+    "description": "Open or inspect a Thumbtack quote request from a pro profile URL. The current implementation does not submit the request.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "service_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "answers": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "form_values": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "submit": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    }
   }
 ]

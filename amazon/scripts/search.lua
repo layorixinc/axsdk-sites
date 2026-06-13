@@ -8,15 +8,7 @@ function AX_search_product(args)
   local query = M.non_empty(args.query or args.regex)
   local cursor = M.non_empty(args.cursor)
 
-  local navigated = M.navigate_search_if_needed(query, cursor)
-  if navigated then
-    return {
-      total_count = 0,
-      candidates = ax.array(),
-      cursor = cursor or false,
-      error = "navigation_pending"
-    }
-  end
+  M.navigate_search(query, cursor)
 
   dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = 30000 })
 

@@ -181,23 +181,12 @@ function M.product_page_matches(product_id)
   return current == product_id and dom.exists("span#productTitle")
 end
 
-function M.navigate_product_if_needed(product_id)
-  if M.product_page_matches(product_id) then
-    return false
-  end
+function M.navigate_product(product_id)
   nav.navigate(M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX .. product_id, {})
-  return true
 end
 
 function M.ensure_product_page(product_id)
-  if M.navigate_product_if_needed(product_id) then
-    return {
-      product_id = product_id,
-      error = "navigation_pending",
-      pending = true
-    }
-  end
-
+  M.navigate_product(product_id)
   dom.wait_for_selector(M.PRODUCT_READY_SELECTOR, { timeout = 30000 })
 
   if dom.exists('form[action*="validateCaptcha"]') then
@@ -369,31 +358,25 @@ function M.current_page_matches_cursor(cursor)
   return false
 end
 
-function M.navigate_search_if_needed(query, cursor)
+function M.navigate_search(query, cursor)
   local target = M.non_empty(cursor)
 
   if target then
     if M.looks_like_url(target) then
-      if not M.current_page_matches_cursor(target) then
-        nav.navigate(M.force_full_navigation_url(target), {})
-        return true
-      end
-      return false
+      nav.navigate(M.force_full_navigation_url(target), {})
+      return
     end
 
     local page = tonumber(target)
-    if page and not M.current_page_matches_cursor(target) then
+    if page then
       nav.navigate(M.AMAZON_SEARCH_NAVIGATION_URL, { k = query or "", page = page })
-      return true
+      return
     end
-    return false
   end
 
-  if query and query ~= "" and not M.current_page_matches_query(query) then
+  if query and query ~= "" then
     nav.navigate(M.AMAZON_SEARCH_NAVIGATION_URL, { k = query })
-    return true
   end
-  return false
 end
 
 function M.first_text(selectors)
@@ -871,12 +854,8 @@ function M.cart_page_matches()
     or href:find("/cart?", 1, true) ~= nil
 end
 
-function M.navigate_cart_if_needed()
-  if M.cart_page_matches() then
-    return false
-  end
+function M.navigate_cart()
   nav.navigate(M.CART_NAVIGATION_URL, {})
-  return true
 end
 
 function M.read_cart_count()

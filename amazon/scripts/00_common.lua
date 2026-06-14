@@ -5,6 +5,7 @@ M.AMAZON_SEARCH_NAVIGATION_URL = "http://www.amazon.com/s"
 M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX = "http://www.amazon.com/dp/"
 M.AMAZON_PRODUCT_URL_PREFIX = "https://www.amazon.com/dp/"
 M.RESULT_SELECTOR = '[data-component-type="s-search-result"][data-asin]'
+M.RESULT_ADD_TO_CART_SELECTOR = 'button[name="submit.addToCart"], input[name="submit.addToCart"]'
 M.RESULT_READY_SELECTOR = M.RESULT_SELECTOR .. ', .s-no-results-result, form[action*="validateCaptcha"]'
 M.PRODUCT_READY_SELECTOR = 'span#productTitle, #centerCol, #buybox, form[action*="validateCaptcha"]'
 M.CART_NAVIGATION_URL = "http://www.amazon.com/gp/cart/view.html"
@@ -211,6 +212,7 @@ function M.result_fields()
     reviews_text = { selector = 'a[href*="#customerReviews"] span, a[href*="#customerReviews"]' },
     badge = { selector = ".a-badge-text, .s-label-popover-default" },
     sponsored = { selector = '.s-sponsored-label-info-icon, [aria-label="Sponsored"], [aria-label="후원"]', exists = true },
+    add_to_cart = { selector = M.RESULT_ADD_TO_CART_SELECTOR, exists = true },
     text = true
   }
 end
@@ -255,7 +257,7 @@ function M.read_candidates()
   for index = 1, #rows do
     local row = rows[index]
     local asin = M.non_empty(row.asin)
-    if asin and not seen[asin] then
+    if asin and not seen[asin] and row.add_to_cart == true then
       local candidate = M.candidate_from_row(row)
       if candidate then
         seen[asin] = true

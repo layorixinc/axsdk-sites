@@ -118,6 +118,16 @@
     }
   },
   {
+    "name": "AX_checkout",
+    "description": "Navigate to the Amazon cart and proceed to checkout. When the checkout page is reached, returns its data (delivering_to, shipping_address, payment_method, order_summary, place_order_available). Returns status login_required when sign-in is needed; does not place an order.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {},
+      "required": [],
+      "type": "object"
+    }
+  },
+  {
     "name": "AX_resolve_zip",
     "description": "Resolve a US ZIP code from an address string for Thumbtack searches.",
     "parameters": {

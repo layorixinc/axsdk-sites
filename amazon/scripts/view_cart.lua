@@ -16,5 +16,9 @@ function AX_view_cart(args)
     }
   end
 
+  if M.is_login_page() then
+    return M.login_required_result()
+  end
+
   return M.read_cart_view()
 end

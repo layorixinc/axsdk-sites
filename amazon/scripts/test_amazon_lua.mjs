@@ -20,6 +20,7 @@ const LUA_FILES = [
   'add_to_cart.lua',
   'view_cart.lua',
   'update_cart.lua',
+  'checkout.lua',
 ];
 
 function parseArgs(argv) {
@@ -34,10 +35,14 @@ function parseArgs(argv) {
     mutateCart: false,
     keepOpen: false,
     deleteCartProductId: null,
+    checkout: false,
+    checkoutOnly: false,
   };
 
   for (const arg of argv) {
     if (arg === '--mutate-cart') options.mutateCart = true;
+    else if (arg === '--checkout') options.checkout = true;
+    else if (arg === '--checkout-only') { options.checkout = true; options.checkoutOnly = true; }
     else if (arg === '--keep-open') options.keepOpen = true;
     else if (arg.startsWith('--cdp=')) options.cdp = arg.slice('--cdp='.length);
     else if (arg.startsWith('--port=')) options.port = Number(arg.slice('--port='.length));
@@ -71,6 +76,8 @@ Options:
   --query=TEXT                  Search query. Default: wireless mouse.
   --product-id=ASIN             Product used for view/update/add tests. Default: B006CQ1ZHI.
   --mutate-cart                 Also run AX_add_to_cart. This changes the real cart.
+  --checkout                    Also run AX_checkout after the suite (proceeds to checkout; no order is placed).
+  --checkout-only               Run only AX_checkout (skips the rest of the suite).
   --delete-cart-product-id=ASIN   Also test AX_update_cart deletion by setting this cart item quantity to 0.
   --keep-open                   Leave Chrome running when this script launched it.
 `);
@@ -204,6 +211,7 @@ async function openPage(cdpUrl, initialUrl) {
   await page.send('Page.enable');
   await page.send('Runtime.enable');
   await navigate(page, initialUrl);
+  await page.send('Page.bringToFront').catch(() => null);
   return page;
 }
 
@@ -341,8 +349,37 @@ function compactProduct(product) {
   };
 }
 
+const CHECKOUT_STATUSES = ['login_required', 'checkout', 'cart_empty', 'checkout_unavailable', 'checkout_pending'];
+
+async function runCheckout(page, options, summary) {
+  console.log('Testing AX_checkout. This navigates to the cart and proceeds to checkout; it does not place an order.');
+  const checkout = await callLuaUntilNotPending(page, options, 'AX_checkout', {});
+  assertCondition(checkout?.ok, 'AX_checkout call failed', checkout);
+  assertCondition(checkout.value?.pending !== true, 'AX_checkout is still pending', checkout.value);
+  assertCondition(CHECKOUT_STATUSES.includes(checkout.value?.status), 'AX_checkout returned an unexpected status', checkout.value);
+  summary.checkout = {
+    status: checkout.value.status,
+    login_required: checkout.value.login_required === true,
+    item_count: checkout.value.item_count,
+    url: checkout.value.url,
+  };
+  if (checkout.value.checkout) {
+    const c = checkout.value.checkout;
+    summary.checkout.data = {
+      delivering_to: c.delivering_to,
+      has_shipping_address: typeof c.shipping_address === 'string' && c.shipping_address.length > 0,
+      has_payment_method: typeof c.payment_method === 'string' && c.payment_method.length > 0,
+      order_summary: c.order_summary,
+      place_order_available: c.place_order_available,
+    };
+  }
+  return summary;
+}
+
 async function runTests(page, options) {
   const summary = {};
+
+  if (options.checkoutOnly) return runCheckout(page, options, summary);
 
   console.log(`Testing AX_search_product query=${JSON.stringify(options.query)}`);
   const search = await callLuaWithNavigationReplay(page, options, 'AX_search_product', { query: options.query });
@@ -442,6 +479,9 @@ async function runTests(page, options) {
   } else {
     summary.update_cart_delete = 'skipped; pass --delete-cart-product-id=ASIN to delete a cart item';
   }
+
+  if (options.checkout) await runCheckout(page, options, summary);
+  else summary.checkout = 'skipped; pass --checkout to run the checkout flow';
 
   return summary;
 }

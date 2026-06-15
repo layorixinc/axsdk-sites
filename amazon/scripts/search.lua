@@ -21,6 +21,10 @@ function AX_search_product(args)
     }
   end
 
+  if M.is_login_page() then
+    return M.login_required_result()
+  end
+
   local candidates = M.read_candidates()
   return {
     total_count = M.read_total_count(#candidates),

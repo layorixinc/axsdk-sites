@@ -112,6 +112,10 @@ function AX_add_to_cart(args)
     }
   end
 
+  if M.is_login_page() then
+    return M.login_required_result()
+  end
+
   local error = nil
   if ready ~= true then
     error = "add_to_cart_pending"

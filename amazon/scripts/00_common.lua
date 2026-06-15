@@ -6,11 +6,14 @@ M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX = "http://www.amazon.com/dp/"
 M.AMAZON_PRODUCT_URL_PREFIX = "https://www.amazon.com/dp/"
 M.RESULT_SELECTOR = '[data-component-type="s-search-result"][data-asin]'
 M.RESULT_ADD_TO_CART_SELECTOR = 'button[name="submit.addToCart"], input[name="submit.addToCart"]'
-M.RESULT_READY_SELECTOR = M.RESULT_SELECTOR .. ', .s-no-results-result, form[action*="validateCaptcha"]'
-M.PRODUCT_READY_SELECTOR = 'span#productTitle, #centerCol, #buybox, form[action*="validateCaptcha"]'
+M.LOGIN_SELECTOR = 'form[name="signIn"], #authportal-main-section, #ap_email, #ap_password'
+M.RESULT_READY_SELECTOR = M.RESULT_SELECTOR .. ', .s-no-results-result, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
+M.PRODUCT_READY_SELECTOR = 'span#productTitle, #centerCol, #buybox, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.CART_NAVIGATION_URL = "http://www.amazon.com/gp/cart/view.html"
-M.CART_READY_SELECTOR = '#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart, form[action*="validateCaptcha"]'
-M.ADD_TO_CART_READY_SELECTOR = '#NATC_SMART_WAGON_CONF_MSG_SUCCESS, #attachDisplayAddBaseAlert, #attach-added-to-cart-message, #huc-v2-order-row-confirm-text, #sw-atc-confirmation, form[action*="validateCaptcha"]'
+M.CART_READY_SELECTOR = '#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
+M.ADD_TO_CART_READY_SELECTOR = '#NATC_SMART_WAGON_CONF_MSG_SUCCESS, #attachDisplayAddBaseAlert, #attach-added-to-cart-message, #huc-v2-order-row-confirm-text, #sw-atc-confirmation, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
+M.CHECKOUT_BUTTON_SELECTOR = 'input[name="proceedToRetailCheckout"], #sc-buy-box-ptc-button input, [data-feature-id="proceed-to-checkout-action"] input, #hlb-ptc-btn-native'
+M.CHECKOUT_READY_SELECTOR = M.LOGIN_SELECTOR .. ', #submitOrderButtonId, #placeYourOrder, input[name="placeYourOrder1"], #spc-orders, #subtotals, #deliver-to-customer-text, #checkout-payment-option-panel, form[action*="validateCaptcha"]'
 M.RESULT_LIMIT = 24
 
 function M.clean_text(value)
@@ -25,6 +28,20 @@ function M.non_empty(value)
     return nil
   end
   return text
+end
+
+function M.is_login_page()
+  local href = M.non_empty(dom.get_location_href()) or ""
+  return href:find("/ap/signin", 1, true) ~= nil
+    or dom.exists(M.LOGIN_SELECTOR)
+end
+
+function M.login_required_result()
+  return {
+    status = "login_required",
+    login_required = true,
+    url = M.non_empty(dom.get_location_href())
+  }
 end
 
 function M.normalize_query(value)
@@ -195,6 +212,10 @@ function M.ensure_product_page(product_id)
       product_id = product_id,
       error = "captcha_required"
     }
+  end
+
+  if M.is_login_page() then
+    return M.login_required_result()
   end
 
   return nil
@@ -984,5 +1005,118 @@ function M.read_cart_view()
     subtotal_text = subtotal.text,
     currency = subtotal.currency,
     empty = #items == 0
+  }
+end
+
+M.CHECKOUT_SUMMARY_LABELS = {
+  "Items:",
+  "Shipping & handling:",
+  "Total before tax:",
+  "Estimated tax to be collected:",
+  "Estimated tax:",
+  "Order total:",
+  "Exchange rate",
+  "Promotion",
+  "Free Shipping",
+  "Import Fees"
+}
+
+function M.checkout_summary_value(text, start_label)
+  local s = text:find(start_label, 1, true)
+  if not s then
+    return nil
+  end
+  s = s + #start_label
+
+  local cut = nil
+  for index = 1, #M.CHECKOUT_SUMMARY_LABELS do
+    local label = M.CHECKOUT_SUMMARY_LABELS[index]
+    if label ~= start_label then
+      local position = text:find(label, s, true)
+      if position and (not cut or position < cut) then
+        cut = position
+      end
+    end
+  end
+
+  local segment = cut and text:sub(s, cut - 1) or text:sub(s)
+  segment = M.non_empty(segment)
+  if not segment then
+    return nil
+  end
+  return M.truncate_text(segment, 40)
+end
+
+function M.read_checkout_summary()
+  local text = M.non_empty(dom.get_text("#subtotals"))
+  if not text then
+    return nil
+  end
+  return {
+    items = M.checkout_summary_value(text, "Items:"),
+    shipping_handling = M.checkout_summary_value(text, "Shipping & handling:"),
+    estimated_tax = M.checkout_summary_value(text, "Estimated tax to be collected:"),
+    order_total = M.checkout_summary_value(text, "Order total:")
+  }
+end
+
+function M.checkout_delivering_to()
+  local text = M.non_empty(dom.get_text("#deliver-to-customer-text"))
+  if not text then
+    return nil
+  end
+  local name = text:match("^[Dd]elivering to%s*(.+)$")
+  return M.non_empty(name) or text
+end
+
+function M.checkout_payment_method()
+  local text = M.non_empty(dom.get_text("#checkout-payment-option-panel"))
+    or M.non_empty(dom.get_text("#checkout-paymentOptionPanel"))
+  if not text then
+    return nil
+  end
+
+  -- get_text returns textContent, which includes inline <script> source on
+  -- partially loaded checkout pages; cut everything from the first script marker.
+  local cut = nil
+  local markers = { "//<![CDATA[", "(function", "function(", "PaymentsPortal", "<![CDATA[", "{" }
+  for index = 1, #markers do
+    local position = text:find(markers[index], 1, true)
+    if position and (not cut or position < cut) then
+      cut = position
+    end
+  end
+  if cut then
+    text = text:sub(1, cut - 1)
+  end
+
+  text = text:gsub("[Ss]etting your payment method%s*%.*", "")
+  -- strip one or more leading "Payment method" labels; a bare label means no method is shown yet.
+  local previous
+  repeat
+    previous = text
+    text = text:gsub("^%s*[Pp]ayment method%s*", "")
+  until text == previous
+  local cleaned = M.non_empty(text)
+  if not cleaned then
+    return nil
+  end
+  return M.truncate_text(cleaned, 160)
+end
+
+function M.checkout_place_order_available()
+  return dom.exists("#submitOrderButtonId")
+    or dom.exists('input[name="placeYourOrder1"]')
+    or dom.exists("#bottomSubmitOrderButtonId")
+end
+
+function M.read_checkout_view()
+  return {
+    url = M.non_empty(dom.get_location_href()),
+    delivering_to = M.checkout_delivering_to(),
+    shipping_address = M.non_empty(dom.get_text("#deliver-to-address-text")),
+    payment_method = M.checkout_payment_method(),
+    order_summary = M.read_checkout_summary(),
+    place_order_available = M.checkout_place_order_available()
   }
 end

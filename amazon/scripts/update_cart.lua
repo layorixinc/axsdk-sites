@@ -119,6 +119,10 @@ function AX_update_cart(args)
     }
   end
 
+  if M.is_login_page() then
+    return M.login_required_result()
+  end
+
   local row_selector = cart_row_selector(product_id)
   local before = read_cart_item(product_id)
   if not before then

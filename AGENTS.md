@@ -20,17 +20,26 @@ This repository stores site-specific `llms.txt` sitemap data used by the AXSDK C
 - Do not add generated timestamps unless the project later defines them as part of a schema.
 - If a site has no reliable `llms.txt` source, do not create a placeholder that implies support.
 
-## Suggested Structure
+## Project Structure
 
-Until a stricter schema is introduced, keep additions simple and predictable:
+Use the existing root-level site directory convention. Do not introduce a `sites/` wrapper unless the repository schema is explicitly changed.
 
 ```text
-sites/
-  example.com/
-    llms.txt
+index.md
+<site>/
+  sitemap.md              # route aliases and site navigation, when available
+  knowledge/
+    index.yaml
+    <group>/
+      info.json
+      knowledge.md
+  scripts/
+    *.lua                 # AXSDK helpers, when needed
 ```
 
-Use lowercase hostnames for directory names. Avoid protocol prefixes such as `https://` in paths.
+Use lowercase hostnames or established site slugs for directory names. Avoid protocol prefixes such as `https://` in paths. Empty directories with only `.gitkeep` are not supported site data; do not list them as supported unless real source-backed data is added.
+
+Keep `index.md` synchronized with populated site entries.
 
 ## Validation Before Finishing
 

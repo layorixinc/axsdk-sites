@@ -281,10 +281,10 @@ function M.start_search(query, zip_code)
   dom.set_value('input[aria-label="Search on Thumbtack"]', query)
   dom.wait_for_selector('[role="option"]', { timeout = 5000 })
   if dom.exists('[role="option"]') then
-    dom.click('[role="option"]')
+    dom.click('[role="option"]', { navigates = false })
   end
   dom.set_value('input[aria-label="Zip code"]', zip_code)
-  dom.click('button[data-test="search-button"]')
+  dom.click('button[data-test="search-button"]', { expectedUrl = "/instant-results/" })
   return true
 end
 

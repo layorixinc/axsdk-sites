@@ -11,7 +11,10 @@ M.RESULT_READY_SELECTOR = M.RESULT_SELECTOR .. ', .s-no-results-result, ' .. M.L
 M.PRODUCT_READY_SELECTOR = 'span#productTitle, #centerCol, #buybox, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.CART_NAVIGATION_URL = "http://www.amazon.com/gp/cart/view.html"
 M.CART_READY_SELECTOR = '#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
-M.ADD_TO_CART_READY_SELECTOR = '#NATC_SMART_WAGON_CONF_MSG_SUCCESS, #attachDisplayAddBaseAlert, #attach-added-to-cart-message, #huc-v2-order-row-confirm-text, #sw-atc-confirmation, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
+M.ADD_TO_CART_CONFIRM_SELECTOR = '#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin]'
+M.ATTACH_PANE_SELECTOR = '#attach-warranty-pane:not(.aok-hidden)'
+M.ATTACH_DECLINE_SELECTOR = '#attach-warranty-pane:not(.aok-hidden) #attachSiNoCoverage input, #attach-warranty-pane:not(.aok-hidden) #attachSiNoCoverage .a-button-input, #attach-warranty-pane:not(.aok-hidden) #attachSiNoCoverage'
+M.ADD_TO_CART_READY_SELECTOR = M.ADD_TO_CART_CONFIRM_SELECTOR .. ', ' .. M.ATTACH_PANE_SELECTOR .. ', ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.CHECKOUT_BUTTON_SELECTOR = 'input[name="proceedToRetailCheckout"], #sc-buy-box-ptc-button input, [data-feature-id="proceed-to-checkout-action"] input, #hlb-ptc-btn-native'
 M.CHECKOUT_READY_SELECTOR = M.LOGIN_SELECTOR .. ', #submitOrderButtonId, #placeYourOrder, input[name="placeYourOrder1"], #spc-orders, #subtotals, #deliver-to-customer-text, #checkout-payment-option-panel, form[action*="validateCaptcha"]'
 M.RESULT_LIMIT = 24

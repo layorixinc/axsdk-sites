@@ -51,7 +51,7 @@ function makePages() {
     product: {
       href: 'https://www.amazon.com/dp/B000000001',
       tokens: ['productTitle', 'centerCol', 'buybox', 'add-to-cart-button'],
-      text: {},
+      text: { '#nav-cart-count': '0' },
       rows: {},
     },
     cartWithItem: {
@@ -87,6 +87,18 @@ function makePages() {
         '#deliver-to-address-text': '123 Main St, Springfield, IL, 62704, United States',
         '#checkout-payment-option-panel': 'Payment method Visa ending in 1234, pay $13.33',
       },
+      rows: {},
+    },
+    productAttach: {
+      href: 'https://www.amazon.com/dp/B000000001',
+      tokens: ['productTitle', 'centerCol', 'buybox', 'add-to-cart-button', 'attach-warranty-pane', 'attach-warranty-header', 'attachSiNoCoverage'],
+      text: { '#nav-cart-count': '1' },
+      rows: {},
+    },
+    smartWagon: {
+      href: 'https://www.amazon.com/cart/smart-wagon?newItems=abc',
+      tokens: ['sw-atc-confirmation', 'NATC_SMART_WAGON_CONF_MSG_SUCCESS', 'nav-cart-count'],
+      text: { '#nav-cart-count': '1', '#sw-atc-confirmation': 'Added to cart', '#NATC_SMART_WAGON_CONF_MSG_SUCCESS': 'Added to cart Phone Only' },
       rows: {},
     },
   };
@@ -229,6 +241,20 @@ const tests = [
     assert(value.item_count === 1, 'item_count 1', value);
     assert(value.empty === false, 'cart not empty', value);
     assert(value.login_required === undefined, 'no login_required flag on success', value);
+  }],
+  ['AX_add_to_cart declines the "Add to your order" sidesheet and completes', async () => {
+    const navTo = (url, cur) => ((cur === 'product' || cur === 'productAttach') ? cur : 'product');
+    const clickTo = (sel, cur) => {
+      if (cur === 'product' && /add-to-cart|submit\.add/.test(sel)) return 'productAttach';
+      if (cur === 'productAttach' && /attachSiNoCoverage/.test(sel)) return 'smartWagon';
+      return cur;
+    };
+    const { value, steps } = await drive('AX_add_to_cart', { product_id: 'B000000001' }, { start: 'product', navTo, clickTo });
+    assert(value.added === true, 'added true', value);
+    assert(!value.pending, 'not pending', value);
+    assert(value.error == null, 'no error', value);
+    assert(typeof value.confirmation === 'string' && /Added to cart/i.test(value.confirmation), 'confirmation read from smart-wagon', value);
+    assert(steps.filter(k => k === 'dom.click').length >= 2, 'add and decline clicks issued', steps);
   }],
 ];
 

@@ -85,25 +85,39 @@ function AX_add_to_cart(args)
     return page_error
   end
 
-  local selector = add_button_selector()
-  if not selector then
-    return {
-      product_id = M.current_product_id() or product_id,
-      error = "add_to_cart_unavailable"
-    }
-  end
-
   local before_count = M.read_cart_count()
-  local clicked = dom.click(selector)
-  if clicked ~= true then
-    return {
-      product_id = M.current_product_id() or product_id,
-      added = false,
-      error = "click_failed"
-    }
+
+  -- Add the item while on the product page. The add click (and the optional
+  -- "Add to your order" protection-plan sidesheet) navigates to the confirmation
+  -- page, so on a durable replay we re-enter here off the product page and fall
+  -- through to read the result instead of re-evaluating the buy box.
+  if M.product_page_matches(product_id) then
+    local selector = add_button_selector()
+    if not selector then
+      return {
+        product_id = M.current_product_id() or product_id,
+        error = "add_to_cart_unavailable"
+      }
+    end
+
+    local clicked = dom.click(selector)
+    if clicked ~= true then
+      return {
+        product_id = M.current_product_id() or product_id,
+        added = false,
+        error = "click_failed"
+      }
+    end
+
+    dom.wait_for_selector(M.ADD_TO_CART_READY_SELECTOR, { timeout = 30000 })
+
+    -- Decline the optional "Add to your order" protection-plan sidesheet by default.
+    if dom.exists(M.ATTACH_PANE_SELECTOR) then
+      dom.click(M.ATTACH_DECLINE_SELECTOR)
+      dom.wait_for_selector(M.ADD_TO_CART_CONFIRM_SELECTOR, { timeout = 30000 })
+    end
   end
 
-  local ready = dom.wait_for_selector(M.ADD_TO_CART_READY_SELECTOR, { timeout = 30000 })
   if dom.exists('form[action*="validateCaptcha"]') then
     return {
       product_id = M.current_product_id() or product_id,
@@ -116,21 +130,17 @@ function AX_add_to_cart(args)
     return M.login_required_result()
   end
 
-  local error = nil
-  if ready ~= true then
-    error = "add_to_cart_pending"
-  end
-
+  local confirmed = dom.exists(M.ADD_TO_CART_CONFIRM_SELECTOR)
   local confirmation = nil
-  if ready == true then
+  if confirmed then
     confirmation = add_confirmation_text()
   end
 
   return {
     product_id = M.current_product_id() or product_id,
-    added = true,
-    pending = ready ~= true,
-    error = error,
+    added = confirmed,
+    pending = not confirmed,
+    error = (not confirmed) and "add_to_cart_pending" or nil,
     previous_cart_count = before_count,
     cart_count = M.read_cart_count(),
     confirmation = confirmation

@@ -2,7 +2,7 @@ AX_THUMBTACK = {}
 local M = AX_THUMBTACK
 
 M.HOME_URL = "https://www.thumbtack.com/"
-M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"], [data-test="pro-list-result"], input[aria-label="Search on Thumbtack"]'
+M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"], [data-test="pro-list-result"]'
 M.SERVICE_READY_SELECTOR = 'h1, button, [data-test="specialties-section__interested-item"]'
 M.MODAL_SELECTOR = '[data-test="thumbprint-modal-container"], [role="dialog"]'
 M.CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
@@ -290,12 +290,18 @@ function M.start_search(query, zip_code)
     return true
   end
 
-  dom.set_value('input[aria-label="Search on Thumbtack"]', query)
-  dom.wait_for_selector('[role="option"]', { timeout = 5000 })
-  if dom.exists('[role="option"]') then
-    dom.click('[role="option"]', { navigates = false })
-  end
-  dom.set_value('input[aria-label="Zip code"]', zip_code)
+  -- Prep the multi-input search as one async flow so React commits each step (typed query →
+  -- autocomplete category selection → zip) before submitting. A plain durable sequence runs
+  -- synchronously within a replay pass, so the submit would fire before Thumbtack resolves the
+  -- query and produce no navigation. dom.fill yields between actions; the submit click is a
+  -- separate navigating step.
+  dom.fill({
+    { set = 'input[aria-label="Search on Thumbtack"]', value = query },
+    { wait = '[role="option"]' },
+    { click = '[role="option"]' },
+    { delay = 400 },
+    { set = 'input[aria-label="Zip code"]', value = zip_code },
+  })
   dom.click('button[data-test="search-button"]', { expectedUrl = "/instant-results/" })
   return true
 end

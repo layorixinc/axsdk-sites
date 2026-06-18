@@ -272,6 +272,18 @@ function M.current_results_match(query, zip_code)
   return true
 end
 
+-- Selectors for dismissable modal/overlay popups (e.g., instant-results project questions).
+M.MODAL_CLOSE_SELECTOR = '[aria-label="Close"], [data-test="close-modal"]'
+
+-- Best-effort close of an open modal/overlay popup that overlays the results/page.
+-- Closing does not navigate, so navigates=false keeps the durable step replay-safe.
+-- Safe no-op when no such popup is present (dom.click returns false on no match).
+function M.dismiss_modals()
+  if dom.exists(M.MODAL_CLOSE_SELECTOR) then
+    dom.click(M.MODAL_CLOSE_SELECTOR, { navigates = false })
+  end
+end
+
 function M.start_search(query, zip_code)
   if not M.is_home_page() then
     nav.navigate(M.HOME_URL, {})

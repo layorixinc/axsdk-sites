@@ -81,9 +81,14 @@ async function axcall(cmd, args = {}) {
 - **`run` vs `call`**: prefer `axrun` (durable). `axcall` is a single turn and returns a pending
   marker for any step that navigates or fetches.
 - **Parse the result**: `lua.run` returns `result` as a JSON string (the helper parses it).
-- **Cache after a push (~5 min)**: the extension keeps old script code until the
-  `raw.githubusercontent.com` cache expires. To test a fresh commit immediately: DevTools →
-  Network → check **Disable cache**, then reload, and confirm with `lua.listCommands()`.
+- **New script files load after a cache-bust reload**: scripts are fetched from
+  `raw.githubusercontent.com` (cached ~5 min). DevTools → Network → check **Disable cache**, reload,
+  then confirm with `lua.listCommands()`.
+- **Editing an existing file is stickier**: the site definition is cached in extension storage
+  (`chrome.storage.local` key `axsdk:sites`) and site scripts are re-applied by script id (not by
+  source hash), so an edited same-name file can keep serving the old source even after a cache-bust
+  reload. **Reload the extension** (chrome://extensions → reload) to force a clean re-fetch; verify a
+  helper landed with `(window._AXLUA||window._AXSDK.lua).eval('return tostring(type(AX_THUMBTACK.<fn>))')`.
 - **Manual overrides are temporary**: `await window._AXSDK.lua.loadSiteScript("<lua>")` (or
   `window._AXLUA.load(src, { id, replace: true })`) is in-memory and lost on navigation.
 - **Navigation changes the context id**: after a command that navigates, re-select the

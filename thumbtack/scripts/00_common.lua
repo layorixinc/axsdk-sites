@@ -5,6 +5,11 @@ M.HOME_URL = "https://www.thumbtack.com/"
 M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"], [data-test="pro-list-result"]'
 M.SERVICE_READY_SELECTOR = 'h1, button, [data-test="specialties-section__interested-item"]'
 M.MODAL_SELECTOR = '[data-test="thumbprint-modal-container"], [role="dialog"]'
+-- Quote/estimate flow ("Request Flow Dialog"): a multi-step dialog distinct from the legacy
+-- thumbprint modal. The pro page also pre-renders many empty modal placeholders, so the flow is
+-- detected and read by its active step, never by M.MODAL_SELECTOR.
+M.REQUEST_FLOW_SELECTOR = '[aria-label="Request Flow Dialog"]'
+M.REQUEST_FLOW_ACTIVE_SELECTOR = '[data-test="request-flow-step--active"]'
 M.CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 M.ZIPPOPOTAM_CITY_URL = "https://api.zippopotam.us/us/"
 
@@ -670,7 +675,15 @@ function M.read_service_view(service_id)
 end
 
 function M.read_project_form()
-  local fields = dom.query_all(M.MODAL_SELECTOR .. ' input, ' .. M.MODAL_SELECTOR .. ' textarea, ' .. M.MODAL_SELECTOR .. ' select', {
+  -- Read the active request-flow step when present (the real quote dialog); otherwise fall back to
+  -- the legacy modal. Avoids the empty thumbprint-modal placeholders the page pre-renders.
+  local scope = M.MODAL_SELECTOR
+  if dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
+    scope = M.REQUEST_FLOW_ACTIVE_SELECTOR
+  elseif dom.exists(M.REQUEST_FLOW_SELECTOR) then
+    scope = M.REQUEST_FLOW_SELECTOR
+  end
+  local fields = dom.query_all(scope .. ' input, ' .. scope .. ' textarea, ' .. scope .. ' select', {
     tag = { attr = "tagName" },
     type = { attr = "type" },
     name = { attr = "name" },
@@ -681,12 +694,13 @@ function M.read_project_form()
     aria = { attr = "aria-label" },
     text = true
   }, 120)
-  local buttons = dom.query_all(M.MODAL_SELECTOR .. ' button, ' .. M.MODAL_SELECTOR .. ' [role="button"]', {
+  local buttons = dom.query_all(scope .. ' button, ' .. scope .. ' [role="button"]', {
     text = true,
     aria = { attr = "aria-label" }
   }, 80)
   return {
-    text = M.non_empty(dom.get_text(M.MODAL_SELECTOR)),
+    scope = scope,
+    text = M.non_empty(dom.get_text(scope)),
     fields = fields,
     buttons = buttons
   }

@@ -604,6 +604,14 @@ async function runScenario(page, options, scenario) {
     const quote = await callLuaSettled(page, options, 'AX_request_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
     assertCondition(quote?.ok, `[${scenario.name}] AX_request_quote call failed`, quote);
     assertCondition(quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable', `[${scenario.name}] AX_request_quote returned unexpected state`, quote.value);
+    const choiceFields = (quote.value?.form?.fields || []).filter(field => field.type === 'radio' || field.type === 'checkbox');
+    if (choiceFields.length > 0) {
+      assertCondition(
+        choiceFields.every(field => typeof field.text === 'string' && field.text.trim().length > 0),
+        `[${scenario.name}] AX_request_quote returned empty choice field text`,
+        choiceFields
+      );
+    }
 
     selected = { candidate, view: view.value, quote: quote.value };
     if (quote.value?.status === 'open') break;

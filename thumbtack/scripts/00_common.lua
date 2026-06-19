@@ -674,16 +674,47 @@ function M.read_service_view(service_id)
   }
 end
 
-function M.read_project_form()
-  -- Read the active request-flow step when present (the real quote dialog); otherwise fall back to
-  -- the legacy modal. Avoids the empty thumbprint-modal placeholders the page pre-renders.
-  local scope = M.MODAL_SELECTOR
-  if dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
-    scope = M.REQUEST_FLOW_ACTIVE_SELECTOR
-  elseif dom.exists(M.REQUEST_FLOW_SELECTOR) then
-    scope = M.REQUEST_FLOW_SELECTOR
+function M.read_project_form_fields(scope)
+  if scope == M.REQUEST_FLOW_ACTIVE_SELECTOR then
+    local fields = dom.query_all(
+      scope .. ' label:has(input[type="radio"]), '
+        .. scope .. ' label:has(input[type="checkbox"])',
+      {
+        tag = { selector = "input", attr = "tagName" },
+        type = { selector = "input", attr = "type" },
+        name = { selector = "input", attr = "name" },
+        id = { selector = "input", attr = "id" },
+        placeholder = { selector = "input", attr = "placeholder" },
+        value = { selector = "input", attr = "value" },
+        checked = { selector = "input", attr = "checked" },
+        aria = { selector = "input", attr = "aria-label" },
+        text = true
+      },
+      120
+    )
+    local other_fields = dom.query_all(
+      scope .. ' textarea, '
+        .. scope .. ' select, '
+        .. scope .. ' input:not([type="radio"]):not([type="checkbox"])',
+      {
+        tag = { attr = "tagName" },
+        type = { attr = "type" },
+        name = { attr = "name" },
+        id = { attr = "id" },
+        placeholder = { attr = "placeholder" },
+        value = { attr = "value" },
+        checked = { attr = "checked" },
+        aria = { attr = "aria-label" },
+        text = true
+      },
+      120
+    )
+    for index = 1, #other_fields do
+      fields[#fields + 1] = other_fields[index]
+    end
+    return fields
   end
-  local fields = dom.query_all(scope .. ' input, ' .. scope .. ' textarea, ' .. scope .. ' select', {
+  return dom.query_all(scope .. ' input, ' .. scope .. ' textarea, ' .. scope .. ' select', {
     tag = { attr = "tagName" },
     type = { attr = "type" },
     name = { attr = "name" },
@@ -694,6 +725,18 @@ function M.read_project_form()
     aria = { attr = "aria-label" },
     text = true
   }, 120)
+end
+
+function M.read_project_form()
+  -- Read the active request-flow step when present (the real quote dialog); otherwise fall back to
+  -- the legacy modal. Avoids the empty thumbprint-modal placeholders the page pre-renders.
+  local scope = M.MODAL_SELECTOR
+  if dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
+    scope = M.REQUEST_FLOW_ACTIVE_SELECTOR
+  elseif dom.exists(M.REQUEST_FLOW_SELECTOR) then
+    scope = M.REQUEST_FLOW_SELECTOR
+  end
+  local fields = M.read_project_form_fields(scope)
   local buttons = dom.query_all(scope .. ' button, ' .. scope .. ' [role="button"]', {
     text = true,
     aria = { attr = "aria-label" }

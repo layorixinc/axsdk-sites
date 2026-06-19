@@ -355,6 +355,71 @@ function M.read_search_candidates()
   return candidates
 end
 
+-- Service options (left-side filters): per the page structure, each option group is the
+-- parent div of a `.tp-title-4` heading. Read them as { title, choices } and select a choice.
+M.SERVICE_OPTION_GROUP_SELECTOR = 'div:has(> .tp-title-4)'
+
+function M.is_option_control(value)
+  return value == "Skip" or value == "Next" or value == "Back" or value == "More"
+    or value == "Show more" or value == "See more" or value == "Change search"
+end
+
+function M.clean_choice_list(raw, title)
+  local choices = ax.array()
+  local seen = {}
+  if type(raw) == "table" then
+    for index = 1, #raw do
+      local value = M.non_empty(raw[index])
+      if value and value ~= title and not M.is_option_control(value) and not seen[value] then
+        seen[value] = true
+        choices[#choices + 1] = value
+      end
+    end
+  end
+  return choices
+end
+
+function M.read_service_options()
+  local groups = dom.query_all(M.SERVICE_OPTION_GROUP_SELECTOR, {
+    title = { selector = ".tp-title-4", text = true },
+    choices = { selector = 'a[href], button, label, [role="radio"], [role="button"], [role="option"]', all = true }
+  }, 40)
+  local options = ax.array()
+  local seen = {}
+  for index = 1, #groups do
+    local title = M.non_empty(groups[index].title)
+    if title and not seen[title] then
+      seen[title] = true
+      options[#options + 1] = {
+        title = title,
+        choices = M.clean_choice_list(groups[index].choices, title)
+      }
+    end
+  end
+  return options
+end
+
+-- Select a service-option choice by its visible text. Link-style filters are clicked by href;
+-- returns ok=false when no matching clickable (link) option is found.
+function M.select_service_option(value)
+  local target = M.normalize_text(value or "")
+  if target == "" then return { ok = false, error = "missing_value" } end
+  local links = dom.query_all(M.SERVICE_OPTION_GROUP_SELECTOR .. ' a[href]', {
+    text = true,
+    url = { attr = "href" }
+  }, 200)
+  for index = 1, #links do
+    if M.normalize_text(links[index].text or "") == target then
+      local href = M.non_empty(links[index].url)
+      if href then
+        dom.click('a[href="' .. href .. '"]', { navigates = true })
+        return { ok = true, href = href }
+      end
+    end
+  end
+  return { ok = false, error = "option_not_found" }
+end
+
 function M.read_text_array(selector, limit)
   local rows = dom.query_all(selector, { text = true }, limit)
   local values = ax.array()

@@ -51,6 +51,7 @@ function AX_search_service(args)
     zip_code = zip_code,
     candidates = candidates,
     total_count = #candidates,
+    service_options = M.read_service_options(),
     cursor = false
   }
 end

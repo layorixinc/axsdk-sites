@@ -89,6 +89,16 @@ async function axcall(cmd, args = {}) {
 `AX_update_project` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons.
 Set `advance: false` to select/fill the current step without moving forward.
 
+### Live multi-service runner
+
+```bash
+node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-service --submit-quote --submit-quote-scenario=lawn-mowing --max-quote-steps=10 --keep-open
+```
+
+Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
+`--submit-quote` only proceeds to the logged-out contact/login gate for the named scenario; other
+scenarios still search, filter, view a pro, open quote, and step the first two quote questions.
+
 ## 5. Gotchas
 
 - **`run` vs `call`**: prefer `axrun` (durable). `axcall` is a single turn and returns a pending

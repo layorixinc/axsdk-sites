@@ -431,6 +431,9 @@ end
 -- Service options (left-side filters): per the page structure, each option group is the
 -- parent div of a `.tp-title-4` heading. Read them as { title, choices } and select a choice.
 M.SERVICE_OPTION_GROUP_SELECTOR = 'div:has(> .tp-title-4)'
+-- Radio/checkbox filter variant: a bold body-2 heading div followed by option <label> elements
+-- (each wrapping a hidden input). Matched in one document-order query to rebuild { title, choices }.
+M.RADIO_FILTER_SELECTOR = 'div.b.tp-body-2, label:has(input[type="radio"]), label:has(input[type="checkbox"])'
 
 function M.is_option_control(value)
   return value == "Skip" or value == "Next" or value == "Back" or value == "More"
@@ -453,12 +456,13 @@ function M.clean_choice_list(raw, title)
 end
 
 function M.read_service_options()
+  local options = ax.array()
+  local seen = {}
+  -- Variant A: link/title filter groups (a `.tp-title-4` heading with link/label choices).
   local groups = dom.query_all(M.SERVICE_OPTION_GROUP_SELECTOR, {
     title = { selector = ".tp-title-4", text = true },
     choices = { selector = 'a[href], button, label, [role="radio"], [role="button"], [role="option"]', all = true }
   }, 40)
-  local options = ax.array()
-  local seen = {}
   for index = 1, #groups do
     local title = M.non_empty(groups[index].title)
     if title and not seen[title] then
@@ -469,11 +473,47 @@ function M.read_service_options()
       }
     end
   end
+  -- Variant B: radio/checkbox filter groups.
+  M.append_radio_filter_options(options, seen)
   return options
 end
 
--- Select a service-option choice by its visible text. Link-style filters are clicked by href;
--- returns ok=false when no matching clickable (link) option is found.
+-- Reconstruct radio/checkbox filter groups from one document-order query: a heading row (no input)
+-- opens a group; each following option label (input present) adds a choice and records the selected
+-- one. A heading with no following option is ignored so unrelated bold text never forms a group.
+function M.append_radio_filter_options(options, seen)
+  local rows = dom.query_all(M.RADIO_FILTER_SELECTOR, {
+    text = true,
+    control = { selector = "input", attr = "type" },
+    checked = { selector = "input", attr = "checked" }
+  }, 200)
+  local pending_title = nil
+  local current = nil
+  for index = 1, #rows do
+    local row = rows[index]
+    local text = M.clean_text(row.text)
+    if not row.control then
+      current = nil
+      pending_title = (text ~= "" and not seen[text]) and text or nil
+    elseif text ~= "" then
+      if pending_title then
+        seen[pending_title] = true
+        current = { title = pending_title, choices = ax.array() }
+        options[#options + 1] = current
+        pending_title = nil
+      end
+      if current then
+        current.choices[#current.choices + 1] = text
+        if row.checked == true then
+          current.selected = text
+        end
+      end
+    end
+  end
+end
+
+-- Select a service-option choice by its visible text. Link filters are clicked by href; radio /
+-- checkbox filters fall back to a position-based click within the option's group.
 function M.select_service_option(value)
   local target = M.normalize_text(value or "")
   if target == "" then return { ok = false, error = "missing_value" } end
@@ -487,6 +527,35 @@ function M.select_service_option(value)
       if href then
         dom.click('a[href="' .. href .. '"]', { navigates = true })
         return { ok = true, href = href }
+      end
+    end
+  end
+  return M.select_radio_filter_option(target)
+end
+
+-- Radio/checkbox option: locate it by visible text, then click the Nth option label within its
+-- group container (options share the input name, read at runtime; the label carries no stable id).
+-- Idempotent: an already-selected option is left unchanged.
+function M.select_radio_filter_option(target)
+  local options = dom.query_all('label:has(input[type="radio"]), label:has(input[type="checkbox"])', {
+    text = true,
+    group = { selector = "input", attr = "name" },
+    checked = { selector = "input", attr = "checked" }
+  }, 300)
+  local counts = {}
+  for index = 1, #options do
+    local option = options[index]
+    local group = option.group or ""
+    counts[group] = (counts[group] or 0) + 1
+    if M.normalize_text(option.text or "") == target then
+      if option.checked == true then
+        return { ok = true, already_selected = true }
+      end
+      if option.group then
+        local selector = 'div:has(> div > label > input[name="' .. option.group
+          .. '"]) > *:nth-child(' .. counts[group] .. ') label'
+        dom.click(selector, { navigates = false })
+        return { ok = true, position = counts[group] }
       end
     end
   end

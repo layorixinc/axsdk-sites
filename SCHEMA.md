@@ -262,8 +262,8 @@
     }
   },
   {
-    "name": "AX_update_service",
-    "description": "Change a service option (left-side filter) on the Thumbtack search-results screen, then re-read the filters and matching pros.",
+    "name": "AX_update_search",
+    "description": "Change a search filter (service option) on the Thumbtack search-results screen by its visible choice text, then re-read the filters and matching pros.",
     "parameters": {
       "additionalProperties": false,
       "properties": {

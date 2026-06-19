@@ -67,7 +67,7 @@ async function axcall(cmd, args = {}) {
 | `AX_resolve_zip` | net fetch | `axrun("AX_resolve_zip", { address: "San Francisco, CA" })` |
 | `AX_search_service` | nav | `axrun("AX_search_service", { query: "house cleaning", zip_code: "94105" })` |
 | `AX_view_service` | nav | `axrun("AX_view_service", { url: "<pro URL from search>" })` |
-| `AX_update_service` | filter change | `axrun("AX_update_service", { value: "Deep clean", option: "Cleaning type" })` |
+| `AX_update_search` | filter change | `axrun("AX_update_search", { value: "Every 2 weeks", option: "Frequency" })` |
 | `AX_update_project` | quote-modal form | `axrun("AX_update_project", { form_values: { "#zip": "94105" } })` |
 | `AX_request_quote` | **opens quote (submit sends)** | `axrun("AX_request_quote", { url: "<pro URL>", submit: false })` |
 

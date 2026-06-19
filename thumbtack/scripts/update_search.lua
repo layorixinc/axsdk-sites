@@ -1,12 +1,12 @@
 local M = AX_THUMBTACK
 if not M then
-  error("thumbtack/scripts/00_common.lua must be loaded before update_service.lua")
+  error("thumbtack/scripts/00_common.lua must be loaded before update_search.lua")
 end
 
--- Change a service option (left-side filter) on the search-results screen.
+-- Change a search filter (service option) on the search-results screen, then re-read the results.
 -- args.value (or args.choice): the option choice text to select, e.g. "Every week".
 -- args.option (or args.group): optional group title for the caller's reference.
-function AX_update_service(args)
+function AX_update_search(args)
   args = args or {}
   local value = M.non_empty(args.value or args.choice or args.option_value)
   if not value then

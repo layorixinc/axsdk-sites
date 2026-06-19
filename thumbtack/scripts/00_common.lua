@@ -648,13 +648,26 @@ function M.apply_form_values(values)
 end
 
 function M.open_quote_modal()
-  local selector = 'button._2Wt7kayvRID5rLVjUZGxyx + button._2Wt7kayvRID5rLVjUZGxyx'
-  if dom.exists(selector) then
-    return dom.click(selector)
-  end
-  selector = 'button._2i8mb7zKaftUGBdoxRCF1T'
-  if dom.exists(selector) then
-    return dom.click(selector)
+  -- The pro page's quote/estimate CTA carries no semantic id, so locate it by document structure:
+  -- the sticky <aside> sidebar holds "View details" (its parent's :last-child) followed by the
+  -- primary "Request estimate" button. NEVER target hashed CSS-module class names; the dom
+  -- capability is CSS-only, so confirm the visible label via query_all before clicking.
+  local selectors = {
+    'aside button:not(:last-child)',
+    'aside button',
+    'main button:not(:last-child)'
+  }
+  for index = 1, #selectors do
+    local selector = selectors[index]
+    local rows = dom.query_all(selector, { text = true }, 1)
+    if #rows > 0 then
+      local text = M.normalize_text(rows[1].text)
+      if text:find("request estimate", 1, true)
+        or text:find("request a quote", 1, true)
+        or text:find("get a quote", 1, true) then
+        return dom.click(selector, { navigates = false })
+      end
+    end
   end
   return false
 end

@@ -39,10 +39,18 @@ function AX_request_quote(args)
   end
 
   local update = nil
-  if args.answers or args.form_values or args.values or args.fields then
+  if args.answers or args.form_values or args.values or args.fields
+    or args.value or args.selection or args.selections or args.text or args.details or args.message then
     update = AX_update_project({
       answers = args.answers,
-      form_values = args.form_values or args.values or args.fields
+      form_values = args.form_values or args.values or args.fields,
+      value = args.value,
+      selection = args.selection,
+      selections = args.selections,
+      text = args.text,
+      details = args.details,
+      message = args.message,
+      advance = args.advance
     })
   end
 

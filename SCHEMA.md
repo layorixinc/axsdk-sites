@@ -212,7 +212,7 @@
   },
   {
     "name": "AX_update_project",
-    "description": "Fill Thumbtack project request fields using generic selector-based answers and form value maps.",
+    "description": "Answer the active Thumbtack request-flow step or fill legacy quote fields. It may click Next/Continue or optional-step Skip, but it refuses send/submit buttons.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -223,6 +223,28 @@
         "form_values": {
           "additionalProperties": true,
           "type": "object"
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "selection": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "selections": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "advance": {
+          "type": "boolean"
         }
       },
       "required": [],
@@ -231,7 +253,7 @@
   },
   {
     "name": "AX_request_quote",
-    "description": "Open or inspect a Thumbtack quote request from a pro profile URL. The current implementation does not submit the request.",
+    "description": "Open or inspect a Thumbtack quote request from a pro profile URL. Optional flow-step values may advance through Next/Continue or optional-step Skip; submit/send is never clicked.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -250,6 +272,28 @@
         "form_values": {
           "additionalProperties": true,
           "type": "object"
+        },
+        "value": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "selection": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "selections": {
+          "items": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "text": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "advance": {
+          "type": "boolean"
         },
         "submit": {
           "type": "boolean"

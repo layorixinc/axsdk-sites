@@ -32,8 +32,10 @@ function AX_update_project(args)
   args = args or {}
   local applied = M.apply_form_values(args.form_values or args.values or args.fields)
   append_answer_updates(applied, args.answers)
+  local flow = M.update_request_flow_step(args, applied, #applied)
   return {
     applied = applied,
+    flow = flow,
     form = M.read_project_form()
   }
 end

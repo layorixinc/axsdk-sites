@@ -706,6 +706,249 @@ function M.read_project_form()
   }
 end
 
+function M.request_flow_advance_state()
+  local buttons = dom.query_all(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' button', {
+    text = true,
+    aria = { attr = "aria-label" },
+    title = { attr = "title" }
+  }, 20)
+  local fallback = nil
+  local submit_like = false
+  for index = 1, #buttons do
+    local label = M.non_empty(buttons[index].text) or M.non_empty(buttons[index].aria) or M.non_empty(buttons[index].title)
+    local normalized = M.normalize_text(label)
+    if label and not fallback then
+      fallback = label
+    end
+    submit_like = submit_like
+      or normalized:find("send", 1, true) ~= nil
+      or normalized:find("submit", 1, true) ~= nil
+      or normalized:find("quote", 1, true) ~= nil
+      or normalized:find("request", 1, true) ~= nil
+    if normalized == "next" or normalized == "continue" then
+      return {
+        label = label,
+        can_advance = true,
+        selector = M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' button:not([aria-label])',
+        reached_submit_step = false
+      }
+    end
+    if normalized == "skip" then
+      return {
+        label = label,
+        can_advance = true,
+        selector = M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' button:not([aria-label]):not([title])',
+        allow_without_answer = true,
+        reached_submit_step = false
+      }
+    end
+  end
+  local normalized = M.normalize_text(fallback)
+  submit_like = submit_like
+    or normalized:find("send", 1, true) ~= nil
+    or normalized:find("submit", 1, true) ~= nil
+    or normalized:find("quote", 1, true) ~= nil
+    or normalized:find("request", 1, true) ~= nil
+  return {
+    label = fallback,
+    can_advance = false,
+    reached_submit_step = submit_like
+  }
+end
+
+function M.request_flow_choice_values(args)
+  local choices = ax.array()
+  if type(args.selections) == "table" then
+    for index = 1, #args.selections do
+      local value = M.non_empty(args.selections[index])
+      if value then
+        choices[#choices + 1] = value
+      end
+    end
+  else
+    local value = M.non_empty(args.selection or args.value or args.option or args.answer)
+    if value then
+      choices[#choices + 1] = value
+    end
+  end
+  return choices
+end
+
+function M.request_flow_text_value(args)
+  return args.text or args.details or args.message
+end
+
+function M.request_flow_options()
+  return dom.query_all(
+    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' label:has(input[type="radio"]), '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' label:has(input[type="checkbox"])',
+    {
+      text = true,
+      control = { selector = "input", attr = "type" },
+      group = { selector = "input", attr = "name" },
+      id = { selector = "input", attr = "id" },
+      checked = { selector = "input", attr = "checked" }
+    },
+    160
+  )
+end
+
+function M.select_request_flow_option(value)
+  local target = M.normalize_text(value or "")
+  if target == "" then
+    return { ok = false, reason = "missing_value" }
+  end
+  local options = M.request_flow_options()
+  local counts = {}
+  for index = 1, #options do
+    local option = options[index]
+    local group = option.group or ""
+    counts[group] = (counts[group] or 0) + 1
+    if M.normalize_text(option.text or "") == target then
+      if option.checked == true then
+        return { ok = true, reason = "already_selected", type = option.control }
+      end
+      local id = M.non_empty(option.id)
+      local selector = nil
+      if id then
+        selector = M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' label:has(input[id="' .. M.css_attr_string(id) .. '"])'
+      elseif option.group then
+        selector = M.REQUEST_FLOW_ACTIVE_SELECTOR
+          .. ' div:has(> div > div > label > input[name="' .. M.css_attr_string(option.group)
+          .. '"]) > div:nth-child(' .. counts[group] .. ') label'
+      end
+      if not selector then
+        return { ok = false, reason = "option_missing_selector", type = option.control }
+      end
+      local ok = dom.click(selector, { navigates = false }) == true
+      return {
+        ok = ok,
+        reason = ok and "selected" or "click_failed",
+        type = option.control
+      }
+    end
+  end
+  return { ok = false, reason = "option_not_found" }
+end
+
+function M.request_flow_has_text_value()
+  local rows = dom.query_all(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea', {
+    value = { attr = "value" },
+    text = true
+  }, 20)
+  for index = 1, #rows do
+    if M.non_empty(rows[index].value) or M.non_empty(rows[index].text) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.request_flow_control_count()
+  local controls = dom.query_all(
+    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' input, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' select',
+    { tag = { attr = "tagName" } },
+    160
+  )
+  return #controls
+end
+
+function M.update_request_flow_step(args, applied, prior_updates)
+  if not dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
+    return nil
+  end
+
+  local flow = {
+    active = true,
+    advanced = false
+  }
+  local before_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
+  local supplied = false
+  local attempted = (prior_updates or 0) > 0
+  for index = 1, (prior_updates or 0) do
+    if applied[index] and applied[index].ok == true then
+      supplied = true
+      break
+    end
+  end
+
+  local choices = M.request_flow_choice_values(args)
+  if #choices > 0 then
+    attempted = true
+  end
+  for index = 1, #choices do
+    local result = M.select_request_flow_option(choices[index])
+    if result.ok == true then
+      supplied = true
+    end
+    applied[#applied + 1] = {
+      kind = "flow_option",
+      value = choices[index],
+      ok = result.ok == true,
+      reason = result.reason,
+      type = result.type
+    }
+  end
+
+  local text = M.request_flow_text_value(args)
+  if text ~= nil then
+    attempted = true
+    local ok = dom.set_value(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea', text) == true
+    if ok then
+      supplied = true
+    end
+    applied[#applied + 1] = {
+      kind = "flow_text",
+      value = text,
+      ok = ok,
+      reason = ok and "updated" or "textarea_not_found"
+    }
+  end
+  if not supplied and M.request_flow_has_text_value() then
+    supplied = true
+  end
+
+  local controls = M.request_flow_control_count()
+  flow.control_count = controls
+  if attempted and not supplied then
+    flow.advance_skipped = true
+    flow.advance_reason = "answer_not_applied"
+    return flow
+  end
+  if args.advance == false then
+    flow.advance_skipped = true
+    flow.advance_reason = "advance_false"
+    return flow
+  end
+  if supplied then
+    dom.wait(400)
+  end
+  local advance = M.request_flow_advance_state()
+  flow.advance_label = advance.label
+  flow.reached_submit_step = advance.reached_submit_step == true
+  if controls > 0 and not supplied and advance.allow_without_answer ~= true then
+    flow.advance_skipped = true
+    flow.advance_reason = "missing_answer"
+    return flow
+  end
+  if not advance.can_advance then
+    flow.advance_skipped = true
+    flow.advance_reason = advance.label and "unsafe_advance_button" or "advance_button_not_found"
+    return flow
+  end
+
+  local ok = dom.click(advance.selector, { navigates = false }) == true
+  if ok then
+    dom.wait(1200)
+  end
+  local after_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
+  flow.advanced = ok and before_text ~= after_text
+  flow.advance_reason = flow.advanced and "advanced" or (ok and "advance_not_confirmed" or "advance_click_failed")
+  return flow
+end
+
 function M.apply_form_values(values)
   local applied = ax.array()
   if type(values) ~= "table" then

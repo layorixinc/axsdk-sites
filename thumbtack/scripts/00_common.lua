@@ -6,6 +6,7 @@ M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"]
 M.SERVICE_READY_SELECTOR = 'h1, button, [data-test="specialties-section__interested-item"]'
 M.MODAL_SELECTOR = '[data-test="thumbprint-modal-container"], [role="dialog"]'
 M.CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
+M.ZIPPOPOTAM_CITY_URL = "https://api.zippopotam.us/us/"
 
 function M.clean_text(value)
   local text = tostring(value or "")
@@ -166,6 +167,64 @@ function M.location_from_text(value)
   return text:match("(Serves [A-Za-z%s%.%-]+, [A-Z][A-Z])")
 end
 
+-- Fallback city/state -> ZIP via Zippopotam. Census onelineaddress only matches full street
+-- addresses, so a bare "City, ST" returns no addressMatches; this resolves a representative ZIP.
+-- Parses a trailing 2-letter state ("San Francisco, CA"); returns nil when not "City, ST" form.
+function M.split_city_state(address)
+  local text = M.clean_text(address)
+  local city, state = text:match("^(.+),%s*([A-Za-z][A-Za-z])%s*$")
+  if city and state then
+    return M.non_empty(city), state:upper()
+  end
+  return nil, nil
+end
+
+function M.zip_from_city(address)
+  local city, state = M.split_city_state(address)
+  if not city or not state then
+    return nil
+  end
+  local fetch = (net and net.fetch) or (http and http.fetch)
+  if not fetch then
+    return nil
+  end
+  local response = fetch(M.ZIPPOPOTAM_CITY_URL .. state:lower() .. "/" .. M.url_encode(city), {
+    method = "GET",
+    headers = {
+      accept = "application/json"
+    },
+    credentials = "omit",
+    response = "json",
+    timeout = 10000
+  })
+  if response.reason == "pending" then
+    return { pending = true }
+  end
+  if not response.ok or type(response.json) ~= "table" then
+    return nil
+  end
+  local places = response.json.places
+  if type(places) ~= "table" then
+    return nil
+  end
+  local target = M.clean_text(city):lower()
+  local fallback = nil
+  for index = 1, #places do
+    local place = places[index]
+    local zip = place and place["post code"]
+    if zip then
+      if not fallback then
+        fallback = tostring(zip)
+      end
+      local pname = place["place name"]
+      if pname and M.clean_text(pname):lower() == target then
+        return tostring(zip)
+      end
+    end
+  end
+  return fallback
+end
+
 function M.resolve_zip(args)
   args = args or {}
   local explicit = M.extract_zip(args.zip_code)
@@ -230,9 +289,23 @@ function M.resolve_zip(args)
   local components = first and first.addressComponents
   local zip = components and components.zip
   if not zip then
+    local city_zip = M.zip_from_city(address)
+    if type(city_zip) == "table" and city_zip.pending then
+      return {
+        pending = true,
+        error = "pending"
+      }
+    end
+    if city_zip then
+      return {
+        zip_code = tostring(city_zip),
+        source = "zippopotam_city"
+      }
+    end
     return {
       error = "zip_not_found",
-      status = response.status
+      status = response.status,
+      message = "No ZIP for this address. Provide a full street address or a 5-digit ZIP."
     }
   end
 

@@ -68,25 +68,25 @@ async function axcall(cmd, args = {}) {
 | `AX_search_service` | nav | `axrun("AX_search_service", { query: "house cleaning", zip_code: "94105" })` |
 | `AX_view_service` | nav | `axrun("AX_view_service", { url: "<pro URL from search>" })` |
 | `AX_update_search` | filter change | `axrun("AX_update_search", { value: "Every 2 weeks", option: "Frequency" })` |
-| `AX_update_project` | quote-flow step | `axrun("AX_update_project", { value: "Home" })` or `axrun("AX_update_project", { selections: ["Inside cabinets"] })` |
-| `AX_request_quote` | opens quote (never submits) | `axrun("AX_request_quote", { url: "<pro URL>", submit: false })` |
+| `AX_answer_quote` | quote-flow step | `axrun("AX_answer_quote", { value: "Home" })` or `axrun("AX_answer_quote", { selections: ["Inside cabinets"] })` |
+| `AX_open_quote` | opens quote (never submits) | `axrun("AX_open_quote", { url: "<pro URL>", submit: false })` |
 
 - `AX_search_service` requires `query` plus `zip_code` **or** `address`.
 - `AX_resolve_zip` / `address`: a full street address resolves via the US Census geocoder; a bare
   `"City, ST"` falls back to a representative city ZIP. A 5-digit ZIP in the text is used directly.
-- `AX_view_service` / `AX_request_quote` `url` = a pro profile URL from `AX_search_service` results.
+- `AX_view_service` / `AX_open_quote` `url` = a pro profile URL from `AX_search_service` results.
 
 ### Quote request flow test recipe
 
-1. Open the flow: `let r = await axrun("AX_request_quote", { url: proUrl, submit: false })`.
-2. If the active step is an intro with no fields, advance it: `r = await axrun("AX_update_project", {})`.
-3. For radio steps, pass the exact visible option label: `r = await axrun("AX_update_project", { value: "Home" })`.
-4. For checkbox steps, pass exact visible labels: `r = await axrun("AX_update_project", { selections: ["Inside cabinets"] })`.
-5. For the details textarea, pass text only: `r = await axrun("AX_update_project", { text: "Need a standard cleaning estimate. Do not send yet." })`.
+1. Open the flow: `let r = await axrun("AX_open_quote", { url: proUrl, submit: false })`.
+2. If the active step is an intro with no fields, advance it: `r = await axrun("AX_answer_quote", {})`.
+3. For radio steps, pass the exact visible option label: `r = await axrun("AX_answer_quote", { value: "Home" })`.
+4. For checkbox steps, pass exact visible labels: `r = await axrun("AX_answer_quote", { selections: ["Inside cabinets"] })`.
+5. For the details textarea, pass text only: `r = await axrun("AX_answer_quote", { text: "Need a standard cleaning estimate. Do not send yet." })`.
 6. Optional photo upload steps are skipped automatically; do not upload test files.
 7. Stop when `r.flow.reached_submit_step` is `true`, `r.flow.advance_reason` is `"unsafe_advance_button"`, or `r.flow.advance_reason` is `"advance_not_confirmed"`.
 
-`AX_update_project` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons.
+`AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons.
 Set `advance: false` to select/fill the current step without moving forward.
 
 ### Live multi-service runner

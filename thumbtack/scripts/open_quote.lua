@@ -1,9 +1,9 @@
 local M = AX_THUMBTACK
 if not M then
-  error("thumbtack/scripts/00_common.lua must be loaded before request_quote.lua")
+  error("thumbtack/scripts/00_common.lua must be loaded before open_quote.lua")
 end
 
-function AX_request_quote(args)
+function AX_open_quote(args)
   args = args or {}
   local service_id = M.non_empty(args.service_id or args.id)
   local url = M.non_empty(args.url)
@@ -41,7 +41,7 @@ function AX_request_quote(args)
   local update = nil
   if args.answers or args.form_values or args.values or args.fields
     or args.value or args.selection or args.selections or args.text or args.details or args.message then
-    update = AX_update_project({
+    update = AX_answer_quote({
       answers = args.answers,
       form_values = args.form_values or args.values or args.fields,
       value = args.value,

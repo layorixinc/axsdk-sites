@@ -1,6 +1,6 @@
 local M = AX_THUMBTACK
 if not M then
-  error("thumbtack/scripts/00_common.lua must be loaded before update_project.lua")
+  error("thumbtack/scripts/00_common.lua must be loaded before answer_quote.lua")
 end
 
 local function append_answer_updates(applied, answers)
@@ -28,7 +28,7 @@ local function append_answer_updates(applied, answers)
     }
   end
 end
-function AX_update_project(args)
+function AX_answer_quote(args)
   args = args or {}
   local applied = M.apply_form_values(args.form_values or args.values or args.fields)
   append_answer_updates(applied, args.answers)

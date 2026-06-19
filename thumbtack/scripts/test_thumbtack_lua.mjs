@@ -11,7 +11,7 @@ const DEFAULT_EXTENSION_ID = 'dldlgmekahifbogjphgglkhibclglmpf';
 const DEFAULT_CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const DEFAULT_PROFILE = process.env.CHROME_PROFILE || `${process.env.LOCALAPPDATA || ''}/AXSDKSitesChromeDevProfile`;
 const DEFAULT_PORT = Number(process.env.CDP_PORT || 9224);
-const LUA_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'update_project.lua', 'request_quote.lua'];
+const LUA_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua'];
 const DEFAULT_SCENARIOS = [
   { name: 'house-cleaning', query: 'house cleaning', address: 'San Francisco, CA' },
   { name: 'lawn-mowing', query: 'lawn mowing', address: 'San Francisco, CA' },
@@ -504,8 +504,8 @@ async function progressQuoteFlow(page, options) {
     }
     const args = quoteArgsForStep(before);
     console.log(`  quote step ${index}: ${JSON.stringify((before.text || '').slice(0, 80))} buttons=${JSON.stringify(buttonLabels(before).slice(0, 4))}`);
-    const update = await callLuaSettled(page, options, 'AX_update_project', args);
-    assertCondition(update?.ok, 'AX_update_project call failed while progressing quote flow', update);
+    const update = await callLuaSettled(page, options, 'AX_answer_quote', args);
+    assertCondition(update?.ok, 'AX_answer_quote call failed while progressing quote flow', update);
     await waitForSettle(page);
     const after = await readQuoteStep(page);
     const flow = update.value?.flow || {};
@@ -600,15 +600,15 @@ async function runScenario(page, options, scenario) {
     assertCondition(view?.ok, `[${scenario.name}] AX_view_service call failed`, view);
     assertCondition(Boolean(view.value?.name), `[${scenario.name}] AX_view_service returned no name`, view.value);
 
-    console.log(`[${scenario.name}] Testing AX_request_quote submit=false service_id=${candidate.service_id}`);
-    const quote = await callLuaSettled(page, options, 'AX_request_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
-    assertCondition(quote?.ok, `[${scenario.name}] AX_request_quote call failed`, quote);
-    assertCondition(quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable', `[${scenario.name}] AX_request_quote returned unexpected state`, quote.value);
+    console.log(`[${scenario.name}] Testing AX_open_quote submit=false service_id=${candidate.service_id}`);
+    const quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
+    assertCondition(quote?.ok, `[${scenario.name}] AX_open_quote call failed`, quote);
+    assertCondition(quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable', `[${scenario.name}] AX_open_quote returned unexpected state`, quote.value);
     const choiceFields = (quote.value?.form?.fields || []).filter(field => field.type === 'radio' || field.type === 'checkbox');
     if (choiceFields.length > 0) {
       assertCondition(
         choiceFields.every(field => typeof field.text === 'string' && field.text.trim().length > 0),
-        `[${scenario.name}] AX_request_quote returned empty choice field text`,
+        `[${scenario.name}] AX_open_quote returned empty choice field text`,
         choiceFields
       );
     }
@@ -626,7 +626,7 @@ async function runScenario(page, options, scenario) {
     photos: selected.view.photos?.length,
     request_quote: selected.view.actions?.request_quote,
   };
-  summary.request_quote = {
+  summary.open_quote = {
     status: selected.quote?.status,
     error: selected.quote?.error,
     field_count: selected.quote?.form?.fields?.length,

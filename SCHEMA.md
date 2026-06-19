@@ -211,8 +211,8 @@
     }
   },
   {
-    "name": "AX_update_project",
-    "description": "Answer the active Thumbtack request-flow step or fill legacy quote fields. It may click Next/Continue or optional-step Skip, but it refuses send/submit buttons.",
+    "name": "AX_answer_quote",
+    "description": "Answer the active Thumbtack quote step or fill legacy quote fields. It may click Next/Continue or optional-step Skip, but it refuses send/submit buttons.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -252,8 +252,8 @@
     }
   },
   {
-    "name": "AX_request_quote",
-    "description": "Open or inspect a Thumbtack quote request from a pro profile URL. Optional flow-step values may advance through Next/Continue or optional-step Skip; submit/send is never clicked.",
+    "name": "AX_open_quote",
+    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step values may advance through Next/Continue or optional-step Skip; submit/send is never clicked.",
     "parameters": {
       "additionalProperties": false,
       "properties": {

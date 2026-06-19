@@ -887,6 +887,105 @@ function M.request_flow_has_text_value()
   return false
 end
 
+function M.request_flow_arg_value(args, keys)
+  local contact = type(args.contact) == "table" and args.contact or {}
+  for index = 1, #keys do
+    local key = keys[index]
+    local value = M.non_empty(args[key])
+    if value then
+      return value
+    end
+    value = M.non_empty(contact[key])
+    if value then
+      return value
+    end
+  end
+  return nil
+end
+
+function M.set_request_flow_value(name, value, selectors, applied)
+  if not value then
+    return nil
+  end
+  for index = 1, #selectors do
+    local selector = M.REQUEST_FLOW_ACTIVE_SELECTOR .. " " .. selectors[index]
+    if dom.exists(selector) then
+      local ok = dom.set_value(selector, value) == true
+      applied[#applied + 1] = {
+        kind = "flow_contact",
+        name = name,
+        value = value,
+        ok = ok,
+        reason = ok and "updated" or "update_failed"
+      }
+      return ok
+    end
+  end
+  return nil
+end
+
+function M.note_request_flow_set(result, state)
+  if result ~= nil then
+    state.attempted = true
+    if result == true then
+      state.supplied = true
+    end
+  end
+end
+
+function M.apply_request_flow_contact_values(args, applied)
+  local state = { supplied = false, attempted = false }
+
+  local email = M.request_flow_arg_value(args, { "email" })
+  if email then
+    M.note_request_flow_set(M.set_request_flow_value("email", email, {
+      'input[type="email"]',
+      'input[autocomplete="email"]',
+      'input[placeholder="Email"]',
+      'input[placeholder="Email address"]'
+    }, applied), state)
+  end
+
+  local first_name = M.request_flow_arg_value(args, { "first_name", "firstName", "given_name", "givenName" })
+  if first_name then
+    M.note_request_flow_set(M.set_request_flow_value("first_name", first_name, {
+      'input[autocomplete="given-name"]',
+      'input[placeholder="First name"]',
+      'input[aria-label="First name"]'
+    }, applied), state)
+  end
+
+  local last_name = M.request_flow_arg_value(args, { "last_name", "lastName", "family_name", "familyName" })
+  if last_name then
+    M.note_request_flow_set(M.set_request_flow_value("last_name", last_name, {
+      'input[autocomplete="family-name"]',
+      'input[placeholder="Last name"]',
+      'input[aria-label="Last name"]'
+    }, applied), state)
+  end
+
+  local phone = M.request_flow_arg_value(args, { "phone", "phone_number", "phoneNumber", "tel" })
+  if phone then
+    M.note_request_flow_set(M.set_request_flow_value("phone", phone, {
+      'input[type="tel"]',
+      'input[autocomplete="tel"]',
+      'input[placeholder="(555) 555-5555"]',
+      'input[aria-label="Phone number"]'
+    }, applied), state)
+  end
+
+  local zip_code = M.request_flow_arg_value(args, { "zip_code", "zip", "postal_code", "postalCode" })
+  if zip_code then
+    M.note_request_flow_set(M.set_request_flow_value("zip_code", zip_code, {
+      'input[autocomplete="postal-code"]',
+      'input[placeholder="Zip code"]',
+      'input[aria-label="Zip code"]'
+    }, applied), state)
+  end
+
+  return state
+end
+
 function M.request_flow_control_count()
   local controls = dom.query_all(
     M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' input, '
@@ -948,6 +1047,14 @@ function M.update_request_flow_step(args, applied, prior_updates)
       ok = ok,
       reason = ok and "updated" or "textarea_not_found"
     }
+  end
+
+  local contact_result = M.apply_request_flow_contact_values(args, applied)
+  if contact_result.attempted then
+    attempted = true
+  end
+  if contact_result.supplied then
+    supplied = true
   end
   if not supplied and M.request_flow_has_text_value() then
     supplied = true

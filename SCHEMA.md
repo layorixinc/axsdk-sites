@@ -212,7 +212,7 @@
   },
   {
     "name": "AX_answer_quote",
-    "description": "Answer the active Thumbtack quote step or fill legacy quote fields. It may click Next/Continue or optional-step Skip, but it refuses send/submit buttons.",
+    "description": "Answer the active Thumbtack quote step, including contact fields. It may click Next/Continue or optional-step Skip, but it refuses send/submit buttons.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -243,6 +243,30 @@
           "minLength": 1,
           "type": "string"
         },
+        "contact": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "email": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "first_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "last_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "phone": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "zip_code": {
+          "minLength": 1,
+          "type": "string"
+        },
         "advance": {
           "type": "boolean"
         }
@@ -253,7 +277,7 @@
   },
   {
     "name": "AX_open_quote",
-    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step values may advance through Next/Continue or optional-step Skip; submit/send is never clicked.",
+    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step/contact values may advance through Next/Continue or optional-step Skip; submit/send is never clicked.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -289,6 +313,30 @@
           "type": "array"
         },
         "text": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "contact": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "email": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "first_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "last_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "phone": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "zip_code": {
           "minLength": 1,
           "type": "string"
         },

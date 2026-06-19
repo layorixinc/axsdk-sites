@@ -18,6 +18,13 @@ const DEFAULT_SCENARIOS = [
   { name: 'handyman', query: 'handyman', address: 'San Francisco, CA' },
 ];
 const DEFAULT_QUOTE_MESSAGE = 'Testing Thumbtack quote flow only. Do not send yet.';
+const DEFAULT_CONTACT = {
+  email: 'thumbtack-test@example.com',
+  first_name: 'Test',
+  last_name: 'User',
+  phone: '4155550100',
+  zip_code: '94101',
+};
 
 function scenarioName(query) {
   return String(query || 'scenario').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'scenario';
@@ -46,8 +53,7 @@ function parseArgs(argv) {
     scenarios: [],
     multiService: false,
     submitQuote: false,
-    maxQuoteSteps: Number(process.env.THUMBTACK_QUOTE_STEPS || 14),
-    submitQuoteScenario: process.env.THUMBTACK_SUBMIT_QUOTE_SCENARIO || 'lawn-mowing',
+    maxQuoteSteps: Number(process.env.THUMBTACK_QUOTE_STEPS || 20),
     keepOpen: false,
   };
   for (const arg of argv) {
@@ -63,9 +69,8 @@ function parseArgs(argv) {
     else if (arg.startsWith('--address=')) options.address = arg.slice('--address='.length);
     else if (arg.startsWith('--scenario=')) options.scenarios.push(parseScenario(arg.slice('--scenario='.length)));
     else if (arg.startsWith('--max-quote-steps=')) options.maxQuoteSteps = Number(arg.slice('--max-quote-steps='.length));
-    else if (arg.startsWith('--submit-quote-scenario=')) options.submitQuoteScenario = scenarioName(arg.slice('--submit-quote-scenario='.length));
     else if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: node thumbtack/scripts/test_thumbtack_lua.mjs [options]\n\nOptions:\n  --query=TEXT                         Single-service query.\n  --address=TEXT                       Single-service address/city/ZIP.\n  --scenario=QUERY|ADDRESS             Add one scenario; repeatable.\n  --multi-service                      Run the default varied-service scenario set.\n  --submit-quote                       Click the final quote/login-gate button only when logged out is clear.\n  --submit-quote-scenario=NAME         Scenario that may make the final login-gate click. Default: lawn-mowing.\n  --max-quote-steps=N                  Max request-flow steps for the submit scenario.\n  --cdp=http://127.0.0.1:9224          Connect to an existing Chrome CDP endpoint.\n  --port=9224\n  --profile=PATH\n  --keep-open`);
+      console.log(`Usage: node thumbtack/scripts/test_thumbtack_lua.mjs [options]\n\nOptions:\n  --query=TEXT                         Single-service query.\n  --address=TEXT                       Single-service address/city/ZIP.\n  --scenario=QUERY|ADDRESS             Add one scenario; repeatable.\n  --multi-service                      Run the default varied-service scenario set.\n  --submit-quote                       Progress every quote flow until the final submit button appears; never clicks submit.\n  --max-quote-steps=N                  Max request-flow steps per scenario.\n  --cdp=http://127.0.0.1:9224          Connect to an existing Chrome CDP endpoint.\n  --port=9224\n  --profile=PATH\n  --keep-open`);
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -359,6 +364,14 @@ function buttonLabels(step) {
   return (step?.buttons || []).map(button => button.label).filter(Boolean);
 }
 
+function asArray(value) {
+  if (Array.isArray(value)) return value;
+  if (!value || typeof value !== 'object') return [];
+  return Object.keys(value)
+    .sort((left, right) => Number(left) - Number(right))
+    .map(key => value[key]);
+}
+
 function firstSelectableFilter(serviceOptions) {
   for (const group of serviceOptions || []) {
     const choices = Array.isArray(group?.choices) ? group.choices : [];
@@ -410,12 +423,26 @@ async function readQuoteStep(page) {
       }))
       .filter(button => button.label);
     const safeButton = buttons.find(button => /^(next|continue|skip)$/i.test(button.label));
+    const fields = [...active.querySelectorAll('input, textarea, select')]
+      .map((field, index) => ({
+        index,
+        tag: field.tagName,
+        type: field.type || field.tagName.toLowerCase(),
+        name: field.getAttribute('name') || '',
+        id: field.getAttribute('id') || '',
+        placeholder: field.getAttribute('placeholder') || '',
+        aria: field.getAttribute('aria-label') || '',
+        autocomplete: field.getAttribute('autocomplete') || '',
+        value: field.value || '',
+        visible: visible(field)
+      }));
     const submitButton = buttons.find(button => /(send|submit|quote|request|get quotes?|get estimate|check availability)/i.test(button.label));
     return {
       active: true,
       url,
       text: activeText.slice(0, 320),
       labels,
+      fields,
       textareaCount: active.querySelectorAll('textarea').length,
       textareaValue: active.querySelector('textarea')?.value || '',
       buttons,
@@ -427,11 +454,39 @@ async function readQuoteStep(page) {
     };
   })()`);
 }
+function contactArgsForStep(step) {
+  const args = {};
+  for (const field of step.fields || []) {
+    const type = String(field.type || '').toLowerCase();
+    const placeholder = String(field.placeholder || '').toLowerCase();
+    const aria = String(field.aria || '').toLowerCase();
+    const autocomplete = String(field.autocomplete || '').toLowerCase();
+    const haystack = `${type} ${placeholder} ${aria} ${autocomplete}`;
+    if ((type === 'email' || autocomplete === 'email' || haystack.includes('email')) && !field.value) {
+      args.email = DEFAULT_CONTACT.email;
+    } else if ((autocomplete === 'given-name' || haystack.includes('first name')) && !field.value) {
+      args.first_name = DEFAULT_CONTACT.first_name;
+    } else if ((autocomplete === 'family-name' || haystack.includes('last name')) && !field.value) {
+      args.last_name = DEFAULT_CONTACT.last_name;
+    } else if ((type === 'tel' || autocomplete === 'tel' || haystack.includes('phone')) && !field.value) {
+      args.phone = DEFAULT_CONTACT.phone;
+    } else if ((autocomplete === 'postal-code' || haystack.includes('zip code')) && !field.value) {
+      args.zip_code = DEFAULT_CONTACT.zip_code;
+    }
+  }
+  return args;
+}
+
+function hasArgs(args) {
+  return Object.keys(args || {}).length > 0;
+}
 
 function quoteArgsForStep(step) {
+  const contactArgs = contactArgsForStep(step);
+  if (hasArgs(contactArgs)) return contactArgs;
   const radios = (step.labels || []).filter(option => option.type === 'radio');
   if (radios.length > 0) return { value: radios[0].text };
-  const checks = (step.labels || []).filter(option => option.type === 'checkbox');
+  const checks = (step.labels || []).filter(option => option.type === 'checkbox' && option.text && !/marketing texts/i.test(option.text));
   if (checks.length > 0) return { selections: [checks[0].text] };
   if (step.textareaCount > 0) {
     if (step.safeButton === 'Skip') return {};
@@ -440,47 +495,6 @@ function quoteArgsForStep(step) {
   return {};
 }
 
-async function attemptQuoteSubmitLoginGate(page, before) {
-  if (!before?.signedOut) {
-    return {
-      attempted: false,
-      reason: 'refused_signed_out_not_clear',
-      before: {
-        button: before?.submitButton || null,
-        signedOut: before?.signedOut === true,
-        loginGate: before?.loginGate === true,
-      },
-    };
-  }
-  const click = await evaluatePage(page, `(() => {
-    const norm = value => (value || '').replace(/\\s+/g, ' ').trim();
-    const active = document.querySelector('[data-test="request-flow-step--active"]');
-    if (!active) return { clicked: false, reason: 'no_active_step' };
-    const button = [...active.querySelectorAll('button')].find(candidate => {
-      const label = norm(candidate.textContent) || candidate.getAttribute('aria-label') || candidate.getAttribute('title') || '';
-      return /(send|submit|quote|request|get quotes?|get estimate|check availability)/i.test(label);
-    });
-    if (!button) return { clicked: false, reason: 'submit_button_not_found' };
-    const label = norm(button.textContent) || button.getAttribute('aria-label') || button.getAttribute('title') || '';
-    button.click();
-    return { clicked: true, label };
-  })()`);
-  await sleep(5000);
-  const after = await readQuoteStep(page);
-  return {
-    attempted: click.clicked === true,
-    click,
-    stoppedAtLogin: after.loginGate === true || after.signedOut === true,
-    after: {
-      active: after.active,
-      url: after.url,
-      loginGate: after.loginGate,
-      signedOut: after.signedOut,
-      text: after.text,
-      buttons: buttonLabels(after),
-    },
-  };
-}
 
 async function progressQuoteFlow(page, options) {
   const steps = [];
@@ -491,15 +505,34 @@ async function progressQuoteFlow(page, options) {
       steps.push({ index, state: 'no_active_step', loginGate: before.loginGate, signedOut: before.signedOut, url: before.url });
       break;
     }
-    if (before.loginGate) {
-      console.log(`  quote step ${index}: login gate`);
-      steps.push({ index, state: 'login_gate', text: before.text, buttons: buttonLabels(before), url: before.url });
-      break;
-    }
     if (before.submitButton && !before.safeButton) {
-      console.log(`  quote step ${index}: submit button ${JSON.stringify(before.submitButton)}`);
-      steps.push({ index, state: 'submit_step', button: before.submitButton, signedOut: before.signedOut, loginGate: before.loginGate });
-      if (options.submitQuote) finalSubmit = await attemptQuoteSubmitLoginGate(page, before);
+      const args = quoteArgsForStep(before);
+      console.log(`  quote step ${index}: submit button ${JSON.stringify(before.submitButton)} buttons=${JSON.stringify(buttonLabels(before).slice(0, 4))}`);
+      let update = null;
+      let after = before;
+      if (hasArgs(args)) {
+        update = await callLuaSettled(page, options, 'AX_answer_quote', { ...args, advance: false });
+        assertCondition(update?.ok, 'AX_answer_quote failed while filling submit step fields', update);
+        await waitForSettle(page);
+        after = await readQuoteStep(page);
+      }
+      steps.push({
+        index,
+        state: 'submit_step',
+        button: before.submitButton,
+        args,
+        update: update?.value || null,
+        before: {
+          text: before.text,
+          buttons: buttonLabels(before).slice(0, 5),
+        },
+        after: {
+          text: after.text,
+          buttons: buttonLabels(after).slice(0, 5),
+          submitButton: after.submitButton,
+        },
+      });
+      finalSubmit = { attempted: false, reason: 'submit_button_reached_not_clicked' };
       break;
     }
     const args = quoteArgsForStep(before);
@@ -526,7 +559,7 @@ async function progressQuoteFlow(page, options) {
       },
     });
     const reason = flow.advance_reason;
-    if (after.loginGate) break;
+    if (after.submitButton && !after.safeButton) continue;
     if (stepChanged) continue;
     if (flow.reached_submit_step === true
       || reason === 'unsafe_advance_button'
@@ -534,9 +567,6 @@ async function progressQuoteFlow(page, options) {
       || reason === 'missing_answer'
       || reason === 'answer_not_applied'
       || reason === 'advance_click_failed') {
-      if (options.submitQuote && (flow.reached_submit_step === true || reason === 'unsafe_advance_button')) {
-        finalSubmit = await attemptQuoteSubmitLoginGate(page, after);
-      }
       break;
     }
   }
@@ -548,6 +578,7 @@ async function progressQuoteFlow(page, options) {
       active: final.active,
       text: final.text,
       buttons: buttonLabels(final),
+      submitButton: final.submitButton,
       loginGate: final.loginGate,
       signedOut: final.signedOut,
       url: final.url,
@@ -604,7 +635,7 @@ async function runScenario(page, options, scenario) {
     const quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
     assertCondition(quote?.ok, `[${scenario.name}] AX_open_quote call failed`, quote);
     assertCondition(quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable', `[${scenario.name}] AX_open_quote returned unexpected state`, quote.value);
-    const choiceFields = (quote.value?.form?.fields || []).filter(field => field.type === 'radio' || field.type === 'checkbox');
+    const choiceFields = asArray(quote.value?.form?.fields).filter(field => field.type === 'radio' || field.type === 'checkbox');
     if (choiceFields.length > 0) {
       assertCondition(
         choiceFields.every(field => typeof field.text === 'string' && field.text.trim().length > 0),
@@ -629,19 +660,13 @@ async function runScenario(page, options, scenario) {
   summary.open_quote = {
     status: selected.quote?.status,
     error: selected.quote?.error,
-    field_count: selected.quote?.form?.fields?.length,
-    button_count: selected.quote?.form?.buttons?.length,
+    field_count: asArray(selected.quote?.form?.fields).length,
+    button_count: asArray(selected.quote?.form?.buttons).length,
   };
 
   if (selected.quote?.status === 'open') {
-    const fullQuote = !options.submitQuote || options.scenarios.length === 1 || scenario.name === options.submitQuoteScenario;
-    const quoteOptions = {
-      ...options,
-      submitQuote: options.submitQuote && fullQuote,
-      maxQuoteSteps: fullQuote ? options.maxQuoteSteps : Math.min(options.maxQuoteSteps, 2),
-    };
-    console.log(`[${scenario.name}] Progressing quote request flow${quoteOptions.submitQuote ? ' with submit/login-gate attempt' : ''}`);
-    summary.quote_flow = await progressQuoteFlow(page, quoteOptions);
+    console.log(`[${scenario.name}] Progressing quote request flow${options.submitQuote ? ' until submit button' : ''}`);
+    summary.quote_flow = await progressQuoteFlow(page, options);
   } else {
     summary.quote_flow = 'skipped; quote unavailable';
   }
@@ -657,9 +682,11 @@ async function runTests(page, options) {
   const quoteFlows = scenarios.filter(scenario => typeof scenario.quote_flow === 'object');
   assertCondition(quoteFlows.length > 0, 'No scenario opened a quote flow', scenarios);
   if (options.submitQuote) {
-    const attempted = quoteFlows.some(scenario => scenario.quote_flow?.finalSubmit?.attempted === true);
-    const loginGate = quoteFlows.some(scenario => scenario.quote_flow?.final?.loginGate === true);
-    assertCondition(attempted || loginGate, '--submit-quote did not reach a login gate or submit-login attempt', quoteFlows);
+    assertCondition(
+      quoteFlows.every(scenario => Boolean(scenario.quote_flow?.final?.submitButton)),
+      '--submit-quote did not reach the final submit button for every scenario',
+      quoteFlows
+    );
   }
   return {
     scenario_count: scenarios.length,

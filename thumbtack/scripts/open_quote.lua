@@ -39,8 +39,10 @@ function AX_open_quote(args)
   end
 
   local update = nil
-  if args.answers or args.form_values or args.values or args.fields
-    or args.value or args.selection or args.selections or args.text or args.details or args.message then
+  if args.answers or args.form_values or args.values or args.fields or args.contact
+    or args.value or args.selection or args.selections or args.text or args.details or args.message
+    or args.email or args.first_name or args.firstName or args.last_name or args.lastName
+    or args.phone or args.phone_number or args.phoneNumber or args.zip_code or args.zip then
     update = AX_answer_quote({
       answers = args.answers,
       form_values = args.form_values or args.values or args.fields,
@@ -50,7 +52,18 @@ function AX_open_quote(args)
       text = args.text,
       details = args.details,
       message = args.message,
-      advance = args.advance
+      advance = args.advance,
+      contact = args.contact,
+      email = args.email,
+      first_name = args.first_name,
+      firstName = args.firstName,
+      last_name = args.last_name,
+      lastName = args.lastName,
+      phone = args.phone,
+      phone_number = args.phone_number,
+      phoneNumber = args.phoneNumber,
+      zip_code = args.zip_code,
+      zip = args.zip,
     })
   end
 

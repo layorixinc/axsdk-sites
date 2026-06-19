@@ -83,8 +83,9 @@ async function axcall(cmd, args = {}) {
 3. For radio steps, pass the exact visible option label: `r = await axrun("AX_answer_quote", { value: "Home" })`.
 4. For checkbox steps, pass exact visible labels: `r = await axrun("AX_answer_quote", { selections: ["Inside cabinets"] })`.
 5. For the details textarea, pass text only: `r = await axrun("AX_answer_quote", { text: "Need a standard cleaning estimate. Do not send yet." })`.
-6. Optional photo upload steps are skipped automatically; do not upload test files.
-7. Stop when `r.flow.reached_submit_step` is `true`, `r.flow.advance_reason` is `"unsafe_advance_button"`, or `r.flow.advance_reason` is `"advance_not_confirmed"`.
+6. For contact steps, pass only test-safe/reserved data in dev: `r = await axrun("AX_answer_quote", { email: "thumbtack-test@example.com", first_name: "Test", last_name: "User", phone: "4155550100", zip_code: "94101" })`.
+7. Optional photo upload steps are skipped automatically; do not upload test files.
+8. Stop when `r.flow.reached_submit_step` is `true`, `r.flow.advance_reason` is `"unsafe_advance_button"`, or `r.flow.advance_reason` is `"advance_not_confirmed"`.
 
 `AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons.
 Set `advance: false` to select/fill the current step without moving forward.
@@ -92,12 +93,12 @@ Set `advance: false` to select/fill the current step without moving forward.
 ### Live multi-service runner
 
 ```bash
-node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-service --submit-quote --submit-quote-scenario=lawn-mowing --max-quote-steps=10 --keep-open
+node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-service --submit-quote --max-quote-steps=20 --keep-open
 ```
 
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
-`--submit-quote` only proceeds to the logged-out contact/login gate for the named scenario; other
-scenarios still search, filter, view a pro, open quote, and step the first two quote questions.
+`--submit-quote` progresses every scenario until the final `Submit` button is visible, using
+reserved/fake contact data. It never clicks `Submit`.
 
 ## 5. Gotchas
 

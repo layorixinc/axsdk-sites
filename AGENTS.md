@@ -41,6 +41,16 @@ Use lowercase hostnames or established site slugs for directory names. Avoid pro
 
 Keep `index.md` synchronized with populated site entries.
 
+## Lua Script Selectors
+
+AXSDK Lua scripts drive pages through the injected `dom` capability, which resolves only standard CSS selectors (`querySelector` / `querySelectorAll`). Author selectors for stability across deploys and A/B variants, never for the current build's generated markup:
+
+- Never target obfuscated or build-generated class names — CSS-module / styled-component hashes such as `._2Wt7kayvRID5rLVjUZGxyx`, `.css-1a2b3c`, or `[class*="_3iW9"]`. They change on every deploy and differ across A/B variants.
+- Prefer stable, meaningful identifiers: `data-test` / `data-testid` attributes, `id` / `name` made of real words, `aria-label`, `role`, semantic elements (`main`, `aside`, `section`, `nav`, `form`), and design-system utility classes whose names are real words.
+- When no stable identifier exists, locate the element by document structure and position relative to a semantic anchor: parent/child/sibling combinators, `:has()`, `:not()`, `:nth-*`, `:first-child`, `:last-child`.
+- The `dom` capability cannot match by visible text. When an element is distinguishable only by its label, read candidates with `dom.query_all(selector, { text = true })`, confirm the meaningful label in Lua, then click the verified selector.
+- Keep shared selectors as named `M.*` constants in `<site>/scripts/00_common.lua` so they are reviewed and updated in one place.
+
 ## Validation Before Finishing
 
 Before reporting work as complete:

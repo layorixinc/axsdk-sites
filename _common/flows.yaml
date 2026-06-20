@@ -9,8 +9,9 @@ planner:
     conversationSummary: conversationSummary
     latestMessageInterpretation: latestMessageInterpretation
   prompt: |-
-    Use the config-runtime planner to call decide for flowDocument routes.
-    Always call decide exactly once with intent=request_service_quote.
+    You orchestrate the request_service_quote flow. Call decide exactly once.
+    - If an active request_service_quote flow is awaiting the user's answer (an active flow / active prompt exists), call decide with action=continue_current and the latest user message. Do NOT restart the flow.
+    - Otherwise, for a new service-quote request, call decide with action=replace_current and intent=request_service_quote.
 router:
   mode: fixed
   defaultIntent: request_service_quote
@@ -32,7 +33,7 @@ flows:
     nodes:
       parse_request:
         kind: action_unit
-        description: Extract the service quote request and decide where to resume.
+        description: Extract the service quote request and decide whether to start, resume, or submit.
         inputSelector:
           - requestText
           - request_service_quote
@@ -47,25 +48,24 @@ flows:
           - phone number
           - quote preferences that answer visible Thumbtack questions
 
-          Required before search: service_query and either zip_code or address.
+          Required before searching: service_query and either zip_code or address.
           If the user did not state an address/ZIP but memory has one clear service address or ZIP, use it.
           If both the user and memory provide values, prefer the latest user message.
           If memory has multiple conflicting addresses, names, emails, or phone numbers, ask the user to choose instead of guessing.
           Contact fields are optional until quote/contact steps require them, but capture them from memory when available: email, first_name, last_name, phone, zip_code.
 
           If the user is approving a previously prepared final quote submission, set submit_confirmed=true and next=submit_quote.
-          If required search details are still missing after checking memory, set next=ask_user and message to ask only for the missing details.
-          If zip_code is present, set next=search_service.
-          If address is present but zip_code is absent, set next=resolve_zip.
+          If required search details are still missing after checking memory, set next=ask_user and question to ask only for the missing details.
+          If service_query plus zip_code or address is available, set next=find_pro.
           Otherwise set next=error with a short message.
+          When you need the user (next=ask_user), set question=<the concise question to ask the user>.
 
           Call capture_request exactly once.
         allowedTools: [capture_request]
         next:
-          resolve_zip: resolve_zip
-          search_service: search_service
+          find_pro: find_pro
           submit_quote: submit_quote
-          ask_user: ask_user
+          ask_user: parse_request
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
         outputMap:
@@ -77,85 +77,45 @@ flows:
           request_service_quote.user_requirements: user_requirements
           request_service_quote.submit_confirmed: submit_confirmed
           request_service_quote.message: message
+          request_service_quote.question: question
 
-      resolve_zip:
+      find_pro:
         kind: action_unit
-        description: Resolve a ZIP code from the requested address.
+        description: Resolve location, search Thumbtack, select a pro, and inspect the selected profile.
         inputSelector:
           - request_service_quote
         prompt: |-
-          Call resolve_zip exactly once using request_service_quote.address.
-          The flow transition is derived from the remote result.
-        allowedTools: [resolve_zip]
+          Drive pro discovery one tool call at a time. Inspect request_service_quote and call exactly one allowed tool.
+
+          Order:
+          1. If zip_code is missing and address exists, call resolve_zip with address.
+          2. If no search candidates are available, call search_service with service_query and zip_code or address.
+          3. If candidates exist but no selected_service_id/selected_pro_url is stored, choose the best candidate and call select_pro with next=find_pro. Prefer a profile URL, service_id, strong rating/review evidence, and request_quote availability when visible.
+          4. If no viable candidates exist, call select_pro with next=ask_user and question explaining that no pro could be selected and asking how to proceed.
+          5. If a selected pro exists but pro details have not been loaded, call view_service with selected_pro_url and selected_service_id.
+          6. If pro details are loaded, call continue_flow with next=drive_quote.
+
+          When you need the user (next=ask_user), set question=<the concise question to ask the user>.
+        allowedTools: [resolve_zip, search_service, select_pro, view_service, continue_flow]
         next:
-          search_service: search_service
+          find_pro: find_pro
+          drive_quote: drive_quote
+          ask_user: find_pro
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
         outputMap:
           request_service_quote.zip_code: zip_code
           request_service_quote.zip_source: source
           request_service_quote.zip_status: status
-
-      search_service:
-        kind: action_unit
-        description: Search Thumbtack for matching pros.
-        inputSelector:
-          - request_service_quote
-        prompt: |-
-          Call search_service exactly once.
-          Use request_service_quote.service_query as query.
-          Prefer zip_code when present; otherwise use address.
-          Include filters only when already known.
-          The flow transition is derived from the remote result.
-        allowedTools: [search_service]
-        next:
-          select_pro: select_pro
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-        outputMap:
           request_service_quote.search.candidates: candidates
           request_service_quote.search.service_options: service_options
           request_service_quote.search.total_count: total_count
           request_service_quote.search.cursor: cursor
           request_service_quote.search.zip_code: zip_code
-
-      select_pro:
-        kind: action_unit
-        description: Select the best pro from search candidates.
-        inputSelector:
-          - request_service_quote
-        prompt: |-
-          Choose one candidate from request_service_quote.search.candidates.
-          Prefer candidates with a profile URL, service_id, strong rating/review evidence, and request_quote availability when visible.
-          If there are no viable candidates, set next=ask_user and explain that no pro could be selected.
-          Otherwise call select_pro exactly once with next=view_service and copy the selected candidate's url, service_id, name, price_text, rating, review_count, and reason.
-        allowedTools: [select_pro]
-        next:
-          view_service: view_service
-          ask_user: ask_user
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-        outputMap:
           request_service_quote.selected_pro: selected_pro
           request_service_quote.selected_pro_url: url
           request_service_quote.selected_service_id: service_id
           request_service_quote.selection_reason: reason
-          request_service_quote.message: message
-
-      view_service:
-        kind: action_unit
-        description: Open and inspect the selected pro profile.
-        inputSelector:
-          - request_service_quote
-        prompt: |-
-          Call view_service exactly once using selected_pro_url and selected_service_id.
-          The flow transition is derived from the remote result.
-        allowedTools: [view_service]
-        next:
-          open_quote: open_quote
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-        outputMap:
           request_service_quote.pro.name: name
           request_service_quote.pro.service_id: service_id
           request_service_quote.pro.url: url
@@ -164,20 +124,38 @@ flows:
           request_service_quote.pro.price_text: price_text
           request_service_quote.pro.actions: actions
           request_service_quote.pro.services_offered: services_offered
+          request_service_quote.message: message
+          request_service_quote.question: question
 
-      open_quote:
+      drive_quote:
         kind: action_unit
-        description: Open the selected pro's quote flow.
+        description: Open and complete the active Thumbtack quote flow until submit confirmation is required.
         inputSelector:
           - request_service_quote
         prompt: |-
-          Call open_quote exactly once using selected_pro_url and selected_service_id.
-          Pass known contact fields if they already exist, but do not submit.
-          The flow transition is derived from the remote result.
-        allowedTools: [open_quote]
+          Drive the Thumbtack quote dialog one tool call at a time. Inspect request_service_quote and call exactly one allowed tool.
+
+          Rules:
+          - If quote.form is missing or the quote flow is not open, call open_quote using selected_pro_url and selected_service_id. Pass known contact fields if present. Do not submit.
+          - If a final Submit/send/request button is visible in quote.form, call plan_quote_step with next=confirm_submit and message summarizing the pro, price_text, contact, zip, and that user confirmation is required before submitting.
+          - If a required field is visible, answer it from request_service_quote.contact, request_service_quote.user_requirements, memory, or the latest user request. Use memory as user-provided data when it contains exactly one unambiguous value.
+          - If both memory and the latest user request provide values, prefer the latest user request.
+          - If memory has multiple conflicting values for the field, call plan_quote_step with next=ask_user and question asking the user to choose.
+          - If you know the answer, call answer_quote directly with the exact AX_answer_quote args:
+            - radio: value = exact visible option text
+            - checkbox: selections = exact visible option texts
+            - textarea/details: text
+            - contact: email, first_name, last_name, phone, zip_code
+          - If an optional upload/photo step has Skip/Next and no required input, call answer_quote with no answer fields.
+          - If a required answer is unknown after checking memory, call plan_quote_step with next=ask_user and question to ask one focused question.
+
+          Never call submit_quote here. Never invent address, contact, or quote-answer data.
+          When you need the user (next=ask_user), set question=<the concise question to ask the user>.
+        allowedTools: [open_quote, answer_quote, plan_quote_step]
         next:
-          plan_quote_step: plan_quote_step
-          ask_user: ask_user
+          drive_quote: drive_quote
+          confirm_submit: confirm_submit
+          ask_user: drive_quote
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
         outputMap:
@@ -185,70 +163,11 @@ flows:
           request_service_quote.quote.error: error
           request_service_quote.quote.form: form
           request_service_quote.quote.update: update
-
-      plan_quote_step:
-        kind: action_unit
-        description: Decide how to answer the currently active quote-flow step.
-        inputSelector:
-          - request_service_quote
-        prompt: |-
-          Inspect request_service_quote.quote.form.
-
-          If the quote flow is unavailable or errored, call plan_quote_step with next=error and message.
-          If a final Submit/send/request button is visible, call plan_quote_step with next=confirm_submit and include a concise message summarizing the pro, price_text, contact, zip, and that user confirmation is required before submitting.
-          If a required field is visible, answer it from request_service_quote.contact, request_service_quote.user_requirements, memory, or the latest user request. Use memory as user-provided data when it contains exactly one unambiguous value.
-          If both memory and the latest user request provide values, prefer the latest user request.
-          If memory has multiple conflicting values for the field, call plan_quote_step with next=ask_user and ask the user to choose.
-          If you know the answer, call plan_quote_step with next=answer_quote and the exact AX_answer_quote args:
-          - radio: value = exact visible option text
-          - checkbox: selections = exact visible option texts
-          - textarea/details: text
-          - contact: email, first_name, last_name, phone, zip_code
-          If an optional upload/photo step has Skip/Next and no required input, call plan_quote_step with next=answer_quote and no answer fields.
-          If a required answer is unknown after checking memory, call plan_quote_step with next=ask_user and ask one focused question.
-
-          Never choose submit_quote here. Never invent address, contact, or quote-answer data.
-          Call plan_quote_step exactly once.
-        allowedTools: [plan_quote_step]
-        next:
-          answer_quote: answer_quote
-          confirm_submit: confirm_submit
-          ask_user: ask_user
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-        outputMap:
-          request_service_quote.next_quote_action: next
-          request_service_quote.pending_answer.value: value
-          request_service_quote.pending_answer.selection: selection
-          request_service_quote.pending_answer.selections: selections
-          request_service_quote.pending_answer.text: text
-          request_service_quote.pending_answer.email: email
-          request_service_quote.pending_answer.first_name: first_name
-          request_service_quote.pending_answer.last_name: last_name
-          request_service_quote.pending_answer.phone: phone
-          request_service_quote.pending_answer.zip_code: zip_code
-          request_service_quote.pending_answer.contact: contact
-          request_service_quote.pending_answer.message: message
-          request_service_quote.message: message
-
-      answer_quote:
-        kind: action_unit
-        description: Apply the planned answer to the active quote step.
-        inputSelector:
-          - request_service_quote
-        prompt: |-
-          Call answer_quote exactly once using request_service_quote.pending_answer fields.
-          Do not call submit. The flow transition is derived from the remote result.
-        allowedTools: [answer_quote]
-        next:
-          plan_quote_step: plan_quote_step
-          ask_user: ask_user
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-        outputMap:
           request_service_quote.quote.applied: applied
           request_service_quote.quote.flow: flow
-          request_service_quote.quote.form: form
+          request_service_quote.next_quote_action: next
+          request_service_quote.message: message
+          request_service_quote.question: question
 
       confirm_submit:
         kind: action_unit
@@ -303,9 +222,6 @@ flows:
         outputMap:
           request_service_quote.message: message
 
-      ask_user:
-        kind: terminal
-        respond: Use Flow state JSON's message.
       error:
         kind: terminal
         respond: Use Flow state JSON's message, or say the quote flow could not continue.
@@ -324,7 +240,7 @@ flowTools:
       additionalProperties: false
       required: [next]
       properties:
-        next: { type: string, enum: [resolve_zip, search_service, submit_quote, ask_user, error] }
+        next: { type: string, enum: [find_pro, submit_quote, ask_user, error] }
         service_query: { type: string }
         address: { type: string }
         zip_code: { type: string }
@@ -333,6 +249,7 @@ flowTools:
         user_requirements: { type: string }
         submit_confirmed: { type: boolean }
         message: { type: string }
+        question: { type: string }
 
   select_pro:
     description: Capture the selected Thumbtack pro candidate.
@@ -345,7 +262,7 @@ flowTools:
       additionalProperties: false
       required: [next]
       properties:
-        next: { type: string, enum: [view_service, ask_user, error] }
+        next: { type: string, enum: [find_pro, drive_quote, ask_user, error] }
         selected_pro: { type: object, additionalProperties: true }
         url: { type: string }
         service_id: { type: string }
@@ -355,6 +272,7 @@ flowTools:
         review_count: { type: number }
         reason: { type: string }
         message: { type: string }
+        question: { type: string }
 
   plan_quote_step:
     description: Capture the next answer for the active Thumbtack quote step.
@@ -367,7 +285,7 @@ flowTools:
       additionalProperties: false
       required: [next]
       properties:
-        next: { type: string, enum: [answer_quote, confirm_submit, ask_user, error] }
+        next: { type: string, enum: [confirm_submit, ask_user, error] }
         value: { type: string }
         selection: { type: string }
         selections:
@@ -380,6 +298,21 @@ flowTools:
         last_name: { type: string }
         phone: { type: string }
         zip_code: { type: string }
+        message: { type: string }
+        question: { type: string }
+
+  continue_flow:
+    description: Continue to the requested internal flow node.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next]
+      properties:
+        next: { type: string, enum: [drive_quote, error] }
         message: { type: string }
 
   confirm_submission:
@@ -417,7 +350,7 @@ flowTools:
     input:
       address: tool.args.address
     output:
-      next: { if: [{ var: result.error }, "error", "search_service"] }
+      next: { if: [{ var: result.error }, "error", "find_pro"] }
       zip_code: result.zip_code
       source: result.source
       status: result.status
@@ -439,7 +372,7 @@ flowTools:
       filters: tool.args.filters
       cursor: tool.args.cursor
     output:
-      next: { if: [{ var: result.error }, "error", "select_pro"] }
+      next: { if: [{ var: result.error }, "error", "find_pro"] }
       candidates: result.candidates
       service_options: result.service_options
       total_count: result.total_count
@@ -464,7 +397,7 @@ flowTools:
       url: tool.args.url
       service_id: tool.args.service_id
     output:
-      next: { if: [{ var: result.error }, "error", "open_quote"] }
+      next: { if: [{ var: result.error }, "error", "drive_quote"] }
       name: result.name
       service_id: result.service_id
       url: result.url
@@ -496,7 +429,7 @@ flowTools:
       zip_code: tool.args.zip_code
       submit: false
     output:
-      next: { if: [{ var: result.error }, "ask_user", "plan_quote_step"] }
+      next: { if: [{ var: result.error }, "ask_user", "drive_quote"] }
       status: result.status
       error: result.error
       form: result.form
@@ -531,7 +464,7 @@ flowTools:
       zip_code: tool.args.zip_code
       advance: tool.args.advance
     output:
-      next: { if: [{ var: result.error }, "error", "plan_quote_step"] }
+      next: { if: [{ var: result.error }, "error", "drive_quote"] }
       applied: result.applied
       flow: result.flow
       form: result.form

@@ -1,0 +1,20 @@
+extends: app
+planner:
+  inputSelector:
+    - active
+    - queue
+    - conversationSummary
+    - latestMessageInterpretation
+  outputMap:
+    conversationSummary: conversationSummary
+    latestMessageInterpretation: latestMessageInterpretation
+  prompt: |-
+    Use the config-runtime planner to call decide for flowDocument routes.
+    Always call decide exactly once with intent=request_service_quote.
+router:
+  routes:
+    - intent: request_service_quote
+      description: Request quotes for service
+      examples:
+        - 열쇠공 견적줘
+

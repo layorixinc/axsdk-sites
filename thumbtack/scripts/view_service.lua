@@ -18,14 +18,7 @@ function AX_view_service(args)
     }
   end
 
-  local navigated = M.navigate_service_if_needed({ service_id = service_id, url = url })
-  if navigated then
-    return {
-      service_id = service_id,
-      pending = true,
-      error = "navigation_pending"
-    }
-  end
+  M.navigate_service_if_needed({ service_id = service_id, url = url })
 
   if service_id and not M.current_service_matches(service_id) and not url then
     return {

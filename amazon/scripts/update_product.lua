@@ -163,8 +163,8 @@ local function apply_variation_update(variation, entry, applied)
 
   if option_product_id and option_product_id ~= M.current_product_id() then
     nav.navigate(M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX .. option_product_id, {})
-    append_applied(applied, "variation", variation.id, option_value, true, "navigation_pending")
-    return "navigation_pending"
+    append_applied(applied, "variation", variation.id, option_value, true, "product_navigated")
+    return "product_navigated"
   end
 
   local selector = M.non_empty(option.selector)
@@ -331,6 +331,16 @@ function AX_update_product(args)
   local pending = nil
   if #variation_updates > 0 then
     pending = apply_variation_updates(M.read_variations(), variation_updates, applied)
+  end
+
+  local navigation_retries = 0
+  while pending == "product_navigated" and navigation_retries <= #variation_updates do
+    navigation_retries = navigation_retries + 1
+    pending = apply_variation_updates(M.read_variations(), variation_updates, applied)
+  end
+
+  if pending == "product_navigated" then
+    pending = "variation_navigation_loop"
   end
 
   if pending then

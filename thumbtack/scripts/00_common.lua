@@ -365,9 +365,9 @@ end
 function M.start_search(query, zip_code)
   if not M.is_home_page() then
     nav.navigate(M.HOME_URL, {})
-    return true
   end
 
+  dom.wait_for_selector('input[aria-label="Search on Thumbtack"]', { timeout = 30000 })
   -- Prep the multi-input search as one async flow so React commits each step (typed query →
   -- autocomplete category selection → zip) before submitting. A plain durable sequence runs
   -- synchronously within a replay pass, so the submit would fire before Thumbtack resolves the
@@ -381,7 +381,6 @@ function M.start_search(query, zip_code)
     { set = 'input[aria-label="Zip code"]', value = zip_code },
   })
   dom.click('button[data-test="search-button"]', { expectedUrl = "/instant-results/" })
-  return true
 end
 
 function M.result_candidate_from_row(row)

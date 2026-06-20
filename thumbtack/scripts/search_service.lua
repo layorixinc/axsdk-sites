@@ -16,11 +16,6 @@ function AX_search_service(args)
   if cursor then
     if M.current_url() ~= cursor then
       nav.navigate(cursor, {})
-      return {
-        pending = true,
-        error = "navigation_pending",
-        cursor = cursor
-      }
     end
   end
 
@@ -35,11 +30,6 @@ function AX_search_service(args)
 
   if not M.current_results_match(query, zip_code) then
     M.start_search(query, zip_code)
-    return {
-      pending = true,
-      error = "navigation_pending",
-      zip_code = zip_code
-    }
   end
 
   dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = 30000 })

@@ -16,41 +16,536 @@ router:
   defaultIntent: request_service_quote
   routes:
     - intent: request_service_quote
-      entry: request_service_quote.request_service_quote
-      description: Request quotes for a service
+      entry: request_service_quote.parse_request
+      description: Request quotes from Thumbtack service professionals.
       examples:
         - 열쇠공 견적줘
+        - 샌프란시스코 핸디맨 견적 받아줘
+        - get a house cleaning quote in San Francisco
 flows:
   request_service_quote:
+    goal: Search Thumbtack, choose a pro, complete the quote flow, and submit only after explicit user confirmation.
     contexts: [memory]
+    inputSelector:
+      - requestText
+      - request_service_quote
     nodes:
-      request_service_quote:
+      parse_request:
+        kind: action_unit
+        description: Extract the service quote request and decide where to resume.
         inputSelector:
           - requestText
-        kind: action_unit
-        description: Request quotes for a service
+          - request_service_quote
         prompt: |-
-          Answer the user question with provided contexts.
-          Call respond exactly once: set next to done and message to your reply in the user's language.
+          Extract the user's Thumbtack quote request.
+          Preserve any existing request_service_quote state; the latest user message may add missing details or approve submission.
+
+          Treat the injected memory context as user-provided data. Use a single unambiguous value from memory for:
+          - service address or ZIP code
+          - first name and last name
+          - email
+          - phone number
+          - quote preferences that answer visible Thumbtack questions
+
+          Required before search: service_query and either zip_code or address.
+          If the user did not state an address/ZIP but memory has one clear service address or ZIP, use it.
+          If both the user and memory provide values, prefer the latest user message.
+          If memory has multiple conflicting addresses, names, emails, or phone numbers, ask the user to choose instead of guessing.
+          Contact fields are optional until quote/contact steps require them, but capture them from memory when available: email, first_name, last_name, phone, zip_code.
+
+          If the user is approving a previously prepared final quote submission, set submit_confirmed=true and next=submit_quote.
+          If required search details are still missing after checking memory, set next=ask_user and message to ask only for the missing details.
+          If zip_code is present, set next=search_service.
+          If address is present but zip_code is absent, set next=resolve_zip.
+          Otherwise set next=error with a short message.
+
+          Call capture_request exactly once.
+        allowedTools: [capture_request]
+        next:
+          resolve_zip: resolve_zip
+          search_service: search_service
+          submit_quote: submit_quote
+          ask_user: ask_user
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.service_query: service_query
+          request_service_quote.address: address
+          request_service_quote.zip_code: zip_code
+          request_service_quote.filters: filters
+          request_service_quote.contact: contact
+          request_service_quote.user_requirements: user_requirements
+          request_service_quote.submit_confirmed: submit_confirmed
+          request_service_quote.message: message
+
+      resolve_zip:
+        kind: action_unit
+        description: Resolve a ZIP code from the requested address.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call resolve_zip exactly once using request_service_quote.address.
+          Set next=search_service when you call it. Set next=error only if there is no address.
+        allowedTools: [resolve_zip]
+        next:
+          search_service: search_service
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.zip_code: zip_code
+          request_service_quote.zip_source: source
+          request_service_quote.zip_status: status
+
+      search_service:
+        kind: action_unit
+        description: Search Thumbtack for matching pros.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call search_service exactly once.
+          Use request_service_quote.service_query as query.
+          Prefer zip_code when present; otherwise use address.
+          Include filters only when already known.
+          Set next=select_pro.
+        allowedTools: [search_service]
+        next:
+          select_pro: select_pro
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.search.candidates: candidates
+          request_service_quote.search.service_options: service_options
+          request_service_quote.search.total_count: total_count
+          request_service_quote.search.cursor: cursor
+          request_service_quote.search.zip_code: zip_code
+
+      select_pro:
+        kind: action_unit
+        description: Select the best pro from search candidates.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Choose one candidate from request_service_quote.search.candidates.
+          Prefer candidates with a profile URL, service_id, strong rating/review evidence, and request_quote availability when visible.
+          If there are no viable candidates, set next=ask_user and explain that no pro could be selected.
+          Otherwise call select_pro exactly once with next=view_service and copy the selected candidate's url, service_id, name, price_text, rating, review_count, and reason.
+        allowedTools: [select_pro]
+        next:
+          view_service: view_service
+          ask_user: ask_user
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.selected_pro: selected_pro
+          request_service_quote.selected_pro_url: url
+          request_service_quote.selected_service_id: service_id
+          request_service_quote.selection_reason: reason
+          request_service_quote.message: message
+
+      view_service:
+        kind: action_unit
+        description: Open and inspect the selected pro profile.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call view_service exactly once using selected_pro_url and selected_service_id.
+          Set next=open_quote.
+        allowedTools: [view_service]
+        next:
+          open_quote: open_quote
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.pro.name: name
+          request_service_quote.pro.service_id: service_id
+          request_service_quote.pro.url: url
+          request_service_quote.pro.rating: rating
+          request_service_quote.pro.review_count: review_count
+          request_service_quote.pro.price_text: price_text
+          request_service_quote.pro.actions: actions
+          request_service_quote.pro.services_offered: services_offered
+
+      open_quote:
+        kind: action_unit
+        description: Open the selected pro's quote flow.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call open_quote exactly once using selected_pro_url and selected_service_id.
+          Pass known contact fields if they already exist, but do not submit.
+          Set next=plan_quote_step.
+        allowedTools: [open_quote]
+        next:
+          plan_quote_step: plan_quote_step
+          ask_user: ask_user
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.quote.status: status
+          request_service_quote.quote.error: error
+          request_service_quote.quote.form: form
+          request_service_quote.quote.update: update
+
+      plan_quote_step:
+        kind: action_unit
+        description: Decide how to answer the currently active quote-flow step.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Inspect request_service_quote.quote.form.
+
+          If the quote flow is unavailable or errored, call plan_quote_step with next=error and message.
+          If a final Submit/send/request button is visible, call plan_quote_step with next=confirm_submit and include a concise message summarizing the pro, price_text, contact, zip, and that user confirmation is required before submitting.
+          If a required field is visible, answer it from request_service_quote.contact, request_service_quote.user_requirements, memory, or the latest user request. Use memory as user-provided data when it contains exactly one unambiguous value.
+          If both memory and the latest user request provide values, prefer the latest user request.
+          If memory has multiple conflicting values for the field, call plan_quote_step with next=ask_user and ask the user to choose.
+          If you know the answer, call plan_quote_step with next=answer_quote and the exact AX_answer_quote args:
+          - radio: value = exact visible option text
+          - checkbox: selections = exact visible option texts
+          - textarea/details: text
+          - contact: email, first_name, last_name, phone, zip_code
+          If an optional upload/photo step has Skip/Next and no required input, call plan_quote_step with next=answer_quote and no answer fields.
+          If a required answer is unknown after checking memory, call plan_quote_step with next=ask_user and ask one focused question.
+
+          Never choose submit_quote here. Never invent address, contact, or quote-answer data.
+          Call plan_quote_step exactly once.
+        allowedTools: [plan_quote_step]
+        next:
+          answer_quote: answer_quote
+          confirm_submit: confirm_submit
+          ask_user: ask_user
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.next_quote_action: next
+          request_service_quote.pending_answer.value: value
+          request_service_quote.pending_answer.selection: selection
+          request_service_quote.pending_answer.selections: selections
+          request_service_quote.pending_answer.text: text
+          request_service_quote.pending_answer.email: email
+          request_service_quote.pending_answer.first_name: first_name
+          request_service_quote.pending_answer.last_name: last_name
+          request_service_quote.pending_answer.phone: phone
+          request_service_quote.pending_answer.zip_code: zip_code
+          request_service_quote.pending_answer.contact: contact
+          request_service_quote.pending_answer.message: message
+          request_service_quote.message: message
+
+      answer_quote:
+        kind: action_unit
+        description: Apply the planned answer to the active quote step.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call answer_quote exactly once using request_service_quote.pending_answer fields.
+          Do not call submit. Set next=plan_quote_step.
+        allowedTools: [answer_quote]
+        next:
+          plan_quote_step: plan_quote_step
+          ask_user: ask_user
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.quote.applied: applied
+          request_service_quote.quote.flow: flow
+          request_service_quote.quote.form: form
+
+      confirm_submit:
+        kind: action_unit
+        description: Ask for or honor explicit submit confirmation.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          If request_service_quote.submit_confirmed is true, call confirm_submission with next=submit_quote and confirm=true.
+          Otherwise call respond with next=done and message in the user's language asking for explicit confirmation before submitting the Thumbtack quote request. Include the selected pro name, price_text, contact fields that will be sent, and note that contact fields may come from memory when the user did not override them. If any required contact field is still missing or ambiguous in memory, ask for that field instead of asking for submit confirmation.
+        allowedTools: [confirm_submission, respond]
+        next:
+          submit_quote: submit_quote
+          done: done
+          error: error
+        fallback: { invalidNext: done, exhaustedNext: done }
+        outputMap:
+          request_service_quote.submit_confirmed: confirm
+          request_service_quote.message: message
+
+      submit_quote:
+        kind: action_unit
+        description: Submit the quote after explicit confirmation.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call submit_quote exactly once only when request_service_quote.submit_confirmed is true.
+          Pass confirm=true and all known contact fields from request_service_quote.contact or memory, preferring the latest user-provided values.
+          Set next=final_response.
+        allowedTools: [submit_quote]
+        next:
+          final_response: final_response
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+        outputMap:
+          request_service_quote.submit.status: status
+          request_service_quote.submit.before: before
+          request_service_quote.submit.steps: steps
+          request_service_quote.submit.after: after
+
+      final_response:
+        kind: action_unit
+        description: Summarize the quote request outcome.
+        inputSelector:
+          - request_service_quote
+        prompt: |-
+          Call respond exactly once with next=done and a concise user-language summary.
+          Include selected pro, visible price_text if available, submit status, and any verification_required state.
         allowedTools: [respond]
         next:
           done: done
+        fallback: { invalidNext: done, exhaustedNext: done }
         outputMap:
           request_service_quote.message: message
+
+      ask_user:
+        kind: terminal
+        respond: Use Flow state JSON's message.
+      error:
+        kind: terminal
+        respond: Use Flow state JSON's message, or say the quote flow could not continue.
       done:
         kind: terminal
         respond: Use Flow state JSON's message.
 flowTools:
-  respond:
-    description: Return the final answer message to the user.
+  capture_request:
+    description: Capture parsed quote-request details and choose the next flow node.
     execute:
       kind: runtime
       implementation: passthrough
     output: tool.args
     parameters:
       type: object
-      additionalProperties: false                                                                                                                                                                        
-      required: [next, message]                                                                                                                                                                          
+      additionalProperties: false
+      required: [next]
+      properties:
+        next: { type: string, enum: [resolve_zip, search_service, submit_quote, ask_user, error] }
+        service_query: { type: string }
+        address: { type: string }
+        zip_code: { type: string }
+        filters: { type: object, additionalProperties: true }
+        contact: { type: object, additionalProperties: true }
+        user_requirements: { type: string }
+        submit_confirmed: { type: boolean }
+        message: { type: string }
+
+  select_pro:
+    description: Capture the selected Thumbtack pro candidate.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next]
+      properties:
+        next: { type: string, enum: [view_service, ask_user, error] }
+        selected_pro: { type: object, additionalProperties: true }
+        url: { type: string }
+        service_id: { type: string }
+        name: { type: string }
+        price_text: { type: string }
+        rating: { type: number }
+        review_count: { type: number }
+        reason: { type: string }
+        message: { type: string }
+
+  plan_quote_step:
+    description: Capture the next answer for the active Thumbtack quote step.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next]
+      properties:
+        next: { type: string, enum: [answer_quote, confirm_submit, ask_user, error] }
+        value: { type: string }
+        selection: { type: string }
+        selections:
+          type: array
+          items: { type: string }
+        text: { type: string }
+        contact: { type: object, additionalProperties: true }
+        email: { type: string }
+        first_name: { type: string }
+        last_name: { type: string }
+        phone: { type: string }
+        zip_code: { type: string }
+        message: { type: string }
+
+  confirm_submission:
+    description: Capture explicit user confirmation to submit the quote request.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, confirm]
+      properties:
+        next: { type: string, enum: [submit_quote, error] }
+        confirm: { type: boolean, const: true }
+        message: { type: string }
+
+  respond:
+    description: Return a message to the user.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, message]
       properties:
         next: { type: string, enum: [done] }
         message: { type: string }
+
+  resolve_zip:
+    description: Resolve a US ZIP code from an address string for Thumbtack searches.
+    execute: { kind: remote, tool: AX_resolve_zip }
+    input:
+      address: tool.args.address
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, address]
+      properties:
+        next: { type: string, enum: [search_service, error] }
+        address: { type: string }
+
+  search_service:
+    description: Search Thumbtack services and local pros by query and ZIP code or address.
+    execute: { kind: remote, tool: AX_search_service }
+    input:
+      query: tool.args.query
+      zip_code: tool.args.zip_code
+      address: tool.args.address
+      filters: tool.args.filters
+      cursor: tool.args.cursor
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, query]
+      properties:
+        next: { type: string, enum: [select_pro, error] }
+        query: { type: string }
+        zip_code: { type: string }
+        address: { type: string }
+        cursor: { type: string }
+        filters: { type: object, additionalProperties: true }
+
+  view_service:
+    description: View a Thumbtack pro profile from a search result URL.
+    execute: { kind: remote, tool: AX_view_service }
+    input:
+      url: tool.args.url
+      service_id: tool.args.service_id
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, url]
+      properties:
+        next: { type: string, enum: [open_quote, error] }
+        url: { type: string }
+        service_id: { type: string }
+
+  open_quote:
+    description: Open or inspect a Thumbtack quote flow from a pro profile URL.
+    execute: { kind: remote, tool: AX_open_quote }
+    input:
+      url: tool.args.url
+      service_id: tool.args.service_id
+      contact: tool.args.contact
+      email: tool.args.email
+      first_name: tool.args.first_name
+      last_name: tool.args.last_name
+      phone: tool.args.phone
+      zip_code: tool.args.zip_code
+      submit: false
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, url]
+      properties:
+        next: { type: string, enum: [plan_quote_step, ask_user, error] }
+        url: { type: string }
+        service_id: { type: string }
+        contact: { type: object, additionalProperties: true }
+        email: { type: string }
+        first_name: { type: string }
+        last_name: { type: string }
+        phone: { type: string }
+        zip_code: { type: string }
+
+  answer_quote:
+    description: Answer the active Thumbtack quote step without submitting.
+    execute: { kind: remote, tool: AX_answer_quote }
+    input:
+      value: tool.args.value
+      selection: tool.args.selection
+      selections: tool.args.selections
+      text: tool.args.text
+      contact: tool.args.contact
+      email: tool.args.email
+      first_name: tool.args.first_name
+      last_name: tool.args.last_name
+      phone: tool.args.phone
+      zip_code: tool.args.zip_code
+      advance: tool.args.advance
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next]
+      properties:
+        next: { type: string, enum: [plan_quote_step, ask_user, error] }
+        value: { type: string }
+        selection: { type: string }
+        selections:
+          type: array
+          items: { type: string }
+        text: { type: string }
+        contact: { type: object, additionalProperties: true }
+        email: { type: string }
+        first_name: { type: string }
+        last_name: { type: string }
+        phone: { type: string }
+        zip_code: { type: string }
+        advance: { type: boolean }
+
+  submit_quote:
+    description: Submit the active Thumbtack quote flow after explicit user confirmation.
+    execute: { kind: remote, tool: AX_submit_quote }
+    input:
+      confirm: tool.args.confirm
+      contact: tool.args.contact
+      email: tool.args.email
+      first_name: tool.args.first_name
+      last_name: tool.args.last_name
+      phone: tool.args.phone
+      zip_code: tool.args.zip_code
+      max_steps: tool.args.max_steps
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, confirm]
+      properties:
+        next: { type: string, enum: [final_response, error] }
+        confirm: { type: boolean, const: true }
+        contact: { type: object, additionalProperties: true }
+        email: { type: string }
+        first_name: { type: string }
+        last_name: { type: string }
+        phone: { type: string }
+        zip_code: { type: string }
+        max_steps: { type: integer, minimum: 1 }

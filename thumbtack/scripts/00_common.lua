@@ -749,6 +749,98 @@ function M.read_project_form()
   }
 end
 
+function M.url_query_param(url, name)
+  local pattern = "[?&]" .. name .. "=([^&#]+)"
+  return M.non_empty(tostring(url or ""):match(pattern))
+end
+
+function M.read_quote_contact(fields)
+  local contact = {}
+  for index = 1, #fields do
+    local field = fields[index]
+    local field_type = M.normalize_text(field.type or "")
+    local placeholder = M.normalize_text(field.placeholder or "")
+    local aria = M.normalize_text(field.aria or "")
+    local value = M.non_empty(field.value)
+    if value then
+      if field_type == "email" or aria:find("email", 1, true) or placeholder:find("email", 1, true) then
+        contact.email = value
+      elseif field_type == "tel" or aria:find("phone", 1, true) or placeholder:find("555", 1, true) then
+        contact.phone = value
+      elseif placeholder:find("zip", 1, true) or aria:find("zip", 1, true) then
+        contact.zip_code = value
+      elseif placeholder:find("first name", 1, true) or aria:find("first name", 1, true) then
+        contact.first_name = value
+      elseif placeholder:find("last name", 1, true) or aria:find("last name", 1, true) then
+        contact.last_name = value
+      end
+    end
+  end
+  return contact
+end
+
+function M.read_submit_button_label(form)
+  local buttons = form and form.buttons or {}
+  for index = 1, #buttons do
+    local label = M.non_empty(buttons[index].text) or M.non_empty(buttons[index].aria)
+    local normalized = M.normalize_text(label)
+    if normalized:find("submit", 1, true)
+      or normalized:find("send", 1, true)
+      or normalized:find("quote", 1, true)
+      or normalized:find("request", 1, true) then
+      return label
+    end
+  end
+  return nil
+end
+
+function M.read_quote_submission_snapshot()
+  local url = M.current_url()
+  local service_id = M.service_id_from_url(url)
+  local form = M.read_project_form()
+  local submit_button = M.read_submit_button_label(form)
+  local aside_text = M.non_empty(dom.get_text("aside"))
+  local main_text = M.non_empty(dom.get_text("main"))
+  return {
+    ready = submit_button ~= nil and dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR),
+    url = url,
+    service_id = service_id,
+    project_pk = M.url_query_param(url, "project_pk"),
+    lp_request_pk = M.url_query_param(url, "lp_request_pk"),
+    keyword_pk = M.url_query_param(url, "keyword_pk"),
+    category_pk = M.url_query_param(url, "category_pk"),
+    user_query_pk = M.url_query_param(url, "user_query_pk"),
+    zip_code = M.url_query_param(url, "zip_code"),
+    submit_button = submit_button,
+    pro = {
+      name = M.non_empty(dom.get_text("h1")),
+      url = url,
+      price_text = M.parse_price_text(aside_text or ""),
+      summary = M.truncate_text(aside_text or main_text or "", 500)
+    },
+    quote = {
+      form = form,
+      contact = M.read_quote_contact(form.fields or {}),
+      disclaimer = M.truncate_text(form.text or "", 1200)
+    }
+  }
+end
+
+function M.read_quote_submit_result(before_url)
+  local url = M.current_url()
+  local body_text = M.non_empty(dom.get_text("body"))
+  local form = M.read_project_form()
+  local submit_button = M.read_submit_button_label(form)
+  return {
+    url = url,
+    url_changed = before_url ~= nil and before_url ~= url,
+    active_flow = dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR),
+    submit_button = submit_button,
+    form = form,
+    page_text = M.truncate_text(body_text or "", 2000)
+  }
+end
+
 function M.request_flow_advance_state()
   local buttons = dom.query_all(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' button', {
     text = true,
@@ -768,7 +860,7 @@ function M.request_flow_advance_state()
       or normalized:find("submit", 1, true) ~= nil
       or normalized:find("quote", 1, true) ~= nil
       or normalized:find("request", 1, true) ~= nil
-    if normalized == "next" or normalized == "continue" then
+    if normalized == "next" or normalized == "continue" or normalized == "loadingnext" or normalized == "loadingcontinue" then
       return {
         label = label,
         can_advance = true,

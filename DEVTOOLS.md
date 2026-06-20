@@ -70,6 +70,7 @@ async function axcall(cmd, args = {}) {
 | `AX_update_search` | filter change | `axrun("AX_update_search", { value: "Every 2 weeks", option: "Frequency" })` |
 | `AX_answer_quote` | quote-flow step | `axrun("AX_answer_quote", { value: "Home" })` or `axrun("AX_answer_quote", { selections: ["Inside cabinets"] })` |
 | `AX_open_quote` | opens quote (never submits) | `axrun("AX_open_quote", { url: "<pro URL>", submit: false })` |
+| `AX_submit_quote` | submits quote | `axrun("AX_submit_quote", { confirm: true })` |
 
 - `AX_search_service` requires `query` plus `zip_code` **or** `address`.
 - `AX_resolve_zip` / `address`: a full street address resolves via the US Census geocoder; a bare
@@ -86,19 +87,25 @@ async function axcall(cmd, args = {}) {
 6. For contact steps, pass only test-safe/reserved data in dev: `r = await axrun("AX_answer_quote", { email: "thumbtack-test@example.com", first_name: "Test", last_name: "User", phone: "4155550100", zip_code: "94101" })`.
 7. Optional photo upload steps are skipped automatically; do not upload test files.
 8. Stop when `r.flow.reached_submit_step` is `true`, `r.flow.advance_reason` is `"unsafe_advance_button"`, or `r.flow.advance_reason` is `"advance_not_confirmed"`.
+9. Submit only when intentional: `await axrun("AX_submit_quote", { confirm: true, email: "thumbtack-test@example.com", first_name: "Test", last_name: "User", phone: "4155550100" })`.
 
 `AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons.
+`AX_submit_quote` requires `confirm: true`, clicks the final `Submit`, and returns before/after quote details.
 Set `advance: false` to select/fill the current step without moving forward.
 
 ### Live multi-service runner
 
 ```bash
 node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-service --submit-quote --max-quote-steps=20 --keep-open
+# Actual submit for one scenario:
+node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --scenario="handyman|San Francisco, CA" --actual-submit --max-quote-steps=20 --keep-open
 ```
 
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
 `--submit-quote` progresses every scenario until the final `Submit` button is visible, using
-reserved/fake contact data. It never clicks `Submit`.
+reserved/fake contact data. It never clicks `Submit`. `--actual-submit` calls `AX_submit_quote`
+with `confirm:true`, clicks the final `Submit`, and may return `verification_required` when
+Thumbtack opens reCAPTCHA/account verification.
 
 ## 5. Gotchas
 

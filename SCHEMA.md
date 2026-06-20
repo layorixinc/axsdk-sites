@@ -354,6 +354,51 @@
     }
   },
   {
+    "name": "AX_submit_quote",
+    "description": "Submit the active Thumbtack quote flow. Requires confirm=true; can fill remaining contact steps; returns quote details from before and after the click.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "confirm": {
+          "const": true,
+          "type": "boolean"
+        },
+        "contact": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "email": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "first_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "last_name": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "phone": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "zip_code": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "max_steps": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "confirm"
+      ],
+      "type": "object"
+    }
+  },
+  {
     "name": "AX_update_search",
     "description": "Change a search filter (service option) on the Thumbtack search-results screen by its visible choice text, then re-read the filters and matching pros.",
     "parameters": {

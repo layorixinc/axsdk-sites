@@ -11,7 +11,7 @@ const DEFAULT_EXTENSION_ID = 'dldlgmekahifbogjphgglkhibclglmpf';
 const DEFAULT_CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const DEFAULT_PROFILE = process.env.CHROME_PROFILE || `${process.env.LOCALAPPDATA || ''}/AXSDKSitesChromeDevProfile`;
 const DEFAULT_PORT = Number(process.env.CDP_PORT || 9224);
-const LUA_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua'];
+const LUA_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua', 'submit_quote.lua'];
 const DEFAULT_SCENARIOS = [
   { name: 'house-cleaning', query: 'house cleaning', address: 'San Francisco, CA' },
   { name: 'lawn-mowing', query: 'lawn mowing', address: 'San Francisco, CA' },
@@ -53,6 +53,7 @@ function parseArgs(argv) {
     scenarios: [],
     multiService: false,
     submitQuote: false,
+    actualSubmit: false,
     maxQuoteSteps: Number(process.env.THUMBTACK_QUOTE_STEPS || 20),
     keepOpen: false,
   };
@@ -60,6 +61,10 @@ function parseArgs(argv) {
     if (arg === '--keep-open') options.keepOpen = true;
     else if (arg === '--multi-service') options.multiService = true;
     else if (arg === '--submit-quote') options.submitQuote = true;
+    else if (arg === '--actual-submit') {
+      options.submitQuote = true;
+      options.actualSubmit = true;
+    }
     else if (arg.startsWith('--cdp=')) options.cdp = arg.slice('--cdp='.length);
     else if (arg.startsWith('--port=')) options.port = Number(arg.slice('--port='.length));
     else if (arg.startsWith('--chrome=')) options.chrome = arg.slice('--chrome='.length);
@@ -70,7 +75,7 @@ function parseArgs(argv) {
     else if (arg.startsWith('--scenario=')) options.scenarios.push(parseScenario(arg.slice('--scenario='.length)));
     else if (arg.startsWith('--max-quote-steps=')) options.maxQuoteSteps = Number(arg.slice('--max-quote-steps='.length));
     else if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: node thumbtack/scripts/test_thumbtack_lua.mjs [options]\n\nOptions:\n  --query=TEXT                         Single-service query.\n  --address=TEXT                       Single-service address/city/ZIP.\n  --scenario=QUERY|ADDRESS             Add one scenario; repeatable.\n  --multi-service                      Run the default varied-service scenario set.\n  --submit-quote                       Progress every quote flow until the final submit button appears; never clicks submit.\n  --max-quote-steps=N                  Max request-flow steps per scenario.\n  --cdp=http://127.0.0.1:9224          Connect to an existing Chrome CDP endpoint.\n  --port=9224\n  --profile=PATH\n  --keep-open`);
+      console.log(`Usage: node thumbtack/scripts/test_thumbtack_lua.mjs [options]\n\nOptions:\n  --query=TEXT                         Single-service query.\n  --address=TEXT                       Single-service address/city/ZIP.\n  --scenario=QUERY|ADDRESS             Add one scenario; repeatable.\n  --multi-service                      Run the default varied-service scenario set.\n  --submit-quote                       Progress every quote flow until the final submit button appears; never clicks submit.\n  --actual-submit                      Actually click final Submit via AX_submit_quote(confirm:true).\n  --max-quote-steps=N                  Max request-flow steps per scenario.\n  --cdp=http://127.0.0.1:9224          Connect to an existing Chrome CDP endpoint.\n  --port=9224\n  --profile=PATH\n  --keep-open`);
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
@@ -532,7 +537,13 @@ async function progressQuoteFlow(page, options) {
           submitButton: after.submitButton,
         },
       });
-      finalSubmit = { attempted: false, reason: 'submit_button_reached_not_clicked' };
+      if (options.actualSubmit) {
+        finalSubmit = await callLuaSettled(page, options, 'AX_submit_quote', { confirm: true, ...DEFAULT_CONTACT, max_steps: 8 });
+        assertCondition(finalSubmit?.ok, 'AX_submit_quote call failed', finalSubmit);
+        await waitForSettle(page);
+      } else {
+        finalSubmit = { attempted: false, reason: 'submit_button_reached_not_clicked' };
+      }
       break;
     }
     const args = quoteArgsForStep(before);
@@ -681,7 +692,13 @@ async function runTests(page, options) {
   }
   const quoteFlows = scenarios.filter(scenario => typeof scenario.quote_flow === 'object');
   assertCondition(quoteFlows.length > 0, 'No scenario opened a quote flow', scenarios);
-  if (options.submitQuote) {
+  if (options.actualSubmit) {
+    assertCondition(
+      quoteFlows.every(scenario => scenario.quote_flow?.finalSubmit?.ok === true),
+      '--actual-submit did not call AX_submit_quote successfully for every scenario',
+      quoteFlows
+    );
+  } else if (options.submitQuote) {
     assertCondition(
       quoteFlows.every(scenario => Boolean(scenario.quote_flow?.final?.submitButton)),
       '--submit-quote did not reach the final submit button for every scenario',
@@ -692,6 +709,7 @@ async function runTests(page, options) {
     scenario_count: scenarios.length,
     quote_flow_count: quoteFlows.length,
     submit_quote: options.submitQuote,
+    actual_submit: options.actualSubmit,
     scenarios,
   };
 }

@@ -29,3 +29,26 @@ flows:
         description: Request quotes for a service
         prompt: |-
           Answer the user question with provided contexts.
+          Call respond exactly once: set next to done and message to your reply in the user's language.
+        allowedTools: [respond]
+        next:
+          done: done
+        outputMap:
+          request_service_quote.message: message
+      done:
+        kind: terminal
+        respond: Use Flow state JSON's message.
+flowTools:
+  respond:
+    description: Return the final answer message to the user.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false                                                                                                                                                                        
+      required: [next, message]                                                                                                                                                                          
+      properties:
+        next: { type: string, enum: [done] }
+        message: { type: string }

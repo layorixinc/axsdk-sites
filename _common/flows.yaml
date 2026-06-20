@@ -85,7 +85,7 @@ flows:
           - request_service_quote
         prompt: |-
           Call resolve_zip exactly once using request_service_quote.address.
-          Set next=search_service when you call it. Set next=error only if there is no address.
+          The flow transition is derived from the remote result.
         allowedTools: [resolve_zip]
         next:
           search_service: search_service
@@ -106,7 +106,7 @@ flows:
           Use request_service_quote.service_query as query.
           Prefer zip_code when present; otherwise use address.
           Include filters only when already known.
-          Set next=select_pro.
+          The flow transition is derived from the remote result.
         allowedTools: [search_service]
         next:
           select_pro: select_pro
@@ -149,7 +149,7 @@ flows:
           - request_service_quote
         prompt: |-
           Call view_service exactly once using selected_pro_url and selected_service_id.
-          Set next=open_quote.
+          The flow transition is derived from the remote result.
         allowedTools: [view_service]
         next:
           open_quote: open_quote
@@ -173,7 +173,7 @@ flows:
         prompt: |-
           Call open_quote exactly once using selected_pro_url and selected_service_id.
           Pass known contact fields if they already exist, but do not submit.
-          Set next=plan_quote_step.
+          The flow transition is derived from the remote result.
         allowedTools: [open_quote]
         next:
           plan_quote_step: plan_quote_step
@@ -238,7 +238,7 @@ flows:
           - request_service_quote
         prompt: |-
           Call answer_quote exactly once using request_service_quote.pending_answer fields.
-          Do not call submit. Set next=plan_quote_step.
+          Do not call submit. The flow transition is derived from the remote result.
         allowedTools: [answer_quote]
         next:
           plan_quote_step: plan_quote_step
@@ -276,7 +276,7 @@ flows:
         prompt: |-
           Call submit_quote exactly once only when request_service_quote.submit_confirmed is true.
           Pass confirm=true and all known contact fields from request_service_quote.contact or memory, preferring the latest user-provided values.
-          Set next=final_response.
+          The flow transition is derived from the remote result.
         allowedTools: [submit_quote]
         next:
           final_response: final_response
@@ -416,12 +416,17 @@ flowTools:
     execute: { kind: remote, tool: AX_resolve_zip }
     input:
       address: tool.args.address
+    output:
+      next: { if: [{ var: result.error }, "error", "search_service"] }
+      zip_code: result.zip_code
+      source: result.source
+      status: result.status
+      error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [next, address]
+      required: [address]
       properties:
-        next: { type: string, enum: [search_service, error] }
         address: { type: string }
 
   search_service:
@@ -433,12 +438,19 @@ flowTools:
       address: tool.args.address
       filters: tool.args.filters
       cursor: tool.args.cursor
+    output:
+      next: { if: [{ var: result.error }, "error", "select_pro"] }
+      candidates: result.candidates
+      service_options: result.service_options
+      total_count: result.total_count
+      cursor: result.cursor
+      zip_code: result.zip_code
+      error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [next, query]
+      required: [query]
       properties:
-        next: { type: string, enum: [select_pro, error] }
         query: { type: string }
         zip_code: { type: string }
         address: { type: string }
@@ -451,12 +463,22 @@ flowTools:
     input:
       url: tool.args.url
       service_id: tool.args.service_id
+    output:
+      next: { if: [{ var: result.error }, "error", "open_quote"] }
+      name: result.name
+      service_id: result.service_id
+      url: result.url
+      rating: result.rating
+      review_count: result.review_count
+      price_text: result.price_text
+      actions: result.actions
+      services_offered: result.services_offered
+      error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [next, url]
+      required: [url]
       properties:
-        next: { type: string, enum: [open_quote, error] }
         url: { type: string }
         service_id: { type: string }
 
@@ -473,12 +495,17 @@ flowTools:
       phone: tool.args.phone
       zip_code: tool.args.zip_code
       submit: false
+    output:
+      next: { if: [{ var: result.error }, "ask_user", "plan_quote_step"] }
+      status: result.status
+      error: result.error
+      form: result.form
+      update: result.update
     parameters:
       type: object
       additionalProperties: false
-      required: [next, url]
+      required: [url]
       properties:
-        next: { type: string, enum: [plan_quote_step, ask_user, error] }
         url: { type: string }
         service_id: { type: string }
         contact: { type: object, additionalProperties: true }
@@ -503,12 +530,16 @@ flowTools:
       phone: tool.args.phone
       zip_code: tool.args.zip_code
       advance: tool.args.advance
+    output:
+      next: { if: [{ var: result.error }, "error", "plan_quote_step"] }
+      applied: result.applied
+      flow: result.flow
+      form: result.form
+      error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [next]
       properties:
-        next: { type: string, enum: [plan_quote_step, ask_user, error] }
         value: { type: string }
         selection: { type: string }
         selections:
@@ -535,12 +566,18 @@ flowTools:
       phone: tool.args.phone
       zip_code: tool.args.zip_code
       max_steps: tool.args.max_steps
+    output:
+      next: { if: [{ var: result.error }, "error", "final_response"] }
+      status: result.status
+      before: result.before
+      steps: result.steps
+      after: result.after
+      error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [next, confirm]
+      required: [confirm]
       properties:
-        next: { type: string, enum: [final_response, error] }
         confirm: { type: boolean, const: true }
         contact: { type: object, additionalProperties: true }
         email: { type: string }

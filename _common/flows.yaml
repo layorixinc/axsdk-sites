@@ -14,7 +14,18 @@ planner:
 router:
   routes:
     - intent: request_service_quote
-      description: Request quotes for service
+      entry: request_service_quote.request_service_quote
+      description: Request quotes for a service
       examples:
         - 열쇠공 견적줘
-
+flows:
+  request_service_quote:
+    contexts: [memory]
+    nodes:
+      request_service_quote:
+        inputSelector:
+          - requestText
+        kind: action_unit
+        description: Request quotes for a service
+        prompt: |-
+          Answer the user question with provided contexts.

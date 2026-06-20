@@ -12,6 +12,8 @@ planner:
     Use the config-runtime planner to call decide for flowDocument routes.
     Always call decide exactly once with intent=request_service_quote.
 router:
+  mode: fixed
+  defaultIntent: request_service_quote
   routes:
     - intent: request_service_quote
       entry: request_service_quote.request_service_quote

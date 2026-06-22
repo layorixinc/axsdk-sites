@@ -10,6 +10,7 @@ M.MODAL_SELECTOR = '[data-test="thumbprint-modal-container"], [role="dialog"]'
 -- detected and read by its active step, never by M.MODAL_SELECTOR.
 M.REQUEST_FLOW_SELECTOR = '[aria-label="Request Flow Dialog"]'
 M.REQUEST_FLOW_ACTIVE_SELECTOR = '[data-test="request-flow-step--active"]'
+M.REQUEST_FLOW_ERROR_SELECTOR = '#request-flow-error'
 M.CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
 M.ZIPPOPOTAM_CITY_URL = "https://api.zippopotam.us/us/"
 
@@ -726,6 +727,57 @@ function M.read_project_form_fields(scope)
   }, 120)
 end
 
+function M.read_request_flow_error()
+  if not dom.exists(M.REQUEST_FLOW_ERROR_SELECTOR) then
+    return nil
+  end
+  local text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ERROR_SELECTOR))
+  if not text then
+    return nil
+  end
+  text = M.clean_text(text:gsub("%s*Close alert%s*$", ""))
+  local normalized = M.normalize_text(text)
+  local email = text:match('email address%s+"([^"]+)"')
+    or text:match("([%w%.%+_%-]+@[%w%.%-]+%.[A-Za-z][A-Za-z]+)")
+  local retry_field = nil
+  local error_code = "request_flow_error"
+  if email or normalized:find("email", 1, true) then
+    retry_field = "email"
+    if normalized:find("disabled", 1, true) then
+      error_code = "email_account_disabled"
+    elseif normalized:find("invalid", 1, true) then
+      error_code = "invalid_email"
+    else
+      error_code = "email_error"
+    end
+  end
+  local question = "Thumbtack returned an error: " .. text
+  if retry_field == "email" then
+    if email then
+      question = 'Thumbtack rejected "' .. email .. '". Please provide a different email address.'
+    else
+      question = "Thumbtack rejected the email address. Please provide a different email address."
+    end
+  end
+  return {
+    error = error_code,
+    message = text,
+    field = retry_field,
+    retry_field = retry_field,
+    bad_value = email,
+    question = question
+  }
+end
+
+function M.dismiss_request_flow_error()
+  if not dom.exists(M.REQUEST_FLOW_ERROR_SELECTOR) then
+    return false
+  end
+  return dom.click(M.REQUEST_FLOW_ERROR_SELECTOR .. ' button[aria-label="Close alert"]', {
+    navigates = false
+  }) == true
+end
+
 function M.read_project_form()
   -- Read the active request-flow step when present (the real quote dialog); otherwise fall back to
   -- the legacy modal. Avoids the empty thumbprint-modal placeholders the page pre-renders.
@@ -740,11 +792,14 @@ function M.read_project_form()
     text = true,
     aria = { attr = "aria-label" }
   }, 80)
+  local request_error = M.read_request_flow_error()
   return {
     scope = scope,
     text = M.non_empty(dom.get_text(scope)),
     fields = fields,
-    buttons = buttons
+    buttons = buttons,
+    request_error = request_error,
+    error = request_error and request_error.error or nil
   }
 end
 
@@ -797,6 +852,7 @@ function M.read_quote_submission_snapshot()
   local url = M.current_url()
   local service_id = M.service_id_from_url(url)
   local form = M.read_project_form()
+  local request_error = M.read_request_flow_error()
   local submit_button = M.read_submit_button_label(form)
   local aside_text = M.non_empty(dom.get_text("aside"))
   local main_text = M.non_empty(dom.get_text("main"))
@@ -811,6 +867,7 @@ function M.read_quote_submission_snapshot()
     user_query_pk = M.url_query_param(url, "user_query_pk"),
     zip_code = M.url_query_param(url, "zip_code"),
     submit_button = submit_button,
+    request_error = request_error,
     pro = {
       name = M.non_empty(dom.get_text("h1")),
       url = url,
@@ -820,6 +877,7 @@ function M.read_quote_submission_snapshot()
     quote = {
       form = form,
       contact = M.read_quote_contact(form.fields or {}),
+      request_error = request_error,
       disclaimer = M.truncate_text(form.text or "", 1200)
     }
   }
@@ -829,12 +887,14 @@ function M.read_quote_submit_result(before_url)
   local url = M.current_url()
   local body_text = M.non_empty(dom.get_text("body"))
   local form = M.read_project_form()
+  local request_error = M.read_request_flow_error()
   local submit_button = M.read_submit_button_label(form)
   return {
     url = url,
     url_changed = before_url ~= nil and before_url ~= url,
     active_flow = dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR),
     submit_button = submit_button,
+    request_error = request_error,
     form = form,
     page_text = M.truncate_text(body_text or "", 2000)
   }
@@ -1097,6 +1157,15 @@ function M.update_request_flow_step(args, applied, prior_updates)
     active = true,
     advanced = false
   }
+  local existing_error = M.read_request_flow_error()
+  if existing_error then
+    flow.advance_skipped = true
+    flow.advance_reason = "request_flow_error"
+    flow.request_error = existing_error
+    flow.error = existing_error.error
+    return flow
+  end
+
   local before_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
   local supplied = false
   local attempted = (prior_updates or 0) > 0
@@ -1183,6 +1252,14 @@ function M.update_request_flow_step(args, applied, prior_updates)
   local ok = dom.click(advance.selector, { navigates = false }) == true
   if ok then
     dom.wait(1200)
+  end
+  local request_error = M.read_request_flow_error()
+  flow.request_error = request_error
+  if request_error then
+    flow.advance_skipped = true
+    flow.advance_reason = "request_flow_error"
+    flow.error = request_error.error
+    return flow
   end
   local after_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
   flow.advanced = ok and before_text ~= after_text

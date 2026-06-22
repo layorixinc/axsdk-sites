@@ -33,9 +33,23 @@ function AX_answer_quote(args)
   local applied = M.apply_form_values(args.form_values or args.values or args.fields)
   append_answer_updates(applied, args.answers)
   local flow = M.update_request_flow_step(args, applied, #applied)
-  return {
+  local form = M.read_project_form()
+  local request_error = (flow and flow.request_error) or form.request_error
+  local result = {
     applied = applied,
     flow = flow,
-    form = M.read_project_form()
+    form = form
   }
+  if request_error then
+    result.status = request_error.retry_field and "contact_update_required" or "request_flow_error"
+    if not request_error.retry_field then
+      result.error = request_error.error
+    end
+    result.request_error = request_error
+    result.retry_field = request_error.retry_field
+    result.bad_value = request_error.bad_value
+    result.message = request_error.message
+    result.question = request_error.question
+  end
+  return result
 end

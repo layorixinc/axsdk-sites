@@ -13,6 +13,51 @@ local function form_has_recaptcha(form)
   return false
 end
 
+local function same_normalized(left, right)
+  return M.normalize_text(left or "") == M.normalize_text(right or "")
+end
+
+local function retry_value_for_request_error(args, request_error)
+  if not request_error or not request_error.retry_field then
+    return nil
+  end
+  if request_error.retry_field == "email" then
+    return M.request_flow_arg_value(args, { "email" })
+  end
+  return nil
+end
+
+local function should_retry_request_error(args, request_error)
+  local retry_value = retry_value_for_request_error(args, request_error)
+  if not retry_value then
+    return false
+  end
+  if request_error.bad_value and same_normalized(retry_value, request_error.bad_value) then
+    return false
+  end
+  return true
+end
+
+local function request_error_result(before, steps, after, request_error)
+  local retryable = request_error and request_error.retry_field ~= nil
+  local error_value = nil
+  if not retryable then
+    error_value = request_error and request_error.error or "request_flow_error"
+  end
+  return {
+    status = retryable and "contact_update_required" or "request_flow_error",
+    error = error_value,
+    request_error = request_error,
+    retry_field = request_error and request_error.retry_field or nil,
+    bad_value = request_error and request_error.bad_value or nil,
+    message = request_error and request_error.message or nil,
+    question = request_error and request_error.question or nil,
+    before = before,
+    steps = steps or ax.array(),
+    after = after
+  }
+end
+
 function AX_submit_quote(args)
   args = args or {}
   local before = M.read_quote_submission_snapshot()
@@ -21,6 +66,15 @@ function AX_submit_quote(args)
       error = "submit_requires_confirm",
       before = before
     }
+  end
+
+  local request_error = M.read_request_flow_error()
+  if request_error then
+    if not should_retry_request_error(args, request_error) then
+      return request_error_result(before, ax.array(), before, request_error)
+    end
+    M.dismiss_request_flow_error()
+    dom.wait(500)
   end
 
   local steps = ax.array()
@@ -37,6 +91,9 @@ function AX_submit_quote(args)
         before = snapshot,
         after = after_submit
       }
+      if after_submit.request_error then
+        return request_error_result(before, steps, after_submit, after_submit.request_error)
+      end
       if not clicked then
         return {
           status = "submit_click_failed",
@@ -67,6 +124,10 @@ function AX_submit_quote(args)
         flow = flow,
         after = after_step
       }
+      local step_request_error = after_step.request_error or (flow and flow.request_error)
+      if step_request_error then
+        return request_error_result(before, steps, after_step, step_request_error)
+      end
       if not flow then
         return {
           status = "submit_not_ready",

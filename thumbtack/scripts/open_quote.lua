@@ -70,10 +70,23 @@ function AX_open_quote(args)
     }
   end
 
-  return {
+  local request_error = (update and update.request_error) or form.request_error
+  local result = {
     service_id = service_id or M.service_id_from_url(M.current_url()),
     status = "open",
     form = form,
     update = update
   }
+  if request_error then
+    result.status = request_error.retry_field and "contact_update_required" or "request_flow_error"
+    if not request_error.retry_field then
+      result.error = request_error.error
+    end
+    result.request_error = request_error
+    result.retry_field = request_error.retry_field
+    result.bad_value = request_error.bad_value
+    result.message = request_error.message
+    result.question = request_error.question
+  end
+  return result
 end

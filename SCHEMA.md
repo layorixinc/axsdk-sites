@@ -212,7 +212,7 @@
   },
   {
     "name": "AX_answer_quote",
-    "description": "Answer the active Thumbtack quote step, including contact fields. It may click Next/Continue or optional-step Skip, but it refuses send/submit buttons.",
+    "description": "Answer the active Thumbtack quote step, including contact fields. It may click Next/Continue or optional-step Skip, refuses send/submit buttons, and returns retryable contact-popup errors.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -277,7 +277,7 @@
   },
   {
     "name": "AX_open_quote",
-    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step/contact values may advance through Next/Continue or optional-step Skip; submit/send is never clicked.",
+    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step/contact values may advance through Next/Continue or optional-step Skip; submit/send is never clicked; retryable contact-popup errors are returned.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -355,7 +355,7 @@
   },
   {
     "name": "AX_submit_quote",
-    "description": "Submit the active Thumbtack quote flow. Requires confirm=true; can fill remaining contact steps; returns quote details from before and after the click.",
+    "description": "Submit the active Thumbtack quote flow. Requires confirm=true; can fill remaining contact steps; returns quote details and retryable contact-popup errors such as disabled email accounts.",
     "parameters": {
       "additionalProperties": false,
       "properties": {

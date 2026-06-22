@@ -89,8 +89,8 @@ async function axcall(cmd, args = {}) {
 8. Stop when `r.flow.reached_submit_step` is `true`, `r.flow.advance_reason` is `"unsafe_advance_button"`, or `r.flow.advance_reason` is `"advance_not_confirmed"`.
 9. Submit only when intentional: `await axrun("AX_submit_quote", { confirm: true, email: "thumbtack-test@example.com", first_name: "Test", last_name: "User", phone: "4155550100" })`.
 
-`AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons.
-`AX_submit_quote` requires `confirm: true`, clicks the final `Submit`, and returns before/after quote details.
+`AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons and returns `contact_update_required` when Thumbtack rejects a contact field.
+`AX_submit_quote` requires `confirm: true`, clicks the final `Submit`, and returns before/after quote details or a retryable contact error.
 Set `advance: false` to select/fill the current step without moving forward.
 
 ### Live multi-service runner
@@ -104,8 +104,8 @@ node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --scen
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
 `--submit-quote` progresses every scenario until the final `Submit` button is visible, using
 reserved/fake contact data. It never clicks `Submit`. `--actual-submit` calls `AX_submit_quote`
-with `confirm:true`, clicks the final `Submit`, and may return `verification_required` when
-Thumbtack opens reCAPTCHA/account verification.
+with `confirm:true`, clicks the final `Submit`, and may return `verification_required` for
+reCAPTCHA/account checks or `contact_update_required` when Thumbtack rejects a contact field.
 
 ## 5. Gotchas
 

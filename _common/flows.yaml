@@ -70,6 +70,9 @@ flows:
         status: null
         error: null
         form: null
+        questions: []
+        all_questions_available: false
+        question_collection_status: null
         update: null
         applied: null
         flow: null
@@ -186,22 +189,17 @@ flows:
 
           Rules:
           - If quote.form is missing or the quote flow is not open, call open_quote using selected_pro_url and selected_service_id. Pass known contact fields if present. Do not submit.
+          - If quote.questions is present, quote.all_questions_available is true, and user_requirements is missing, ask once for the user's project requirements with plan_quote_step next=ask_user. Summarize the visible quote questions in one concise question. Do not ask those questions one at a time.
           - If quote.request_error or quote.flow.request_error has a retry_field, call plan_quote_step with next=ask_user and question asking for the replacement value. Never retry the rejected bad_value.
           - If a final Submit/send/request button is visible in quote.form, call plan_quote_step with next=confirm_submit and message summarizing the pro, price_text, contact, zip, and that user confirmation is required before submitting.
-          - If a required field is visible, answer it from contact, user_requirements, memory, or the latest user request. Use memory as user-provided data when it contains exactly one unambiguous value.
+          - For ordinary project questions, prefer automation over asking: call answer_quote with auto=true, user_requirements, and all known contact fields. AX_answer_quote matches exact visible labels when possible, chooses conservative defaults for radio choices, skips optional checkbox/upload steps when safe, fills textareas from user_requirements, and never clicks send/submit.
+          - If a required contact field is visible, answer it from contact or memory. Use memory as user-provided data when it contains exactly one unambiguous value.
           - If both memory and the latest user request provide values, prefer the latest user request.
-          - If memory has multiple conflicting values for the field, call plan_quote_step with next=ask_user and question asking the user to choose.
-          - If you know the answer, call answer_quote directly with the exact AX_answer_quote args:
-            - radio: value = exact visible option text
-            - checkbox: selections = exact visible option texts
-            - textarea/details: text
-            - contact: email, first_name, last_name, phone, zip_code
+          - If memory has multiple conflicting values for a required contact field, call plan_quote_step with next=ask_user and question asking the user to choose.
+          - If quote.status is `needs_answer`, quote.retry_field is `answer`, or quote.flow.advance_reason is `missing_answer` or `answer_not_applied` after an automated attempt, do not repeat the same answer. Ask one focused question for the current visible field/option with plan_quote_step next=ask_user.
           - Always pass all currently known contact fields in `contact` when calling open_quote, answer_quote, or submit_quote; also pass any newly supplied contact field directly.
-          - If quote.status is `needs_answer`, quote.retry_field is `answer`, or quote.flow.advance_reason is `missing_answer` or `answer_not_applied`, do not repeat the same answer. Ask for the current visible field/option with plan_quote_step next=ask_user.
-          - If an optional upload/photo step has Skip/Next and no required input, call answer_quote with no answer fields.
-          - If a required answer is unknown after checking memory, call plan_quote_step with next=ask_user and question to ask one focused question.
 
-          Never call submit_quote here. Never invent address, contact, or quote-answer data.
+          Never call submit_quote here. Never invent address or contact data.
           When you need the user (next=ask_user), set question=<the concise question to ask the user>.
         allowedTools: [open_quote, answer_quote, plan_quote_step]
         next:
@@ -483,6 +481,8 @@ flowTools:
       last_name: tool.args.last_name
       phone: tool.args.phone
       zip_code: tool.args.zip_code
+      user_requirements: tool.args.user_requirements
+      auto: tool.args.auto
       submit: false
     output:
       next: { if: [{ var: result.retry_field }, "ask_user", { if: [{ var: result.error }, "ask_user", "drive_quote"] }] }
@@ -493,6 +493,9 @@ flowTools:
         retry_field: result.retry_field
         bad_value: result.bad_value
         form: result.form
+        questions: result.questions
+        all_questions_available: result.all_questions_available
+        question_collection_status: result.question_collection_status
         update: result.update
       contact:
         email: { if: [{ var: result.contact.email }, { var: result.contact.email }, { var: contact.email }] }
@@ -515,6 +518,8 @@ flowTools:
         last_name: { type: string }
         phone: { type: string }
         zip_code: { type: string }
+        user_requirements: { type: string }
+        auto: { type: boolean }
 
   answer_quote:
     description: Answer the active Thumbtack quote step without submitting.
@@ -524,6 +529,8 @@ flowTools:
       selection: tool.args.selection
       selections: tool.args.selections
       text: tool.args.text
+      user_requirements: tool.args.user_requirements
+      auto: tool.args.auto
       contact: tool.args.contact
       email: tool.args.email
       first_name: tool.args.first_name
@@ -538,6 +545,9 @@ flowTools:
         applied: result.applied
         flow: result.flow
         form: result.form
+        questions: result.questions
+        all_questions_available: result.all_questions_available
+        question_collection_status: result.question_collection_status
         error: result.error
         request_error: result.request_error
         retry_field: result.retry_field
@@ -560,6 +570,8 @@ flowTools:
           type: array
           items: { type: string }
         text: { type: string }
+        user_requirements: { type: string }
+        auto: { type: boolean }
         contact: { type: object, additionalProperties: true }
         email: { type: string }
         first_name: { type: string }

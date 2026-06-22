@@ -212,7 +212,7 @@
   },
   {
     "name": "AX_answer_quote",
-    "description": "Answer the active Thumbtack quote step, including contact fields. It may click Next/Continue or optional-step Skip, refuses send/submit buttons, and returns retryable contact-popup errors.",
+    "description": "Answer the active Thumbtack quote step, including contact fields. With auto=true it selects/fills ordinary project steps from user_requirements. It may click Next/Continue or optional-step Skip, refuses send/submit buttons, and returns retryable contact-popup errors.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -240,6 +240,13 @@
           "type": "array"
         },
         "text": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "auto": {
+          "type": "boolean"
+        },
+        "user_requirements": {
           "minLength": 1,
           "type": "string"
         },
@@ -277,7 +284,7 @@
   },
   {
     "name": "AX_open_quote",
-    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step/contact values may advance through Next/Continue or optional-step Skip; submit/send is never clicked; retryable contact-popup errors are returned.",
+    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step/contact values, including auto=true with user_requirements, may advance through Next/Continue or optional-step Skip; submit/send is never clicked; retryable contact-popup errors are returned.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -313,6 +320,13 @@
           "type": "array"
         },
         "text": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "auto": {
+          "type": "boolean"
+        },
+        "user_requirements": {
           "minLength": 1,
           "type": "string"
         },

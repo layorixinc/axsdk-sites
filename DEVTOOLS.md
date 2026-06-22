@@ -68,7 +68,7 @@ async function axcall(cmd, args = {}) {
 | `AX_search_service` | nav | `axrun("AX_search_service", { query: "house cleaning", zip_code: "94105" })` |
 | `AX_view_service` | nav | `axrun("AX_view_service", { url: "<pro URL from search>" })` |
 | `AX_update_search` | filter change | `axrun("AX_update_search", { value: "Every 2 weeks", option: "Frequency" })` |
-| `AX_answer_quote` | quote-flow step | `axrun("AX_answer_quote", { value: "Home" })` or `axrun("AX_answer_quote", { selections: ["Inside cabinets"] })` |
+| `AX_answer_quote` | quote-flow step | `axrun("AX_answer_quote", { auto: true, user_requirements: "Standard home cleaning, no pets." })` |
 | `AX_open_quote` | opens quote (never submits) | `axrun("AX_open_quote", { url: "<pro URL>", submit: false })` |
 | `AX_submit_quote` | submits quote | `axrun("AX_submit_quote", { confirm: true })` |
 
@@ -80,16 +80,16 @@ async function axcall(cmd, args = {}) {
 ### Quote request flow test recipe
 
 1. Open the flow: `let r = await axrun("AX_open_quote", { url: proUrl, submit: false })`.
-2. If the active step is an intro with no fields, advance it: `r = await axrun("AX_answer_quote", {})`.
-3. For radio steps, pass the exact visible option label: `r = await axrun("AX_answer_quote", { value: "Home" })`.
-4. For checkbox steps, pass exact visible labels: `r = await axrun("AX_answer_quote", { selections: ["Inside cabinets"] })`.
+2. Auto-progress ordinary project steps: `r = await axrun("AX_answer_quote", { auto: true, user_requirements: "Standard home cleaning, no pets." })`.
+3. For exact radio control, pass the visible option label: `r = await axrun("AX_answer_quote", { value: "Home" })`.
+4. For exact checkbox control, pass visible labels: `r = await axrun("AX_answer_quote", { selections: ["Inside cabinets"] })`.
 5. For the details textarea, pass text only: `r = await axrun("AX_answer_quote", { text: "Need a standard cleaning estimate. Do not send yet." })`.
 6. For contact steps, pass only test-safe/reserved data in dev: `r = await axrun("AX_answer_quote", { email: "thumbtack-test@example.com", first_name: "Test", last_name: "User", phone: "4155550100", zip_code: "94101" })`.
-7. Optional photo upload steps are skipped automatically; do not upload test files.
+7. Optional photo upload and checkbox-only steps are skipped automatically when safe; do not upload test files.
 8. Stop when `r.flow.reached_submit_step` is `true`, `r.flow.advance_reason` is `"unsafe_advance_button"`, or `r.flow.advance_reason` is `"advance_not_confirmed"`.
 9. Submit only when intentional: `await axrun("AX_submit_quote", { confirm: true, email: "thumbtack-test@example.com", first_name: "Test", last_name: "User", phone: "4155550100" })`.
 
-`AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; it refuses send/submit/quote-request buttons and returns `contact_update_required` when Thumbtack rejects a contact field.
+`AX_answer_quote` only clicks buttons labeled `Next`, `Continue`, or optional-step `Skip`; `auto:true` selects/fills ordinary project steps from `user_requirements`, refuses send/submit/quote-request buttons, and returns `contact_update_required` when Thumbtack rejects a contact field.
 `AX_submit_quote` requires `confirm: true`, clicks the final `Submit`, and returns before/after quote details or a retryable contact error.
 Set `advance: false` to select/fill the current step without moving forward.
 
@@ -102,10 +102,11 @@ node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --scen
 ```
 
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
-`--submit-quote` progresses every scenario until the final `Submit` button is visible, using
-reserved/fake contact data. It never clicks `Submit`. `--actual-submit` calls `AX_submit_quote`
-with `confirm:true`, clicks the final `Submit`, and may return `verification_required` for
-reCAPTCHA/account checks or `contact_update_required` when Thumbtack rejects a contact field.
+`--submit-quote` progresses every scenario toward the final `Submit` button using reserved/fake
+contact data. It never clicks `Submit`; logged-out/test accounts may stop at a safe login/contact
+gate instead. `--actual-submit` calls `AX_submit_quote` with `confirm:true`, clicks the final
+`Submit`, and may return `verification_required` for reCAPTCHA/account checks or
+`contact_update_required` when Thumbtack rejects a contact field.
 
 ## 5. Gotchas
 

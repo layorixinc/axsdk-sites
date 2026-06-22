@@ -121,6 +121,9 @@ function AX_answer_quote(args)
     applied = applied,
     flow = flow,
     form = form,
+    questions = form.questions,
+    all_questions_available = form.all_questions_available,
+    question_collection_status = form.question_collection_status,
     contact = contact
   }
   if request_error then

@@ -35,7 +35,9 @@ function AX_open_quote(args)
   if args.answers or args.form_values or args.values or args.fields or args.contact
     or args.value or args.selection or args.selections or args.text or args.details or args.message
     or args.email or args.first_name or args.firstName or args.last_name or args.lastName
-    or args.phone or args.phone_number or args.phoneNumber or args.zip_code or args.zip then
+    or args.phone or args.phone_number or args.phoneNumber or args.zip_code or args.zip
+    or args.auto == true or args.auto_answer == true or args.user_requirements or args.requirements
+    or args.requestText or args.description then
     update = AX_answer_quote({
       answers = args.answers,
       form_values = args.form_values or args.values or args.fields,
@@ -45,6 +47,12 @@ function AX_open_quote(args)
       text = args.text,
       details = args.details,
       message = args.message,
+      auto = args.auto,
+      auto_answer = args.auto_answer,
+      user_requirements = args.user_requirements,
+      requirements = args.requirements,
+      requestText = args.requestText,
+      description = args.description,
       advance = args.advance,
       contact = args.contact,
       email = args.email,
@@ -76,6 +84,9 @@ function AX_open_quote(args)
     service_id = service_id or M.service_id_from_url(M.current_url()),
     status = "open",
     form = form,
+    questions = form.questions,
+    all_questions_available = form.all_questions_available,
+    question_collection_status = form.question_collection_status,
     update = update,
     contact = update and update.contact or nil
   }

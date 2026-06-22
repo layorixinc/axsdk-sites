@@ -727,6 +727,68 @@ function M.read_project_form_fields(scope)
   }, 120)
 end
 
+function M.read_request_flow_questions()
+  local questions = ax.array()
+  local status = "not_open"
+  local all_available = false
+  local active_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
+
+  if active_text then
+    status = "active_step_only"
+  elseif dom.exists(M.REQUEST_FLOW_SELECTOR) then
+    status = "dialog_without_active_step"
+  else
+    return {
+      status = status,
+      all_questions_available = false,
+      questions = questions
+    }
+  end
+
+  local rows = dom.query_all(
+    M.REQUEST_FLOW_SELECTOR .. ' form[data-test="request-flow-step-form"], '
+      .. M.REQUEST_FLOW_SELECTOR .. ' [data-test="request-flow-step--active"]',
+    {
+      text = true,
+      data_test = { attr = "data-test" },
+      aria = { attr = "aria-label" }
+    },
+    40
+  )
+  local seen = {}
+  for index = 1, #rows do
+    local text = M.non_empty(rows[index].text)
+    if text and not seen[text] then
+      seen[text] = true
+      questions[#questions + 1] = {
+        index = #questions + 1,
+        text = M.truncate_text(text, 600),
+        active = active_text ~= nil and text == active_text
+      }
+    end
+  end
+
+  if active_text and #questions == 0 then
+    questions[#questions + 1] = {
+      index = 1,
+      text = M.truncate_text(active_text, 600),
+      active = true
+    }
+  end
+
+  if active_text and #questions > 1 then
+    status = "preloaded_questions"
+    all_available = true
+  end
+
+  return {
+    status = status,
+    all_questions_available = all_available,
+    questions = questions
+  }
+end
+
+
 function M.read_request_flow_error()
   if not dom.exists(M.REQUEST_FLOW_ERROR_SELECTOR) then
     return nil
@@ -793,13 +855,17 @@ function M.read_project_form()
     aria = { attr = "aria-label" }
   }, 80)
   local request_error = M.read_request_flow_error()
+  local question_snapshot = M.read_request_flow_questions()
   return {
     scope = scope,
     text = M.non_empty(dom.get_text(scope)),
     fields = fields,
     buttons = buttons,
     request_error = request_error,
-    error = request_error and request_error.error or nil
+    error = request_error and request_error.error or nil,
+    questions = question_snapshot.questions,
+    all_questions_available = question_snapshot.all_questions_available,
+    question_collection_status = question_snapshot.status
   }
 end
 
@@ -967,6 +1033,152 @@ function M.request_flow_choice_values(args)
   end
   return choices
 end
+
+function M.request_flow_auto_enabled(args)
+  return args.auto == true or args.auto_answer == true
+end
+
+function M.request_flow_requirement_text(args)
+  local parts = ax.array()
+  local keys = {
+    "user_requirements",
+    "requirements",
+    "requestText",
+    "description",
+    "details",
+    "message"
+  }
+  for index = 1, #keys do
+    local value = M.non_empty(args[keys[index]])
+    if value then
+      parts[#parts + 1] = value
+    end
+  end
+  if #parts == 0 then
+    return ""
+  end
+  return M.normalize_text(table.concat(parts, " "))
+end
+
+function M.request_flow_option_score(option, requirements)
+  local text = M.normalize_text(option and option.text or "")
+  if text == "" then
+    return -1
+  end
+  local score = 0
+  if requirements ~= "" then
+    if requirements:find(text, 1, true) or text:find(requirements, 1, true) then
+      score = score + 100
+    end
+    for word in text:gmatch("[%w]+") do
+      if #word >= 3 and requirements:find(word, 1, true) then
+        score = score + 5
+      end
+    end
+  end
+  if text:find("home", 1, true) then
+    score = score + 8
+  end
+  if text:find("no pet", 1, true) or text == "no" or text:find("none", 1, true) then
+    score = score + 6
+  end
+  if text:find("standard", 1, true) or text:find("basic", 1, true) then
+    score = score + 5
+  end
+  if text:find("one time", 1, true) or text:find("once", 1, true) then
+    score = score + 3
+  end
+  if text:find("business", 1, true) then
+    score = score - 2
+  end
+  return score
+end
+
+function M.request_flow_auto_choice_values(args)
+  local requirements = M.request_flow_requirement_text(args)
+  local options = M.request_flow_options()
+  local groups = {}
+  local order = ax.array()
+  for index = 1, #options do
+    local option = options[index]
+    local text = M.non_empty(option.text)
+    local control = M.normalize_text(option.control or "")
+    if text and (control == "radio" or control == "checkbox") then
+      local group = M.non_empty(option.group) or (control .. ":" .. tostring(index))
+      if not groups[group] then
+        groups[group] = {
+          control = control,
+          options = ax.array()
+        }
+        order[#order + 1] = group
+      end
+      groups[group].options[#groups[group].options + 1] = option
+    end
+  end
+
+  local values = ax.array()
+  for order_index = 1, #order do
+    local group = groups[order[order_index]]
+    local best = nil
+    local best_score = nil
+    for option_index = 1, #group.options do
+      local option = group.options[option_index]
+      local score = M.request_flow_option_score(option, requirements)
+      if best == nil or score > best_score then
+        best = option
+        best_score = score
+      end
+    end
+    if group.control == "radio" and best then
+      values[#values + 1] = best.text
+    elseif group.control == "checkbox" then
+      for option_index = 1, #group.options do
+        local option = group.options[option_index]
+        local score = M.request_flow_option_score(option, requirements)
+        local normalized = M.normalize_text(option.text or "")
+        if score >= 100 or normalized:find("none", 1, true) or normalized:find("no ", 1, true) then
+          values[#values + 1] = option.text
+        end
+      end
+    end
+  end
+  return values
+end
+
+function M.request_flow_auto_text_value(args)
+  if not dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea') then
+    return nil
+  end
+  return M.non_empty(args.user_requirements)
+    or M.non_empty(args.requirements)
+    or M.non_empty(args.requestText)
+    or M.non_empty(args.description)
+    or M.non_empty(args.details)
+    or M.non_empty(args.message)
+    or "Please provide a standard estimate."
+end
+
+function M.request_flow_can_auto_skip_controls()
+  local options = M.request_flow_options()
+  local has_checkbox = false
+  for index = 1, #options do
+    local control = M.normalize_text(options[index].control or "")
+    if control == "radio" then
+      return false
+    elseif control == "checkbox" then
+      has_checkbox = true
+    end
+  end
+  local controls = dom.query_all(
+    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' select, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"]):not([type="file"])',
+    { tag = { attr = "tagName" } },
+    40
+  )
+  return has_checkbox and #controls == 0
+end
+
 
 function M.request_flow_text_value(args)
   return args.text or args.details or args.message
@@ -1207,6 +1419,7 @@ function M.update_request_flow_step(args, applied, prior_updates)
 
   local before_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
   flow.before_text = before_text
+  local auto_enabled = M.request_flow_auto_enabled(args)
   local supplied = false
   local attempted = (prior_updates or 0) > 0
   for index = 1, (prior_updates or 0) do
@@ -1217,6 +1430,12 @@ function M.update_request_flow_step(args, applied, prior_updates)
   end
 
   local choices = M.request_flow_choice_values(args)
+  if #choices == 0 and auto_enabled then
+    choices = M.request_flow_auto_choice_values(args)
+    if #choices > 0 then
+      flow.auto_answered = true
+    end
+  end
   if #choices > 0 then
     attempted = true
   end
@@ -1235,6 +1454,12 @@ function M.update_request_flow_step(args, applied, prior_updates)
   end
 
   local text = M.request_flow_text_value(args)
+  if text == nil and auto_enabled then
+    text = M.request_flow_auto_text_value(args)
+    if text ~= nil then
+      flow.auto_answered = true
+    end
+  end
   if text ~= nil then
     attempted = true
     local ok = dom.set_value(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea', text) == true
@@ -1287,7 +1512,8 @@ function M.update_request_flow_step(args, applied, prior_updates)
   local advance = M.request_flow_advance_state()
   flow.advance_label = advance.label
   flow.reached_submit_step = advance.reached_submit_step == true
-  if controls > 0 and not supplied and advance.allow_without_answer ~= true then
+  if controls > 0 and not supplied and advance.allow_without_answer ~= true
+    and not (auto_enabled and M.request_flow_can_auto_skip_controls()) then
     flow.advance_skipped = true
     flow.advance_reason = "missing_answer"
     return flow

@@ -95,7 +95,6 @@ flows:
           - user_requirements
           - submit_confirmed
           - message
-          - question
         prompt: |-
           Extract the user's Thumbtack quote request.
           Preserve any existing request_service_quote state; the latest user message may add missing details or approve submission.
@@ -148,7 +147,6 @@ flows:
           - review_count
           - pro
           - message
-          - question
         prompt: |-
           Drive pro discovery one tool call at a time. Use the projected state fields and call exactly one allowed tool.
           Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
@@ -182,7 +180,6 @@ flows:
           - pro
           - quote
           - message
-          - question
         prompt: |-
           Drive the Thumbtack quote dialog one tool call at a time. Use the projected state fields and call exactly one allowed tool.
           Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
@@ -199,6 +196,8 @@ flows:
             - checkbox: selections = exact visible option texts
             - textarea/details: text
             - contact: email, first_name, last_name, phone, zip_code
+          - Always pass all currently known contact fields in `contact` when calling open_quote, answer_quote, or submit_quote; also pass any newly supplied contact field directly.
+          - If quote.status is `needs_answer`, quote.retry_field is `answer`, or quote.flow.advance_reason is `missing_answer` or `answer_not_applied`, do not repeat the same answer. Ask for the current visible field/option with plan_quote_step next=ask_user.
           - If an optional upload/photo step has Skip/Next and no required input, call answer_quote with no answer fields.
           - If a required answer is unknown after checking memory, call plan_quote_step with next=ask_user and question to ask one focused question.
 
@@ -226,7 +225,6 @@ flows:
           - name
           - price_text
           - message
-          - question
         prompt: |-
           If submit_confirmed is true, call confirm_submission with next=submit_quote and confirm=true.
           Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
@@ -248,7 +246,6 @@ flows:
           - quote
           - pro
           - message
-          - question
           - submit
         prompt: |-
           Call submit_quote exactly once only when submit_confirmed is true.
@@ -271,7 +268,6 @@ flows:
           - quote
           - submit
           - message
-          - question
         prompt: |-
           Call respond exactly once with next=done and a concise user-language summary.
           Use the projected state fields in this node input as the current request_service_quote state.
@@ -498,6 +494,12 @@ flowTools:
         bad_value: result.bad_value
         form: result.form
         update: result.update
+      contact:
+        email: { if: [{ var: result.contact.email }, { var: result.contact.email }, { var: contact.email }] }
+        first_name: { if: [{ var: result.contact.first_name }, { var: result.contact.first_name }, { var: contact.first_name }] }
+        last_name: { if: [{ var: result.contact.last_name }, { var: result.contact.last_name }, { var: contact.last_name }] }
+        phone: { if: [{ var: result.contact.phone }, { var: result.contact.phone }, { var: contact.phone }] }
+        zip_code: { if: [{ var: result.contact.zip_code }, { var: result.contact.zip_code }, { var: contact.zip_code }] }
       message: result.message
       question: result.question
     parameters:
@@ -540,6 +542,12 @@ flowTools:
         request_error: result.request_error
         retry_field: result.retry_field
         bad_value: result.bad_value
+      contact:
+        email: { if: [{ var: result.contact.email }, { var: result.contact.email }, { var: contact.email }] }
+        first_name: { if: [{ var: result.contact.first_name }, { var: result.contact.first_name }, { var: contact.first_name }] }
+        last_name: { if: [{ var: result.contact.last_name }, { var: result.contact.last_name }, { var: contact.last_name }] }
+        phone: { if: [{ var: result.contact.phone }, { var: result.contact.phone }, { var: contact.phone }] }
+        zip_code: { if: [{ var: result.contact.zip_code }, { var: result.contact.zip_code }, { var: contact.zip_code }] }
       message: result.message
       question: result.question
     parameters:

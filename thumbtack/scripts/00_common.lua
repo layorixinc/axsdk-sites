@@ -1138,14 +1138,53 @@ function M.apply_request_flow_contact_values(args, applied)
 end
 
 function M.request_flow_control_count()
-  local controls = dom.query_all(
-    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' input, '
-      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea, '
-      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' select',
-    { tag = { attr = "tagName" } },
+  local count = 0
+  local choices = dom.query_all(
+    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' label:has(input[type="radio"]), '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' label:has(input[type="checkbox"])',
+    { text = true },
     160
   )
-  return #controls
+  for index = 1, #choices do
+    if M.non_empty(choices[index].text) then
+      count = count + 1
+    end
+  end
+
+  local controls = dom.query_all(
+    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' select, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"]):not([type="file"])',
+    {
+      tag = { attr = "tagName" },
+      type = { attr = "type" },
+      placeholder = { attr = "placeholder" },
+      aria = { attr = "aria-label" },
+      autocomplete = { attr = "autocomplete" }
+    },
+    160
+  )
+  for index = 1, #controls do
+    local control = controls[index]
+    local tag = M.normalize_text(control.tag or "")
+    local control_type = M.normalize_text(control.type or "")
+    local placeholder = M.non_empty(control.placeholder)
+    local aria = M.non_empty(control.aria)
+    local autocomplete = M.non_empty(control.autocomplete)
+    if tag == "textarea"
+      or tag == "select"
+      or placeholder
+      or aria
+      or autocomplete
+      or control_type == "email"
+      or control_type == "tel"
+      or control_type == "text"
+      or control_type == "date"
+      or control_type == "number" then
+      count = count + 1
+    end
+  end
+  return count
 end
 
 function M.update_request_flow_step(args, applied, prior_updates)
@@ -1167,6 +1206,7 @@ function M.update_request_flow_step(args, applied, prior_updates)
   end
 
   local before_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
+  flow.before_text = before_text
   local supplied = false
   local attempted = (prior_updates or 0) > 0
   for index = 1, (prior_updates or 0) do
@@ -1222,6 +1262,15 @@ function M.update_request_flow_step(args, applied, prior_updates)
 
   local controls = M.request_flow_control_count()
   flow.control_count = controls
+  if attempted and not supplied then
+    dom.wait(1600)
+    local current_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
+    if before_text and current_text and current_text ~= before_text then
+      flow.advanced = true
+      flow.advance_reason = "advanced"
+      return flow
+    end
+  end
   if attempted and not supplied then
     flow.advance_skipped = true
     flow.advance_reason = "answer_not_applied"

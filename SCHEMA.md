@@ -432,5 +432,25 @@
       ],
       "type": "object"
     }
+  },
+  {
+    "name": "AX_echo",
+    "description": "Debug echo. console.log and return the given arguments. Use to verify the tool pipeline or surface values for debugging.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "data": {
+          "additionalProperties": true,
+          "type": "object"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "type": "object"
+    }
   }
 ]

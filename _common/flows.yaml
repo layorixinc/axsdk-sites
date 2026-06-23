@@ -713,3 +713,20 @@ flowTools:
         phone: { type: string }
         zip_code: { type: string }
         max_steps: { type: integer, minimum: 1 }
+
+  echo:
+    description: Debug echo — console.log and return the given arguments. Declaration only; not referenced by any node. Wire it into a debug flow/node (allowedTools) to expose it to the LLM.
+    execute: { kind: remote, tool: AX_echo }
+    input:
+      message: tool.args.message
+      data: tool.args.data
+    output:
+      next: done
+      echo: result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [message]
+      properties:
+        message: { type: string }
+        data: { type: object, additionalProperties: true }

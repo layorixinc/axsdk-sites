@@ -15,105 +15,31 @@ M.MODAL_SELECTOR = '[data-test="thumbprint-modal-container"], [role="dialog"]'
 M.REQUEST_FLOW_SELECTOR = '[aria-label="Request Flow Dialog"]'
 M.REQUEST_FLOW_ACTIVE_SELECTOR = '[data-test="request-flow-step--active"]'
 M.REQUEST_FLOW_ERROR_SELECTOR = '#request-flow-error'
-M.CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
-M.ZIPPOPOTAM_CITY_URL = "https://api.zippopotam.us/us/"
+-- Site-agnostic primitives are composed from the shared base (AX_BASE, _common/scripts/00_base.lua,
+-- loaded before this file). Single source of truth; no duplicated logic in this module.
+local B = AX_BASE
+M.clean_text = B.clean_text
+M.non_empty = B.non_empty
+M.normalize_text = B.normalize_text
+M.truncate_text = B.truncate_text
+M.dedupe_adjacent = B.dedupe_adjacent
+M.css_attr_string = B.css_attr_string
+M.selector_for_name = B.selector_for_name
+M.selector_for_id = B.selector_for_id
+M.url_encode = B.url_encode
+M.url_query_param = B.url_query_param
+M.current_url = B.current_url
+M.extract_zip = B.extract_zip
+M.parse_number_text = B.parse_number_text
+M.parse_rating = B.parse_rating
+M.parse_review_count = B.parse_review_count
+M.parse_price_text = B.parse_price_text
+M.read_text_array = B.read_text_array
+M.read_images = B.read_images
+M.split_city_state = B.split_city_state
+M.zip_from_city = B.zip_from_city
+M.resolve_zip = B.resolve_zip
 
-function M.clean_text(value)
-  local text = tostring(value or "")
-  text = text:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
-  return text
-end
-
-function M.non_empty(value)
-  local text = M.clean_text(value)
-  if text == "" then
-    return nil
-  end
-  return text
-end
-
-function M.normalize_text(value)
-  return M.clean_text(value):lower():gsub("%s+", " ")
-end
-
-function M.truncate_text(value, limit)
-  local text = M.clean_text(value)
-  if #text <= limit then
-    return text
-  end
-  return text:sub(1, limit - 1) .. "…"
-end
-
-function M.css_attr_string(value)
-  local text = tostring(value or "")
-  text = text:gsub("\\", "\\\\"):gsub('"', '\\"')
-  return text
-end
-
-function M.selector_for_name(name)
-  local text = M.non_empty(name)
-  if not text then
-    return nil
-  end
-  return '[name="' .. M.css_attr_string(text) .. '"]'
-end
-
-function M.selector_for_id(id)
-  local text = M.non_empty(id)
-  if not text then
-    return nil
-  end
-  return '[id="' .. M.css_attr_string(text) .. '"]'
-end
-
-function M.url_encode(value)
-  local text = tostring(value or "")
-  return (text:gsub("([^%w%-_%.~])", function(char)
-    return string.format("%%%02X", string.byte(char))
-  end))
-end
-
-function M.extract_zip(value)
-  local text = tostring(value or "")
-  local zip = text:match("(%d%d%d%d%d)%-%d%d%d%d") or text:match("(%d%d%d%d%d)")
-  return zip
-end
-
-function M.parse_number_text(value)
-  local text = tostring(value or ""):gsub(",", "")
-  local number_text = text:match("(%d+%.%d+)") or text:match("(%d+)")
-  if not number_text then
-    return nil
-  end
-  return tonumber(number_text)
-end
-
-function M.parse_rating(value)
-  local rating = tonumber(tostring(value or ""):match("(%d+%.%d+)"))
-  if rating and rating <= 5 then
-    return rating
-  end
-  return nil
-end
-
-function M.parse_review_count(value)
-  local count = tostring(value or ""):match("%(([%d,]+)%)")
-  if count then
-    local digits = count:gsub(",", "")
-    return tonumber(digits)
-  end
-  return nil
-end
-
-function M.parse_price_text(value)
-  local text = M.clean_text(value)
-  local contact = text:match("Contact for price")
-  if contact then
-    return contact
-  end
-  local price = text:match("($[%d,]+[^$]-Starting price)") or text:match("($[%d,]+)")
-  return M.non_empty(price)
-end
 
 function M.service_id_from_url(value)
   local text = tostring(value or "")
@@ -130,18 +56,6 @@ function M.slug_name_from_url(value)
   return (slug:gsub("(%a)([%w']*)", function(first, rest)
     return first:upper() .. rest:lower()
   end))
-end
-
-function M.dedupe_adjacent(value)
-  local text = M.clean_text(value)
-  local length = #text
-  if length % 2 == 0 then
-    local half = length / 2
-    if text:sub(1, half) == text:sub(half + 1) then
-      return text:sub(1, half)
-    end
-  end
-  return text
 end
 
 function M.name_from_result_text(text, url)
@@ -175,159 +89,6 @@ end
 function M.location_from_text(value)
   local text = M.clean_text(value)
   return text:match("(Serves [A-Za-z%s%.%-]+, [A-Z][A-Z])")
-end
-
--- Fallback city/state -> ZIP via Zippopotam. Census onelineaddress only matches full street
--- addresses, so a bare "City, ST" returns no addressMatches; this resolves a representative ZIP.
--- Parses a trailing 2-letter state ("San Francisco, CA"); returns nil when not "City, ST" form.
-function M.split_city_state(address)
-  local text = M.clean_text(address)
-  local city, state = text:match("^(.+),%s*([A-Za-z][A-Za-z])%s*$")
-  if city and state then
-    return M.non_empty(city), state:upper()
-  end
-  return nil, nil
-end
-
-function M.zip_from_city(address)
-  local city, state = M.split_city_state(address)
-  if not city or not state then
-    return nil
-  end
-  local fetch = (net and net.fetch) or (http and http.fetch)
-  if not fetch then
-    return nil
-  end
-  local response = fetch(M.ZIPPOPOTAM_CITY_URL .. state:lower() .. "/" .. M.url_encode(city), {
-    method = "GET",
-    headers = {
-      accept = "application/json"
-    },
-    credentials = "omit",
-    response = "json",
-    timeout = 4000
-  })
-  if response.reason == "pending" then
-    return { pending = true }
-  end
-  if not response.ok or type(response.json) ~= "table" then
-    return nil
-  end
-  local places = response.json.places
-  if type(places) ~= "table" then
-    return nil
-  end
-  local target = M.clean_text(city):lower()
-  local fallback = nil
-  for index = 1, #places do
-    local place = places[index]
-    local zip = place and place["post code"]
-    if zip then
-      if not fallback then
-        fallback = tostring(zip)
-      end
-      local pname = place["place name"]
-      if pname and M.clean_text(pname):lower() == target then
-        return tostring(zip)
-      end
-    end
-  end
-  return fallback
-end
-
-function M.resolve_zip(args)
-  args = args or {}
-  local explicit = M.extract_zip(args.zip_code)
-  if explicit then
-    return {
-      zip_code = explicit,
-      source = "zip_code"
-    }
-  end
-
-  local address = M.non_empty(args.address)
-  if not address then
-    return {
-      error = "missing_zip_or_address"
-    }
-  end
-
-  local embedded = M.extract_zip(address)
-  if embedded then
-    return {
-      zip_code = embedded,
-      source = "address_text"
-    }
-  end
-  local fetch = (net and net.fetch) or (http and http.fetch)
-  if not fetch then
-    return {
-      error = "fetch_unavailable"
-    }
-  end
-  local response = fetch(M.CENSUS_GEOCODER_URL .. "?address=" .. M.url_encode(address) .. "&benchmark=Public_AR_Current&format=json", {
-    method = "GET",
-    headers = {
-      accept = "application/json"
-    },
-    credentials = "omit",
-    response = "json",
-    timeout = 4000
-  })
-
-  if response.reason == "pending" then
-    return {
-      pending = true,
-      error = "pending"
-    }
-  end
-
-  if not response.ok then
-    return {
-      error = "zip_lookup_failed",
-      status = response.status,
-      reason = response.reason,
-      body = response.body,
-      message = response.error
-    }
-  end
-
-  local matches = response.json
-    and response.json.result
-    and response.json.result.addressMatches
-  local first = matches and matches[1]
-  local components = first and first.addressComponents
-  local zip = components and components.zip
-  if not zip then
-    local city_zip = M.zip_from_city(address)
-    if type(city_zip) == "table" and city_zip.pending then
-      return {
-        pending = true,
-        error = "pending"
-      }
-    end
-    if city_zip then
-      return {
-        zip_code = tostring(city_zip),
-        source = "zippopotam_city"
-      }
-    end
-    return {
-      error = "zip_not_found",
-      status = response.status,
-      message = "No ZIP for this address. Provide a full street address or a 5-digit ZIP."
-    }
-  end
-
-  return {
-    zip_code = tostring(zip),
-    source = "census_geocoder",
-    matched_address = first.matchedAddress
-  }
-end
-
-function M.current_url()
-  return M.non_empty(dom.get_location_href()) or ""
 end
 
 function M.is_home_page()
@@ -580,40 +341,6 @@ function M.select_radio_filter_option(target)
     end
   end
   return { ok = false, error = "option_not_found" }
-end
-
-function M.read_text_array(selector, limit)
-  local rows = dom.query_all(selector, { text = true }, limit)
-  local values = ax.array()
-  local seen = {}
-  for index = 1, #rows do
-    local value = M.non_empty(rows[index].text)
-    if value and not seen[value] then
-      seen[value] = true
-      values[#values + 1] = value
-    end
-  end
-  return values
-end
-
-function M.read_images(selector, limit)
-  local rows = dom.query_all(selector, {
-    url = { attr = "src" },
-    alt = { attr = "alt" }
-  }, limit)
-  local images = ax.array()
-  local seen = {}
-  for index = 1, #rows do
-    local url = M.non_empty(rows[index].url)
-    if url and not seen[url] then
-      seen[url] = true
-      images[#images + 1] = {
-        url = url,
-        alt = M.non_empty(rows[index].alt)
-      }
-    end
-  end
-  return images
 end
 
 function M.section_between(body, start_label, end_labels)
@@ -882,11 +609,6 @@ function M.read_project_form()
     all_questions_available = question_snapshot.all_questions_available,
     question_collection_status = question_snapshot.status
   }
-end
-
-function M.url_query_param(url, name)
-  local pattern = "[?&]" .. name .. "=([^&#]+)"
-  return M.non_empty(tostring(url or ""):match(pattern))
 end
 
 function M.read_quote_contact(fields)

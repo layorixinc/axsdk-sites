@@ -224,3 +224,154 @@ function W.classify_advance(buttons, labels)
   submit_like = submit_like or is_submit(B.normalize_text(fallback))
   return { kind = "none", label = fallback, can_advance = false, reached_submit_step = submit_like }
 end
+
+-- Generic single-step driver. `ctx` injects ALL DOM operations; decisions come from the W.* core
+-- above. This mirrors a site's request-flow step update exactly: apply explicit/auto choices, then
+-- free text, then contact fields; decide supplied/attempted; guard required steps; then advance
+-- (Next/Skip) or STOP when the only actionable button is submit-like. Returns a flow table whose
+-- shape matches the site's original step result (advanced, advance_reason, reached_submit_step, …).
+--
+-- ctx ops: active_exists()->bool, read_error()->err|nil, current_text()->str, read_options()->rows,
+--   select_option(value)->{ok,reason,type}, auto_text_value(args)->str|nil, set_text(value)->bool,
+--   apply_contact(args,applied)->{attempted,supplied}, has_text()->bool, control_count()->int,
+--   extra_control_count()->int, read_buttons()->rows, advance_click(decision)->bool, wait(ms),
+--   labels?(advance/skip/submit), requirement_keys?.
+function W.drive_step(ctx, args, applied, prior_updates)
+  if not ctx.active_exists() then
+    return nil
+  end
+  local flow = { active = true, advanced = false }
+
+  local existing_error = ctx.read_error and ctx.read_error()
+  if existing_error then
+    flow.advance_skipped = true
+    flow.advance_reason = "request_flow_error"
+    flow.request_error = existing_error
+    flow.error = existing_error.error
+    return flow
+  end
+
+  local before_text = ctx.current_text()
+  flow.before_text = before_text
+  local auto_enabled = W.auto_enabled(args)
+  local supplied = false
+  local attempted = (prior_updates or 0) > 0
+  for index = 1, (prior_updates or 0) do
+    if applied[index] and applied[index].ok == true then
+      supplied = true
+      break
+    end
+  end
+
+  local choices = W.choice_values(args)
+  if #choices == 0 and auto_enabled then
+    choices = W.auto_choice_values(ctx.read_options(), W.requirement_text(args, ctx.requirement_keys))
+    if #choices > 0 then
+      flow.auto_answered = true
+    end
+  end
+  if #choices > 0 then
+    attempted = true
+  end
+  for index = 1, #choices do
+    local result = ctx.select_option(choices[index])
+    if result.ok == true then
+      supplied = true
+    end
+    applied[#applied + 1] = {
+      kind = "flow_option",
+      value = choices[index],
+      ok = result.ok == true,
+      reason = result.reason,
+      type = result.type
+    }
+  end
+
+  local text = W.text_value(args)
+  if text == nil and auto_enabled and ctx.auto_text_value then
+    text = ctx.auto_text_value(args)
+    if text ~= nil then
+      flow.auto_answered = true
+    end
+  end
+  if text ~= nil then
+    attempted = true
+    local ok = ctx.set_text(text) == true
+    if ok then
+      supplied = true
+    end
+    applied[#applied + 1] = {
+      kind = "flow_text",
+      value = text,
+      ok = ok,
+      reason = ok and "updated" or "textarea_not_found"
+    }
+  end
+
+  local contact_result = ctx.apply_contact(args, applied)
+  if contact_result.attempted then
+    attempted = true
+  end
+  if contact_result.supplied then
+    supplied = true
+  end
+  if not supplied and ctx.has_text() then
+    supplied = true
+  end
+
+  local controls = ctx.control_count()
+  flow.control_count = controls
+  if attempted and not supplied then
+    ctx.wait(300)
+    local current_text = ctx.current_text()
+    if before_text and current_text and current_text ~= before_text then
+      flow.advanced = true
+      flow.advance_reason = "advanced"
+      return flow
+    end
+  end
+  if attempted and not supplied then
+    flow.advance_skipped = true
+    flow.advance_reason = "answer_not_applied"
+    return flow
+  end
+  if args.advance == false then
+    flow.advance_skipped = true
+    flow.advance_reason = "advance_false"
+    return flow
+  end
+  if supplied then
+    ctx.wait(150)
+  end
+  local advance = W.classify_advance(ctx.read_buttons(), ctx.labels)
+  flow.advance_label = advance.label
+  flow.reached_submit_step = advance.reached_submit_step == true
+  if controls > 0 and not supplied and advance.allow_without_answer ~= true
+    and not (auto_enabled and W.can_auto_skip(ctx.read_options(), ctx.extra_control_count())) then
+    flow.advance_skipped = true
+    flow.advance_reason = "missing_answer"
+    return flow
+  end
+  if not advance.can_advance then
+    flow.advance_skipped = true
+    flow.advance_reason = advance.label and "unsafe_advance_button" or "advance_button_not_found"
+    return flow
+  end
+
+  local ok = ctx.advance_click(advance) == true
+  if ok then
+    ctx.wait(300)
+  end
+  local request_error = ctx.read_error and ctx.read_error()
+  flow.request_error = request_error
+  if request_error then
+    flow.advance_skipped = true
+    flow.advance_reason = "request_flow_error"
+    flow.error = request_error.error
+    return flow
+  end
+  local after_text = ctx.current_text()
+  flow.advanced = ok and before_text ~= after_text
+  flow.advance_reason = flow.advanced and "advanced" or (ok and "advance_not_confirmed" or "advance_click_failed")
+  return flow
+end

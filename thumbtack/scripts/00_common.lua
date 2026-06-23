@@ -1414,147 +1414,56 @@ function M.request_flow_control_count()
   return count
 end
 
-function M.update_request_flow_step(args, applied, prior_updates)
-  if not dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
-    return nil
-  end
+function M.request_flow_extra_control_count()
+  local controls = dom.query_all(
+    M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' select, '
+      .. M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"]):not([type="file"])',
+    { tag = { attr = "tagName" } },
+    40
+  )
+  return #controls
+end
 
-  local flow = {
-    active = true,
-    advanced = false
+-- Thumbtack DOM ops for the generic AX_WIZARD step driver. All request-flow selectors live here;
+-- the step control flow + decisions live in AX_WIZARD (shared, site-agnostic).
+function M.tt_wizard_ctx()
+  local active = M.REQUEST_FLOW_ACTIVE_SELECTOR
+  return {
+    active_exists = function() return dom.exists(active) end,
+    read_error = function() return M.read_request_flow_error() end,
+    current_text = function() return M.non_empty(dom.get_text(active)) end,
+    read_options = function() return M.request_flow_options() end,
+    select_option = function(value) return M.select_request_flow_option(value) end,
+    auto_text_value = function(args) return M.request_flow_auto_text_value(args) end,
+    set_text = function(value) return dom.set_value(active .. ' textarea', value) == true end,
+    apply_contact = function(args, applied) return M.apply_request_flow_contact_values(args, applied) end,
+    has_text = function() return M.request_flow_has_text_value() end,
+    control_count = function() return M.request_flow_control_count() end,
+    extra_control_count = function() return M.request_flow_extra_control_count() end,
+    read_buttons = function()
+      return dom.query_all(active .. ' button', {
+        text = true,
+        aria = { attr = "aria-label" },
+        title = { attr = "title" }
+      }, 20)
+    end,
+    advance_click = function(decision)
+      local selector
+      if decision.kind == "skip" then
+        selector = active .. ' button:not([aria-label]):not([title])'
+      else
+        selector = active .. ' button:not([aria-label])'
+      end
+      return dom.click(selector, { navigates = false }) == true
+    end,
+    wait = function(ms) dom.wait(ms) end
   }
-  local existing_error = M.read_request_flow_error()
-  if existing_error then
-    flow.advance_skipped = true
-    flow.advance_reason = "request_flow_error"
-    flow.request_error = existing_error
-    flow.error = existing_error.error
-    return flow
-  end
+end
 
-  local before_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
-  flow.before_text = before_text
-  local auto_enabled = M.request_flow_auto_enabled(args)
-  local supplied = false
-  local attempted = (prior_updates or 0) > 0
-  for index = 1, (prior_updates or 0) do
-    if applied[index] and applied[index].ok == true then
-      supplied = true
-      break
-    end
-  end
-
-  local choices = M.request_flow_choice_values(args)
-  if #choices == 0 and auto_enabled then
-    choices = M.request_flow_auto_choice_values(args)
-    if #choices > 0 then
-      flow.auto_answered = true
-    end
-  end
-  if #choices > 0 then
-    attempted = true
-  end
-  for index = 1, #choices do
-    local result = M.select_request_flow_option(choices[index])
-    if result.ok == true then
-      supplied = true
-    end
-    applied[#applied + 1] = {
-      kind = "flow_option",
-      value = choices[index],
-      ok = result.ok == true,
-      reason = result.reason,
-      type = result.type
-    }
-  end
-
-  local text = M.request_flow_text_value(args)
-  if text == nil and auto_enabled then
-    text = M.request_flow_auto_text_value(args)
-    if text ~= nil then
-      flow.auto_answered = true
-    end
-  end
-  if text ~= nil then
-    attempted = true
-    local ok = dom.set_value(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' textarea', text) == true
-    if ok then
-      supplied = true
-    end
-    applied[#applied + 1] = {
-      kind = "flow_text",
-      value = text,
-      ok = ok,
-      reason = ok and "updated" or "textarea_not_found"
-    }
-  end
-
-  local contact_result = M.apply_request_flow_contact_values(args, applied)
-  if contact_result.attempted then
-    attempted = true
-  end
-  if contact_result.supplied then
-    supplied = true
-  end
-  if not supplied and M.request_flow_has_text_value() then
-    supplied = true
-  end
-
-  local controls = M.request_flow_control_count()
-  flow.control_count = controls
-  if attempted and not supplied then
-    dom.wait(300)
-    local current_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
-    if before_text and current_text and current_text ~= before_text then
-      flow.advanced = true
-      flow.advance_reason = "advanced"
-      return flow
-    end
-  end
-  if attempted and not supplied then
-    flow.advance_skipped = true
-    flow.advance_reason = "answer_not_applied"
-    return flow
-  end
-  if args.advance == false then
-    flow.advance_skipped = true
-    flow.advance_reason = "advance_false"
-    return flow
-  end
-  if supplied then
-    dom.wait(150)
-  end
-  local advance = M.request_flow_advance_state()
-  flow.advance_label = advance.label
-  flow.reached_submit_step = advance.reached_submit_step == true
-  if controls > 0 and not supplied and advance.allow_without_answer ~= true
-    and not (auto_enabled and M.request_flow_can_auto_skip_controls()) then
-    flow.advance_skipped = true
-    flow.advance_reason = "missing_answer"
-    return flow
-  end
-  if not advance.can_advance then
-    flow.advance_skipped = true
-    flow.advance_reason = advance.label and "unsafe_advance_button" or "advance_button_not_found"
-    return flow
-  end
-
-  local ok = dom.click(advance.selector, { navigates = false }) == true
-  if ok then
-    dom.wait(300)
-  end
-  local request_error = M.read_request_flow_error()
-  flow.request_error = request_error
-  if request_error then
-    flow.advance_skipped = true
-    flow.advance_reason = "request_flow_error"
-    flow.error = request_error.error
-    return flow
-  end
-  local after_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
-  flow.advanced = ok and before_text ~= after_text
-  flow.advance_reason = flow.advanced and "advanced" or (ok and "advance_not_confirmed" or "advance_click_failed")
-  return flow
+-- Delegates a single Thumbtack request-flow step to the generic form-wizard engine.
+function M.update_request_flow_step(args, applied, prior_updates)
+  return AX_WIZARD.drive_step(M.tt_wizard_ctx(), args, applied, prior_updates)
 end
 
 function M.apply_form_values(values)

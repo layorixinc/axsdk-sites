@@ -12,6 +12,8 @@ const DEFAULT_CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrom
 const DEFAULT_PROFILE = process.env.CHROME_PROFILE || `${process.env.LOCALAPPDATA || ''}/AXSDKSitesChromeDevProfile`;
 const DEFAULT_PORT = Number(process.env.CDP_PORT || 9224);
 const LUA_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua', 'submit_quote.lua'];
+const commonDir = resolve(repoRoot, '_common', 'scripts');
+const COMMON_FILES = ['00_base.lua', '10_form_wizard.lua'];
 const DEFAULT_SCENARIOS = [
   { name: 'house-cleaning', query: 'house cleaning', address: 'San Francisco, CA', requirements: 'Standard home cleaning for a small home, no pets.' },
   { name: 'lawn-mowing', query: 'lawn mowing', address: 'San Francisco, CA', requirements: 'Residential lawn mowing, one-time service within 48 hours.' },
@@ -371,8 +373,12 @@ async function loadLuaFiles(page, options) {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     await waitForLuaRuntime(page, options);
     try {
-      for (const file of LUA_FILES) {
-        const source = await readFile(resolve(scriptDir, file), 'utf8');
+      const ordered = [
+        ...COMMON_FILES.map(f => [commonDir, f]),
+        ...LUA_FILES.map(f => [scriptDir, f]),
+      ];
+      for (const [dir, file] of ordered) {
+        const source = await readFile(resolve(dir, file), 'utf8');
         const result = await callInAxContext(page, options, `async function(source, id) {
           const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
           if (!lua) throw new Error('AX Lua runtime is not available');

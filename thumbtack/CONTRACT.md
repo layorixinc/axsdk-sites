@@ -70,27 +70,28 @@ Replaces the scattered `is_home_page` / `is_results_page` / `current_results_mat
 - no JSON-LD.
 
 ### pro_profile  (`/<state>/<city>/<category>/<slug>/service/<id>?service_pk=&category_pk=&...`)
-Read with **layered, per-field fallback** across independent sources — **never a single
-load-bearing source**. Any one source can change when the site changes (JSON-LD is optional and can
-be dropped; Apollo cache shape is app-internal; data-test/text churn on redesigns), so each field is
-covered by several sources, the most stable that *has* it is tried first, and a missing source
-degrades gracefully instead of breaking the read. Measured sources, by stability:
+Read **selector-first**: every field = an ordered list of **candidate selectors** (first non-empty
+wins), one paradigm (`data-test` → semantic/structural). When a selector is fragile, add **another
+selector** as fallback — not another data source. Missing field → null (partial result, never
+hard-fail); record which selector fed each field so drift is visible.
 
-| source | stability | covers (measured) |
+| field | candidate selectors (in order) | parse |
 |---|---|---|
-| URL | highest | service_id, zip_code, keyword_pk, category_pk |
-| JSON-LD `script[type="application/ld+json"]` `@graph[0]` (`GeneralContractor`/`LocalBusiness`) | high — SEO-maintained, survives UI redesign | name, `aggregateRating.ratingValue`, review/ratingCount, address{locality,region,postalCode}. **No price, no services.** |
-| `window.__APOLLO_STATE__` (single query-shaped root, ~72KB) | medium — app/GraphQL-internal, path-fragile | everything incl. price + services (only structured source for these) |
-| `data-test` anchors (79 on page): `review-summary`, `specialties-section__interested-item` | medium — UI test hooks | rating block, services list |
-| visible text / CSS structure | low | last resort |
+| service_id / zip_code / keyword_pk | URL (from `detect_page`) | — |
+| name | `h1` | text |
+| rating | `[data-test="review-summary"]` → `[data-test="pro-list-result-ratings"]` | parse_rating |
+| review_count | `[data-test="review-summary"]` | parse_review_count |
+| services_offered | `[data-test="specialties-section__interested-item"]` (array) | text[] |
+| price_text | survey pro price area → confirm a `data-test`/structural selector | parse_price_text |
+| quote CTA | `button` text `Request estimate` / `Request a call` (no stable attr) | `query_all{text=true}` + verify label before click |
 
-Per-field extractor order (first non-empty wins; missing → null, never hard-fail):
-- name / rating / review_count / address: **JSON-LD → Apollo → data-test/text**.
-- price_text: **Apollo → data-test → text** (JSON-LD has none).
-- services_offered: **`[data-test="specialties-section__interested-item"]` → Apollo → text**.
-- quote CTA: DOM only — `button` text `Request estimate` (also `Request a call`); no stable attr /
-  no trustworthy structured flag → `query_all{text=true}` + verify label before click.
-- Return a `sources` map (which source fed each field) + a `partial` flag so drift is visible.
+- **`data-test` is the primary anchor** — Thumbtack's own QA hooks (`review-summary`,
+  `specialties-section__interested-item`, …) are kept stable for their testing.
+- JSON-LD / `__APOLLO_STATE__` are **dropped**: JSON-LD lacks price+services (selectors needed
+  anyway) and Apollo is query-shaped/app-internal (more fragile than `data-test`). At most keep
+  JSON-LD as a single *optional last-resort* fallback selector for name/rating, behind the same
+  first-non-empty interface.
+- Return a `sources` map (which selector fed each field) + a `partial` flag so drift is visible.
 - readiness: `h1` present (also `[data-test="review-summary"]`).
 - **Replaces** the old `section_between(get_text("body"), "About", …)` body-text scraping.
 
@@ -121,9 +122,10 @@ Per-field extractor order (first non-empty wins; missing → null, never hard-fa
   {page, status: done|navigating|needs_input|error, payload}`; navigation is fire-and-return.
 - **Form wizard** is a same-context engine over the quote dialog: `{activeStepSelector, optionSelector,
   submitMatcher, contactFieldMap}`; reusable across quote/booking sites.
-- **Reads = layered multi-source with fallback + partial-tolerance + drift detection** (URL →
-  JSON-LD → Apollo state → data-test → text), never depending on a single source. A source-agnostic
-  extractor (ordered list per field, first non-empty wins) keeps reads working when any one source
-  changes, and records which source fed each field so drift surfaces instead of silently breaking.
+- **Reads = selector-first with per-field fallback chains + partial-tolerance + drift detection**:
+  each field tries an ordered list of **candidate selectors** (`data-test` → semantic/structural,
+  first non-empty wins), staying in one paradigm; URL supplies IDs/zip. JSON-LD/Apollo dropped
+  (selectors needed for price/services regardless). Records which selector fed each field so drift
+  surfaces instead of silently breaking.
 - **Selector health**: a smoke check should assert each readiness selector + `data-test` anchor still
   resolves, to catch drift early.

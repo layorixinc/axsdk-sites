@@ -27,7 +27,7 @@ function AX_view_service(args)
     }
   end
 
-  dom.wait_for_selector(M.SERVICE_READY_SELECTOR, { timeout = 30000 })
+  dom.wait_for_selector(M.SERVICE_READY_SELECTOR, { timeout = 8000 })
   M.dismiss_modals()
   return M.read_service_view(service_id)
 end

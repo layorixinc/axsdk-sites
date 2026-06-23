@@ -74,7 +74,7 @@ function AX_submit_quote(args)
       return request_error_result(before, ax.array(), before, request_error)
     end
     M.dismiss_request_flow_error()
-    dom.wait(500)
+    dom.wait(250)
   end
 
   local steps = ax.array()
@@ -83,7 +83,7 @@ function AX_submit_quote(args)
     local snapshot = M.read_quote_submission_snapshot()
     if snapshot.ready then
       local clicked = dom.click(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' button[type="submit"]') == true
-      dom.wait(5000)
+      dom.wait(1500)
       local after_submit = M.read_quote_submit_result(snapshot.url)
       steps[#steps + 1] = {
         kind = "submit_click",
@@ -115,7 +115,7 @@ function AX_submit_quote(args)
     else
       local applied = M.apply_form_values(args.form_values or args.values or args.fields)
       local flow = M.update_request_flow_step(args, applied, #applied)
-      dom.wait(1500)
+      dom.wait(500)
       local after_step = M.read_quote_submit_result(snapshot.url)
       steps[#steps + 1] = {
         kind = "answer_step",

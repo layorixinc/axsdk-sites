@@ -35,7 +35,7 @@ function AX_update_search(args)
     }
   end
 
-  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = 30000 })
+  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = 8000 })
   M.dismiss_modals()
   local candidates = M.read_search_candidates()
 

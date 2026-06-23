@@ -2,6 +2,10 @@ AX_THUMBTACK = {}
 local M = AX_THUMBTACK
 
 M.HOME_URL = "https://www.thumbtack.com/"
+M.SEARCH_INPUT_SELECTOR = 'input[aria-label="Search on Thumbtack"]'
+M.SEARCH_ZIP_SELECTOR = 'input[aria-label="Zip code"]'
+M.SEARCH_BUTTON_SELECTOR = 'button[data-test="search-button"]'
+M.SEARCH_AUTOCOMPLETE_SELECTOR = '[role="option"]'
 M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"], [data-test="pro-list-result"]'
 M.SERVICE_READY_SELECTOR = 'h1, button, [data-test="specialties-section__interested-item"]'
 M.MODAL_SELECTOR = '[data-test="thumbprint-modal-container"], [role="dialog"]'
@@ -201,7 +205,7 @@ function M.zip_from_city(address)
     },
     credentials = "omit",
     response = "json",
-    timeout = 10000
+    timeout = 4000
   })
   if response.reason == "pending" then
     return { pending = true }
@@ -268,7 +272,7 @@ function M.resolve_zip(args)
     },
     credentials = "omit",
     response = "json",
-    timeout = 10000
+    timeout = 4000
   })
 
   if response.reason == "pending" then
@@ -339,14 +343,13 @@ function M.current_results_match(query, zip_code)
   if not M.is_results_page() then
     return false
   end
-  local zip_value = M.non_empty(dom.get_attr('input[aria-label="Zip code"]', "value")) or M.current_url():match("[?&]zip_code=(%d%d%d%d%d)")
-  if zip_code and zip_value ~= zip_code then
+  -- On the results page only reject when the zip is explicitly present and differs. The query is
+  -- already submitted (Thumbtack canonicalizes it) and results may still be hydrating, so never
+  -- re-search from here based on query text or missing pro links — that re-navigates on every
+  -- durable replay and stalls the call for many seconds.
+  local zip_value = M.non_empty(dom.get_attr(M.SEARCH_ZIP_SELECTOR, "value")) or M.current_url():match("[?&]zip_code=(%d%d%d%d%d)")
+  if zip_code and zip_value and zip_value ~= zip_code then
     return false
-  end
-  local query_value = M.non_empty(dom.get_attr('input[aria-label="Search on Thumbtack"]', "value"))
-  if query and query_value and M.normalize_text(query_value) ~= M.normalize_text(query) then
-    -- Thumbtack normalizes queries to canonical category names, so do not reject a populated result page.
-    return dom.exists('a[href*="/service/"]')
   end
   return true
 end
@@ -368,20 +371,32 @@ function M.start_search(query, zip_code)
     nav.navigate(M.HOME_URL, {})
   end
 
-  dom.wait_for_selector('input[aria-label="Search on Thumbtack"]', { timeout = 30000 })
+  dom.wait_for_selector(M.SEARCH_INPUT_SELECTOR, { timeout = 8000 })
   -- Prep the multi-input search as one async flow so React commits each step (typed query →
   -- autocomplete category selection → zip) before submitting. A plain durable sequence runs
   -- synchronously within a replay pass, so the submit would fire before Thumbtack resolves the
   -- query and produce no navigation. dom.fill yields between actions; the submit click is a
   -- separate navigating step.
-  dom.fill({
-    { set = 'input[aria-label="Search on Thumbtack"]', value = query },
-    { wait = '[role="option"]' },
-    { click = '[role="option"]' },
-    { delay = 400 },
-    { set = 'input[aria-label="Zip code"]', value = zip_code },
+  -- The autocomplete wait is bounded and OPTIONAL. dom.fill aborts the remaining actions when a
+  -- wait times out, so when the category dropdown does not render (cold load / A/B variant) the
+  -- short wait fails fast and we fall back to typing query + zip directly instead of stalling.
+  local filled = dom.fill({
+    { set = M.SEARCH_INPUT_SELECTOR, value = query },
+    { wait = M.SEARCH_AUTOCOMPLETE_SELECTOR, timeout = 2500 },
+    { click = M.SEARCH_AUTOCOMPLETE_SELECTOR },
+    { delay = 150 },
+    { set = M.SEARCH_ZIP_SELECTOR, value = zip_code },
   })
-  dom.click('button[data-test="search-button"]', { expectedUrl = "/instant-results/" })
+  if type(filled) ~= "table" or filled.ok ~= true then
+    dom.fill({
+      { set = M.SEARCH_INPUT_SELECTOR, value = query },
+      { set = M.SEARCH_ZIP_SELECTOR, value = zip_code },
+    })
+  end
+  -- Fire the submit without awaiting navigation (no expectedUrl): AX_search_service returns
+  -- status="navigating" and the caller reads results on the next call, so the durable call never
+  -- suspends across this navigation.
+  dom.click(M.SEARCH_BUTTON_SELECTOR)
 end
 
 function M.result_candidate_from_row(row)
@@ -1488,7 +1503,7 @@ function M.update_request_flow_step(args, applied, prior_updates)
   local controls = M.request_flow_control_count()
   flow.control_count = controls
   if attempted and not supplied then
-    dom.wait(1600)
+    dom.wait(300)
     local current_text = M.non_empty(dom.get_text(M.REQUEST_FLOW_ACTIVE_SELECTOR))
     if before_text and current_text and current_text ~= before_text then
       flow.advanced = true
@@ -1507,7 +1522,7 @@ function M.update_request_flow_step(args, applied, prior_updates)
     return flow
   end
   if supplied then
-    dom.wait(400)
+    dom.wait(150)
   end
   local advance = M.request_flow_advance_state()
   flow.advance_label = advance.label
@@ -1526,7 +1541,7 @@ function M.update_request_flow_step(args, applied, prior_updates)
 
   local ok = dom.click(advance.selector, { navigates = false }) == true
   if ok then
-    dom.wait(1200)
+    dom.wait(300)
   end
   local request_error = M.read_request_flow_error()
   flow.request_error = request_error

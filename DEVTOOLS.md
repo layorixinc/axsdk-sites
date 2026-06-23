@@ -93,20 +93,31 @@ async function axcall(cmd, args = {}) {
 `AX_submit_quote` requires `confirm: true`, clicks the final `Submit`, and returns before/after quote details or a retryable contact error.
 Set `advance: false` to select/fill the current step without moving forward.
 
-### Live multi-service runner
+### Live multi-service and multi-quote runners
 
 ```bash
 node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-service --submit-quote --max-quote-steps=20 --keep-open
-# Actual submit for one scenario:
+node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-quote --quote-count=3 --submit-quote --max-quote-steps=20 --keep-open
+# Actual submit for one scenario/item:
 node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --scenario="handyman|San Francisco, CA" --actual-submit --max-quote-steps=20 --keep-open
 ```
 
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
-`--submit-quote` progresses every scenario toward the final `Submit` button using reserved/fake
-contact data. It never clicks `Submit`; logged-out/test accounts may stop at a safe login/contact
-gate instead. `--actual-submit` calls `AX_submit_quote` with `confirm:true`, clicks the final
-`Submit`, and may return `verification_required` for reCAPTCHA/account checks or
+`--multi-quote` uses one query/address input, selects up to `--quote-count` candidates from the
+same search result, and drives each quote item sequentially with the existing single-flow Lua tools.
+`--submit-quote` progresses every scenario or quote item toward the final `Submit` button using
+reserved/fake contact data. It never clicks `Submit`; logged-out/test accounts may stop at a safe
+login/contact gate instead. `--actual-submit` calls `AX_submit_quote` with `confirm:true`, clicks the
+final `Submit`, and may return `verification_required` for reCAPTCHA/account checks or
 `contact_update_required` when Thumbtack rejects a contact field.
+
+Each Lua tool call is logged with its wall time (`· AX_… <ms>`, flagged `[SLOW >3s]` above 3s) so a
+run is easy to profile. `AX_search_service` is two-phase: the first call fires the search funnel and
+returns `status:"navigating"`; the runner waits for the results page (CDP) and calls again to read
+candidates, so no single call suspends across the results navigation (which the SDK resumes slowly).
+The runner passes the already-resolved `zip_code` to search and reuses one Lua load per navigation.
+A `--multi-quote --quote-count=2` run completes in roughly 25–35s on the dev profile (live page-load
+variance), with every individual tool call under 3s.
 
 ## 5. Gotchas
 

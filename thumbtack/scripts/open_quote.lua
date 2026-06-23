@@ -19,7 +19,7 @@ function AX_open_quote(args)
   -- Wait for the pro page's quote CTA to render, then open the request flow if a step is not already
   -- showing. Detection keys on the active flow step, never M.MODAL_SELECTOR (the page pre-renders
   -- empty modal placeholders that would otherwise look "open").
-  dom.wait_for_selector('aside button', { timeout = 30000 })
+  dom.wait_for_selector('aside button', { timeout = 6000 })
   if not dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
     local opened = M.open_quote_modal()
     if not opened then
@@ -28,7 +28,7 @@ function AX_open_quote(args)
         error = "quote_unavailable"
       }
     end
-    dom.wait_for_selector(M.REQUEST_FLOW_ACTIVE_SELECTOR, { timeout = 30000 })
+    dom.wait_for_selector(M.REQUEST_FLOW_ACTIVE_SELECTOR, { timeout = 6000 })
   end
 
   local update = nil

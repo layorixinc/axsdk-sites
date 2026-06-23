@@ -30,6 +30,19 @@ function scenarioName(query) {
   return String(query || 'scenario').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'scenario';
 }
 
+function proPathUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.origin}${parsed.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+// Lua site scripts are wiped on every full navigation. Track whether a navigation happened since the
+// last load so loadLuaFiles can skip the (8-file) reload for same-page calls.
+let luaContextDirty = true;
+
 function parseScenario(value) {
   const parts = String(value || '').split('|').map(part => part.trim()).filter(Boolean);
   const query = parts[0];
@@ -52,6 +65,8 @@ function parseArgs(argv) {
     address: 'San Francisco, CA',
     scenarios: [],
     multiService: false,
+    multiQuote: false,
+    quoteCount: Number(process.env.THUMBTACK_QUOTE_COUNT || 3),
     submitQuote: false,
     actualSubmit: false,
     maxQuoteSteps: Number(process.env.THUMBTACK_QUOTE_STEPS || 20),
@@ -60,6 +75,7 @@ function parseArgs(argv) {
   for (const arg of argv) {
     if (arg === '--keep-open') options.keepOpen = true;
     else if (arg === '--multi-service') options.multiService = true;
+    else if (arg === '--multi-quote') options.multiQuote = true;
     else if (arg === '--submit-quote') options.submitQuote = true;
     else if (arg === '--actual-submit') {
       options.submitQuote = true;
@@ -74,13 +90,33 @@ function parseArgs(argv) {
     else if (arg.startsWith('--address=')) options.address = arg.slice('--address='.length);
     else if (arg.startsWith('--scenario=')) options.scenarios.push(parseScenario(arg.slice('--scenario='.length)));
     else if (arg.startsWith('--max-quote-steps=')) options.maxQuoteSteps = Number(arg.slice('--max-quote-steps='.length));
+    else if (arg.startsWith('--quote-count=')) options.quoteCount = Number(arg.slice('--quote-count='.length));
+    else if (arg.startsWith('--count=')) options.quoteCount = Number(arg.slice('--count='.length));
     else if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: node thumbtack/scripts/test_thumbtack_lua.mjs [options]\n\nOptions:\n  --query=TEXT                         Single-service query.\n  --address=TEXT                       Single-service address/city/ZIP.\n  --scenario=QUERY|ADDRESS             Add one scenario; repeatable.\n  --multi-service                      Run the default varied-service scenario set.\n  --submit-quote                       Progress every quote flow toward final Submit; accepts a safe login/contact gate; never clicks submit.\n  --actual-submit                      Actually click final Submit via AX_submit_quote(confirm:true).\n  --max-quote-steps=N                  Max request-flow steps per scenario.\n  --cdp=http://127.0.0.1:9224          Connect to an existing Chrome CDP endpoint.\n  --port=9224\n  --profile=PATH\n  --keep-open`);
+      console.log(`Usage: node thumbtack/scripts/test_thumbtack_lua.mjs [options]
+
+Options:
+  --query=TEXT                         Single-service query.
+  --address=TEXT                       Single-service address/city/ZIP.
+  --scenario=QUERY|ADDRESS             Add one scenario; repeatable.
+  --multi-service                      Run the default varied-service scenario set.
+  --multi-quote                        Request multiple quote flows from one search input.
+  --quote-count=N                      Number of quote candidates per scenario for --multi-quote (1-5).
+  --submit-quote                       Progress every quote flow toward final Submit; accepts a safe login/contact gate; never clicks submit.
+  --actual-submit                      Actually click final Submit via AX_submit_quote(confirm:true).
+  --max-quote-steps=N                  Max request-flow steps per scenario.
+  --cdp=http://127.0.0.1:9224          Connect to an existing Chrome CDP endpoint.
+  --port=N                             Launch/connect using this CDP port when --cdp is omitted.
+  --chrome=PATH                        Chrome executable to launch when CDP is unavailable.
+  --profile=PATH                       Chrome profile directory.
+  --extension-id=ID                    AXSDK extension id.
+  --keep-open                          Keep launched Chrome open after the run.`);
       process.exit(0);
     } else {
       throw new Error(`Unknown argument: ${arg}`);
     }
   }
+  options.quoteCount = Math.max(1, Math.min(5, Number.isFinite(options.quoteCount) ? Math.floor(options.quoteCount) : 3));
   if (!options.cdp) options.cdp = `http://127.0.0.1:${options.port}`;
   if (options.scenarios.length === 0) {
     options.scenarios = options.multiService
@@ -211,10 +247,11 @@ async function openPage(cdpUrl, url) {
 }
 
 async function navigate(page, url) {
-  const loaded = page.waitFor('Page.loadEventFired', () => true, 30000).catch(() => null);
+  const loaded = page.waitFor('Page.loadEventFired', () => true, 10000).catch(() => null);
   await page.send('Page.navigate', { url });
   await loaded;
-  await sleep(1200);
+  await sleep(500);
+  luaContextDirty = true;
 }
 
 async function findAxContext(page, extensionId, timeoutMs = 15000) {
@@ -253,8 +290,10 @@ function isPendingResult(result) {
 }
 
 async function waitForSettle(page) {
-  await page.waitFor('Page.loadEventFired', () => true, 30000).catch(() => null);
-  await sleep(2500);
+  // Lua tools wait for their own readiness selectors and navigate() awaits real load events, so a
+  // brief settle is enough here. Waiting for Page.loadEventFired would stall ~12s on same-page
+  // (no-navigation) steps that never fire one.
+  await sleep(400);
 }
 
 async function callInAxContext(page, options, functionDeclaration, args = []) {
@@ -271,7 +310,7 @@ async function callInAxContext(page, options, functionDeclaration, args = []) {
   return result.result?.value;
 }
 
-async function waitForLuaRuntime(page, options, timeoutMs = 30000) {
+async function waitForLuaRuntime(page, options, timeoutMs = 12000) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
@@ -305,27 +344,60 @@ async function evaluatePage(page, expression) {
   return result.result?.value;
 }
 
-async function loadLuaFiles(page, options) {
-  await waitForLuaRuntime(page, options);
-  for (const file of LUA_FILES) {
-    const source = await readFile(resolve(scriptDir, file), 'utf8');
-    const result = await callInAxContext(page, options, `async function(source, id) {
-      const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
-      if (!lua) throw new Error('AX Lua runtime is not available');
-      if (typeof lua.load === 'function') return await lua.load(source, { id });
-      return await lua.loadSiteScript(source, { id, replace: true, kind: 'devtools' });
-    }`, [source, `thumbtack-test-${file}-${Date.now()}`]);
-    if (!result?.ok && result?.status !== 'loaded') throw new Error(`Failed to load ${file}: ${JSON.stringify(result)}`);
+async function waitForResultsPage(page, timeoutMs = 7000) {
+  // CDP-level wait (not a Lua durable step) for the search results page after a fire-and-forget
+  // submit, so the read call lands on the results list.
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const url = await evaluatePage(page, 'location.href').catch(() => '');
+    if (/instant-results/.test(String(url || ''))) return true;
+    await sleep(300);
   }
+  return false;
+}
+
+async function loadLuaFiles(page, options) {
+  if (!luaContextDirty) return;
+  let lastError = null;
+  // A hard navigation re-inits the AXSDK runtime; a late resource can reset the context mid-load,
+  // leaving a later file loaded before 00_common. Retry the whole ordered load once on failure.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await waitForLuaRuntime(page, options);
+    try {
+      for (const file of LUA_FILES) {
+        const source = await readFile(resolve(scriptDir, file), 'utf8');
+        const result = await callInAxContext(page, options, `async function(source, id) {
+          const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
+          if (!lua) throw new Error('AX Lua runtime is not available');
+          if (typeof lua.load === 'function') return await lua.load(source, { id });
+          return await lua.loadSiteScript(source, { id, replace: true, kind: 'devtools' });
+        }`, [source, `thumbtack-test-${file}-${Date.now()}`]);
+        if (!result?.ok && result?.status !== 'loaded') throw new Error(`Failed to load ${file}: ${JSON.stringify(result)}`);
+      }
+      luaContextDirty = false;
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(700);
+    }
+  }
+  throw lastError;
 }
 
 async function callLua(page, options, command, args) {
   await loadLuaFiles(page, options);
+  const ret = await callInAxContextCmd(page, options, command, args);
+  // AX_search_service navigates to the results page; mark the context dirty so the next call reloads.
+  if (command === 'AX_search_service') luaContextDirty = true;
+  return ret;
+}
+
+async function callInAxContextCmd(page, options, command, args) {
   return callInAxContext(page, options, `async function(command, args) {
     const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
     if (!lua) throw new Error('AX Lua runtime is not available');
     if (typeof lua.run === 'function') {
-      const result = await lua.run(command, args, { timeoutMs: 90000 });
+      const result = await lua.run(command, args, { timeoutMs: 5000, timeout: 5000 });
       let value = null;
       if (result?.result) {
         try {
@@ -346,18 +418,23 @@ async function callLua(page, options, command, args) {
   }`, [command, args]);
 }
 
-async function callLuaSettled(page, options, command, args) {
+async function callLuaSettled(page, options, command, args, maxAttempts = 2) {
+  const started = Date.now();
   let last = null;
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       last = await callLua(page, options, command, args);
-      if (!isPendingResult(last)) return last;
+      if (!isPendingResult(last)) break;
     } catch (error) {
       if (!isContextLostError(error)) throw error;
+      luaContextDirty = true; // context gone -> force a reload on retry
       last = { ok: false, reason: 'context_lost', error: String(error.message || error) };
     }
     await waitForSettle(page);
   }
+  const ms = Date.now() - started;
+  if (last) last.ms = ms;
+  console.log(`    · ${command} ${ms}ms${ms > 3000 ? '  [SLOW >3s]' : ''}`);
   return last;
 }
 
@@ -493,6 +570,89 @@ function quoteArgsForStep(step, scenario) {
     auto: true,
     user_requirements: scenario?.requirements || DEFAULT_QUOTE_MESSAGE,
   };
+}
+
+function quoteItemStatus(quote, quoteFlow, actualSubmit) {
+  if (quote?.status !== 'open') return quote?.error === 'quote_unavailable' ? 'skipped' : 'failed';
+  if (actualSubmit && quoteFlow?.finalSubmit?.ok) return 'submitted';
+  if (quoteFlow?.blocker) return 'blocked';
+  if (quoteFlow?.final?.submitButton) return 'ready_to_submit';
+  return 'quoting';
+}
+
+async function inspectQuoteCandidate(page, options, scenario, candidate, label, tolerant = false) {
+  const summary = {
+    index: null,
+    selected_service_id: candidate.service_id,
+    selected_pro_url: candidate.url,
+    status: 'pending',
+    view_service: null,
+    open_quote: null,
+    blocker: null,
+    quote_flow: null,
+  };
+
+  console.log(`[${label}] Testing AX_view_service service_id=${candidate.service_id}`);
+  const view = await callLuaSettled(page, options, 'AX_view_service', { url: candidate.url, service_id: candidate.service_id });
+  if (!view?.ok || !view.value?.name) {
+    if (!tolerant) {
+      assertCondition(view?.ok, `[${label}] AX_view_service call failed`, view);
+      assertCondition(Boolean(view.value?.name), `[${label}] AX_view_service returned no name`, view.value);
+    }
+    summary.status = 'failed';
+    summary.blocker = { stage: 'view_service', reason: view?.error || view?.value || 'view_service_failed' };
+    console.log(`[${label}] view_service unavailable -> item ${summary.status}`);
+    return { candidate, view: view?.value || null, quote: null, summary };
+  }
+  summary.view_service = {
+    service_id: view.value.service_id,
+    name: view.value.name,
+    rating: view.value.rating,
+    services_offered: view.value.services_offered?.length,
+    photos: view.value.photos?.length,
+    request_quote: view.value.actions?.request_quote,
+  };
+
+  console.log(`[${label}] Testing AX_open_quote submit=false service_id=${candidate.service_id}`);
+  const quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
+  if (!quote?.ok) {
+    if (!tolerant) assertCondition(quote?.ok, `[${label}] AX_open_quote call failed`, quote);
+    summary.status = 'blocked';
+    summary.blocker = { stage: 'open_quote', reason: quote?.error || quote?.value || 'open_quote_failed' };
+    console.log(`[${label}] open_quote failed -> item ${summary.status}`);
+    return { candidate, view: view.value, quote: quote?.value || null, summary };
+  }
+  if (!tolerant) {
+    assertCondition(quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable', `[${label}] AX_open_quote returned unexpected state`, quote.value);
+  }
+  const choiceFields = asArray(quote.value?.form?.fields).filter(field => field.type === 'radio' || field.type === 'checkbox');
+  if (choiceFields.length > 0) {
+    assertCondition(
+      choiceFields.every(field => typeof field.text === 'string' && field.text.trim().length > 0),
+      `[${label}] AX_open_quote returned empty choice field text`,
+      choiceFields
+    );
+  }
+  summary.open_quote = {
+    status: quote.value?.status,
+    error: quote.value?.error,
+    field_count: asArray(quote.value?.form?.fields).length,
+    button_count: asArray(quote.value?.form?.buttons).length,
+    question_count: asArray(quote.value?.questions).length,
+    question_collection_status: quote.value?.question_collection_status,
+    all_questions_available: quote.value?.all_questions_available,
+  };
+  summary.status = quoteItemStatus(quote.value, null, options.actualSubmit);
+  summary.quote_flow = quote.value?.status === 'open' ? null : 'skipped; quote unavailable';
+
+  if (quote.value?.status === 'open') {
+    console.log(`[${label}] Progressing quote request flow${options.submitQuote ? ' until submit button' : ''}`);
+    summary.quote_flow = await progressQuoteFlow(page, options, scenario);
+    summary.status = quoteItemStatus(quote.value, summary.quote_flow, options.actualSubmit);
+    if (summary.quote_flow?.blocker) summary.blocker = summary.quote_flow.blocker;
+  }
+
+  return { candidate, view: view.value, quote: quote.value, summary };
 }
 
 
@@ -645,54 +805,88 @@ async function runScenario(page, options, scenario) {
   const candidates = search.value.candidates.slice(0, 3);
   let selected = null;
   for (const candidate of candidates) {
-    console.log(`[${scenario.name}] Testing AX_view_service service_id=${candidate.service_id}`);
-    const view = await callLuaSettled(page, options, 'AX_view_service', { url: candidate.url, service_id: candidate.service_id });
-    assertCondition(view?.ok, `[${scenario.name}] AX_view_service call failed`, view);
-    assertCondition(Boolean(view.value?.name), `[${scenario.name}] AX_view_service returned no name`, view.value);
-
-    console.log(`[${scenario.name}] Testing AX_open_quote submit=false service_id=${candidate.service_id}`);
-    const quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
-    assertCondition(quote?.ok, `[${scenario.name}] AX_open_quote call failed`, quote);
-    assertCondition(quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable', `[${scenario.name}] AX_open_quote returned unexpected state`, quote.value);
-    const choiceFields = asArray(quote.value?.form?.fields).filter(field => field.type === 'radio' || field.type === 'checkbox');
-    if (choiceFields.length > 0) {
-      assertCondition(
-        choiceFields.every(field => typeof field.text === 'string' && field.text.trim().length > 0),
-        `[${scenario.name}] AX_open_quote returned empty choice field text`,
-        choiceFields
-      );
-    }
-
-    selected = { candidate, view: view.value, quote: quote.value };
-    if (quote.value?.status === 'open') break;
+    const inspected = await inspectQuoteCandidate(page, options, scenario, candidate, scenario.name);
+    selected = inspected;
+    if (inspected.quote?.status === 'open') break;
   }
   assertCondition(Boolean(selected), `[${scenario.name}] no candidate could be viewed`, candidates);
 
-  summary.view_service = {
-    service_id: selected.view.service_id,
-    name: selected.view.name,
-    rating: selected.view.rating,
-    services_offered: selected.view.services_offered?.length,
-    photos: selected.view.photos?.length,
-    request_quote: selected.view.actions?.request_quote,
+  summary.view_service = selected.summary.view_service;
+  summary.open_quote = selected.summary.open_quote;
+  summary.quote_flow = selected.summary.quote_flow;
+
+  return summary;
+}
+
+async function runQuotePlanScenario(page, options, scenario) {
+  const summary = {
+    name: scenario.name,
+    query: scenario.query,
+    address: scenario.address,
+    quote_plan: {
+      requested_count: options.quoteCount,
+      current_index: 0,
+      submit_policy: options.submitQuote || options.actualSubmit ? 'submit_if_ready' : 'prepare_only',
+      status: 'searching',
+      items: [],
+    },
   };
-  summary.open_quote = {
-    status: selected.quote?.status,
-    error: selected.quote?.error,
-    field_count: asArray(selected.quote?.form?.fields).length,
-    button_count: asArray(selected.quote?.form?.buttons).length,
-    question_count: asArray(selected.quote?.questions).length,
-    question_collection_status: selected.quote?.question_collection_status,
-    all_questions_available: selected.quote?.all_questions_available,
+  await navigate(page, 'https://www.thumbtack.com/');
+  await waitForSettle(page);
+
+  console.log(`[${scenario.name}] Testing AX_resolve_zip`);
+  const zip = await callLuaSettled(page, options, 'AX_resolve_zip', { address: scenario.address });
+  assertCondition(zip?.ok, `[${scenario.name}] AX_resolve_zip call failed`, zip);
+  assertCondition(Boolean(zip.value?.zip_code), `[${scenario.name}] AX_resolve_zip returned no zip_code`, zip.value);
+  summary.resolve_zip = zip.value;
+
+  console.log(`[${scenario.name}] Testing AX_search_service query=${JSON.stringify(scenario.query)}`);
+  // Pass the already-resolved zip_code so search skips its internal (rate-limit-prone) ZIP fetch.
+  const searchArgs = { query: scenario.query, zip_code: zip.value.zip_code, address: scenario.address };
+  // Two-phase: call 1 fires the search funnel and returns status="navigating"; wait for the results
+  // page at the CDP level (fast), then call 2 reads candidates with no cross-nav durable suspension.
+  let search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 1);
+  for (let attempt = 0; attempt < 3 && !(search?.ok && (search.value?.candidates?.length || 0) > 0); attempt += 1) {
+    await waitForResultsPage(page);
+    await sleep(300);
+    search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 1);
+  }
+  assertCondition(search?.ok, `[${scenario.name}] AX_search_service call failed`, search);
+  assertCondition((search.value?.candidates?.length || 0) > 0, `[${scenario.name}] AX_search_service returned no candidates`, search);
+  summary.search_service = {
+    zip_code: search.value.zip_code,
+    count: search.value.candidates.length,
+    first_service_id: search.value.candidates[0]?.service_id,
+    option_groups: search.value.service_options?.length || 0,
   };
 
-  if (selected.quote?.status === 'open') {
-    console.log(`[${scenario.name}] Progressing quote request flow${options.submitQuote ? ' until submit button' : ''}`);
-    summary.quote_flow = await progressQuoteFlow(page, options, scenario);
-  } else {
-    summary.quote_flow = 'skipped; quote unavailable';
+  const candidates = search.value.candidates.slice(0, options.quoteCount);
+  summary.quote_plan.available_count = search.value.candidates.length;
+  summary.quote_plan.selected_count = candidates.length;
+  assertCondition(candidates.length > 0, `[${scenario.name}] no quote candidates available`, search.value);
+
+  for (const [index, candidate] of candidates.entries()) {
+    const label = `${scenario.name}:quote-${index + 1}`;
+    // Hard-navigate (CDP full load) to the clean pro path so each item loads in a stable context:
+    // the bare /service/<id> path avoids the search quote params that auto-open the request flow and
+    // reset the Lua runtime mid-load, and a full load avoids stale pro->pro soft-nav reads.
+    await navigate(page, proPathUrl(candidate.url));
+    await waitForSettle(page);
+    const inspected = await inspectQuoteCandidate(page, options, scenario, candidate, label, true);
+    summary.quote_plan.items.push({
+      ...inspected.summary,
+      index: index + 1,
+    });
+    summary.quote_plan.current_index = index + 1;
   }
 
+  const statuses = summary.quote_plan.items.map(item => item.status);
+  const successful = statuses.filter(status => status === 'ready_to_submit' || status === 'submitted').length;
+  summary.quote_plan.status = successful === summary.quote_plan.items.length
+    ? 'complete'
+    : successful > 0
+      ? 'partial'
+      : 'failed';
   return summary;
 }
 
@@ -704,9 +898,20 @@ function quoteFlowReachedSubmitOrGate(scenario) {
 async function runTests(page, options) {
   const scenarios = [];
   for (const scenario of options.scenarios) {
-    scenarios.push(await runScenario(page, options, scenario));
+    scenarios.push(options.multiQuote
+      ? await runQuotePlanScenario(page, options, scenario)
+      : await runScenario(page, options, scenario));
   }
-  const quoteFlows = scenarios.filter(scenario => typeof scenario.quote_flow === 'object');
+  const quoteFlows = options.multiQuote
+    ? scenarios.flatMap(scenario => (scenario.quote_plan?.items || []).filter(item => typeof item.quote_flow === 'object'))
+    : scenarios.filter(scenario => typeof scenario.quote_flow === 'object');
+  if (options.multiQuote) {
+    assertCondition(
+      scenarios.every(scenario => (scenario.quote_plan?.items?.length || 0) > 0),
+      '--multi-quote selected no quote items',
+      scenarios
+    );
+  }
   assertCondition(quoteFlows.length > 0, 'No scenario opened a quote flow', scenarios);
   if (options.actualSubmit) {
     assertCondition(
@@ -726,6 +931,8 @@ async function runTests(page, options) {
     quote_flow_count: quoteFlows.length,
     submit_quote: options.submitQuote,
     actual_submit: options.actualSubmit,
+    multi_quote: options.multiQuote,
+    quote_count: options.quoteCount,
     scenarios,
   };
 }

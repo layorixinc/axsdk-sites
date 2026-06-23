@@ -111,13 +111,15 @@ login/contact gate instead. `--actual-submit` calls `AX_submit_quote` with `conf
 final `Submit`, and may return `verification_required` for reCAPTCHA/account checks or
 `contact_update_required` when Thumbtack rejects a contact field.
 
-Each Lua tool call is logged with its wall time (`· AX_… <ms>`, flagged `[SLOW >3s]` above 3s) so a
-run is easy to profile. `AX_search_service` is two-phase: the first call fires the search funnel and
-returns `status:"navigating"`; the runner waits for the results page (CDP) and calls again to read
-candidates, so no single call suspends across the results navigation (which the SDK resumes slowly).
-The runner passes the already-resolved `zip_code` to search and reuses one Lua load per navigation.
-A `--multi-quote --quote-count=2` run completes in roughly 25–35s on the dev profile (live page-load
-variance), with every individual tool call under 3s.
+Each Lua tool call is logged with an elapsed/wall time (`[<elapsed>s] · AX_… <ms>`, flagged
+`[SLOW >3s]` above 3s), and navigations log their duration, so a run is easy to profile/monitor.
+`AX_search_service` is two-phase: the first call runs the search funnel and submit (returns
+`status:"navigating"`); the runner waits for the results page (CDP, bounded — re-fires the submit if
+it did not navigate) and calls again to read candidates, so no single call suspends across the
+results navigation (which the SDK resumes slowly). The runner passes the already-resolved `zip_code`
+to search, reuses one Lua load per navigation, and skips the redundant home navigation.
+A `--multi-quote --quote-count=2` run completes in roughly 20–29s on the dev profile, with every
+individual tool call under 3s.
 
 ## 5. Gotchas
 

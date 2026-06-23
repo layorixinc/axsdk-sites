@@ -43,6 +43,9 @@ function proPathUrl(url) {
 // last load so loadLuaFiles can skip the (8-file) reload for same-page calls.
 let luaContextDirty = true;
 
+let runT0 = Date.now();
+const el = () => ((Date.now() - runT0) / 1000).toFixed(1);
+
 function parseScenario(value) {
   const parts = String(value || '').split('|').map(part => part.trim()).filter(Boolean);
   const query = parts[0];
@@ -247,11 +250,13 @@ async function openPage(cdpUrl, url) {
 }
 
 async function navigate(page, url) {
+  const t = Date.now();
   const loaded = page.waitFor('Page.loadEventFired', () => true, 10000).catch(() => null);
   await page.send('Page.navigate', { url });
   await loaded;
   await sleep(500);
   luaContextDirty = true;
+  console.log(`  [${el()}s] nav ${Date.now() - t}ms ${String(url).replace('https://www.thumbtack.com', '').slice(0, 40)}`);
 }
 
 async function findAxContext(page, extensionId, timeoutMs = 15000) {
@@ -344,15 +349,17 @@ async function evaluatePage(page, expression) {
   return result.result?.value;
 }
 
-async function waitForResultsPage(page, timeoutMs = 7000) {
+async function waitForResultsPage(page, timeoutMs = 3500) {
   // CDP-level wait (not a Lua durable step) for the search results page after a fire-and-forget
   // submit, so the read call lands on the results list.
+  const t = Date.now();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const url = await evaluatePage(page, 'location.href').catch(() => '');
-    if (/instant-results/.test(String(url || ''))) return true;
+    if (/instant-results/.test(String(url || ''))) { console.log(`  [${el()}s] resultsPage ${Date.now() - t}ms`); return true; }
     await sleep(300);
   }
+  console.log(`  [${el()}s] resultsPage TIMEOUT ${Date.now() - t}ms`);
   return false;
 }
 
@@ -434,7 +441,7 @@ async function callLuaSettled(page, options, command, args, maxAttempts = 2) {
   }
   const ms = Date.now() - started;
   if (last) last.ms = ms;
-  console.log(`    · ${command} ${ms}ms${ms > 3000 ? '  [SLOW >3s]' : ''}`);
+  console.log(`  [${el()}s] · ${command} ${ms}ms${ms > 3000 ? '  [SLOW >3s]' : ''}`);
   return last;
 }
 
@@ -831,7 +838,12 @@ async function runQuotePlanScenario(page, options, scenario) {
       items: [],
     },
   };
-  await navigate(page, 'https://www.thumbtack.com/');
+  runT0 = Date.now();
+  // openPage already navigates to the home page; only re-navigate if we somehow aren't there.
+  const here = await evaluatePage(page, 'location.href').catch(() => '');
+  if (!/^https?:\/\/www\.thumbtack\.com\/?(\?|$)/.test(String(here || ''))) {
+    await navigate(page, 'https://www.thumbtack.com/');
+  }
   await waitForSettle(page);
 
   console.log(`[${scenario.name}] Testing AX_resolve_zip`);
@@ -843,13 +855,14 @@ async function runQuotePlanScenario(page, options, scenario) {
   console.log(`[${scenario.name}] Testing AX_search_service query=${JSON.stringify(scenario.query)}`);
   // Pass the already-resolved zip_code so search skips its internal (rate-limit-prone) ZIP fetch.
   const searchArgs = { query: scenario.query, zip_code: zip.value.zip_code, address: scenario.address };
-  // Two-phase: call 1 fires the search funnel and returns status="navigating"; wait for the results
-  // page at the CDP level (fast), then call 2 reads candidates with no cross-nav durable suspension.
-  let search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 1);
+  // Two-phase: the first call must fully run start_search (input wait + dom.fill + submit click) so
+  // the results navigation is actually triggered — it returns status="navigating". Then wait for the
+  // results page (CDP) and read. Each call gets enough durable-replay attempts to complete its phase.
+  let search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 5);
   for (let attempt = 0; attempt < 3 && !(search?.ok && (search.value?.candidates?.length || 0) > 0); attempt += 1) {
     await waitForResultsPage(page);
     await sleep(300);
-    search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 1);
+    search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 5);
   }
   assertCondition(search?.ok, `[${scenario.name}] AX_search_service call failed`, search);
   assertCondition((search.value?.candidates?.length || 0) > 0, `[${scenario.name}] AX_search_service returned no candidates`, search);

@@ -167,6 +167,46 @@ function W.auto_choice_values(options, requirements)
   return values
 end
 
+-- Conservative fallback for a REQUIRED checkbox step where W.auto_choice_values matched nothing:
+-- pick the single best-scoring checkbox per group (a minimal "select >=1" answer) so the step can
+-- advance. Radio groups are excluded -- auto_choice_values already picks a best for them. The caller
+-- (drive_step) only invokes this for required, non-submit, non-skippable steps in auto mode.
+function W.fallback_choice_values(options, requirements)
+  options = options or {}
+  requirements = requirements or ""
+  local groups = {}
+  local order = ax.array()
+  for index = 1, #options do
+    local option = options[index]
+    local text = B.non_empty(option.text)
+    local control = B.normalize_text(option.control or "")
+    if text and control == "checkbox" then
+      local group = B.non_empty(option.group) or ("checkbox:" .. tostring(index))
+      if not groups[group] then
+        groups[group] = ax.array()
+        order[#order + 1] = group
+      end
+      groups[group][#groups[group] + 1] = option
+    end
+  end
+  local values = ax.array()
+  for order_index = 1, #order do
+    local group = groups[order[order_index]]
+    local best, best_score = nil, nil
+    for option_index = 1, #group do
+      local option = group[option_index]
+      local score = W.option_score(option, requirements)
+      if best == nil or score > best_score then
+        best, best_score = option, score
+      end
+    end
+    if best then
+      values[#values + 1] = best.text
+    end
+  end
+  return values
+end
+
 -- A step can be auto-skipped (advance with no answer) only when it has no radio (radios always
 -- require a pick), and its sole controls are optional checkboxes (no textarea/select/other inputs).
 -- `extra_control_count` = number of non-radio/checkbox inputs the caller found in the step.
@@ -346,6 +386,35 @@ function W.drive_step(ctx, args, applied, prior_updates)
   local advance = W.classify_advance(ctx.read_buttons(), ctx.labels)
   flow.advance_label = advance.label
   flow.reached_submit_step = advance.reached_submit_step == true
+  -- Conservative auto fallback for a REQUIRED, non-submit choice step whose scoring matched nothing
+  -- (radio groups already pick a best above and never reach here). Without this a required checkbox
+  -- step like "What do you need help with?" stays empty -> missing_answer -> the flow stalls. Pick the
+  -- single best checkbox per group so it can advance. NEVER fires on submit steps (we must STOP) or on
+  -- optional Skip steps (allow_without_answer == true, so we never add unwanted services), and only in
+  -- auto mode (otherwise the user answers explicitly).
+  if controls > 0 and not supplied and auto_enabled and not flow.reached_submit_step
+    and advance.allow_without_answer ~= true then
+    local fallback = W.fallback_choice_values(ctx.read_options(), W.requirement_text(args, ctx.requirement_keys))
+    for index = 1, #fallback do
+      local result = ctx.select_option(fallback[index])
+      if result.ok == true then
+        supplied = true
+      end
+      applied[#applied + 1] = {
+        kind = "flow_option",
+        value = fallback[index],
+        ok = result.ok == true,
+        reason = result.reason,
+        type = result.type,
+        fallback = true
+      }
+    end
+    if supplied then
+      flow.auto_answered = true
+      flow.auto_fallback = true
+      ctx.wait(150)
+    end
+  end
   if controls > 0 and not supplied and advance.allow_without_answer ~= true
     and not (auto_enabled and W.can_auto_skip(ctx.read_options(), ctx.extra_control_count())) then
     flow.advance_skipped = true

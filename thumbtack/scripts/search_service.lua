@@ -55,25 +55,11 @@ function AX_search_service(args)
     return read_loaded(query, zip_code, 6000)
   end
 
+  -- Navigate directly to the category results page, then read in the same call. start_search uses
+  -- nav.navigate (a durable await step), so the command suspends across the navigation and on resume
+  -- replays from the top -- where current_results_match is now true and the read branch above returns
+  -- the loaded pros. Direct navigation to a fixed URL is deterministic, so the replay re-uses the
+  -- cached nav step and never bounces; the read below also covers a resume that continues in place.
   M.start_search(query, zip_code)
-
-  -- Single-call mode (wait=true): one remote call does the whole search. The durable call suspends
-  -- across the results-page navigation and resumes here to read, so the candidates come back in the
-  -- same call. The flow engine needs this: splitting the search across two nodes makes the second
-  -- call replay the durable navigation steps and bounce back to the home page, so it never reads.
-  if args.wait then
-    return read_loaded(query, zip_code, 15000)
-  end
-
-  -- Two-phase mode (default): fire the funnel and return status="navigating" so the caller waits for
-  -- the results page and calls again to read. Keeps the durable call from suspending across the slow
-  -- cross-navigation resume (used by the live test harness).
-  return {
-    query = query,
-    zip_code = zip_code,
-    status = "navigating",
-    candidates = ax.array(),
-    total_count = 0,
-    cursor = false
-  }
+  return read_loaded(query, zip_code, 15000)
 end

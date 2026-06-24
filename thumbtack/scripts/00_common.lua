@@ -2,6 +2,7 @@ AX_THUMBTACK = {}
 local M = AX_THUMBTACK
 
 M.HOME_URL = "https://www.thumbtack.com/"
+M.CATEGORY_SEARCH_URL = "https://www.thumbtack.com/k/"
 M.SEARCH_INPUT_SELECTOR = 'input[aria-label="Search on Thumbtack"]'
 M.SEARCH_ZIP_SELECTOR = 'input[aria-label="Zip code"]'
 -- The search submit is the only type=submit button inside the search form (text "Search"); the old
@@ -99,18 +100,21 @@ function M.is_home_page()
 end
 
 function M.is_results_page()
-  return M.current_url():find("/instant%-results/", 1, false) ~= nil
+  local href = M.current_url()
+  return href:find("/instant-results/", 1, true) ~= nil or href:find("/near-me", 1, true) ~= nil
 end
 
 function M.current_results_match(query, zip_code)
-  if not M.is_results_page() then
+  local href = M.current_url()
+  local slug = M.category_slug(query)
+  -- Match the category results page for this query's slug, or a legacy instant-results page.
+  local on_results = (slug ~= "" and href:find("/k/" .. slug .. "/", 1, true) ~= nil)
+    or href:find("/instant-results/", 1, true) ~= nil
+  if not on_results then
     return false
   end
-  -- On the results page only reject when the zip is explicitly present and differs. The query is
-  -- already submitted (Thumbtack canonicalizes it) and results may still be hydrating, so never
-  -- re-search from here based on query text or missing pro links — that re-navigates on every
-  -- durable replay and stalls the call for many seconds.
-  local zip_value = M.non_empty(dom.get_attr(M.SEARCH_ZIP_SELECTOR, "value")) or M.current_url():match("[?&]zip_code=(%d%d%d%d%d)")
+  -- Reject only when an explicit zip is present and differs (results may still be hydrating).
+  local zip_value = href:match("[?&]zip_code=(%d%d%d%d%d)") or M.non_empty(dom.get_attr(M.SEARCH_ZIP_SELECTOR, "value"))
   if zip_code and zip_value and zip_value ~= zip_code then
     return false
   end
@@ -129,45 +133,49 @@ function M.dismiss_modals()
   end
 end
 
-function M.start_search(query, zip_code)
-  -- The search box exists on BOTH the home page and instant-results, so fill it in place rather
-  -- than navigating home. Gating the (rare) home navigation on the search box being ABSENT keeps
-  -- the durable command replay-safe: this condition cannot flip across the submit navigation
-  -- (home and results both have the box), so a replay never introduces a NEW home navigation that
-  -- bounces the page back. (Branching on is_home_page() DID flip home->results on replay: on the
-  -- first pass the page was home so the home nav was skipped, but on the post-submit replay the
-  -- page was instant-results so is_home_page() returned false and nav.navigate(HOME) ran as a new
-  -- uncached durable step, bouncing the page back to home and losing the results.)
-  if not dom.exists(M.SEARCH_INPUT_SELECTOR) then
-    nav.navigate(M.HOME_URL, {})
-  end
+function M.category_slug(query)
+  -- Thumbtack category results live at /k/<slug>/near-me/. Build the slug from the service query:
+  -- lowercase, collapse every run of non-alphanumeric chars to one hyphen, trim hyphens. e.g.
+  -- "handyman"->"handyman", "House Cleaning"->"house-cleaning", "lawn mowing"->"lawn-mowing".
+  local s = (query or ""):lower()
+  s = s:gsub("[^%w]+", "-")
+  s = s:gsub("^%-+", "")
+  s = s:gsub("%-+$", "")
+  return s
+end
 
-  dom.wait_for_selector(M.SEARCH_INPUT_SELECTOR, { timeout = 8000 })
-  -- Prep the multi-input search as one async flow so React commits each step (typed query →
-  -- autocomplete category selection → zip) before submitting. A plain durable sequence runs
-  -- synchronously within a replay pass, so the submit would fire before Thumbtack resolves the
-  -- query and produce no navigation. dom.fill yields between actions; the submit click is a
-  -- separate navigating step.
-  -- The autocomplete wait is bounded and OPTIONAL. dom.fill aborts the remaining actions when a
-  -- wait times out, so when the category dropdown does not render (cold load / A/B variant) the
-  -- short wait fails fast and we fall back to typing query + zip directly instead of stalling.
-  local filled = dom.fill({
-    { set = M.SEARCH_INPUT_SELECTOR, value = query },
-    { wait = M.SEARCH_AUTOCOMPLETE_SELECTOR, timeout = 2500 },
-    { click = M.SEARCH_AUTOCOMPLETE_SELECTOR },
-    { delay = 150 },
-    { set = M.SEARCH_ZIP_SELECTOR, value = zip_code },
-  })
-  if type(filled) ~= "table" or filled.ok ~= true then
-    dom.fill({
-      { set = M.SEARCH_INPUT_SELECTOR, value = query },
-      { set = M.SEARCH_ZIP_SELECTOR, value = zip_code },
-    })
+function M.start_search(query, zip_code)
+  -- Thumbtack's homepage hero is now a "conversational search" textarea that does NOT submit to a
+  -- pro-results page via DOM automation (the autocomplete category never commits and no form submit
+  -- fires). Navigate directly to the stable category results page instead:
+  -- /k/<slug>/near-me/?zip_code=<zip>. This is deterministic and replay-safe -- nav.navigate to a
+  -- fixed URL is a durable step keyed by that URL, so a durable replay re-uses the cached step
+  -- instead of diverging, and there is no live-state branch that could flip across the navigation.
+  -- The page lists pros as [data-test="pro-list-result"] cards that read_search_candidates parses.
+  local slug = M.category_slug(query)
+  local url = M.CATEGORY_SEARCH_URL .. slug .. "/near-me/"
+  local zip = M.non_empty(zip_code)
+  if zip then
+    url = url .. "?zip_code=" .. zip
   end
-  -- Fire the submit without awaiting navigation (no expectedUrl): AX_search_service returns
-  -- status="navigating" and the caller reads results on the next call, so the durable call never
-  -- suspends across this navigation.
-  dom.click(M.SEARCH_BUTTON_SELECTOR)
+  nav.navigate(url, {})
+end
+
+function M.dedupe_name(value)
+  -- Category cards render the pro name twice in responsive spans ("NameName"); collapse an exact
+  -- doubling back to a single name and leave normal names untouched.
+  local s = M.non_empty(value)
+  if not s then
+    return nil
+  end
+  local n = #s
+  if n % 2 == 0 then
+    local half = math.floor(n / 2)
+    if s:sub(1, half) == s:sub(half + 1) then
+      return M.non_empty(s:sub(1, half))
+    end
+  end
+  return s
 end
 
 function M.result_candidate_from_row(row)
@@ -178,7 +186,19 @@ function M.result_candidate_from_row(row)
   end
 
   local text = M.clean_text(row.text)
-  local name = M.name_from_result_text(text, url)
+  -- Name: prefer the avatar img alt ("Avatar for <name>"), then the de-doubled .pro-title, then
+  -- fall back to deriving it from the card text/url (legacy instant-results layout).
+  local name = nil
+  local alt = M.non_empty(row.image_alt)
+  if alt then
+    name = M.non_empty((alt:gsub("^[Aa]vatar [Ff]or%s+", "")))
+  end
+  if not name then
+    name = M.dedupe_name(row.name)
+  end
+  if not name then
+    name = M.name_from_result_text(text, url)
+  end
   if not name then
     return nil
   end
@@ -200,10 +220,12 @@ function M.result_candidate_from_row(row)
 end
 
 function M.read_search_candidates()
-  local rows = dom.query_all('a[href*="/service/"]', {
-    url = { attr = "href" },
-    text = true,
-    image_url = { selector = "img", attr = "src" }
+  local rows = dom.query_all('[data-test="pro-list-result"]', {
+    url = { selector = 'a[href*="/service/"]', attr = "href" },
+    name = { selector = ".pro-title", text = true },
+    image_url = { selector = "img", attr = "src" },
+    image_alt = { selector = "img", attr = "alt" },
+    text = true
   }, 80)
   local candidates = ax.array()
   local seen = {}

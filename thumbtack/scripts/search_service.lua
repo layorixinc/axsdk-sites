@@ -26,40 +26,19 @@ local function read_loaded(query, zip_code, timeout)
 end
 
 function AX_search_service(args)
+  -- TEMP DIAGNOSTIC: report what the flow's remote execution context sees, via mapped fields.
   args = args or {}
-  local query = M.non_empty(args.query)
-  if not query then
-    return {
-      error = "missing_query"
-    }
-  end
-
-  local cursor = M.non_empty(args.cursor)
-  if cursor then
-    if M.current_url() ~= cursor then
-      nav.navigate(cursor, {})
-    end
-  end
-
-  local zip_result = M.resolve_zip(args)
-  if zip_result.pending then
-    return zip_result
-  end
-  if zip_result.error then
-    return zip_result
-  end
-  local zip_code = zip_result.zip_code
-
-  -- Already on the matching results page: read candidates with a same-page poll (no navigation).
-  if M.current_results_match(query, zip_code) then
-    return read_loaded(query, zip_code, 6000)
-  end
-
-  -- Navigate directly to the category results page, then read in the same call. start_search uses
-  -- nav.navigate (a durable await step), so the command suspends across the navigation and on resume
-  -- replays from the top -- where current_results_match is now true and the read branch above returns
-  -- the loaded pros. Direct navigation to a fixed URL is deterministic, so the replay re-uses the
-  -- cached nav step and never bounces; the read below also covers a resume that continues in place.
-  M.start_search(query, zip_code)
-  return read_loaded(query, zip_code, 15000)
+  local q = M.non_empty(args.query) or "NOQUERY"
+  local z = M.non_empty(args.zip_code) or "NOZIP"
+  local okurl, url = pcall(function() return M.current_url() end)
+  local okc, ncards = pcall(function() return #M.read_search_candidates() end)
+  return {
+    status = "completed",
+    query = "DIAG q=" .. q .. " z=" .. z,
+    zip_code = "url=" .. (okurl and tostring(url) or ("err:" .. tostring(url))),
+    total_count = okc and ncards or -1,
+    candidates = ax.array(),
+    service_options = ax.array(),
+    cursor = false
+  }
 end

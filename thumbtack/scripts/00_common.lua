@@ -5,6 +5,7 @@ M.HOME_URL = "https://www.thumbtack.com/"
 M.CATEGORY_SEARCH_URL = "https://www.thumbtack.com/k/"
 M.SEARCH_INPUT_SELECTOR = 'input[aria-label="Search on Thumbtack"]'
 M.SEARCH_ZIP_SELECTOR = 'input[aria-label="Zip code"]'
+M.CONV_SEARCH_SELECTOR = 'textarea[aria-label="Describe your project or problem"]'
 -- The search submit is the only type=submit button inside the search form (text "Search"); the old
 -- data-test="search-button" no longer exists on Thumbtack. Scope by the search input to stay unique.
 M.SEARCH_BUTTON_SELECTOR = 'form:has(input[aria-label="Search on Thumbtack"]) button[type="submit"]'
@@ -145,22 +146,23 @@ function M.category_slug(query)
 end
 
 function M.start_search(query, zip_code)
-  -- Thumbtack's homepage hero is now a "conversational search" textarea that does NOT submit to a
-  -- pro-results page via DOM automation (the autocomplete category never commits and no form submit
-  -- fires). Navigate directly to the stable category results page instead:
-  -- /k/<slug>/near-me/?zip_code=<zip>. This is deterministic and replay-safe -- nav.navigate to a
-  -- fixed URL is a durable step keyed by that URL, so a durable replay re-uses the cached step
-  -- instead of diverging, and there is no live-state branch that could flip across the navigation.
-  -- The page lists pros as [data-test="pro-list-result"] cards that read_search_candidates parses.
+  -- DOM input simulation: type the request into the homepage conversational search (so the user sees
+  -- it entered), then navigate to the category results page with a FULL page load. Thumbtack's
+  -- Next.js SPA ignores synthetic pushState/clicks and only renders the category results on a real
+  -- navigation, so nav.navigate must use { reload = true } (location.assign) -- a same-origin
+  -- pushState changes the URL without loading the page. The durable step survives the reload and
+  -- replays once /k/<slug>/near-me has loaded; the page then lists pros as
+  -- [data-test="pro-list-result"] cards that read_search_candidates parses.
+  if dom.exists(M.CONV_SEARCH_SELECTOR) then
+    dom.fill({ { set = M.CONV_SEARCH_SELECTOR, value = query } })
+  end
   local slug = M.category_slug(query)
-  -- No trailing slash before the query: Thumbtack canonicalizes /near-me/ to /near-me, so matching
-  -- that exact form lets nav.navigate's arrival check (expectedUrl) resolve instead of timing out.
   local url = M.CATEGORY_SEARCH_URL .. slug .. "/near-me"
   local zip = M.non_empty(zip_code)
   if zip then
     url = url .. "?zip_code=" .. zip
   end
-  nav.navigate(url, {})
+  nav.navigate(url, {}, { reload = true })
 end
 
 function M.dedupe_name(value)

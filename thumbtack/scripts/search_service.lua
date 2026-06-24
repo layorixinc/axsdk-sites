@@ -26,19 +26,23 @@ local function read_loaded(query, zip_code, timeout)
 end
 
 function AX_search_service(args)
-  -- TEMP DIAGNOSTIC: report what the flow's remote execution context sees, via mapped fields.
+  -- TEMP DIAGNOSTIC v2: catch each step's error into the mapped query field; avoid ax.array() in the
+  -- return so a missing `ax` global cannot blank the whole result.
   args = args or {}
-  local q = M.non_empty(args.query) or "NOQUERY"
-  local z = M.non_empty(args.zip_code) or "NOZIP"
-  local okurl, url = pcall(function() return M.current_url() end)
-  local okc, ncards = pcall(function() return #M.read_search_candidates() end)
+  local parts = {}
+  parts[#parts + 1] = "q=" .. (M.non_empty(args.query) or "NIL")
+  local oku, u = pcall(function() return M.current_url() end)
+  parts[#parts + 1] = oku and ("url=" .. tostring(u)) or ("urlERR=" .. tostring(u))
+  local oka, ae = pcall(function() return ax.array() end)
+  parts[#parts + 1] = oka and "ax=ok" or ("axERR=" .. tostring(ae))
+  local okr, nc = pcall(function() return #M.read_search_candidates() end)
+  parts[#parts + 1] = okr and ("cards=" .. tostring(nc)) or ("readERR=" .. tostring(nc))
   return {
     status = "completed",
-    query = "DIAG q=" .. q .. " z=" .. z,
-    zip_code = "url=" .. (okurl and tostring(url) or ("err:" .. tostring(url))),
-    total_count = okc and ncards or -1,
-    candidates = ax.array(),
-    service_options = ax.array(),
+    query = table.concat(parts, " | "),
+    zip_code = "DIAG",
+    total_count = 0,
+    candidates = {},
     cursor = false
   }
 end

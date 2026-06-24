@@ -26,23 +26,40 @@ local function read_loaded(query, zip_code, timeout)
 end
 
 function AX_search_service(args)
-  -- TEMP DIAGNOSTIC v2: catch each step's error into the mapped query field; avoid ax.array() in the
-  -- return so a missing `ax` global cannot blank the whole result.
   args = args or {}
-  local parts = {}
-  parts[#parts + 1] = "q=" .. (M.non_empty(args.query) or "NIL")
-  local oku, u = pcall(function() return M.current_url() end)
-  parts[#parts + 1] = oku and ("url=" .. tostring(u)) or ("urlERR=" .. tostring(u))
-  local oka, ae = pcall(function() return ax.array() end)
-  parts[#parts + 1] = oka and "ax=ok" or ("axERR=" .. tostring(ae))
-  local okr, nc = pcall(function() return #M.read_search_candidates() end)
-  parts[#parts + 1] = okr and ("cards=" .. tostring(nc)) or ("readERR=" .. tostring(nc))
-  return {
-    status = "completed",
-    query = table.concat(parts, " | "),
-    zip_code = "DIAG",
-    total_count = 0,
-    candidates = {},
-    cursor = false
-  }
+  local query = M.non_empty(args.query)
+  if not query then
+    return {
+      error = "missing_query"
+    }
+  end
+
+  local cursor = M.non_empty(args.cursor)
+  if cursor then
+    if M.current_url() ~= cursor then
+      nav.navigate(cursor, {})
+    end
+  end
+
+  local zip_result = M.resolve_zip(args)
+  if zip_result.pending then
+    return zip_result
+  end
+  if zip_result.error then
+    return zip_result
+  end
+  local zip_code = zip_result.zip_code
+
+  -- Already on the matching results page: read candidates with a same-page poll (no navigation).
+  if M.current_results_match(query, zip_code) then
+    return read_loaded(query, zip_code, 6000)
+  end
+
+  -- Navigate directly to the category results page, then read in the same call. start_search uses
+  -- nav.navigate (a durable await step), so the command suspends across the navigation and on resume
+  -- replays from the top -- where current_results_match is now true and the read branch above returns
+  -- the loaded pros. Direct navigation to a fixed URL is deterministic, so the replay re-uses the
+  -- cached nav step and never bounces; the read below also covers a resume that continues in place.
+  M.start_search(query, zip_code)
+  return read_loaded(query, zip_code, 15000)
 end

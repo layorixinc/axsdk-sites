@@ -791,7 +791,16 @@ async function runScenario(page, options, scenario) {
   summary.resolve_zip = zip.value;
 
   console.log(`[${scenario.name}] Testing AX_search_service query=${JSON.stringify(scenario.query)}`);
-  const search = await callLuaSettled(page, options, 'AX_search_service', { query: scenario.query, address: scenario.address });
+  const searchArgs = { query: scenario.query, zip_code: zip.value.zip_code, address: scenario.address };
+  // Two-phase navigating search: the first call runs start_search (fill + autocomplete wait + submit
+  // click) and navigates to /instant-results; later calls read the loaded pros. Wait for the results
+  // page between attempts and give each call enough durable-replay attempts to finish its phase.
+  let search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 5);
+  for (let attempt = 0; attempt < 3 && !(search?.ok && (search.value?.candidates?.length || 0) > 0); attempt += 1) {
+    await waitForResultsPage(page);
+    await sleep(300);
+    search = await callLuaSettled(page, options, 'AX_search_service', searchArgs, 5);
+  }
   assertCondition(search?.ok, `[${scenario.name}] AX_search_service call failed`, search);
   assertCondition((search.value?.candidates?.length || 0) > 0, `[${scenario.name}] AX_search_service returned no candidates`, search.value);
   summary.search_service = {

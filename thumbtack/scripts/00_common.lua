@@ -2,13 +2,14 @@ AX_THUMBTACK = {}
 local M = AX_THUMBTACK
 
 M.HOME_URL = "https://www.thumbtack.com/"
-M.CATEGORY_SEARCH_URL = "https://www.thumbtack.com/k/"
 M.SEARCH_INPUT_SELECTOR = 'input[aria-label="Search on Thumbtack"]'
-M.SEARCH_ZIP_SELECTOR = 'input[aria-label="Zip code"]'
-M.CONV_SEARCH_SELECTOR = 'textarea[aria-label="Describe your project or problem"]'
--- The search submit is the only type=submit button inside the search form (text "Search"); the old
--- data-test="search-button" no longer exists on Thumbtack. Scope by the search input to stay unique.
-M.SEARCH_BUTTON_SELECTOR = 'form:has(input[aria-label="Search on Thumbtack"]) button[type="submit"]'
+-- The homepage search form scopes the query and zip fields. Thumbtack renders 3 "Zip code" inputs but
+-- only this form's input[name="zip_code"] is read on submit, so the zip selector is scoped to the form.
+-- The search UI varies by A/B bucket: the "Search" button is type=submit in some variants and
+-- type=button in others, so the form is submitted via dom.submit_form (requestSubmit), not a button click.
+M.SEARCH_FORM_SELECTOR = 'form:has(input[aria-label="Search on Thumbtack"])'
+M.SEARCH_ZIP_SELECTOR = M.SEARCH_FORM_SELECTOR .. ' input[name="zip_code"]'
+-- Autocomplete suggestion; appears after typing and must resolve into a keyword before submit navigates.
 M.SEARCH_AUTOCOMPLETE_SELECTOR = '[role="option"]'
 M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"], [data-test="pro-list-result"]'
 M.SERVICE_READY_SELECTOR = 'h1, button, [data-test="specialties-section__interested-item"]'
@@ -146,23 +147,22 @@ function M.category_slug(query)
 end
 
 function M.start_search(query, zip_code)
-  -- DOM input simulation: type the request into the homepage conversational search (so the user sees
-  -- it entered), then navigate to the category results page with a FULL page load. Thumbtack's
-  -- Next.js SPA ignores synthetic pushState/clicks and only renders the category results on a real
-  -- navigation, so nav.navigate must use { reload = true } (location.assign) -- a same-origin
-  -- pushState changes the URL without loading the page. The durable step survives the reload and
-  -- replays once /k/<slug>/near-me has loaded; the page then lists pros as
-  -- [data-test="pro-list-result"] cards that read_search_candidates parses.
-  if dom.exists(M.CONV_SEARCH_SELECTOR) then
-    dom.fill({ { set = M.CONV_SEARCH_SELECTOR, value = query } })
-  end
-  local slug = M.category_slug(query)
-  local url = M.CATEGORY_SEARCH_URL .. slug .. "/near-me"
+  -- Submit the homepage search box. Type the query and zip into the search FORM's fields, wait for the
+  -- autocomplete to resolve the query into a keyword (a [role="option"] suggestion appears), then submit
+  -- the form, which navigates to /instant-results?keyword_pk=...&zip_code=<zip>. Submitting
+  -- BEFORE the autocomplete resolves is a no-op (the form's onSubmit needs the resolved keyword), so the
+  -- option wait + short settle are required. read_search_candidates parses the resulting pro list.
   local zip = M.non_empty(zip_code)
+  local actions = { { set = M.SEARCH_INPUT_SELECTOR, value = query } }
   if zip then
-    url = url .. "?zip_code=" .. zip
+    actions[#actions + 1] = { set = M.SEARCH_ZIP_SELECTOR, value = zip }
   end
-  nav.navigate(url, {}, { reload = true })
+  -- Keep the option wait + settle well under the SDK per-call deadline so the whole fill (then the
+  -- form submit) completes in one durable call and the next call lands on the loaded results page.
+  actions[#actions + 1] = { wait = M.SEARCH_AUTOCOMPLETE_SELECTOR, timeout = 2500 }
+  actions[#actions + 1] = { delay = 800 }
+  dom.fill(actions)
+  dom.submit_form(M.SEARCH_FORM_SELECTOR, { expectedUrl = "/instant-results" })
 end
 
 function M.dedupe_name(value)
@@ -224,10 +224,12 @@ function M.result_candidate_from_row(row)
 end
 
 function M.read_search_candidates()
-  -- The full pro card is the div that directly contains a [data-test="pro-list-result"]; it holds
-  -- the service link, avatar img (alt="Avatar for <name>"), and the rich text (rating/price/summary).
-  -- The pro-list-result element itself does NOT contain the service link, so query the parent.
-  local rows = dom.query_all('div:has(> [data-test="pro-list-result"])', {
+  -- The full pro card is the div that directly contains the [data-test|data-testid="pro-list-result"]
+  -- marker; it holds the service link, avatar img, the pro name (.pro-title when present, else derived
+  -- from the card text), and the rich text (rating/price/summary). The marker itself does NOT contain
+  -- the service link, so query the parent div. The attribute is data-test in some A/B variants and
+  -- data-testid in others, so match both.
+  local rows = dom.query_all('div:has(> [data-test="pro-list-result"]), div:has(> [data-testid="pro-list-result"])', {
     url = { selector = 'a[href*="/service/"]', attr = "href" },
     name = { selector = ".pro-title", text = true },
     image_url = { selector = "img", attr = "src" },

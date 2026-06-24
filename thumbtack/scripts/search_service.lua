@@ -3,14 +3,18 @@ if not M then
   error("thumbtack/scripts/00_common.lua must be loaded before search_service.lua")
 end
 
--- Read the candidates on an already-loaded results page, polling briefly while the list hydrates.
+-- Read the candidates on an already-loaded results page. Close any project-questions/search overlay
+-- first so the pro list is readable, then wait briefly for it to hydrate. The wait stays under the SDK
+-- per-call deadline so the call returns status="navigating" (prompting a re-call) rather than timing
+-- out pending when the list is still loading.
 local function read_loaded(query, zip_code, timeout)
-  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = timeout or 6000 })
+  M.dismiss_modals()
+  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = timeout or 3000 })
   M.dismiss_modals()
   local candidates = M.read_search_candidates()
   local tries = 0
-  while #candidates == 0 and tries < 6 do
-    dom.wait(500)
+  while #candidates == 0 and tries < 2 do
+    dom.wait(300)
     candidates = M.read_search_candidates()
     tries = tries + 1
   end
@@ -52,14 +56,13 @@ function AX_search_service(args)
 
   -- Already on the matching results page: read candidates with a same-page poll (no navigation).
   if M.current_results_match(query, zip_code) then
-    return read_loaded(query, zip_code, 6000)
+    return read_loaded(query, zip_code)
   end
 
-  -- Navigate directly to the category results page, then read in the same call. start_search uses
-  -- nav.navigate (a durable await step), so the command suspends across the navigation and on resume
-  -- replays from the top -- where current_results_match is now true and the read branch above returns
-  -- the loaded pros. Direct navigation to a fixed URL is deterministic, so the replay re-uses the
-  -- cached nav step and never bounces; the read below also covers a resume that continues in place.
+  -- Not on the results page yet: submit the homepage search box. start_search ends in a durable
+  -- navigating step (dom.submit_form -> requestSubmit), so the command suspends across the navigation
+  -- and on resume replays from the top, where current_results_match is now true and the read branch
+  -- above returns the loaded pros. The read below covers a resume that continues in place.
   M.start_search(query, zip_code)
-  return read_loaded(query, zip_code, 15000)
+  return read_loaded(query, zip_code)
 end

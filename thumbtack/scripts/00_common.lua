@@ -128,7 +128,15 @@ function M.dismiss_modals()
 end
 
 function M.start_search(query, zip_code)
-  if not M.is_home_page() then
+  -- The search box exists on BOTH the home page and instant-results, so fill it in place rather
+  -- than navigating home. Gating the (rare) home navigation on the search box being ABSENT keeps
+  -- the durable command replay-safe: this condition cannot flip across the submit navigation
+  -- (home and results both have the box), so a replay never introduces a NEW home navigation that
+  -- bounces the page back. (Branching on is_home_page() DID flip home->results on replay: on the
+  -- first pass the page was home so the home nav was skipped, but on the post-submit replay the
+  -- page was instant-results so is_home_page() returned false and nav.navigate(HOME) ran as a new
+  -- uncached durable step, bouncing the page back to home and losing the results.)
+  if not dom.exists(M.SEARCH_INPUT_SELECTOR) then
     nav.navigate(M.HOME_URL, {})
   end
 

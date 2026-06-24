@@ -1,4 +1,16 @@
 extends: app
+app:                                                                                                                                                                                                     
+  terminal:
+    llm: { maxOutputTokens: 2048 }
+    prompt: |-
+      Rewrite the terminal browser-extension response in the latest user's language.
+      Return only the final user-facing response text. Do not invent facts, links, or results.
+      Preserve navigation, selection, submission, not-found, and cancellation meaning.
+      If the base response asks to use Flow state JSON's message, return the non-empty message only.
+      If the base response asks to use Flow state JSON's question, return the non-empty question only.
+      If the base response asks to return the search results as JSON, output ONLY a compact JSON object
+      with keys query, zip_code, total_count, and candidates — copy candidates verbatim from the Flow
+      state JSON (do not summarize, reorder, or drop fields). No prose, no markdown fences.
 planner:
   inputSelector:
     - active
@@ -17,7 +29,7 @@ router:
   defaultIntent: request_service_quote
   routes:
     - intent: request_service_quote
-      entry: request_service_quote.parse_request
+      entry: request_service_quote.collect_request
       description: Request quotes from Thumbtack service professionals.
       examples:
         - 열쇠공 견적줘
@@ -25,480 +37,150 @@ router:
         - get a house cleaning quote in San Francisco
 flows:
   request_service_quote:
-    goal: Search Thumbtack, choose a pro, complete the quote flow, and submit only after explicit user confirmation.
+    goal: Collect a service-quote request (service, requirements, ZIP), search Thumbtack, and return the matching pros as JSON.
     contexts: [memory]
-    state:
-      service_query: null
-      address: null
-      zip_code: null
-      zip_source: null
-      zip_status: null
-      filters: {}
-      contact:
-        email: null
-        first_name: null
-        last_name: null
-        phone: null
-        zip_code: null
-      user_requirements: null
-      submit_confirmed: false
-      quote_plan:
-        requested_count: 1
-        max_count: 5
-        current_index: 0
-        submit_policy: prepare_only
-        status: collecting
-        shared:
-          service_query: null
-          address: null
-          zip_code: null
-          user_requirements: null
-          contact: {}
-        items: []
-      message: null
-      question: null
-      search:
-        candidates: []
-        service_options: []
-        total_count: null
-        cursor: null
-        zip_code: null
-      selected_pro_url: null
-      selected_service_id: null
-      name: null
-      price_text: null
-      rating: null
-      review_count: null
-      reason: null
-      pro:
-        name: null
-        service_id: null
-        url: null
-        rating: null
-        review_count: null
-        price_text: null
-        actions: null
-        services_offered: null
-      quote:
-        status: null
-        error: null
-        form: null
-        questions: []
-        all_questions_available: false
-        question_collection_status: null
-        update: null
-        applied: null
-        flow: null
-      submit:
-        status: null
-        before: null
-        steps: null
-        after: null
-        error: null
     inputSelector:
       - requestText
+    state:
+      service_query: null
+      user_requirements: null
+      address: null
+      zip_code: null
+      zip_status: null
+      query: null
+      candidates: null
+      total_count: null
+      service_options: null
+      search_status: null
     nodes:
-      parse_request:
+      collect_request:
         kind: action_unit
-        description: Extract the service quote request and decide whether to start, resume, or submit.
+        description: Fill the request fields from the user message and memory; ask for anything missing; resolve a ZIP from an address when needed.
+        model:
+          providerID: openrouter
+          modelID: minimax/minimax-m3
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: false }
+              reasoning: { effort: high }
         inputSelector:
           - requestText
           - service_query
+          - user_requirements
           - address
           - zip_code
-          - filters
-          - contact
-          - user_requirements
-          - submit_confirmed
-          - quote_plan
-          - message
+          - zip_status
+        allowedTools: [collect_fields]
         prompt: |-
-          Extract the user's Thumbtack quote request.
-          Preserve any existing request_service_quote state; the latest user message may add missing details or approve submission.
-          Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
+          You collect the details needed for a service-quote request. Fill the empty fields from the latest user message (requestText) and the <memory> context. Use the projected state fields as the current values; treat null, empty strings, and empty arrays as missing.
 
-          Treat the injected memory context as user-provided data. Use a single unambiguous value from memory for:
-          - service address or ZIP code
-          - first name and last name
-          - email
-          - phone number
-          - quote preferences that answer visible Thumbtack questions
+          Fields:
+          - service_query: the service to search for (e.g. "house cleaning", "handyman"). Extract from requestText when concrete.
+          - user_requirements: what the user wants done and when (scope / details / timing).
+          - address: a service address or city/state, when the user or memory provides one. Used only to derive a ZIP; not a required final field by itself. Normalize it to an English "City, ST" form (e.g., "San Francisco, CA") so the ZIP can be resolved.
+          - zip_code: a US ZIP code for the search.
 
-          Required before searching: service_query and either zip_code or address.
-          If the user did not state an address/ZIP but memory has one clear service address or ZIP, use it.
-          If both the user and memory provide values, prefer the latest user message.
-          If memory has multiple conflicting addresses, names, emails, or phone numbers, ask the user to choose instead of guessing.
-          Contact fields are optional until quote/contact steps require them, but capture them from memory when available: email, first_name, last_name, phone, zip_code.
+          Use the <memory> context as user-provided data: use a single unambiguous value; prefer the latest user message over memory; on conflicting memory values, ask the user to choose instead of guessing.
 
-          Always maintain quote_plan. A single quote request is quote_plan.items with one item; multiple quotes are the same structure with more items. Do not create a separate batch mode.
-          Determine requested_count from the latest user request: explicit counts win; "several/multiple/여러 곳/몇 군데" without a number means 3; default is 1; cap at quote_plan.max_count or 5. Set quote_plan.requested_count and quote_plan.shared from service_query, address, zip_code, contact, and user_requirements.
-          If the user explicitly asks to send/request/submit quotes in the initial request, set submit_confirmed=true and quote_plan.submit_policy=submit_if_ready. If the user is comparing/exploring or approval is ambiguous, set submit_confirmed=false and quote_plan.submit_policy=prepare_only.
-          If the user is approving a previously prepared final quote submission, set submit_confirmed=true, quote_plan.submit_policy=submit_if_ready, quote_plan.current_index=0, and next=find_pro to submit each prepared item in order.
-          If required search details are still missing after checking memory, set next=ask_user and question to ask only for the missing details.
-          If service_query plus zip_code or address is available, set next=find_pro.
-          Otherwise set next=error with a short message.
-          When you need the user (next=ask_user), set question=<the concise question to ask the user>.
+          Call collect_fields exactly once, always re-emitting every field you already know (service_query, user_requirements, address, zip_code) so accumulated values persist. Choose next:
+          - next=ask — when you need the user to supply a missing or ambiguous detail. You MUST also set a non-empty `question` with the exact question to show the user, in their language. Ask when:
+            - service_query or user_requirements is missing or ambiguous; or
+            - zip_code is missing AND address is also missing (ask for the service address or US ZIP code); or
+            - zip_code is still missing after a resolve attempt (zip_status is non-empty, e.g. "zip_not_found" or an error) — ask for a valid US ZIP code or a more specific address; when the user gives a new address or ZIP, set address/zip_code and reset zip_status to empty.
+          - next=resolve — when zip_code is missing, address is present, and zip_status is empty (you have not resolved yet). resolve_zip derives the ZIP from the address and sets zip_status itself — you do not set zip_status.
+          - next=done — when service_query, user_requirements, and zip_code are ALL present. The flow then searches Thumbtack for matching pros; you do not need to write a confirmation message.
 
-          Call capture_request exactly once.
-        allowedTools: [capture_request]
+          Never set next=ask without a non-empty question.
         next:
-          find_pro: find_pro
-          submit_quote: submit_quote
-          ask_user: parse_request
+          ask: collect_request
+          resolve: resolve_location
+          done: search
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
-      find_pro:
+      resolve_location:
         kind: action_unit
-        description: Resolve location, search Thumbtack, select a pro, and inspect the selected profile.
+        description: Resolve a US ZIP code from the collected address, then return to collect_request.
+        inputSelector:
+          - address
+        allowedTools: [resolve_zip]
+        prompt: |-
+          Call resolve_zip exactly once with the collected address to derive a US ZIP code.
+        next:
+          collect: collect_request
+          error: error
+        fallback: { invalidNext: collect, exhaustedNext: error }
+
+      search:
+        kind: action_unit
+        description: Search Thumbtack for the collected service in the resolved ZIP.
+        model:
+          providerID: openrouter
+          modelID: minimax/minimax-m3
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: false }
+              reasoning: { effort: high }
         inputSelector:
           - service_query
+          - zip_code
           - address
-          - zip_code
-          - zip_source
-          - zip_status
-          - filters
-          - search
-          - selected_pro_url
-          - selected_service_id
-          - name
-          - price_text
-          - rating
-          - review_count
-          - pro
-          - message
-          - quote_plan
+        allowedTools: [search_service]
+        llm: { maxCalls: 5 }
         prompt: |-
-          Drive pro discovery one tool call at a time. Use the projected state fields and call exactly one allowed tool.
-          Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
+          Call search_service with `query` = the collected service_query (e.g. "house cleaning",
+          "handyman") and `zip_code` = the collected zip_code (copy the resolved ZIP from the
+          projected state). Do not set any other field.
 
-          Order:
-          1. If zip_code is missing and address exists, call resolve_zip with address.
-          2. If no search candidates are available, call search_service with service_query and zip_code or address.
-          3. If search candidates exist and quote_plan.items is empty, choose up to min(requested_count, max_count, available viable candidates) candidates and call select_quote_items with next=find_pro. Always create quote_plan.items, even when requested_count is 1. Prefer profile URLs, service_id values, strong rating/review evidence, and request_quote availability when visible. Set quote_plan.current_index=0 and project the current item into selected_pro_url, selected_service_id, name, price_text, rating, and review_count.
-          4. If no viable candidates exist, call select_quote_items with next=ask_user and question explaining that no pro could be selected and asking how to proceed.
-          5. If the current quote_plan item has selected_pro_url/selected_service_id but the projected singular selected_pro_url/selected_service_id is missing, call select_quote_items with next=find_pro to project the current item.
-          6. If a selected pro exists but pro details have not been loaded for the current item, call view_service with selected_pro_url and selected_service_id.
-          7. If pro details are loaded for the current item, call continue_flow with next=drive_quote.
-
-          When you need the user (next=ask_user), set question=<the concise question to ask the user>.
-        allowedTools: [resolve_zip, search_service, select_quote_items, view_service, continue_flow]
+          search_service is two-phase. The first call fires the search and may return
+          status="navigating" while the results page is still loading. Whenever the result is
+          status="navigating", call search_service AGAIN with the SAME query and zip_code to wait
+          for and read the now-loaded results. Repeat until status="completed" (results were read)
+          or status="error". Never stop while the status is "navigating".
         next:
-          find_pro: find_pro
-          drive_quote: drive_quote
-          ask_user: find_pro
+          read: results
+          done: results
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
-      drive_quote:
-        kind: action_unit
-        description: Open and complete the active Thumbtack quote flow until submit confirmation is required.
-        inputSelector:
-          - selected_pro_url
-          - selected_service_id
-          - contact
-          - zip_code
-          - user_requirements
-          - pro
-          - quote
-          - message
-          - quote_plan
-        prompt: |-
-          Drive the Thumbtack quote dialog for the current quote_plan item one tool call at a time. Use the projected state fields and call exactly one allowed tool.
-          Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
-
-          Rules:
-          - Work only on quote_plan.items[quote_plan.current_index], projected into selected_pro_url, selected_service_id, pro, quote, and submit.
-          - If quote.form is missing or the quote flow is not open, call open_quote using selected_pro_url and selected_service_id. Pass known contact fields if present. Do not submit.
-          - If quote.questions is present, quote.all_questions_available is true, and user_requirements is missing, ask once for the user's project requirements with plan_quote_step next=ask_user. Summarize the visible quote questions in one concise question. Do not ask those questions one at a time.
-          - If quote.request_error or quote.flow.request_error has a retry_field, call plan_quote_step with next=ask_user and question asking for the replacement value. Never retry the rejected bad_value.
-          - If a final Submit/send/request button is visible in quote.form: when quote_plan.submit_policy is submit_if_ready or submit_confirmed is true, call plan_quote_step with next=confirm_submit and a message summarizing the current pro, price_text, contact, zip, and quote_plan progress. When quote_plan.submit_policy is prepare_only, do not submit now — call plan_quote_step with next=finalize_item to record this item as ready and continue to the next item.
-          - For ordinary project questions, prefer automation over asking: call answer_quote with auto=true, user_requirements, and all known contact fields. AX_answer_quote matches exact visible labels when possible, chooses conservative defaults for radio choices, skips optional checkbox/upload steps when safe, fills textareas from user_requirements, and never clicks send/submit.
-          - If a required contact field is visible, answer it from contact or memory. Use memory as user-provided data when it contains exactly one unambiguous value.
-          - If both memory and the latest user request provide values, prefer the latest user request.
-          - If memory has multiple conflicting values for a required contact field, call plan_quote_step with next=ask_user and question asking the user to choose.
-          - If quote.status is `needs_answer`, quote.retry_field is `answer`, or quote.flow.advance_reason is `missing_answer` or `answer_not_applied` after an automated attempt, do not repeat the same answer. Ask one focused question for the current visible field/option with plan_quote_step next=ask_user.
-          - Always pass all currently known contact fields in `contact` when calling open_quote, answer_quote, or submit_quote; also pass any newly supplied contact field directly.
-
-          Never call submit_quote here. Never invent address or contact data.
-          When you need the user (next=ask_user), set question=<the concise question to ask the user>.
-        allowedTools: [open_quote, answer_quote, plan_quote_step]
-        next:
-          drive_quote: drive_quote
-          confirm_submit: confirm_submit
-          ask_user: drive_quote
-          finalize_item: finalize_item
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      confirm_submit:
-        kind: action_unit
-        description: Ask for or honor explicit submit confirmation.
-        inputSelector:
-          - submit_confirmed
-          - contact
-          - zip_code
-          - pro
-          - quote
-          - selected_pro_url
-          - selected_service_id
-          - name
-          - price_text
-          - message
-          - quote_plan
-        prompt: |-
-          If submit_confirmed is true or quote_plan.submit_policy is submit_if_ready, call confirm_submission with next=submit_quote and confirm=true.
-          Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
-          Otherwise call respond with next=done and message in the user's language asking for explicit confirmation before submitting the Thumbtack quote request. Include quote_plan progress, selected pro name, price_text, contact fields that will be sent, and note that contact fields may come from memory when the user did not override them. If any required contact field is still missing or ambiguous in memory, ask for that field instead of asking for submit confirmation.
-        allowedTools: [confirm_submission, respond]
-        next:
-          submit_quote: submit_quote
-          done: done
-          error: error
-        fallback: { invalidNext: done, exhaustedNext: done }
-
-      submit_quote:
-        kind: action_unit
-        description: Submit the quote after explicit confirmation.
-        inputSelector:
-          - submit_confirmed
-          - contact
-          - zip_code
-          - quote
-          - pro
-          - message
-          - submit
-          - quote_plan
-          - selected_pro_url
-          - selected_service_id
-        prompt: |-
-          Call submit_quote exactly once for the current quote_plan item only when submit_confirmed is true or quote_plan.submit_policy is submit_if_ready.
-          Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
-          Pass confirm=true and all known contact fields from contact or memory, preferring the latest user-provided values.
-          If the previous submit status is contact_update_required, use the latest user-provided replacement for submit.retry_field. Do not retry the rejected submit.bad_value.
-          The flow transition is derived from the remote result. A retryable contact popup pauses this node and asks for the replacement value; all other outcomes are recorded on the current quote_plan item.
-        allowedTools: [submit_quote]
-        next:
-          submit_quote: submit_quote
-          finalize_item: finalize_item
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      finalize_item:
-        kind: action_unit
-        description: Record the current quote item outcome and advance to the next item or final summary.
-        inputSelector:
-          - quote_plan
-          - selected_pro_url
-          - selected_service_id
-          - contact
-          - zip_code
-          - user_requirements
-          - pro
-          - quote
-          - submit
-          - message
-        prompt: |-
-          Record the projected singular fields into quote_plan.items[quote_plan.current_index], then call record_quote_item exactly once.
-          Use the projected state fields in this node input as the current request_service_quote state. Treat null, empty strings, and empty arrays as missing.
-
-          Status rules for the current item:
-          - If submit.status is submitted, set item.status=submitted.
-          - If submit.status is verification_required, contact_update_required, submit_needs_more_input, or submit_not_ready, set item.status=blocked and store submit plus a blocker.
-          - If quote.error is quote_unavailable, set item.status=skipped.
-          - If quote.error or submit.error is present, set item.status=failed and store the error.
-          - If quote.form shows a final Submit/send/request button, quote.flow.reached_submit_step is true, or quote.flow.advance_reason is unsafe_advance_button/advance_not_confirmed, set item.status=ready_to_submit.
-          - Otherwise set item.status=blocked with a concise blocker.
-
-          If another quote_plan item remains after the current item, increment quote_plan.current_index, project that next item into selected_pro_url, selected_service_id, name, price_text, rating, review_count, and clear quote/submit for the new item; set next=find_pro.
-          If no items remain, set quote_plan.status to complete when all items are submitted or ready_to_submit, partial when some items succeeded/prepared and some failed/skipped/blocked, otherwise failed; set next=final_response.
-          Preserve quote_plan.shared and all previous item results. Do not invent contact data.
-        allowedTools: [record_quote_item]
-        next:
-          find_pro: find_pro
-          final_response: final_response
-          ask_user: drive_quote
-          error: error
-        fallback: { invalidNext: final_response, exhaustedNext: final_response }
-
-      final_response:
-        kind: action_unit
-        description: Summarize the quote request outcome.
-        inputSelector:
-          - quote_plan
-          - pro
-          - quote
-          - submit
-          - message
-        prompt: |-
-          Call respond exactly once with next=done and a concise user-language summary.
-          Use the projected state fields in this node input as the current request_service_quote state.
-          Summarize quote_plan.items in order: pro name, visible price_text if available, item status, submit status, and any verification_required/contact_update_required/blocker state. For one item, use the same item-based summary without mentioning an internal batch mode.
-        allowedTools: [respond]
-        next:
-          done: done
-        fallback: { invalidNext: done, exhaustedNext: done }
+      results:
+        kind: terminal
+        respond: Return the search results as JSON.
 
       error:
         kind: terminal
-        respond: Use Flow state JSON's message, or say the quote flow could not continue.
-      done:
-        kind: terminal
-        respond: Use Flow state JSON's message.
+        respond: 견적 요청에 필요한 정보를 수집하지 못했습니다. 다시 시도해 주세요.
 flowTools:
-  capture_request:
-    description: Capture parsed quote-request details and choose the next flow node.
+  collect_fields:
+    description: Fill the collected request fields and choose the next step (ask the user, resolve a ZIP, or finish).
     execute:
       kind: runtime
       implementation: passthrough
     output: tool.args
     parameters:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [next]
       properties:
-        next: { type: string, enum: [find_pro, submit_quote, ask_user, error] }
+        next: { type: string, enum: [ask, resolve, done] }
+        question: { type: string }
         service_query: { type: string }
+        user_requirements: { type: string }
         address: { type: string }
         zip_code: { type: string }
-        filters: { type: object, additionalProperties: true }
-        contact: { type: object, additionalProperties: true }
-        user_requirements: { type: string }
-        submit_confirmed: { type: boolean }
-        message: { type: string }
-        question: { type: string }
-        requested_count: { type: integer, minimum: 1, maximum: 5 }
-        submit_policy: { type: string, enum: [prepare_only, submit_if_ready] }
-        quote_plan: { type: object, additionalProperties: true }
-
-  select_quote_items:
-    description: Capture selected Thumbtack quote targets and project the current item into singular fields.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [next]
-      properties:
-        next: { type: string, enum: [find_pro, drive_quote, ask_user, error] }
-        quote_plan: { type: object, additionalProperties: true }
-        selected_pro_url: { type: string }
-        selected_service_id: { type: string }
-        name: { type: string }
-        price_text: { type: string }
-        rating: { type: number }
-        review_count: { type: number }
-        reason: { type: string }
-        message: { type: string }
-        question: { type: string }
-
-  plan_quote_step:
-    description: Capture the next answer for the active Thumbtack quote step.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [next]
-      properties:
-        next: { type: string, enum: [confirm_submit, finalize_item, ask_user, error] }
-        value: { type: string }
-        selection: { type: string }
-        selections:
-          type: array
-          items: { type: string }
-        text: { type: string }
-        contact: { type: object, additionalProperties: true }
-        email: { type: string }
-        first_name: { type: string }
-        last_name: { type: string }
-        phone: { type: string }
-        zip_code: { type: string }
-        message: { type: string }
-        question: { type: string }
-
-  continue_flow:
-    description: Continue to the requested internal flow node.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [next]
-      properties:
-        next: { type: string, enum: [drive_quote, error] }
-        message: { type: string }
-
-  confirm_submission:
-    description: Capture explicit user confirmation to submit the quote request.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [next, confirm]
-      properties:
-        next: { type: string, enum: [submit_quote, error] }
-        confirm: { type: boolean, const: true }
-        message: { type: string }
-
-  record_quote_item:
-    description: Persist the current quote item result and optionally project the next item.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [next, quote_plan]
-      properties:
-        next: { type: string, enum: [find_pro, final_response, ask_user, error] }
-        quote_plan: { type: object, additionalProperties: true }
-        selected_pro_url: { type: string }
-        selected_service_id: { type: string }
-        name: { type: string }
-        price_text: { type: string }
-        rating: { type: number }
-        review_count: { type: number }
-        pro: { type: object, additionalProperties: true }
-        quote: { type: object, additionalProperties: true }
-        submit: { type: object, additionalProperties: true }
-        message: { type: string }
-        question: { type: string }
-
-  respond:
-    description: Return a message to the user.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [next, message]
-      properties:
-        next: { type: string, enum: [done] }
+        zip_status: { type: string }
         message: { type: string }
 
   resolve_zip:
-    description: Resolve a US ZIP code from an address string for Thumbtack searches.
+    description: Resolve a US ZIP code from an address string.
     execute: { kind: remote, tool: AX_resolve_zip }
     input:
       address: tool.args.address
     output:
-      next: { if: [{ var: result.error }, "error", "find_pro"] }
+      next: collect
       zip_code: result.zip_code
       zip_source: result.source
-      zip_status: result.status
+      zip_status: { if: [{ var: result.zip_code }, { var: result.status }, "resolve_failed"] }
       error: result.error
     parameters:
       type: object
@@ -508,225 +190,24 @@ flowTools:
         address: { type: string }
 
   search_service:
-    description: Search Thumbtack services and local pros by query and ZIP code or address.
-    execute: { kind: remote, tool: AX_search_service, timeoutMs: 25000 }
+    description: Search Thumbtack for local pros matching the service query in the resolved ZIP.
+    execute: { kind: remote, tool: AX_search_service, timeoutMs: 90000 }
     input:
       query: tool.args.query
       zip_code: tool.args.zip_code
-      address: tool.args.address
-      filters: tool.args.filters
-      cursor: tool.args.cursor
     output:
-      next: { if: [{ var: result.error }, "error", "find_pro"] }
-      search:
-        candidates: result.candidates
-        service_options: result.service_options
-        total_count: result.total_count
-        cursor: result.cursor
-        zip_code: result.zip_code
+      next: { if: [{ "==": [{ var: result.status }, "completed"] }, "done", { var: result.error }, "error", "read"] }
+      query: result.query
+      zip_code: result.zip_code
+      search_status: result.status
+      candidates: result.candidates
+      total_count: result.total_count
+      service_options: result.service_options
       error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [query]
+      required: [query, zip_code]
       properties:
         query: { type: string }
         zip_code: { type: string }
-        address: { type: string }
-        cursor: { type: string }
-        filters: { type: object, additionalProperties: true }
-
-  view_service:
-    description: View a Thumbtack pro profile from a search result URL.
-    execute: { kind: remote, tool: AX_view_service }
-    input:
-      url: tool.args.url
-      service_id: tool.args.service_id
-    output:
-      next: { if: [{ var: result.error }, "error", "drive_quote"] }
-      pro:
-        name: result.name
-        service_id: result.service_id
-        url: result.url
-        rating: result.rating
-        review_count: result.review_count
-        price_text: result.price_text
-        actions: result.actions
-        services_offered: result.services_offered
-      error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [url]
-      properties:
-        url: { type: string }
-        service_id: { type: string }
-
-  open_quote:
-    description: Open or inspect a Thumbtack quote flow from a pro profile URL.
-    execute: { kind: remote, tool: AX_open_quote }
-    input:
-      url: tool.args.url
-      service_id: tool.args.service_id
-      contact: tool.args.contact
-      email: tool.args.email
-      first_name: tool.args.first_name
-      last_name: tool.args.last_name
-      phone: tool.args.phone
-      zip_code: tool.args.zip_code
-      user_requirements: tool.args.user_requirements
-      auto: tool.args.auto
-      submit: false
-    output:
-      next: { if: [{ var: result.retry_field }, "ask_user", { if: [{ var: result.error }, "finalize_item", "drive_quote"] }] }
-      quote:
-        status: result.status
-        error: result.error
-        request_error: result.request_error
-        retry_field: result.retry_field
-        bad_value: result.bad_value
-        form: result.form
-        questions: result.questions
-        all_questions_available: result.all_questions_available
-        question_collection_status: result.question_collection_status
-        update: result.update
-      contact:
-        email: { if: [{ var: result.contact.email }, { var: result.contact.email }, { var: contact.email }] }
-        first_name: { if: [{ var: result.contact.first_name }, { var: result.contact.first_name }, { var: contact.first_name }] }
-        last_name: { if: [{ var: result.contact.last_name }, { var: result.contact.last_name }, { var: contact.last_name }] }
-        phone: { if: [{ var: result.contact.phone }, { var: result.contact.phone }, { var: contact.phone }] }
-        zip_code: { if: [{ var: result.contact.zip_code }, { var: result.contact.zip_code }, { var: contact.zip_code }] }
-      message: result.message
-      question: result.question
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [url]
-      properties:
-        url: { type: string }
-        service_id: { type: string }
-        contact: { type: object, additionalProperties: true }
-        email: { type: string }
-        first_name: { type: string }
-        last_name: { type: string }
-        phone: { type: string }
-        zip_code: { type: string }
-        user_requirements: { type: string }
-        auto: { type: boolean }
-
-  answer_quote:
-    description: Answer the active Thumbtack quote step without submitting.
-    execute: { kind: remote, tool: AX_answer_quote }
-    input:
-      value: tool.args.value
-      selection: tool.args.selection
-      selections: tool.args.selections
-      text: tool.args.text
-      user_requirements: tool.args.user_requirements
-      auto: tool.args.auto
-      contact: tool.args.contact
-      email: tool.args.email
-      first_name: tool.args.first_name
-      last_name: tool.args.last_name
-      phone: tool.args.phone
-      zip_code: tool.args.zip_code
-      advance: tool.args.advance
-    output:
-      next: { if: [{ var: result.retry_field }, "ask_user", { if: [{ var: result.error }, "finalize_item", "drive_quote"] }] }
-      quote:
-        status: result.status
-        applied: result.applied
-        flow: result.flow
-        form: result.form
-        questions: result.questions
-        all_questions_available: result.all_questions_available
-        question_collection_status: result.question_collection_status
-        error: result.error
-        request_error: result.request_error
-        retry_field: result.retry_field
-        bad_value: result.bad_value
-      contact:
-        email: { if: [{ var: result.contact.email }, { var: result.contact.email }, { var: contact.email }] }
-        first_name: { if: [{ var: result.contact.first_name }, { var: result.contact.first_name }, { var: contact.first_name }] }
-        last_name: { if: [{ var: result.contact.last_name }, { var: result.contact.last_name }, { var: contact.last_name }] }
-        phone: { if: [{ var: result.contact.phone }, { var: result.contact.phone }, { var: contact.phone }] }
-        zip_code: { if: [{ var: result.contact.zip_code }, { var: result.contact.zip_code }, { var: contact.zip_code }] }
-      message: result.message
-      question: result.question
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        value: { type: string }
-        selection: { type: string }
-        selections:
-          type: array
-          items: { type: string }
-        text: { type: string }
-        user_requirements: { type: string }
-        auto: { type: boolean }
-        contact: { type: object, additionalProperties: true }
-        email: { type: string }
-        first_name: { type: string }
-        last_name: { type: string }
-        phone: { type: string }
-        zip_code: { type: string }
-        advance: { type: boolean }
-
-  submit_quote:
-    description: Submit the active Thumbtack quote flow after explicit user confirmation.
-    execute: { kind: remote, tool: AX_submit_quote }
-    input:
-      confirm: tool.args.confirm
-      contact: tool.args.contact
-      email: tool.args.email
-      first_name: tool.args.first_name
-      last_name: tool.args.last_name
-      phone: tool.args.phone
-      zip_code: tool.args.zip_code
-      max_steps: tool.args.max_steps
-    output:
-      next: { if: [{ var: result.retry_field }, "submit_quote", "finalize_item"] }
-      submit:
-        status: result.status
-        before: result.before
-        steps: result.steps
-        after: result.after
-        error: result.error
-        request_error: result.request_error
-        retry_field: result.retry_field
-        bad_value: result.bad_value
-        message: result.message
-        question: result.question
-      message: result.message
-      question: result.question
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [confirm]
-      properties:
-        confirm: { type: boolean, const: true }
-        contact: { type: object, additionalProperties: true }
-        email: { type: string }
-        first_name: { type: string }
-        last_name: { type: string }
-        phone: { type: string }
-        zip_code: { type: string }
-        max_steps: { type: integer, minimum: 1 }
-
-  echo:
-    description: Debug echo — console.log and return the given arguments. Declaration only; not referenced by any node. Wire it into a debug flow/node (allowedTools) to expose it to the LLM.
-    execute: { kind: remote, tool: AX_echo }
-    input:
-      message: tool.args.message
-      data: tool.args.data
-    output:
-      next: done
-      echo: result
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [message]
-      properties:
-        message: { type: string }
-        data: { type: object, additionalProperties: true }

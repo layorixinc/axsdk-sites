@@ -4,7 +4,9 @@ local M = AX_THUMBTACK
 M.HOME_URL = "https://www.thumbtack.com/"
 M.SEARCH_INPUT_SELECTOR = 'input[aria-label="Search on Thumbtack"]'
 M.SEARCH_ZIP_SELECTOR = 'input[aria-label="Zip code"]'
-M.SEARCH_BUTTON_SELECTOR = 'button[data-test="search-button"]'
+-- The search submit is the only type=submit button inside the search form (text "Search"); the old
+-- data-test="search-button" no longer exists on Thumbtack. Scope by the search input to stay unique.
+M.SEARCH_BUTTON_SELECTOR = 'form:has(input[aria-label="Search on Thumbtack"]) button[type="submit"]'
 M.SEARCH_AUTOCOMPLETE_SELECTOR = '[role="option"]'
 M.RESULT_READY_SELECTOR = 'a[href*="/service/"], [data-testid="pro-list-result"], [data-test="pro-list-result"]'
 M.SERVICE_READY_SELECTOR = 'h1, button, [data-test="specialties-section__interested-item"]'

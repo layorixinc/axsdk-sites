@@ -153,7 +153,9 @@ function M.start_search(query, zip_code)
   -- instead of diverging, and there is no live-state branch that could flip across the navigation.
   -- The page lists pros as [data-test="pro-list-result"] cards that read_search_candidates parses.
   local slug = M.category_slug(query)
-  local url = M.CATEGORY_SEARCH_URL .. slug .. "/near-me/"
+  -- No trailing slash before the query: Thumbtack canonicalizes /near-me/ to /near-me, so matching
+  -- that exact form lets nav.navigate's arrival check (expectedUrl) resolve instead of timing out.
+  local url = M.CATEGORY_SEARCH_URL .. slug .. "/near-me"
   local zip = M.non_empty(zip_code)
   if zip then
     url = url .. "?zip_code=" .. zip
@@ -220,7 +222,10 @@ function M.result_candidate_from_row(row)
 end
 
 function M.read_search_candidates()
-  local rows = dom.query_all('[data-test="pro-list-result"]', {
+  -- The full pro card is the div that directly contains a [data-test="pro-list-result"]; it holds
+  -- the service link, avatar img (alt="Avatar for <name>"), and the rich text (rating/price/summary).
+  -- The pro-list-result element itself does NOT contain the service link, so query the parent.
+  local rows = dom.query_all('div:has(> [data-test="pro-list-result"])', {
     url = { selector = 'a[href*="/service/"]', attr = "href" },
     name = { selector = ".pro-title", text = true },
     image_url = { selector = "img", attr = "src" },

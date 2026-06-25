@@ -43,19 +43,6 @@ function AX_search_service(args)
     if M.current_url() ~= cursor then
       nav.navigate(cursor, {})
     end
-  elseif not M.is_thumbtack_domain() then
-    -- Off Thumbtack entirely (e.g. the flow started on an external page like a search engine):
-    -- navigate to the Thumbtack home page first so the homepage search form below is present.
-    -- The caller re-invokes on the navigating status, now on thumbtack.com, where resolve_zip +
-    -- start_search run.
-    nav.navigate(M.HOME_URL, {})
-    return {
-      query = query,
-      status = "navigating",
-      candidates = ax.array(),
-      total_count = 0,
-      cursor = false
-    }
   end
 
   local zip_result = M.resolve_zip(args)

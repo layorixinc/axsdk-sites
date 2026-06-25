@@ -63,11 +63,11 @@ flows:
         description: Fill the request fields from the user message and memory; ask for anything missing; resolve a ZIP from an address when needed.
         model:
           providerID: openrouter
-          modelID: z-ai/glm-5.2
+          modelID: openai/gpt-5.4-nano
           providerOptions:
             openrouter:
               provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: medium }
+              reasoning: { effort: low }
         inputSelector:
           - requestText
           - service_query
@@ -102,21 +102,25 @@ flows:
         description: Search Thumbtack for the collected service in the resolved ZIP.
         model:
           providerID: openrouter
-          modelID: z-ai/glm-5.2
+          modelID: openai/gpt-5.4-nano
           providerOptions:
             openrouter:
               provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: medium }
+              reasoning: { effort: low }
         inputSelector:
           - service_query
           - zip_code
           - address
-        allowedTools: [search_service]
+        allowedTools: [open_site, search_service]
         llm: { maxCalls: 8 }
         prompt: |-
-          Call search_service with `query` = the collected service_query (e.g. "house cleaning",
-          "handyman") and `zip_code` = the collected zip_code (copy the resolved ZIP from the
-          projected state). Do not set any other field.
+          First call open_site with site="thumbtack" so the browser is on Thumbtack — the search
+          commands only exist on thumbtack.com. If open_site returns status="navigating", call it
+          AGAIN with site="thumbtack" until it returns status="ready".
+
+          Once open_site is "ready", call search_service with `query` = the collected service_query
+          (e.g. "house cleaning", "handyman") and `zip_code` = the collected zip_code (copy the
+          resolved ZIP from the projected state). Do not set any other field.
 
           search_service is two-phase. The first call fires the search and may return
           status="navigating" while the results page is still loading. Whenever the result is
@@ -124,6 +128,7 @@ flows:
           for and read the now-loaded results. Repeat until status="completed" (results were read)
           or status="error". Never stop while the status is "navigating".
         next:
+          search: search
           read: read_results
           done: pick_quote
           error: error
@@ -205,6 +210,22 @@ flowTools:
       required: [address]
       properties:
         address: { type: string }
+
+  open_site:
+    description: Navigate to the target site's home page before searching. Site-keyed and idempotent — a no-op when already on the site, otherwise fires a durable navigation and returns status="navigating".
+    execute: { kind: remote, tool: AX_open_site, timeoutMs: 60000 }
+    input:
+      site: tool.args.site
+    output:
+      next: { if: [{ "==": [{ var: result.status }, "error"] }, "error", "search"] }
+      search_status: result.status
+      error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [site]
+      properties:
+        site: { type: string, enum: [thumbtack] }
 
   search_service:
     description: Search Thumbtack for local pros matching the service query in the resolved ZIP.

@@ -101,16 +101,6 @@ function M.is_home_page()
   return href == "https://www.thumbtack.com/" or href == "http://www.thumbtack.com/" or href:match("^https://www%.thumbtack%.com/$") ~= nil
 end
 
--- True when the current page is anywhere on thumbtack.com (any subdomain). Used to send the search
--- flow to the Thumbtack home page when it starts on an external page (e.g. a search engine).
-function M.is_thumbtack_domain()
-  local host = M.current_url():match("^https?://([^/]+)")
-  if not host then
-    return false
-  end
-  return host == "thumbtack.com" or host:match("%.thumbtack%.com$") ~= nil
-end
-
 function M.is_results_page()
   local href = M.current_url()
   return href:find("/instant-results/", 1, true) ~= nil or href:find("/near-me", 1, true) ~= nil

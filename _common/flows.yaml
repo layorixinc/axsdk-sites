@@ -52,17 +52,22 @@ flows:
       total_count: null
       service_options: null
       search_status: null
+      quote_status: null
+      quote_service_id: null
+      quote_index: null
+      quote_url: null
+      quote_target_service_id: null
     nodes:
       collect_request:
         kind: action_unit
         description: Fill the request fields from the user message and memory; ask for anything missing; resolve a ZIP from an address when needed.
         model:
           providerID: openrouter
-          modelID: minimax/minimax-m3
+          modelID: z-ai/glm-5.2
           providerOptions:
             openrouter:
-              provider: { sort: latency, allow_fallbacks: false }
-              reasoning: { effort: high }
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: medium }
         inputSelector:
           - requestText
           - service_query
@@ -70,63 +75,44 @@ flows:
           - address
           - zip_code
           - zip_status
-        allowedTools: [collect_fields]
+        allowedTools: [collect_fields, resolve_zip]
         prompt: |-
-          You collect the details needed for a service-quote request. Fill the empty fields from the latest user message (requestText) and the <memory> context. Use the projected state fields as the current values; treat null, empty strings, and empty arrays as missing.
+          Collect a service-quote request, then finish. The current values are the projected state fields; ALSO extract values from the latest user message (requestText) and <memory>. A field is MISSING only if it is absent from the message, memory, AND state. ENGLISH only — translate the service ("청소" -> "house cleaning", "핸디맨" -> "handyman", "잔디 깎기" -> "lawn mowing") and the city ("샌프란시스코" -> "San Francisco, CA").
 
-          Fields:
-          - service_query: the service to search for (e.g. "house cleaning", "handyman"). Extract from requestText when concrete.
-          - user_requirements: what the user wants done and when (scope / details / timing).
-          - address: a service address or city/state, when the user or memory provides one. Used only to derive a ZIP; not a required final field by itself. Normalize it to an English "City, ST" form (e.g., "San Francisco, CA") so the ZIP can be resolved.
-          - zip_code: a US ZIP code for the search.
+          Two tools:
+          - resolve_zip(address): turns an ENGLISH US city/address into a zip_code (sets zip_code, zip_status). Use it to obtain a zip; never guess one. "resolve" is NOT a next value.
+          - collect_fields(next, question?, service_query?, user_requirements?, address?, zip_code?): re-emit fields you know, OMIT unknown ones (never null). next is "ask" or "done" ONLY; "ask" needs a `question` in the user's language.
 
-          Use the <memory> context as user-provided data: use a single unambiguous value; prefer the latest user message over memory; on conflicting memory values, ask the user to choose instead of guessing.
-
-          Call collect_fields exactly once, always re-emitting every field you already know (service_query, user_requirements, address, zip_code) so accumulated values persist. Choose next:
-          - next=ask — when you need the user to supply a missing or ambiguous detail. You MUST also set a non-empty `question` with the exact question to show the user, in their language. Ask when:
-            - service_query or user_requirements is missing or ambiguous; or
-            - zip_code is missing AND address is also missing (ask for the service address or US ZIP code); or
-            - zip_code is still missing after a resolve attempt (zip_status is non-empty, e.g. "zip_not_found" or an error) — ask for a valid US ZIP code or a more specific address; when the user gives a new address or ZIP, set address/zip_code and reset zip_status to empty.
-          - next=resolve — when zip_code is missing, address is present, and zip_status is empty (you have not resolved yet). resolve_zip derives the ZIP from the address and sets zip_status itself — you do not set zip_status.
-          - next=done — when service_query, user_requirements, and zip_code are ALL present. The flow then searches Thumbtack for matching pros; you do not need to write a confirmation message.
-
-          Never set next=ask without a non-empty question.
+          Make ONE tool call — the FIRST rule that applies (a city is NOT a zip_code; you cannot finish with only a city):
+          - service_query unknown -> collect_fields next="ask" (ask which service). If the message names the service, it is known — skip this.
+          - user_requirements unknown -> collect_fields next="ask" (ask what and when).
+          - zip_code unknown AND address unknown -> collect_fields next="ask" (ask for the address or US ZIP code).
+          - zip_code unknown AND address known AND zip_status empty -> resolve_zip(ENGLISH address). Do NOT ask; do NOT finish.
+          - zip_code unknown AND zip_status set (a resolve already failed) -> collect_fields next="ask" (ask for a valid US ZIP or a more specific English address).
+          - zip_code known (5-digit) -> collect_fields next="done".
         next:
           ask: collect_request
-          resolve: resolve_location
+          collect: collect_request
           done: search
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
-
-      resolve_location:
-        kind: action_unit
-        description: Resolve a US ZIP code from the collected address, then return to collect_request.
-        inputSelector:
-          - address
-        allowedTools: [resolve_zip]
-        prompt: |-
-          Call resolve_zip exactly once with the collected address to derive a US ZIP code.
-        next:
-          collect: collect_request
-          error: error
-        fallback: { invalidNext: collect, exhaustedNext: error }
 
       search:
         kind: action_unit
         description: Search Thumbtack for the collected service in the resolved ZIP.
         model:
           providerID: openrouter
-          modelID: minimax/minimax-m3
+          modelID: z-ai/glm-5.2
           providerOptions:
             openrouter:
-              provider: { sort: latency, allow_fallbacks: false }
-              reasoning: { effort: high }
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: medium }
         inputSelector:
           - service_query
           - zip_code
           - address
         allowedTools: [search_service]
-        llm: { maxCalls: 5 }
+        llm: { maxCalls: 8 }
         prompt: |-
           Call search_service with `query` = the collected service_query (e.g. "house cleaning",
           "handyman") and `zip_code` = the collected zip_code (copy the resolved ZIP from the
@@ -139,9 +125,31 @@ flows:
           or status="error". Never stop while the status is "navigating".
         next:
           read: results
-          done: results
+          done: pick_quote
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
+
+      pick_quote:
+        kind: action_contract
+        id: pick_quote
+        description: Deterministically pick the next candidate pro and advance quote_index (no LLM, no navigation).
+        next:
+          open: open_quote
+          done: quotes_done
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      open_quote:
+        kind: action_contract
+        id: open_quote
+        description: Navigate to the picked pro and open its "Request estimate" dialog (never submits).
+        next:
+          open: pick_quote
+          error: pick_quote
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      quotes_done:
+        kind: terminal
+        respond: Return the search results as JSON, plus a short note that the request-quote flow was opened for each candidate (none were submitted).
 
       results:
         kind: terminal
@@ -152,7 +160,7 @@ flows:
         respond: 견적 요청에 필요한 정보를 수집하지 못했습니다. 다시 시도해 주세요.
 flowTools:
   collect_fields:
-    description: Fill the collected request fields and choose the next step (ask the user, resolve a ZIP, or finish).
+    description: Fill the collected request fields and choose the next step (ask the user or finish).
     execute:
       kind: runtime
       implementation: passthrough
@@ -162,7 +170,7 @@ flowTools:
       additionalProperties: true
       required: [next]
       properties:
-        next: { type: string, enum: [ask, resolve, done] }
+        next: { type: string, enum: [ask, done] }
         question: { type: string }
         service_query: { type: string }
         user_requirements: { type: string }
@@ -177,7 +185,7 @@ flowTools:
     input:
       address: tool.args.address
     output:
-      next: collect
+      next: { if: [{ var: result.zip_code }, "collect", "ask"] }
       zip_code: result.zip_code
       zip_source: result.source
       zip_status: { if: [{ var: result.zip_code }, { var: result.status }, "resolve_failed"] }
@@ -211,3 +219,50 @@ flowTools:
       properties:
         query: { type: string }
         zip_code: { type: string }
+
+  pick_quote:
+    description: Deterministically pick the next candidate pro to open and advance quote_index. No LLM, no navigation.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |
+        -- args.candidates / args.quote_index are projected from flow state (action_contract).
+        local cands = args.candidates or {}
+        local idx = args.quote_index or 0   -- count of pros already opened (0-based)
+        local MAX_OPEN = 3                   -- cap per turn to stay within the ~12-step budget
+        local limit = #cands
+        if limit > MAX_OPEN then limit = MAX_OPEN end
+        if idx < limit then
+          local c = cands[idx + 1] or {}     -- Lua is 1-based; cands[idx+1] is the next unopened pro
+          return {
+            next = "open",
+            quote_url = c.url,
+            quote_target_service_id = c.service_id,
+            quote_index = idx + 1,
+          }
+        end
+        return { next = "done", quote_index = idx }
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        candidates: { type: array }
+        quote_index: { type: [integer, "null"] }
+
+  open_quote:
+    description: Navigate to the picked pro and open its "Request estimate" dialog. Never submits or sends.
+    execute: { kind: remote, tool: AX_open_quote, timeoutMs: 60000 }
+    input:
+      url: tool.args.quote_url
+      service_id: tool.args.quote_target_service_id
+    output:
+      next: { if: [{ var: result.error }, "error", "open"] }
+      quote_status: result.status
+      quote_service_id: result.service_id
+      quote_error: result.error
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        quote_url: { type: string }
+        quote_target_service_id: { type: [string, "null"] }

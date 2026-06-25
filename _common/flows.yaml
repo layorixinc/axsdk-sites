@@ -124,8 +124,21 @@ flows:
           for and read the now-loaded results. Repeat until status="completed" (results were read)
           or status="error". Never stop while the status is "navigating".
         next:
-          read: results
+          read: read_results
           done: pick_quote
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      read_results:
+        kind: action_contract
+        id: search_service
+        description: Re-read the now-loaded results page (phase 2 of the two-phase search) before opening quotes.
+        inputSelector:
+          - query
+          - zip_code
+        next:
+          done: pick_quote
+          read: pick_quote
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -150,10 +163,6 @@ flows:
       quotes_done:
         kind: terminal
         respond: Return the search results as JSON, plus a short note that the request-quote flow was opened for each candidate (none were submitted).
-
-      results:
-        kind: terminal
-        respond: Return the search results as JSON.
 
       error:
         kind: terminal

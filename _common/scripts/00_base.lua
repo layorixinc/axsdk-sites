@@ -274,18 +274,22 @@ function B.click_verified(opts)
 end
 
 -- ── US ZIP resolution (address/city -> ZIP) ───────────────────────────────────
--- Parses a trailing 2-letter state ("San Francisco, CA"); returns nil,nil when not "City, ST".
+-- Parses CITY and 2-letter STATE from a US address. Accepts a bare "City, ST" AND a full
+-- "street, City, ST" (city = the comma-segment immediately before the state); returns nil,nil
+-- when there is no trailing 2-letter state.
 function B.split_city_state(address)
   local text = B.clean_text(address)
-  local city, state = text:match("^(.+),%s*([A-Za-z][A-Za-z])%s*$")
-  if city and state then
-    return B.non_empty(city), state:upper()
+  local before, state = text:match("^(.+),%s*([A-Za-z][A-Za-z])%s*$")
+  if not (before and state) then
+    return nil, nil
   end
-  return nil, nil
+  -- "1 Main St, San Francisco" -> "San Francisco"; "San Francisco" -> "San Francisco".
+  local city = before:match("([^,]+)%s*$") or before
+  return B.non_empty(city), state:upper()
 end
 
--- Census onelineaddress only matches full street addresses; a bare "City, ST" returns no
--- addressMatches. This resolves a representative ZIP for the city via Zippopotam.
+-- Resolves a representative city ZIP via Zippopotam — the PRIMARY resolver (reliable, unlike the
+-- frequently slow/erroring Census geocoder). Returns a ZIP string, { pending = true }, or nil.
 function B.zip_from_city(address)
   local city, state = B.split_city_state(address)
   if not city or not state then
@@ -332,7 +336,10 @@ function B.zip_from_city(address)
   return fallback
 end
 
--- args.zip_code (explicit) -> args.address embedded ZIP -> Census (full street) -> Zippopotam city.
+-- Resolution ladder: args.zip_code (explicit) -> args.address embedded ZIP -> Zippopotam city
+-- (PRIMARY) -> Census onelineaddress (fallback for full street addresses Zippopotam can't resolve).
+-- City-level ZIP is the right granularity for finding local pros and avoids the flaky Census path
+-- for the common "City, ST" input.
 function B.resolve_zip(args)
   args = args or {}
   local explicit = B.extract_zip(args.zip_code)
@@ -357,6 +364,23 @@ function B.resolve_zip(args)
       source = "address_text"
     }
   end
+
+  -- Primary: Zippopotam city lookup (split_city_state extracts the city even from a full address).
+  local city_zip = B.zip_from_city(address)
+  if type(city_zip) == "table" and city_zip.pending then
+    return {
+      pending = true,
+      error = "pending"
+    }
+  end
+  if city_zip then
+    return {
+      zip_code = tostring(city_zip),
+      source = "zippopotam_city"
+    }
+  end
+
+  -- Fallback: Census full-address geocoder, only when Zippopotam yields no city ZIP.
   local fetch = (net and net.fetch) or (http and http.fetch)
   if not fetch then
     return {
@@ -396,30 +420,16 @@ function B.resolve_zip(args)
   local first = matches and matches[1]
   local components = first and first.addressComponents
   local zip = components and components.zip
-  if not zip then
-    local city_zip = B.zip_from_city(address)
-    if type(city_zip) == "table" and city_zip.pending then
-      return {
-        pending = true,
-        error = "pending"
-      }
-    end
-    if city_zip then
-      return {
-        zip_code = tostring(city_zip),
-        source = "zippopotam_city"
-      }
-    end
+  if zip then
     return {
-      error = "zip_not_found",
-      status = response.status,
-      message = "No ZIP for this address. Provide a full street address or a 5-digit ZIP."
+      zip_code = tostring(zip),
+      source = "census_geocoder",
+      matched_address = first.matchedAddress
     }
   end
-
   return {
-    zip_code = tostring(zip),
-    source = "census_geocoder",
-    matched_address = first.matchedAddress
+    error = "zip_not_found",
+    status = response.status,
+    message = "No ZIP for this address. Provide a full street address or a 5-digit ZIP."
   }
 end

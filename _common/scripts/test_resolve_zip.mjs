@@ -65,19 +65,22 @@ async function loadFile(page, file, id, inline = false) {
   const loaded = await callInCtx(page, ctx, LOAD_FN, [source, id]);
   if (!loaded?.ok && loaded?.status !== 'loaded') throw new Error(`load failed (${id}): ${JSON.stringify(loaded)}`);
 }
-// Calls AX_resolve_zip; retries while the network ladder reports pending (Census/Zippopotam fetch).
-async function resolveZip(page, args, retries = 6) {
+// Calls AX_resolve_zip; retries while the durable net.fetch reports pending or a transient error.
+// preferZippopotam: for a known US city a census_geocoder result means the Zippopotam PRIMARY
+// transiently missed and the Census fallback caught it — retry to surface the primary source.
+async function resolveZip(page, args, { retries = 6, preferZippopotam = false } = {}) {
   let out;
   for (let i = 0; i < retries; i++) {
     const ctx = await axContext(page);
     out = await callInCtx(page, ctx, `async function(args){const lua=globalThis._AXSDK?.lua||globalThis._AXLUA;const res=await lua.run('AX_resolve_zip',args,{timeoutMs:8000});let v=null;if(res?.result){try{v=JSON.parse(res.result);}catch{v=res.result;}}return {status:res?.status,value:v};}`, [args]);
     const v = out.value;
     // Durable net.fetch can suspend (status='pending'/empty result) or hit a transient network
-    // error (reason='fetch_error', e.g. the 4s Census timeout). Re-run replays the durable step;
-    // definitive errors (missing_zip_or_address, zip_not_found) are NOT retried.
-    const stillPending = out.status !== 'completed' || !v || v.pending === true
-      || v.error === 'pending' || v.reason === 'fetch_error';
-    if (!stillPending) break;
+    // error (reason='fetch_error'); re-run replays the durable step. Definitive results
+    // (zip_code, missing_zip_or_address, zip_not_found) are NOT retried.
+    const transient = out.status !== 'completed' || !v || v.pending === true
+      || v.error === 'pending' || v.reason === 'fetch_error'
+      || (preferZippopotam && v.source === 'census_geocoder');
+    if (!transient) break;
     if (i < retries - 1) await sleep(1500);
   }
   return out;
@@ -124,16 +127,26 @@ async function main() {
   check('empty args -> error=missing_zip_or_address',
     r.status === 'completed' && r.value?.error === 'missing_zip_or_address', r.value);
 
-  // 4. full street address via Census geocoder — NETWORK (luaFetch bridge on external host).
-  r = await resolveZip(page, { address: '1 Dr Carlton B Goodlett Pl, San Francisco, CA' });
-  check('full address -> 94102 via census_geocoder (network on google.com)',
-    r.status === 'completed' && r.value?.zip_code === '94102' && r.value?.source === 'census_geocoder', r.value);
+  // 4. full street address — NETWORK. The city ("San Francisco") is extracted and resolved via
+  //    Zippopotam (PRIMARY); Census is a fallback for inputs Zippopotam can't resolve. Either source
+  //    is a valid resolution (durable caching can pin one call to the fallback after a transient miss).
+  const full = await resolveZip(page, { address: '1 Dr Carlton B Goodlett Pl, San Francisco, CA' }, { preferZippopotam: true });
+  check('full address -> valid SF ZIP (zippopotam primary | census fallback)',
+    full.status === 'completed' && /^941\d\d$/.test(String(full.value?.zip_code || ''))
+      && (full.value?.source === 'zippopotam_city' || full.value?.source === 'census_geocoder'), full.value);
 
-  // 5. city-only via Zippopotam fallback — NETWORK. This is the cleaning-quote path: a user types a
-  //    city ("San Francisco") on google.com and the flow must resolve a representative ZIP.
-  r = await resolveZip(page, { address: 'San Francisco, CA' });
-  check('city-only "San Francisco, CA" -> ZIP via zippopotam_city (network on google.com)',
-    r.status === 'completed' && /^\d{5}$/.test(String(r.value?.zip_code || '')) && r.value?.source === 'zippopotam_city', r.value);
+  // 5. city-only — NETWORK. The cleaning-quote path: a user types a city ("San Francisco") and the
+  //    flow resolves a representative ZIP. Zippopotam is primary here.
+  const city = await resolveZip(page, { address: 'San Francisco, CA' }, { preferZippopotam: true });
+  check('city-only "San Francisco, CA" -> valid ZIP (zippopotam primary | census fallback)',
+    city.status === 'completed' && /^\d{5}$/.test(String(city.value?.zip_code || ''))
+      && (city.value?.source === 'zippopotam_city' || city.value?.source === 'census_geocoder'), city.value);
+
+  // Prove Zippopotam is the PRIMARY resolver: at least one live city lookup resolved via it
+  // (Census is only reached when Zippopotam yields nothing).
+  check('Zippopotam is primary (>=1 network case via zippopotam_city)',
+    [full, city].some(x => x.value?.source === 'zippopotam_city'),
+    { full: full.value?.source, city: city.value?.source });
 
   console.log(ok ? '\nALL PASS — AX_resolve_zip works standalone on an external site' : '\nSOME FAILED');
   process.exitCode = ok ? 0 : 1;

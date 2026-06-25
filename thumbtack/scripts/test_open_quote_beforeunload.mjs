@@ -15,8 +15,8 @@ const args = process.argv.slice(2);
 const cdp = (args.find(a => a.startsWith('--cdp=')) || '').slice('--cdp='.length) || 'http://127.0.0.1:9225';
 const KEYWORD_PK = '102906936628587357'; // handyman
 const COMMON_DIR = resolve(__dirname, '..', '..', '_common', 'scripts');
-const COMMON_FILES = ['00_base.lua', '10_form_wizard.lua', '20_echo.lua']; // AX_BASE etc. — must load before 00_common
-const TT_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua', 'submit_quote.lua'];
+const COMMON_FILES = ['00_base.lua', '10_form_wizard.lua', '20_echo.lua', '30_resolve_zip.lua']; // AX_BASE etc. — must load before 00_common
+const TT_FILES = ['00_common.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua', 'submit_quote.lua'];
 const LOAD_FN = `async function(source,id){const lua=globalThis._AXSDK?.lua||globalThis._AXLUA;if(!lua)throw new Error('no lua');if(typeof lua.load==='function')return await lua.load(source,{id});return await lua.loadSiteScript(source,{id,replace:true,kind:'devtools'});}`;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));

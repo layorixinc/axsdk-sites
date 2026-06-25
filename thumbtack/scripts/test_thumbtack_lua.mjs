@@ -11,9 +11,9 @@ const DEFAULT_EXTENSION_ID = 'dldlgmekahifbogjphgglkhibclglmpf';
 const DEFAULT_CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const DEFAULT_PROFILE = process.env.CHROME_PROFILE || `${process.env.LOCALAPPDATA || ''}/AXSDKSitesChromeDevProfile`;
 const DEFAULT_PORT = Number(process.env.CDP_PORT || 9224);
-const LUA_FILES = ['00_common.lua', 'resolve_zip.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua', 'submit_quote.lua'];
+const LUA_FILES = ['00_common.lua', 'search_service.lua', 'view_service.lua', 'update_search.lua', 'answer_quote.lua', 'open_quote.lua', 'submit_quote.lua'];
 const commonDir = resolve(repoRoot, '_common', 'scripts');
-const COMMON_FILES = ['00_base.lua', '10_form_wizard.lua', '20_echo.lua'];
+const COMMON_FILES = ['00_base.lua', '10_form_wizard.lua', '20_echo.lua', '30_resolve_zip.lua'];
 const DEFAULT_SCENARIOS = [
   { name: 'house-cleaning', query: 'house cleaning', address: 'San Francisco, CA', requirements: 'Standard home cleaning for a small home, no pets.' },
   { name: 'lawn-mowing', query: 'lawn mowing', address: 'San Francisco, CA', requirements: 'Residential lawn mowing, one-time service within 48 hours.' },

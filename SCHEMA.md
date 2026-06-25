@@ -129,7 +129,7 @@
   },
   {
     "name": "AX_resolve_zip",
-    "description": "Resolve a US ZIP code from an address string for Thumbtack searches.",
+    "description": "Resolve a US ZIP code from an address string. Site-agnostic: callable on any page (e.g. before navigating to a provider site).",
     "parameters": {
       "additionalProperties": false,
       "properties": {

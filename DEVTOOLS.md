@@ -73,8 +73,10 @@ async function axcall(cmd, args = {}) {
 | `AX_submit_quote` | submits quote | `axrun("AX_submit_quote", { confirm: true })` |
 
 - `AX_search_service` requires `query` plus `zip_code` **or** `address`.
-- `AX_resolve_zip` / `address`: a full street address resolves via the US Census geocoder; a bare
-  `"City, ST"` falls back to a representative city ZIP. A 5-digit ZIP in the text is used directly.
+- `AX_resolve_zip` is **site-agnostic** — it lives in `_common/scripts/` and loads on every site, so you can
+  call it from any page (e.g. google.com) before navigating to a provider. `address`: a full street address
+  resolves via the US Census geocoder; a bare `"City, ST"` falls back to a representative city ZIP. A 5-digit
+  ZIP in the text is used directly.
 - `AX_view_service` / `AX_open_quote` `url` = a pro profile URL from `AX_search_service` results.
 
 ### Quote request flow test recipe

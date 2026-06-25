@@ -13,7 +13,14 @@ function AX_open_quote(args)
   end
 
   if service_id or url then
-    M.navigate_service_if_needed({ service_id = service_id, url = url })
+    local nav_result = M.navigate_service_if_needed({ service_id = service_id, url = url })
+    if not nav_result.ok then
+      return {
+        service_id = service_id or M.service_id_from_url(M.current_url()),
+        error = "quote_unavailable",
+        reason = nav_result.reason
+      }
+    end
   end
 
   -- Wait for the pro page's quote CTA to render, then open the request flow if a step is not already

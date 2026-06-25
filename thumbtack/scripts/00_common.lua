@@ -359,29 +359,52 @@ end
 -- group container (options share the input name, read at runtime; the label carries no stable id).
 -- Idempotent: an already-selected option is left unchanged.
 function M.select_radio_filter_option(target)
-  local options = dom.query_all('label:has(input[type="radio"]), label:has(input[type="checkbox"])', {
-    text = true,
-    group = { selector = "input", attr = "name" },
-    checked = { selector = "input", attr = "checked" }
-  }, 300)
-  local counts = {}
-  for index = 1, #options do
-    local option = options[index]
-    local group = option.group or ""
-    counts[group] = (counts[group] or 0) + 1
-    if M.normalize_text(option.text or "") == target then
-      if option.checked == true then
-        return { ok = true, already_selected = true }
-      end
-      if option.group then
-        local selector = 'div:has(> div > label > input[name="' .. option.group
-          .. '"]) > *:nth-child(' .. counts[group] .. ') label'
-        dom.click(selector, { navigates = false })
-        return { ok = true, position = counts[group] }
+  local function read_options()
+    return dom.query_all('label:has(input[type="radio"]), label:has(input[type="checkbox"])', {
+      text = true,
+      group = { selector = "input", attr = "name" },
+      checked = { selector = "input", attr = "checked" }
+    }, 300)
+  end
+  -- Locate the option by visible text and its 1-based position within its input-name group.
+  local function locate(options)
+    local counts = {}
+    for index = 1, #options do
+      local option = options[index]
+      local group = option.group or ""
+      counts[group] = (counts[group] or 0) + 1
+      if M.normalize_text(option.text or "") == target then
+        return option, counts[group]
       end
     end
+    return nil, nil
   end
-  return { ok = false, error = "option_not_found" }
+  local option, position = locate(read_options())
+  if not option then
+    return { ok = false, error = "option_not_found" }
+  end
+  if option.checked == true then
+    return { ok = true, already_selected = true }
+  end
+  if not option.group then
+    return { ok = false, error = "option_not_found" }
+  end
+  local selector = 'div:has(> div > label > input[name="' .. option.group
+    .. '"]) > *:nth-child(' .. position .. ') label'
+  -- Verify the click actually checked the option (re-read the live checked property); a bare click
+  -- can silently no-op, so never report success without confirming the new state.
+  local clicked = B.click_verified({
+    selector = selector,
+    navigates = false,
+    verify = function()
+      local opt = locate(read_options())
+      return opt ~= nil and opt.checked == true
+    end
+  })
+  if clicked.ok then
+    return { ok = true, position = position }
+  end
+  return { ok = false, error = "select_failed", reason = clicked.reason, position = position }
 end
 
 function M.section_between(body, start_label, end_labels)
@@ -409,30 +432,60 @@ function M.current_service_matches(service_id)
   return M.service_id_from_url(M.current_url()) == service_id and dom.exists("h1")
 end
 
-function M.navigate_service_if_needed(args)
-  local service_id = M.non_empty(args.service_id or args.id)
+-- Detect a Thumbtack error/redirect surface (404, removed pro, login wall). A loaded pro profile
+-- always renders an <h1>, so the presence of an h1 is treated as "not an error"; only a missing h1
+-- combined with an explicit not-found phrase flags an error page (no false positives on real pros).
+function M.is_error_page()
+  if dom.exists("h1") then
+    return false
+  end
+  local body = M.normalize_text(dom.get_text("body") or "")
+  return body:find("page not found", 1, true) ~= nil
+    or body:find("isn't available", 1, true) ~= nil
+    or body:find("no longer available", 1, true) ~= nil
+end
+
+-- Verified navigation to a pro page: clear the beforeunload guard, force a real load, then confirm
+-- we landed on the intended pro AND it rendered, within the deadline. Returns a structured result
+-- instead of assuming success. Idempotent: a no-op when already on the target (durable replay
+-- re-enters here and short-circuits). reason: already_there|navigated|missing_url|nav_timeout|
+-- wrong_landing|page_error.
+function M.navigate_verified(args)
   local url = M.non_empty(args.url)
+  local service_id = M.non_empty(args.service_id or args.id) or (url and M.service_id_from_url(url))
+  local ready = args.ready or M.SERVICE_READY_SELECTOR
+  local timeout = args.timeout or 8000
   if service_id and M.current_service_matches(service_id) then
-    return false
+    return { ok = true, reason = "already_there", navigated = false }
   end
-  if url and (not service_id or M.service_id_from_url(url) == service_id or not M.current_service_matches(service_id)) then
-    if M.current_url() ~= url then
-      -- Clear the page's beforeunload guard (an open quote dialog sets one) so the real navigation
-      -- below is not blocked by a native "Leave site?" prompt that nothing can dismiss in-flow.
-      nav.clear_beforeunload()
-      -- reload=true forces a real load: Next.js ignores synthetic pushState, so a same-origin
-      -- pro->pro hop would otherwise change the URL without rendering the new pro (stale).
-      -- Signature: navigate(url, query_params, opts). reload lives in the 3rd arg; passing it as the
-      -- 2nd arg would leak ?reload=true into the URL and stay a pushState. Empty params, opts.reload=true.
-      nav.navigate(url, {}, { reload = true })
-      return true
-    end
-    return false
+  if not url then
+    return { ok = false, reason = "missing_url" }
   end
-  if service_id and M.current_service_matches(service_id) then
-    return false
+  if M.current_url() ~= url then
+    -- Clear the page's beforeunload guard (an open quote dialog sets one) so the real navigation is
+    -- not blocked by a native "Leave site?" prompt that nothing can dismiss in-flow. reload=true
+    -- forces a real load: Next.js ignores synthetic pushState, so a same-origin pro->pro hop would
+    -- otherwise change the URL without rendering the new pro (stale). Signature is
+    -- navigate(url, query_params, opts); reload lives in the 3rd arg.
+    nav.clear_beforeunload()
+    nav.navigate(url, {}, { reload = true })
   end
-  return false
+  if dom.wait_for_selector(ready, { timeout = timeout }) ~= true then
+    return { ok = false, reason = "nav_timeout", url = url }
+  end
+  if service_id and M.service_id_from_url(M.current_url()) ~= service_id then
+    return { ok = false, reason = "wrong_landing", url = M.current_url() }
+  end
+  if M.is_error_page() then
+    return { ok = false, reason = "page_error", url = M.current_url() }
+  end
+  return { ok = true, reason = "navigated", navigated = true }
+end
+
+-- Navigate to the pro page when not already there, verifying landing + readiness. Returns the
+-- navigate_verified result; callers gate on result.ok instead of proceeding blindly.
+function M.navigate_service_if_needed(args)
+  return M.navigate_verified({ service_id = args.service_id or args.id, url = args.url })
 end
 
 function M.read_service_view(service_id)
@@ -1073,7 +1126,14 @@ function M.open_quote_modal()
       if text:find("request estimate", 1, true)
         or text:find("request a quote", 1, true)
         or text:find("get a quote", 1, true) then
-        return dom.click(selector, { navigates = false })
+        -- Verify the request-flow dialog actually mounts; a bare click can fire without opening it
+        -- (the page pre-renders empty placeholders), which previously read as a false "open".
+        return B.click_verified({
+          selector = selector,
+          navigates = false,
+          expect = M.REQUEST_FLOW_ACTIVE_SELECTOR,
+          timeout = 6000
+        }).ok
       end
     end
   end

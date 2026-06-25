@@ -226,6 +226,53 @@ function B.dismiss_overlay(selector)
   return false
 end
 
+-- ── dom actions (verified) ────────────────────────────────────────────────────
+-- Gate on a readiness selector: returns wait_for_selector's result so callers surface a real
+-- status instead of silently proceeding on timeout. { ok=true } | { ok=false, reason, selector }.
+function B.require_ready(selector, opts)
+  opts = opts or {}
+  if dom.wait_for_selector(selector, { timeout = opts.timeout or 8000 }) == true then
+    return { ok = true }
+  end
+  return { ok = false, reason = opts.reason or "not_ready", selector = selector }
+end
+
+-- Verified click: act -> verify -> retry-once. dom.click on a non-matching selector is a silent
+-- no-op returning false, so a hit-check plus a post-condition turns "fired and hoped" into a real
+-- result. opts: { selector, hit_check=true, navigates=false, timeout=4000, retry=1, and ONE of
+-- expect=<selector appears> | expect_gone=<selector disappears> | verify=function()->bool }.
+-- Returns { ok=true, reason="clicked" } only when the click landed AND the post-condition held;
+-- else { ok=false, reason="not_found"|"click_failed"|"effect_not_confirmed", selector }.
+function B.click_verified(opts)
+  local selector = opts.selector
+  local timeout = opts.timeout or 4000
+  for attempt = 1, (opts.retry or 1) + 1 do
+    if opts.hit_check ~= false and not dom.exists(selector) then
+      return { ok = false, reason = "not_found", selector = selector }
+    end
+    -- A navigating click returns { ok, reason }; a plain effect click returns a bool. Normalize both.
+    local clicked = dom.click(selector, { navigates = opts.navigates == true })
+    local click_ok = (type(clicked) == "table") and (clicked.ok == true) or (clicked == true)
+    if not click_ok then
+      return { ok = false, reason = "click_failed", selector = selector }
+    end
+    local confirmed = true
+    if opts.expect then
+      confirmed = dom.wait_for_selector(opts.expect, { timeout = timeout }) == true
+    elseif opts.expect_gone then
+      confirmed = dom.wait_for({ selector = opts.expect_gone, gone = true }, { timeout = timeout }) == true
+    elseif opts.verify then
+      dom.wait(300)
+      confirmed = opts.verify() == true
+    end
+    if confirmed then
+      return { ok = true, reason = "clicked", attempt = attempt }
+    end
+    dom.wait(300)
+  end
+  return { ok = false, reason = "effect_not_confirmed", selector = selector }
+end
+
 -- ── US ZIP resolution (address/city -> ZIP) ───────────────────────────────────
 -- Parses a trailing 2-letter state ("San Francisco, CA"); returns nil,nil when not "City, ST".
 function B.split_city_state(address)

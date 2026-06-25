@@ -417,7 +417,14 @@ function M.navigate_service_if_needed(args)
   end
   if url and (not service_id or M.service_id_from_url(url) == service_id or not M.current_service_matches(service_id)) then
     if M.current_url() ~= url then
-      nav.navigate(url, {})
+      -- Clear the page's beforeunload guard (an open quote dialog sets one) so the real navigation
+      -- below is not blocked by a native "Leave site?" prompt that nothing can dismiss in-flow.
+      nav.clear_beforeunload()
+      -- reload=true forces a real load: Next.js ignores synthetic pushState, so a same-origin
+      -- pro->pro hop would otherwise change the URL without rendering the new pro (stale).
+      -- Signature: navigate(url, query_params, opts). reload lives in the 3rd arg; passing it as the
+      -- 2nd arg would leak ?reload=true into the URL and stay a pushState. Empty params, opts.reload=true.
+      nav.navigate(url, {}, { reload = true })
       return true
     end
     return false

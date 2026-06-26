@@ -62,6 +62,9 @@ flows:
       quote_answer_status: null
       quote_advance_reason: null
       quote_reached_submit: null
+      quote_error: null
+      quote_results: ""
+      quote_count: null
     nodes:
       collect_request:
         kind: action_unit
@@ -193,10 +196,15 @@ flows:
         prompt: |-
           You are filling a Thumbtack "Request a quote" multi-step form on behalf of the user.
           Call answer_quote (auto mode — it answers the current step from the user's requirements and
-          clicks Next/Continue) ONCE per turn to advance one step. If a step does not seem to advance,
-          just call answer_quote again. Repeat until the result's flow.reached_submit_step is true —
-          that means you reached the final Submit/Send step. Then STOP: do NOT call answer_quote again,
-          and NEVER submit or send the quote. Also stop if a result has an error. Call no other tool.
+          clicks Next/Continue) ONCE per turn to advance one step. STOP and do NOT call answer_quote
+          again as soon as ANY of these is true in the latest result:
+          - flow.reached_submit_step is true (only the final Submit remains), or
+          - flow.advance_reason is "missing_answer" (the step needs personal contact info we will not
+            provide — treat this as reaching the final contact/submit step), or
+          - flow.advance_reason is "advance_button_not_found", or
+          - the result has an error.
+          Otherwise the step advanced — call answer_quote again for the next step. NEVER submit or send
+          the quote. Call no other tool. Only a few calls are needed; never loop indefinitely.
         next:
           answer: answer_quote
           done: pick_quote
@@ -205,7 +213,14 @@ flows:
 
       quotes_done:
         kind: terminal
-        respond: Return the search results as JSON, plus a short note that the request-quote flow was opened and auto-answered up to the final submit step for the selected pro (nothing was submitted or sent).
+        respond: |-
+          Reply in the user's language. START your reply with a "Quote requests" section built from the
+          quote_results value in the Flow state JSON: reproduce it verbatim — it has one line per pro a
+          quote request was opened for, each line carrying the pro's name, its service_id, and the
+          outcome ("OK - reached final submit step", "OK - stopped at final step (...)", or "FAILED (...)").
+          Also state how many quotes were attempted (quote_count) and make clear that NOTHING was
+          submitted or sent — every quote stopped before the final Submit. THEN, after that section,
+          append the full list of matching pros as JSON.
 
       error:
         kind: terminal
@@ -293,10 +308,29 @@ flowTools:
       kind: runtime
       implementation: lua
       lua: |
-        -- args.candidates / args.quote_index are projected from flow state (action_contract).
+        -- Projected from flow state (action_contract): candidate list, loop index, and the
+        -- per-pro signals open_quote/answer_quote wrote for the pro we just finished.
         local cands = args.candidates or {}
-        local idx = args.quote_index or 0   -- count of pros already opened (0-based)
-        local MAX_OPEN = 1                   -- one pro per request: open + auto-answer up to submit
+        local idx = args.quote_index or 0    -- count of pros already opened (0-based)
+        local MAX_OPEN = 3                    -- open + auto-answer up to submit for up to N pros
+        -- quote_results is a newline-joined summary STRING (one line per pro). A string avoids
+        -- the array/object serialization ambiguity an empty Lua table would hit at the schema.
+        local results = args.quote_results or ""
+
+        -- Record the pro we just finished (cands[idx], 1-based) before picking the next one.
+        if idx > 0 then
+          local prev = cands[idx] or {}
+          local err = args.quote_error
+          if err == "" then err = nil end
+          local reached = args.quote_reached_submit == true
+          local outcome
+          if err then outcome = "FAILED (" .. tostring(err) .. ")"
+          elseif reached then outcome = "OK - reached final submit step"
+          else outcome = "OK - stopped at final step (" .. tostring(args.quote_advance_reason or "no further auto-answer") .. ")" end
+          local line = tostring(prev.name or "?") .. " [service_id " .. tostring(prev.service_id or "?") .. "]: " .. outcome
+          results = (results ~= "" and (results .. "\n") or "") .. line
+        end
+
         local limit = #cands
         if limit > MAX_OPEN then limit = MAX_OPEN end
         if idx < limit then
@@ -306,15 +340,27 @@ flowTools:
             quote_url = c.url,
             quote_target_service_id = c.service_id,
             quote_index = idx + 1,
+            quote_results = results,
+            -- clear per-pro signals so an open failure on the next pro can't inherit this result
+            quote_error = "",
+            quote_reached_submit = false,
+            quote_answer_status = "",
+            quote_status = "",
           }
         end
-        return { next = "done", quote_index = idx }
+        return { next = "done", quote_index = idx, quote_results = results, quote_count = idx }
     parameters:
       type: object
       additionalProperties: true
       properties:
         candidates: { type: array }
         quote_index: { type: [integer, "null"] }
+        quote_results: { type: [string, "null"] }
+        quote_error: { type: [string, "null"] }
+        quote_reached_submit: { type: [boolean, "null"] }
+        quote_answer_status: { type: [string, "null"] }
+        quote_status: { type: [string, "null"] }
+        quote_advance_reason: { type: [string, "null"] }
 
   open_quote:
     description: Navigate to the picked pro and open its "Request estimate" dialog. Never submits or sends.
@@ -341,7 +387,7 @@ flowTools:
       auto: true
       user_requirements: tool.args.user_requirements
     output:
-      next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "done", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "done", "answer"] }
+      next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "done", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "done", { "==": [{ var: result.flow.advance_reason }, "missing_answer"] }, "done", "answer"] }
       quote_answer_status: result.status
       quote_advance_reason: result.flow.advance_reason
       quote_reached_submit: result.flow.reached_submit_step

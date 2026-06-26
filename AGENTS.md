@@ -51,6 +51,15 @@ AXSDK Lua scripts drive pages through the injected `dom` capability, which resol
 - The `dom` capability cannot match by visible text. When an element is distinguishable only by its label, read candidates with `dom.query_all(selector, { text = true })`, confirm the meaningful label in Lua, then click the verified selector.
 - Keep shared selectors as named `M.*` constants in `<site>/scripts/00_common.lua` so they are reviewed and updated in one place.
 
+## Testing Flow Changes
+
+`_common/flows.yaml` (and `<site>/flows.yaml`) are fetched from GitHub at runtime, but the browser HTTP cache on `raw.githubusercontent.com` is sticky — editing an existing `flows.yaml`, pushing, clearing `axsdk:sites` / `axsdk:flows`, and reloading the extension does **not** reliably load the new version. For testing, load flows from the extension flow store instead of from remote:
+
+- Store key `:` holds the common flows (the `_common/flows.yaml` equivalent); `:<domain>` holds a site's flows.
+- Persist to `chrome.storage.local["axsdk:flows"]` as `JSON.stringify({ state: { flows: { ":": "<yaml>" } }, version: 0 })`, or use the extension Options page Flows editor or `AXSDK.setFlows(":", "<yaml>")`.
+- The stored layer is deep-merged over the remote layer (stored wins on conflicts). For a deterministic test, also turn off remote flows (Options flow-source toggle / `clientFlows.remoteSites = false`) so only the store is used.
+- Reload the extension (chrome://extensions) after writing the store, then re-test the planner flow.
+
 ## Validation Before Finishing
 
 Before reporting work as complete:

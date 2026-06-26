@@ -50,6 +50,12 @@ AXSDK Lua scripts drive pages through the injected `dom` capability, which resol
 - When no stable identifier exists, locate the element by document structure and position relative to a semantic anchor: parent/child/sibling combinators, `:has()`, `:not()`, `:nth-*`, `:first-child`, `:last-child`.
 - The `dom` capability cannot match by visible text. When an element is distinguishable only by its label, read candidates with `dom.query_all(selector, { text = true })`, confirm the meaningful label in Lua, then click the verified selector.
 - Keep shared selectors as named `M.*` constants in `<site>/scripts/00_common.lua` so they are reviewed and updated in one place.
+- Reading list/result cards: the same label is often rendered more than once (responsive duplicates) and may be followed by rating/status badge text (e.g. `Top Pro`, `Very good`, `Exceptional`, `Great`). Before using a card value, collapse the largest immediately-repeated prefix and strip known trailing badges; never assume a single clean render.
+
+## Lua State & Serialization
+
+- An empty Lua table serializes to a JSON **object**, not an array. A flow-state field that a tool schema validates as `array` then fails with `expected array, received object`, and the array-type marker is not reliably honored on every output path. For any state an LLM tool schema validates, prefer a scalar — e.g. a newline-joined string accumulator — and split it in the consumer if a list is needed.
+- Scripts shared across domains must live in `_common/scripts/*.lua` registered with `kind: 'common'`; these survive the site-script clear that runs on off-domain navigation, whereas `<site>/scripts/*.lua` do not. Put cross-domain helpers (navigation, ZIP resolution) there.
 
 ## Testing Flow Changes
 
@@ -59,6 +65,11 @@ AXSDK Lua scripts drive pages through the injected `dom` capability, which resol
 - Persist to `chrome.storage.local["axsdk:flows"]` as `JSON.stringify({ state: { flows: { ":": "<yaml>" } }, version: 0 })`, or use the extension Options page Flows editor or `AXSDK.setFlows(":", "<yaml>")`.
 - The stored layer is deep-merged over the remote layer (stored wins on conflicts). For a deterministic test, also turn off remote flows (Options flow-source toggle / `clientFlows.remoteSites = false`) so only the store is used.
 - Reload the extension (chrome://extensions) after writing the store, then re-test the planner flow.
+
+## Testing Lua Logic Locally
+
+- Validate deterministic Lua (serialization, parsing, text normalization, dedupe) OFFLINE with a `fengari` unit test before any live run. Mirror the SDK's real Lua-to-JS converter (sequence detection plus the array-type marker) — a custom reader that ignores the marker gives false confidence. `fengari` needs `lualib.luaL_openlibs(L)` for `tostring` and the string library.
+- A full live multi-step flow run costs minutes (navigation plus per-step model calls). Iterate with reduced scope (one item / lowest count) and confirm full scope once at the end, instead of paying the full cost on every fix.
 
 ## Validation Before Finishing
 

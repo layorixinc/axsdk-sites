@@ -65,13 +65,18 @@ end
 
 function M.name_from_result_text(text, url)
   local value = M.clean_text(text)
+  -- Cut the rating/summary tail (rating-tier word or "<d>.<d>(") so only "[Name][Name][badge]" remains,
+  -- then collapse the doubled name. dedupe_name also drops any trailing badge after the second copy.
   local prefix = value:match("^(.-)Great%s+%d")
     or value:match("^(.-)Excellent%s+%d")
+    or value:match("^(.-)Very good%s+%d")
+    or value:match("^(.-)Exceptional%s+%d")
     or value:match("^(.-)%d+%.%d%(")
     or value:match("^(.-)New on Thumbtack")
     or value:match("^(.-)Top Pro")
-  prefix = M.dedupe_adjacent(prefix or "")
-  return M.non_empty(prefix) or M.slug_name_from_url(url)
+    or value
+  local name = M.dedupe_name(M.dedupe_adjacent(prefix))
+  return M.non_empty(name) or M.slug_name_from_url(url)
 end
 
 function M.response_time_from_text(value)
@@ -166,16 +171,16 @@ function M.start_search(query, zip_code)
 end
 
 function M.dedupe_name(value)
-  -- Category cards render the pro name twice in responsive spans ("NameName"); collapse an exact
-  -- doubling back to a single name and leave normal names untouched.
+  -- Pro cards render the name in two identical spans ("NameName"), sometimes followed by rating-tier
+  -- badges ("Top Pro", "Very good", ...). Return the largest immediately-repeated prefix (the clean
+  -- name), dropping the second copy and any trailing badge. Non-doubled names are returned unchanged.
   local s = M.non_empty(value)
   if not s then
     return nil
   end
   local n = #s
-  if n % 2 == 0 then
-    local half = math.floor(n / 2)
-    if s:sub(1, half) == s:sub(half + 1) then
+  for half = math.floor(n / 2), 3, -1 do
+    if s:sub(1, half) == s:sub(half + 1, half * 2) then
       return M.non_empty(s:sub(1, half))
     end
   end

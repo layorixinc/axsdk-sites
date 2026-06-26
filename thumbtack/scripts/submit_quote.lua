@@ -46,7 +46,10 @@ local function request_error_result(before, steps, after, request_error)
   end
   return {
     status = retryable and "contact_update_required" or "request_flow_error",
-    error = error_value,
+    -- NOT a top-level `error`: a captured request-flow popover is the DESIRED outcome for the test
+    -- submit. The flow engine treats a remote result with `error` as a tool failure and skips the
+    -- output map (losing `message`), so expose the code as `flow_error` and keep `message` capturable.
+    flow_error = error_value,
     request_error = request_error,
     retry_field = request_error and request_error.retry_field or nil,
     bad_value = request_error and request_error.bad_value or nil,

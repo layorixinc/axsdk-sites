@@ -439,10 +439,10 @@ flowTools:
       email: tool.args.submit_email
       zip_code: tool.args.zip_code
     output:
-      next: { if: [{ var: result.error }, "done", "done"] }
+      next: { if: [{ var: result.flow_error }, "done", "done"] }
       quote_submit_status: result.status
       quote_submit_message: { if: [{ var: result.message }, { var: result.message }, { var: result.request_error.message }] }
-      quote_submit_error: result.error
+      quote_submit_error: result.flow_error
     parameters:
       type: object
       additionalProperties: true

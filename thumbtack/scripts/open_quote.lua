@@ -5,37 +5,48 @@ end
 
 function AX_open_quote(args)
   args = args or {}
-  local service_id = M.non_empty(args.service_id or args.id)
   local url = M.non_empty(args.url)
-
+  local service_id = M.non_empty(args.service_id or args.id)
   if not service_id and url then
     service_id = M.service_id_from_url(url)
   end
 
-  if service_id or url then
+  -- Detect the current page once (instant URL + light DOM read; no navigation, no durable resume,
+  -- thumbtack/CONTRACT.md §1). Used to skip the cross-nav when already on the target pro and for
+  -- idempotent re-entry when the dialog is already open.
+  local page = (AX_detect_page and AX_detect_page()) or { page = "other", ready = false }
+  local on_target = (page.page == "pro_profile" or page.page == "quote_dialog")
+    and (not service_id or page.service_id == service_id)
+
+  -- Navigate to the target pro only when not already on it. Same-origin navigation is a durable step
+  -- that suspends and replays once the pro has loaded (this mirrors AX_view_service, the proven nav
+  -- path) -- it is NOT fire-and-forget, so the call cannot "return early" across it. Skipping it when
+  -- already on the pro keeps the common case (flow-after-view / harness) free of an unnecessary
+  -- cross-nav resume.
+  if not on_target and (url or service_id) then
     local nav_result = M.navigate_service_if_needed({ service_id = service_id, url = url })
     if not nav_result.ok then
       return {
         service_id = service_id or M.service_id_from_url(M.current_url()),
+        status = "quote_unavailable",
         error = "quote_unavailable",
         reason = nav_result.reason
       }
     end
   end
 
-  -- Wait for the pro page's quote CTA to render, then open the request flow if a step is not already
-  -- showing. Detection keys on the active flow step, never M.MODAL_SELECTOR (the page pre-renders
-  -- empty modal placeholders that would otherwise look "open").
-  dom.wait_for_selector('aside button', { timeout = 6000 })
+  -- On the pro. Open the request-flow dialog if a step is not already showing. No blind selector
+  -- waits: navigate_verified already gated on the pro rendering, and open_quote_modal locates the CTA
+  -- by verified label and confirms the active step actually mounts. Detection keys on the active
+  -- step, never M.MODAL_SELECTOR (the page pre-renders empty modal placeholders that look "open").
   if not dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
-    local opened = M.open_quote_modal()
-    if not opened then
+    if not M.open_quote_modal() then
       return {
         service_id = service_id or M.service_id_from_url(M.current_url()),
+        status = "quote_unavailable",
         error = "quote_unavailable"
       }
     end
-    dom.wait_for_selector(M.REQUEST_FLOW_ACTIVE_SELECTOR, { timeout = 6000 })
   end
 
   local update = nil

@@ -1114,23 +1114,37 @@ function M.apply_form_values(values)
 end
 
 function M.open_quote_modal()
-  -- The pro page's quote/estimate CTA carries no semantic id, so locate it by document structure:
-  -- the sticky <aside> sidebar holds "View details" (its parent's :last-child) followed by the
-  -- primary "Request estimate" button. NEVER target hashed CSS-module class names; the dom
-  -- capability is CSS-only, so confirm the visible label via query_all before clicking.
+  -- The pro page's quote/estimate CTA carries no semantic id and the dom capability is CSS-only (no
+  -- text matching), so locate it by document structure and CONFIRM its visible label before clicking.
+  -- NEVER target hashed CSS-module class names. Candidate selectors are ordered so the CTA is the
+  -- first match of at least one of them across layout / A-B variants ("View details" is the aside's
+  -- :last-child, so :not(:last-child) isolates the primary "Request estimate" button).
+  local phrases = {
+    "request estimate",
+    "request a quote",
+    "request quote",
+    "get a quote",
+    "get estimate",
+  }
   local selectors = {
     'aside button:not(:last-child)',
     'aside button',
-    'main button:not(:last-child)'
+    'main button:not(:last-child)',
+    'main button',
   }
   for index = 1, #selectors do
     local selector = selectors[index]
     local rows = dom.query_all(selector, { text = true }, 1)
     if #rows > 0 then
       local text = M.normalize_text(rows[1].text)
-      if text:find("request estimate", 1, true)
-        or text:find("request a quote", 1, true)
-        or text:find("get a quote", 1, true) then
+      local matched = false
+      for p = 1, #phrases do
+        if text:find(phrases[p], 1, true) then
+          matched = true
+          break
+        end
+      end
+      if matched then
         -- Verify the request-flow dialog actually mounts; a bare click can fire without opening it
         -- (the page pre-renders empty placeholders), which previously read as a false "open".
         return B.click_verified({

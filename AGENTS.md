@@ -59,12 +59,12 @@ AXSDK Lua scripts drive pages through the injected `dom` capability, which resol
 
 ## Testing Flow Changes
 
-`_common/flows.yaml` (and `<site>/flows.yaml`) are fetched from GitHub at runtime, but the browser HTTP cache on `raw.githubusercontent.com` is sticky — editing an existing `flows.yaml`, pushing, clearing `axsdk:sites` / `axsdk:flows`, and reloading the extension does **not** reliably load the new version. For testing, load flows from the extension flow store instead of from remote:
+`_common/flows.yaml` (and `<site>/flows.yaml`) are fetched from GitHub at runtime, but `raw.githubusercontent.com` is cache-sticky — editing an existing `flows.yaml`, pushing, and reloading does **not** reliably load the new version. So **test flow changes from the flow store with remote flows OFF — never against the remote copy, and without pushing**:
 
-- Store key `:` holds the common flows (the `_common/flows.yaml` equivalent); `:<domain>` holds a site's flows.
-- Persist to `chrome.storage.local["axsdk:flows"]` as `JSON.stringify({ state: { flows: { ":": "<yaml>" } }, version: 0 })`, or use the extension Options page Flows editor or `AXSDK.setFlows(":", "<yaml>")`.
-- The stored layer is deep-merged over the remote layer (stored wins on conflicts). For a deterministic test, also turn off remote flows (Options flow-source toggle / `clientFlows.remoteSites = false`) so only the store is used.
-- Reload the extension (chrome://extensions) after writing the store, then re-test the planner flow.
+- **Turn remote flows OFF** so the store is authoritative: `AXSDK.config.clientFlows = { remoteSites: false, stored: true }` (or the Options flow-source toggle). This is required — if remote stays on, the remote copy is re-fetched/deep-merged on navigation and silently overrides your injected flows (e.g. a stale value clobbers your edit), so the test runs the wrong flow.
+- **Inject the LOCAL `flows.yaml` into the store** as the only layer: `AXSDK.getFlowsStore().getState().setFlows(":", "<yaml>")` (key `:` = common flows; `:<domain>` = a site's flows). Equivalent: persist `chrome.storage.local["axsdk:flows"]` = `JSON.stringify({ state: { flows: { ":": "<yaml>" } }, version: 0 })`, or use the Options Flows editor.
+- **Drive the real flow engine** and read the chat store: `AXSDK.sendMessage(text)`, then poll `AXSDK.getChatStore().getState()` (assistant message lives in the last message's `parts[]`: tool parts carry `state.output`, the terminal reply is a `type:"text"` part — messages have no `role` field). **No git push, no redeploy — iterate by re-injecting**; push only to ship the verified version.
+- Scope: this overrides **flows only**. Site **Lua scripts** (the tools `flowTools` call via `execute: { kind: remote, tool: AX_* }`) still load from GitHub and survive navigation by re-fetch, so a Lua edit needs either `AXSDK.lua.load(...)` (what the `<site>/scripts/test_*.mjs` harnesses do, reloading per navigation) or a push + extension reload to take effect inside the flow.
 
 ## Testing Lua Logic Locally
 

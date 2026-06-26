@@ -325,7 +325,7 @@ flowTools:
         -- per-pro signals open_quote/answer_quote wrote for the pro we just finished.
         local cands = args.candidates or {}
         local idx = args.quote_index or 0    -- count of pros already opened (0-based)
-        local MAX_OPEN = 3                    -- open + auto-answer up to submit for up to N pros
+        local MAX_OPEN = 2                    -- open + auto-answer + submit for up to N pros (kept low to fit the flow's per-run step budget; each pro = open + ~6 answer steps + submit + pick)
         -- quote_results is a newline-joined summary STRING (one line per pro). A string avoids
         -- the array/object serialization ambiguity an empty Lua table would hit at the schema.
         local results = args.quote_results or ""

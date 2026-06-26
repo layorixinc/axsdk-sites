@@ -58,6 +58,10 @@ flows:
       quote_index: null
       quote_url: null
       quote_target_service_id: null
+      quote_auto: true
+      quote_answer_status: null
+      quote_advance_reason: null
+      quote_reached_submit: null
     nodes:
       collect_request:
         kind: action_unit
@@ -168,13 +172,40 @@ flows:
         id: open_quote
         description: Navigate to the picked pro and open its "Request estimate" dialog (never submits).
         next:
-          open: pick_quote
+          open: answer_quote
           error: pick_quote
         fallback: { invalidNext: error, exhaustedNext: error }
 
+      answer_quote:
+        kind: action_unit
+        description: Auto-answer the active request-flow steps up to the final Submit, then stop. NEVER submits or sends.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-5.4-mini
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - user_requirements
+        allowedTools: [answer_quote]
+        llm: { maxCalls: 14 }
+        prompt: |-
+          You are filling a Thumbtack "Request a quote" multi-step form on behalf of the user.
+          Call answer_quote (auto mode — it answers the current step from the user's requirements and
+          clicks Next/Continue) ONCE per turn to advance one step. If a step does not seem to advance,
+          just call answer_quote again. Repeat until the result's flow.reached_submit_step is true —
+          that means you reached the final Submit/Send step. Then STOP: do NOT call answer_quote again,
+          and NEVER submit or send the quote. Also stop if a result has an error. Call no other tool.
+        next:
+          answer: answer_quote
+          done: pick_quote
+          error: pick_quote
+        fallback: { invalidNext: done, exhaustedNext: done }
+
       quotes_done:
         kind: terminal
-        respond: Return the search results as JSON, plus a short note that the request-quote flow was opened for each candidate (none were submitted).
+        respond: Return the search results as JSON, plus a short note that the request-quote flow was opened and auto-answered up to the final submit step for the selected pro (nothing was submitted or sent).
 
       error:
         kind: terminal
@@ -265,7 +296,7 @@ flowTools:
         -- args.candidates / args.quote_index are projected from flow state (action_contract).
         local cands = args.candidates or {}
         local idx = args.quote_index or 0   -- count of pros already opened (0-based)
-        local MAX_OPEN = 3                   -- cap per turn to stay within the ~12-step budget
+        local MAX_OPEN = 1                   -- one pro per request: open + auto-answer up to submit
         local limit = #cands
         if limit > MAX_OPEN then limit = MAX_OPEN end
         if idx < limit then
@@ -302,3 +333,22 @@ flowTools:
       properties:
         quote_url: { type: string }
         quote_target_service_id: { type: [string, "null"] }
+
+  answer_quote:
+    description: Answer the active Thumbtack request-flow step in auto mode and advance via Next/Continue/Skip. Never clicks Send/Submit/Get quotes; stops once the only remaining action is the final submit.
+    execute: { kind: remote, tool: AX_answer_quote, timeoutMs: 60000 }
+    input:
+      auto: true
+      user_requirements: tool.args.user_requirements
+    output:
+      next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "done", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "done", "answer"] }
+      quote_answer_status: result.status
+      quote_advance_reason: result.flow.advance_reason
+      quote_reached_submit: result.flow.reached_submit_step
+      quote_error: result.error
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        auto: { type: boolean }
+        user_requirements: { type: [string, "null"] }

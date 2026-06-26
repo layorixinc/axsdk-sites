@@ -43,6 +43,7 @@ flows:
       - requestText
     state:
       service_query: null
+      site: thumbtack
       user_requirements: null
       address: null
       zip_code: null
@@ -93,7 +94,18 @@ flows:
         next:
           ask: collect_request
           collect: collect_request
-          done: search
+          done: open_site
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      open_site:
+        kind: action_contract
+        id: open_site
+        description: Navigate to Thumbtack before searching. Idempotent — a no-op when already on the site. A cross-domain navigation is terminal in the SDK (it fires the nav and completes the call without a durable replay, since the owning site script unloads on the domain change); the planner then resumes this flow on thumbtack to run the search.
+        inputSelector:
+          - site
+        next:
+          search: search
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -111,16 +123,12 @@ flows:
           - service_query
           - zip_code
           - address
-        allowedTools: [open_site, search_service]
+        allowedTools: [search_service]
         llm: { maxCalls: 8 }
         prompt: |-
-          First call open_site with site="thumbtack" so the browser is on Thumbtack — the search
-          commands only exist on thumbtack.com. If open_site returns status="navigating", call it
-          AGAIN with site="thumbtack" until it returns status="ready".
-
-          Once open_site is "ready", call search_service with `query` = the collected service_query
-          (e.g. "house cleaning", "handyman") and `zip_code` = the collected zip_code (copy the
-          resolved ZIP from the projected state). Do not set any other field.
+          You are already on thumbtack.com. Call search_service with `query` = the collected
+          service_query (e.g. "house cleaning", "handyman") and `zip_code` = the collected
+          zip_code (copy the resolved ZIP from the projected state). Do not set any other field.
 
           search_service is two-phase. The first call fires the search and may return
           status="navigating" while the results page is still loading. Whenever the result is
@@ -128,7 +136,6 @@ flows:
           for and read the now-loaded results. Repeat until status="completed" (results were read)
           or status="error". Never stop while the status is "navigating".
         next:
-          search: search
           read: read_results
           done: pick_quote
           error: error
@@ -212,13 +219,12 @@ flowTools:
         address: { type: string }
 
   open_site:
-    description: Navigate to the target site's home page before searching. Site-keyed and idempotent — a no-op when already on the site, otherwise fires a durable navigation and returns status="navigating".
+    description: Navigate to the target site's home page before searching. Site-keyed and idempotent — a no-op when already on the site; off-site it fires the navigation. A cross-domain navigation is terminal (no durable replay — the site script unloads on the domain change); the planner resumes the flow on the destination.
     execute: { kind: remote, tool: AX_open_site, timeoutMs: 60000 }
     input:
       site: tool.args.site
     output:
-      next: { if: [{ "==": [{ var: result.status }, "error"] }, "error", "search"] }
-      search_status: result.status
+      next: { if: [{ var: result.error }, "error", "search"] }
       error: result.error
     parameters:
       type: object

@@ -87,8 +87,9 @@ function SITE.open(args)
   if SITE.on_site(url) then
     return { site = args.site, url = url, status = "ready" }
   end
-  -- Off the target site: fire a durable navigation and return immediately. The caller re-invokes on
-  -- the "navigating" status; on resume the host matches and this returns "ready".
+  -- Off the target site: fire the navigation and return. For a cross-domain target the SDK completes
+  -- this call now and navigates afterward (no durable replay — the owning site script unloads on the
+  -- domain change); the flow resumes on the destination, where this call becomes a no-op ("ready").
   nav.navigate(url, {})
   return { site = args.site, url = url, status = "navigating" }
 end

@@ -8,9 +8,6 @@ app:
       Preserve navigation, selection, submission, not-found, and cancellation meaning.
       If the base response asks to use Flow state JSON's message, return the non-empty message only.
       If the base response asks to use Flow state JSON's question, return the non-empty question only.
-      If the base response asks to return the search results as JSON, output ONLY a compact JSON object
-      with keys query, zip_code, total_count, and candidates — copy candidates verbatim from the Flow
-      state JSON (do not summarize, reorder, or drop fields). No prose, no markdown fences.
 planner:
   inputSelector:
     - active
@@ -37,7 +34,7 @@ router:
         - get a house cleaning quote in San Francisco
 flows:
   request_service_quote:
-    goal: Collect a service-quote request (service, requirements, ZIP), search Thumbtack, and return the matching pros as JSON.
+    goal: Collect a service-quote request (service, requirements, ZIP), search Thumbtack, open quote requests for the top pros, attempt the final Submit with reserved TEST contact data (which Thumbtack rejects), and report each quote's outcome including the Thumbtack error popover text.
     contexts: [memory]
     inputSelector:
       - requestText
@@ -63,6 +60,11 @@ flows:
       quote_advance_reason: null
       quote_reached_submit: null
       quote_error: null
+      quote_submit_status: null
+      quote_submit_message: null
+      quote_submit_error: null
+      submit_phone: "4155550100"
+      submit_email: thumbtack-test@example.com
       quote_results: ""
       quote_count: null
     nodes:
@@ -207,6 +209,16 @@ flows:
           the quote. Call no other tool. Only a few calls are needed; never loop indefinitely.
         next:
           answer: answer_quote
+          submit: submit_quote
+          done: pick_quote
+          error: pick_quote
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      submit_quote:
+        kind: action_contract
+        id: submit_quote
+        description: Click the final Submit on the active quote step using reserved TEST contact (never a real submission). Captures the Thumbtack error popover that results (e.g. invalid phone / sign-in required).
+        next:
           done: pick_quote
           error: pick_quote
         fallback: { invalidNext: done, exhaustedNext: done }
@@ -214,13 +226,14 @@ flows:
       quotes_done:
         kind: terminal
         respond: |-
-          Reply in the user's language. START your reply with a "Quote requests" section built from the
-          quote_results value in the Flow state JSON: reproduce it verbatim — it has one line per pro a
-          quote request was opened for, each line carrying the pro's name, its service_id, and the
-          outcome ("OK - reached final submit step", "OK - stopped at final step (...)", or "FAILED (...)").
-          Also state how many quotes were attempted (quote_count) and make clear that NOTHING was
-          submitted or sent — every quote stopped before the final Submit. THEN, after that section,
-          append the full list of matching pros as JSON.
+          Reply in the user's language. Output ONLY a "Quote requests" section built VERBATIM from the
+          quote_results value in the Flow state JSON: one line per pro a quote request was opened for,
+          each carrying the pro's name, its service_id, and the outcome. When an outcome includes the
+          exact text of a Thumbtack error popover returned on Submit (e.g. an invalid-phone or sign-in
+          error), reproduce that popover text exactly. State how many quotes were attempted (quote_count).
+          The Submit used reserved TEST contact data, so a Thumbtack error popover is the EXPECTED result —
+          surface its content; nothing was actually sent to any pro. Do NOT include the searched pro list
+          or any search results; output the quote outcomes only.
 
       error:
         kind: terminal
@@ -320,13 +333,25 @@ flowTools:
         -- Record the pro we just finished (cands[idx], 1-based) before picking the next one.
         if idx > 0 then
           local prev = cands[idx] or {}
-          local err = args.quote_error
-          if err == "" then err = nil end
-          local reached = args.quote_reached_submit == true
+          local function nz(v) if v == nil or v == "" then return nil end return v end
+          local open_err = nz(args.quote_error)
+          local submit_status = nz(args.quote_submit_status)
+          local submit_msg = nz(args.quote_submit_message)
+          local submit_err = nz(args.quote_submit_error)
           local outcome
-          if err then outcome = "FAILED (" .. tostring(err) .. ")"
-          elseif reached then outcome = "OK - reached final submit step"
-          else outcome = "OK - stopped at final step (" .. tostring(args.quote_advance_reason or "no further auto-answer") .. ")" end
+          if open_err then
+            outcome = "FAILED to open/answer (" .. tostring(open_err) .. ")"
+          elseif submit_msg then
+            outcome = "Submitted -> Thumbtack error popover: \"" .. tostring(submit_msg) .. "\""
+          elseif submit_status == "submitted" then
+            outcome = "Submitted -> no error returned"
+          elseif submit_status then
+            outcome = "Submit attempted -> " .. tostring(submit_status) .. (submit_err and (" (" .. tostring(submit_err) .. ")") or "")
+          elseif args.quote_reached_submit == true then
+            outcome = "Reached final submit step (submit not attempted)"
+          else
+            outcome = "Stopped before submit (" .. tostring(args.quote_advance_reason or "no further auto-answer") .. ")"
+          end
           local line = tostring(prev.name or "?") .. " [service_id " .. tostring(prev.service_id or "?") .. "]: " .. outcome
           results = (results ~= "" and (results .. "\n") or "") .. line
         end
@@ -346,6 +371,9 @@ flowTools:
             quote_reached_submit = false,
             quote_answer_status = "",
             quote_status = "",
+            quote_submit_status = "",
+            quote_submit_message = "",
+            quote_submit_error = "",
           }
         end
         return { next = "done", quote_index = idx, quote_results = results, quote_count = idx }
@@ -361,6 +389,9 @@ flowTools:
         quote_answer_status: { type: [string, "null"] }
         quote_status: { type: [string, "null"] }
         quote_advance_reason: { type: [string, "null"] }
+        quote_submit_status: { type: [string, "null"] }
+        quote_submit_message: { type: [string, "null"] }
+        quote_submit_error: { type: [string, "null"] }
 
   open_quote:
     description: Navigate to the picked pro and open its "Request estimate" dialog. Never submits or sends.
@@ -387,7 +418,7 @@ flowTools:
       auto: true
       user_requirements: tool.args.user_requirements
     output:
-      next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "done", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "done", { "==": [{ var: result.flow.advance_reason }, "missing_answer"] }, "done", "answer"] }
+      next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "submit", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "submit", { "==": [{ var: result.flow.advance_reason }, "missing_answer"] }, "submit", "answer"] }
       quote_answer_status: result.status
       quote_advance_reason: result.flow.advance_reason
       quote_reached_submit: result.flow.reached_submit_step
@@ -398,3 +429,24 @@ flowTools:
       properties:
         auto: { type: boolean }
         user_requirements: { type: [string, "null"] }
+
+  submit_quote:
+    description: Click the final Submit on the active Thumbtack quote step with reserved TEST contact data (never a real submission); returns the resulting Thumbtack error popover text.
+    execute: { kind: remote, tool: AX_submit_quote, timeoutMs: 60000 }
+    input:
+      confirm: true
+      phone: tool.args.submit_phone
+      email: tool.args.submit_email
+      zip_code: tool.args.zip_code
+    output:
+      next: { if: [{ var: result.error }, "done", "done"] }
+      quote_submit_status: result.status
+      quote_submit_message: { if: [{ var: result.message }, { var: result.message }, { var: result.request_error.message }] }
+      quote_submit_error: result.error
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        zip_code: { type: [string, "null"] }
+        submit_phone: { type: [string, "null"] }
+        submit_email: { type: [string, "null"] }

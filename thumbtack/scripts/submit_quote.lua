@@ -82,6 +82,11 @@ function AX_submit_quote(args)
   for index = 1, max_steps do
     local snapshot = M.read_quote_submission_snapshot()
     if snapshot.ready then
+      -- Fill any provided contact (reserved test phone/zip/email) into the contact step before the
+      -- submit click, so the submit carries data and Thumbtack returns a real validation popover
+      -- (e.g. invalid phone) we can capture — rather than an empty-field prompt.
+      M.apply_request_flow_contact_values(args, ax.array())
+      dom.wait(900)
       local clicked = dom.click(M.REQUEST_FLOW_ACTIVE_SELECTOR .. ' button[type="submit"]') == true
       dom.wait(1500)
       local after_submit = M.read_quote_submit_result(snapshot.url)

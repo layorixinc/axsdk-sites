@@ -15,7 +15,7 @@ local function append_answer_updates(applied, answers)
         ok = dom.set_value(value.selector, value.value) == true
         reason = ok and "updated" or "update_failed"
       else
-        ok = dom.click(value.selector) == true
+        ok = dom.click(value.selector, { navigates = false }) == true
         reason = ok and "clicked" or "click_failed"
       end
     end

@@ -7,7 +7,11 @@ local B = AX_BASE
 
 -- US locale endpoints (reused by any US site needing city/ZIP resolution).
 B.CENSUS_GEOCODER_URL = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress"
-B.ZIPPOPOTAM_CITY_URL = "https://api.zippopotam.us/us/"
+B.CENSUS_ZCTA_URL = "https://geocoding.geo.census.gov/geocoder/geographies/coordinates"
+-- Forward geocoders (no API key; Photon needs no User-Agent): Photon (Komoot) primary, Nominatim
+-- (OSM) fallback. A geocoded point is reverse-resolved to its ZCTA (ZIP) via the Census endpoint above.
+B.PHOTON_SEARCH_URL = "https://photon.komoot.io/api"
+B.NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 
 -- ── text ────────────────────────────────────────────────────────────────────
 function B.clean_text(value)
@@ -288,25 +292,99 @@ function B.split_city_state(address)
   return B.non_empty(city), state:upper()
 end
 
--- Resolves a representative city ZIP via Zippopotam — the PRIMARY resolver (reliable, unlike the
--- frequently slow/erroring Census geocoder). Returns a ZIP string, { pending = true }, or nil.
-function B.zip_from_city(address)
-  local city, state = B.split_city_state(address)
-  if not city or not state then
+-- Forward-geocodes a free-form place/address string to a representative point, no API key required.
+-- Primary: Photon (Komoot) — permissive CORS, no User-Agent requirement. Fallback: Nominatim (OSM).
+-- Both reliably return coordinates for "City, ST" and full addresses where city-level postcode
+-- lookups (and the Census street geocoder) come up empty.
+-- Returns { lat, lon[, zip] } | { pending = true } | nil.
+function B.geocode_point(query)
+  local q = B.non_empty(query)
+  if not q then
     return nil
   end
   local fetch = (net and net.fetch) or (http and http.fetch)
   if not fetch then
     return nil
   end
-  local response = fetch(B.ZIPPOPOTAM_CITY_URL .. state:lower() .. "/" .. B.url_encode(city), {
+  -- Primary: Photon. Occasionally returns a postcode directly (used as a shortcut when present).
+  local photon = fetch(B.PHOTON_SEARCH_URL .. "?q=" .. B.url_encode(q) .. "&limit=1", {
     method = "GET",
     headers = {
       accept = "application/json"
     },
     credentials = "omit",
     response = "json",
-    timeout = 4000
+    timeout = 5000
+  })
+  if photon.reason == "pending" then
+    return { pending = true }
+  end
+  if photon.ok and type(photon.json) == "table" then
+    local features = photon.json.features
+    local first = type(features) == "table" and features[1] or nil
+    if type(first) == "table" then
+      local props = first.properties
+      local zip = type(props) == "table" and B.extract_zip(props.postcode) or nil
+      local geom = first.geometry
+      local coords = type(geom) == "table" and geom.coordinates or nil
+      if type(coords) == "table" and coords[1] and coords[2] then
+        -- GeoJSON coordinate order is [lon, lat].
+        return { lon = tonumber(coords[1]), lat = tonumber(coords[2]), zip = zip }
+      end
+      if zip then
+        return { zip = zip }
+      end
+    end
+  end
+  -- Fallback: Nominatim. The browser bridge cannot override User-Agent, so the request carries
+  -- Chrome's UA (accepted by Nominatim for light use); on rejection this returns nil and the caller
+  -- falls through to the Census street geocoder.
+  local nom = fetch(B.NOMINATIM_SEARCH_URL .. "?q=" .. B.url_encode(q) .. "&format=jsonv2&addressdetails=1&limit=1", {
+    method = "GET",
+    headers = {
+      accept = "application/json"
+    },
+    credentials = "omit",
+    response = "json",
+    timeout = 5000
+  })
+  if nom.reason == "pending" then
+    return { pending = true }
+  end
+  if nom.ok and type(nom.json) == "table" then
+    local first = nom.json[1]
+    if type(first) == "table" and first.lat and first.lon then
+      local zip = type(first.address) == "table" and B.extract_zip(first.address.postcode) or nil
+      return { lon = tonumber(first.lon), lat = tonumber(first.lat), zip = zip }
+    end
+  end
+  return nil
+end
+
+-- Reverse-geocodes a point to its US Census ZIP Code Tabulation Area (ZCTA5). A point always falls
+-- within exactly one ZCTA, so this yields a representative ZIP even for city-centroid inputs that
+-- forward geocoders return without a postcode. No API key, no User-Agent requirement.
+-- Returns a ZIP string | { pending = true } | nil.
+function B.zip_from_point(lat, lon)
+  local y = tonumber(lat)
+  local x = tonumber(lon)
+  if not y or not x then
+    return nil
+  end
+  local fetch = (net and net.fetch) or (http and http.fetch)
+  if not fetch then
+    return nil
+  end
+  local response = fetch(B.CENSUS_ZCTA_URL
+    .. "?x=" .. tostring(x) .. "&y=" .. tostring(y)
+    .. "&benchmark=Public_AR_Current&vintage=Current_Current&layers=all&format=json", {
+    method = "GET",
+    headers = {
+      accept = "application/json"
+    },
+    credentials = "omit",
+    response = "json",
+    timeout = 6000
   })
   if response.reason == "pending" then
     return { pending = true }
@@ -314,32 +392,51 @@ function B.zip_from_city(address)
   if not response.ok or type(response.json) ~= "table" then
     return nil
   end
-  local places = response.json.places
-  if type(places) ~= "table" then
+  local geos = response.json.result and response.json.result.geographies
+  if type(geos) ~= "table" then
     return nil
   end
-  local target = B.clean_text(city):lower()
-  local fallback = nil
-  for index = 1, #places do
-    local place = places[index]
-    local zip = place and place["post code"]
-    if zip then
-      if not fallback then
-        fallback = tostring(zip)
-      end
-      local pname = place["place name"]
-      if pname and B.clean_text(pname):lower() == target then
-        return tostring(zip)
+  -- The layer key carries a vintage prefix ("2020 Census ZIP Code Tabulation Areas") that shifts
+  -- between vintages; match by substring so a future bump keeps resolving.
+  for key, layer in pairs(geos) do
+    if type(key) == "string" and key:lower():find("zip code tabulation", 1, true) and type(layer) == "table" then
+      for index = 1, #layer do
+        local entry = layer[index]
+        local zip = entry and B.extract_zip(entry.ZCTA5 or entry.BASENAME or entry.NAME)
+        if zip then
+          return zip
+        end
       end
     end
   end
-  return fallback
+  return nil
 end
 
--- Resolution ladder: args.zip_code (explicit) -> args.address embedded ZIP -> Zippopotam city
--- (PRIMARY) -> Census onelineaddress (fallback for full street addresses Zippopotam can't resolve).
--- City-level ZIP is the right granularity for finding local pros and avoids the flaky Census path
--- for the common "City, ST" input.
+-- City/address -> representative ZIP via forward geocode (Photon/Nominatim) + Census ZCTA reverse.
+-- Robust for the common "City, ST" input that single-shot postcode lookups cannot resolve.
+-- Returns a ZIP string | { pending = true } | nil.
+function B.zip_from_city(address)
+  local point = B.geocode_point(address)
+  if type(point) ~= "table" then
+    return nil
+  end
+  if point.pending then
+    return { pending = true }
+  end
+  if point.zip then
+    return point.zip
+  end
+  if point.lat and point.lon then
+    return B.zip_from_point(point.lat, point.lon)
+  end
+  return nil
+end
+
+-- Resolution ladder (layered; no single load-bearing source):
+--   args.zip_code (explicit) -> embedded ZIP in args.address -> forward geocode + Census ZCTA reverse
+--   (robust for "City, ST" and full addresses) -> Census onelineaddress (full street addresses) ->
+--   error. The geocode/ZCTA path replaces the previously flaky Zippopotam primary, which also
+--   mis-resolved some cities (e.g. "San Francisco" -> "South San Francisco").
 function B.resolve_zip(args)
   args = args or {}
   local explicit = B.extract_zip(args.zip_code)
@@ -365,22 +462,22 @@ function B.resolve_zip(args)
     }
   end
 
-  -- Primary: Zippopotam city lookup (split_city_state extracts the city even from a full address).
-  local city_zip = B.zip_from_city(address)
-  if type(city_zip) == "table" and city_zip.pending then
+  -- Primary: forward geocode (Photon/Nominatim) -> Census ZCTA reverse.
+  local geo = B.zip_from_city(address)
+  if type(geo) == "table" and geo.pending then
     return {
       pending = true,
       error = "pending"
     }
   end
-  if city_zip then
+  if type(geo) == "string" then
     return {
-      zip_code = tostring(city_zip),
-      source = "zippopotam_city"
+      zip_code = geo,
+      source = "geocode_zcta"
     }
   end
 
-  -- Fallback: Census full-address geocoder, only when Zippopotam yields no city ZIP.
+  -- Fallback: Census full-address geocoder (authoritative for full street addresses).
   local fetch = (net and net.fetch) or (http and http.fetch)
   if not fetch then
     return {
@@ -394,7 +491,7 @@ function B.resolve_zip(args)
     },
     credentials = "omit",
     response = "json",
-    timeout = 4000
+    timeout = 5000
   })
 
   if response.reason == "pending" then

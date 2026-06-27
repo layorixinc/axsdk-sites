@@ -66,9 +66,8 @@ async function loadFile(page, file, id, inline = false) {
   if (!loaded?.ok && loaded?.status !== 'loaded') throw new Error(`load failed (${id}): ${JSON.stringify(loaded)}`);
 }
 // Calls AX_resolve_zip; retries while the durable net.fetch reports pending or a transient error.
-// preferZippopotam: for a known US city a census_geocoder result means the Zippopotam PRIMARY
-// transiently missed and the Census fallback caught it — retry to surface the primary source.
-async function resolveZip(page, args, { retries = 6, preferZippopotam = false } = {}) {
+// Definitive results (zip_code, errors) are returned as-is; only pending/transient states retry.
+async function resolveZip(page, args, { retries = 6 } = {}) {
   let out;
   for (let i = 0; i < retries; i++) {
     const ctx = await axContext(page);
@@ -78,8 +77,7 @@ async function resolveZip(page, args, { retries = 6, preferZippopotam = false } 
     // error (reason='fetch_error'); re-run replays the durable step. Definitive results
     // (zip_code, missing_zip_or_address, zip_not_found) are NOT retried.
     const transient = out.status !== 'completed' || !v || v.pending === true
-      || v.error === 'pending' || v.reason === 'fetch_error'
-      || (preferZippopotam && v.source === 'census_geocoder');
+      || v.error === 'pending' || v.reason === 'fetch_error';
     if (!transient) break;
     if (i < retries - 1) await sleep(1500);
   }
@@ -127,25 +125,25 @@ async function main() {
   check('empty args -> error=missing_zip_or_address',
     r.status === 'completed' && r.value?.error === 'missing_zip_or_address', r.value);
 
-  // 4. full street address — NETWORK. The city ("San Francisco") is extracted and resolved via
-  //    Zippopotam (PRIMARY); Census is a fallback for inputs Zippopotam can't resolve. Either source
-  //    is a valid resolution (durable caching can pin one call to the fallback after a transient miss).
-  const full = await resolveZip(page, { address: '1 Dr Carlton B Goodlett Pl, San Francisco, CA' }, { preferZippopotam: true });
-  check('full address -> valid SF ZIP (zippopotam primary | census fallback)',
+  // 4. full street address — NETWORK. Forward-geocoded to a point, then reverse-resolved to its
+  //    ZCTA (geocode_zcta); the Census street geocoder is a fallback. Either is a valid SF ZIP.
+  const full = await resolveZip(page, { address: '1 Dr Carlton B Goodlett Pl, San Francisco, CA' });
+  check('full address -> valid SF ZIP (geocode_zcta | census fallback)',
     full.status === 'completed' && /^941\d\d$/.test(String(full.value?.zip_code || ''))
-      && (full.value?.source === 'zippopotam_city' || full.value?.source === 'census_geocoder'), full.value);
+      && (full.value?.source === 'geocode_zcta' || full.value?.source === 'census_geocoder'), full.value);
 
   // 5. city-only — NETWORK. The cleaning-quote path: a user types a city ("San Francisco") and the
-  //    flow resolves a representative ZIP. Zippopotam is primary here.
-  const city = await resolveZip(page, { address: 'San Francisco, CA' }, { preferZippopotam: true });
-  check('city-only "San Francisco, CA" -> valid ZIP (zippopotam primary | census fallback)',
-    city.status === 'completed' && /^\d{5}$/.test(String(city.value?.zip_code || ''))
-      && (city.value?.source === 'zippopotam_city' || city.value?.source === 'census_geocoder'), city.value);
+  //    flow resolves a representative ZIP via forward geocode + Census ZCTA — the exact case the old
+  //    Zippopotam/Census-street path failed on (or mis-resolved to South SF). Primary fix target.
+  const city = await resolveZip(page, { address: 'San Francisco, CA' });
+  check('city-only "San Francisco, CA" -> valid SF ZIP 941xx (geocode_zcta)',
+    city.status === 'completed' && /^941\d\d$/.test(String(city.value?.zip_code || ''))
+      && (city.value?.source === 'geocode_zcta' || city.value?.source === 'census_geocoder'), city.value);
 
-  // Prove Zippopotam is the PRIMARY resolver: at least one live city lookup resolved via it
-  // (Census is only reached when Zippopotam yields nothing).
-  check('Zippopotam is primary (>=1 network case via zippopotam_city)',
-    [full, city].some(x => x.value?.source === 'zippopotam_city'),
+  // Prove the forward-geocode + ZCTA path is the PRIMARY resolver: at least one live lookup
+  // resolved via it (Census street geocoder is only reached when the geocode path yields nothing).
+  check('geocode+ZCTA is primary (>=1 network case via geocode_zcta)',
+    [full, city].some(x => x.value?.source === 'geocode_zcta'),
     { full: full.value?.source, city: city.value?.source });
 
   console.log(ok ? '\nALL PASS — AX_resolve_zip works standalone on an external site' : '\nSOME FAILED');

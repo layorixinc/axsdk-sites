@@ -36,7 +36,7 @@ router:
         - get a house cleaning quote in San Francisco
 flows:
   request_service_quote:
-    goal: Collect a service-quote request (service, requirements, ZIP, and a contact phone collected up front together with the address), search Thumbtack, open quote requests for the top pros, then attempt the final Submit with the collected phone and a reserved TEST email (never a real submission), and report each quote's outcome including the exact text of any Thumbtack validation/error popover.
+    goal: Collect a service-quote request (service, requirements, ZIP/address, and the contact details the pros will use to reach the user — first name, last name, email, and phone — all collected up front; never proceed until every contact field is present), search Thumbtack, open quote requests for the top pros, then attempt the final Submit with the collected contact, and report each quote's outcome including the exact text of any Thumbtack validation/error popover.
     contexts: [memory]
     inputSelector:
       - requestText
@@ -66,7 +66,9 @@ flows:
       quote_submit_message: null
       quote_submit_error: null
       submit_phone: null
-      submit_email: thumbtack-test@example.com
+      submit_email: null
+      submit_first_name: null
+      submit_last_name: null
       quote_results: ""
       quote_count: null
     nodes:
@@ -88,28 +90,42 @@ flows:
           - zip_code
           - zip_status
           - submit_phone
+          - submit_email
+          - submit_first_name
+          - submit_last_name
         allowedTools: [collect_fields, resolve_zip]
         prompt: |-
-          Collect a service-quote request, then finish. The current values are the projected state fields; ALSO extract values from the latest user message (requestText) and <memory>. A field is MISSING only if it is absent from the message, memory, AND state. ENGLISH only — translate the service ("청소" -> "house cleaning", "핸디맨" -> "handyman", "잔디 깎기" -> "lawn mowing") and the city ("샌프란시스코" -> "San Francisco, CA").
+          Collect a service-quote request, then finish. The current values are the projected state fields; ALSO extract values from the latest user message (requestText) and <memory>. A field is MISSING only if it is absent from the message, memory, AND state. ENGLISH only for the service and the city — translate the service ("청소" -> "house cleaning", "핸디맨" -> "handyman", "잔디 깎기" -> "lawn mowing") and the city ("샌프란시스코" -> "San Francisco, CA"). Keep the user's name and email exactly as written.
+
+          To finish you MUST have ALL of: service_query, user_requirements, a 5-digit zip_code, AND the four contact fields the pros use to reach the user for the bulk quote requests — submit_first_name, submit_last_name, submit_email, submit_phone. NEVER invent or guess a contact field.
 
           Two tools:
           - resolve_zip(address): turns an ENGLISH US city/address into a zip_code (sets zip_code, zip_status). Use it to obtain a zip; never guess one. "resolve" is NOT a next value.
-          - collect_fields(next, question?, service_query?, user_requirements?, address?, zip_code?, submit_phone?): re-emit fields you know, OMIT unknown ones (never null). submit_phone is the contact phone the pros will use to reach the user (digits, e.g. "415-555-1234"). next is "ask" or "done" ONLY; "ask" needs a `question` in the user's language.
+          - collect_fields(next, question?, service_query?, user_requirements?, address?, zip_code?, submit_phone?, submit_email?, submit_first_name?, submit_last_name?): ALWAYS re-emit EVERY field you already know (service_query, user_requirements, zip_code, AND every contact field you have) on every call — not just newly-learned ones — so a field collected earlier is never dropped. OMIT only fields that are still unknown (never pass null). next is "ask" or "done" ONLY; "ask" needs a `question` in the user's language.
 
           Make ONE tool call — the FIRST rule that applies (a city is NOT a zip_code; you cannot finish with only a city):
           - service_query unknown -> collect_fields next="ask" (ask which service). If the message names the service, it is known — skip this.
           - user_requirements unknown -> collect_fields next="ask" (ask what and when).
-          - zip_code unknown AND address unknown -> collect_fields next="ask" (ask for the address or US ZIP code AND the contact phone number, in ONE question — collect location and phone together).
+          - zip_code unknown AND address unknown -> collect_fields next="ask" (ask for the address or US ZIP code).
           - zip_code unknown AND address known AND zip_status empty -> resolve_zip(ENGLISH address). Do NOT ask; do NOT finish.
           - zip_code unknown AND zip_status set (a resolve already failed) -> collect_fields next="ask" (ask for a valid US ZIP or a more specific English address).
-          - submit_phone unknown -> collect_fields next="ask" (ask for the contact phone number the pros should use).
-          - zip_code known (5-digit) AND submit_phone known -> collect_fields next="done".
+          - ANY contact field missing (submit_first_name, submit_last_name, submit_email, or submit_phone) -> collect_fields next="ask": in ONE question ask for ALL the still-missing contact fields together (first name, last name, email, and the contact phone number) and re-emit the contact fields you already know. NEVER finish while any of the four is missing.
+          - everything known (5-digit zip_code AND submit_first_name AND submit_last_name AND submit_email AND submit_phone) -> collect_fields next="done", re-emitting ALL of service_query, user_requirements, zip_code, submit_first_name, submit_last_name, submit_email, submit_phone in this SAME call.
         next:
           ask: collect_request
           collect: collect_request
-          done: open_site
+          done: verify_request
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
+
+      verify_request:
+        kind: action_contract
+        id: verify_request
+        description: Deterministically verify the collected request is complete (service_query, a resolved 5-digit zip_code, and all four contact fields) before leaving collection. No LLM, no navigation. Routes back to collect_request whenever anything is still missing, so the flow never reaches search without a ZIP (search_service requires a non-null zip_code) or opens quotes without the contact the pros need.
+        next:
+          ok: open_site
+          collect: collect_request
+        fallback: { invalidNext: collect, exhaustedNext: collect }
 
       open_site:
         kind: action_contract
@@ -123,47 +139,13 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
 
       search:
-        kind: action_unit
-        description: Search Thumbtack for the collected service in the resolved ZIP.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-5.4-mini
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: medium }
-        inputSelector:
-          - service_query
-          - zip_code
-          - address
-        allowedTools: [search_service]
-        llm: { maxCalls: 8 }
-        prompt: |-
-          You are already on thumbtack.com. Call search_service with `query` = the collected
-          service_query (e.g. "house cleaning", "handyman") and `zip_code` = the collected
-          zip_code (copy the resolved ZIP from the projected state). Do not set any other field.
-
-          search_service is two-phase. The first call fires the search and may return
-          status="navigating" while the results page is still loading. Whenever the result is
-          status="navigating", call search_service AGAIN with the SAME query and zip_code to wait
-          for and read the now-loaded results. Repeat until status="completed" (results were read)
-          or status="error". Never stop while the status is "navigating".
-        next:
-          read: read_results
-          done: pick_quote
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      read_results:
         kind: action_contract
         id: search_service
-        description: Re-read the now-loaded results page (phase 2 of the two-phase search) before opening quotes.
-        inputSelector:
-          - query
-          - zip_code
+        maxSelfSteps: 8
+        description: Search Thumbtack for the collected service in the resolved ZIP. Single durable call — start_search fires the search and the command suspends across the results navigation, then resumes on the loaded page to read candidates (robust cross-nav durable; no LLM loop, no separate read phase).
         next:
           done: pick_quote
-          read: pick_quote
+          read: search
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -186,42 +168,20 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
 
       answer_quote:
-        kind: action_unit
-        description: Auto-answer the active request-flow steps up to the final Submit, then stop. NEVER submits or sends.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-5.4-mini
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
-        inputSelector:
-          - user_requirements
-        allowedTools: [answer_quote]
-        llm: { maxCalls: 14 }
-        prompt: |-
-          You are filling a Thumbtack "Request a quote" multi-step form on behalf of the user.
-          Call answer_quote (auto mode — it answers the current step from the user's requirements and
-          clicks Next/Continue) ONCE per turn to advance one step. STOP and do NOT call answer_quote
-          again as soon as ANY of these is true in the latest result:
-          - flow.reached_submit_step is true (only the final Submit remains), or
-          - flow.advance_reason is "missing_answer" (the step needs personal contact info we will not
-            provide — treat this as reaching the final contact/submit step), or
-          - flow.advance_reason is "advance_button_not_found", or
-          - the result has an error.
-          Otherwise the step advanced — call answer_quote again for the next step. NEVER submit or send
-          the quote. Call no other tool. Only a few calls are needed; never loop indefinitely.
+        kind: action_contract
+        id: answer_quote
+        maxSelfSteps: 16
+        description: Auto-answer the active request-flow step (auto mode answers from user_requirements and clicks Next/Continue/Skip), then self-loop to the next step; route to submit once only the final Submit remains. NEVER submits or sends. Deterministic — the answer/submit decision is computed from the tool result (no LLM).
         next:
           answer: answer_quote
           submit: submit_quote
-          done: pick_quote
           error: pick_quote
-        fallback: { invalidNext: done, exhaustedNext: done }
+        fallback: { invalidNext: error, exhaustedNext: error }
 
       submit_quote:
         kind: action_contract
         id: submit_quote
-        description: Click the final Submit on the active quote step with the collected contact phone and a reserved TEST email — never a real submission. Captures the Thumbtack popover or outcome that results (e.g. a validation error or a sign-in prompt).
+        description: Click the final Submit on the active quote step with the collected contact details (first/last name, email, phone). Captures the Thumbtack popover or outcome that results (e.g. a validation error or a sign-in prompt).
         next:
           done: pick_quote
           error: pick_quote
@@ -235,8 +195,7 @@ flows:
           each carrying the pro's name, its service_id, and the outcome. When an outcome includes the
           exact text of a Thumbtack popover returned on Submit (a validation error or a sign-in prompt),
           reproduce that popover text exactly. State how many quotes were attempted (quote_count).
-          The Submit used the collected contact phone with a reserved TEST email; nothing was actually
-          sent to any pro. Do NOT include the searched pro list or any search results; output the quote
+          The Submit used the collected contact details (name, email, phone). Do NOT include the searched pro list or any search results; output the quote
           outcomes only.
 
       error:
@@ -262,7 +221,34 @@ flowTools:
         zip_code: { type: string }
         zip_status: { type: string }
         submit_phone: { type: string }
+        submit_email: { type: string }
+        submit_first_name: { type: string }
+        submit_last_name: { type: string }
         message: { type: string }
+
+  verify_request:
+    description: Check the collected request is complete — returns next=ok when service_query, zip_code, and all four contact fields (first/last name, email, phone) are present; otherwise next=collect to re-collect the missing field. Pure check; no navigation, no side effects.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |
+        local function nz(v) if v == nil or v == "" then return nil end return v end
+        if nz(args.service_query) and nz(args.zip_code)
+           and nz(args.submit_first_name) and nz(args.submit_last_name)
+           and nz(args.submit_email) and nz(args.submit_phone) then
+          return { next = "ok" }
+        end
+        return { next = "collect" }
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        service_query: { type: [string, "null"] }
+        zip_code: { type: [string, "null"] }
+        submit_first_name: { type: [string, "null"] }
+        submit_last_name: { type: [string, "null"] }
+        submit_email: { type: [string, "null"] }
+        submit_phone: { type: [string, "null"] }
 
   resolve_zip:
     description: Resolve a US ZIP code from an address string.
@@ -301,12 +287,11 @@ flowTools:
     description: Search Thumbtack for local pros matching the service query in the resolved ZIP.
     execute: { kind: remote, tool: AX_search_service, timeoutMs: 90000 }
     input:
-      query: tool.args.query
+      query: tool.args.service_query
       zip_code: tool.args.zip_code
     output:
       next: { if: [{ "==": [{ var: result.status }, "completed"] }, "done", { var: result.error }, "error", "read"] }
       query: result.query
-      zip_code: result.zip_code
       search_status: result.status
       candidates: result.candidates
       total_count: result.total_count
@@ -315,9 +300,9 @@ flowTools:
     parameters:
       type: object
       additionalProperties: false
-      required: [query, zip_code]
+      required: [service_query, zip_code]
       properties:
-        query: { type: string }
+        service_query: { type: string }
         zip_code: { type: string }
 
   pick_quote:
@@ -330,7 +315,7 @@ flowTools:
         -- per-pro signals open_quote/answer_quote wrote for the pro we just finished.
         local cands = args.candidates or {}
         local idx = args.quote_index or 0    -- count of pros already opened (0-based)
-        local MAX_OPEN = 6                    -- attempted = min(#candidates, MAX_OPEN). Each pro costs ~4 flow steps (pick+open+answer+submit); 6 pros ~28 steps fits the top-level `defaults.maxSteps: 64` budget (default ~14 only fit ~2).
+        local MAX_OPEN = 6                    -- attempted = min(#candidates, MAX_OPEN). answer_quote's form self-loop is budgeted per-node via maxSelfSteps (exempt from global maxSteps), so each pro costs ~4 global flow steps (pick+open+answer-entry+submit); 6 pros fit maxSteps=64 with margin.
         -- quote_results is a newline-joined summary STRING (one line per pro). A string avoids
         -- the array/object serialization ambiguity an empty Lua table would hit at the schema.
         local results = args.quote_results or ""
@@ -422,6 +407,11 @@ flowTools:
     input:
       auto: true
       user_requirements: tool.args.user_requirements
+      email: tool.args.submit_email
+      first_name: tool.args.submit_first_name
+      last_name: tool.args.submit_last_name
+      phone: tool.args.submit_phone
+      zip_code: tool.args.zip_code
     output:
       next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "submit", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "submit", { "==": [{ var: result.flow.advance_reason }, "missing_answer"] }, "submit", "answer"] }
       quote_answer_status: result.status
@@ -434,14 +424,21 @@ flowTools:
       properties:
         auto: { type: boolean }
         user_requirements: { type: [string, "null"] }
+        submit_email: { type: [string, "null"] }
+        submit_first_name: { type: [string, "null"] }
+        submit_last_name: { type: [string, "null"] }
+        submit_phone: { type: [string, "null"] }
+        zip_code: { type: [string, "null"] }
 
   submit_quote:
-    description: Click the final Submit on the active Thumbtack quote step with the collected contact phone and a reserved TEST email — never a real submission; returns the resulting Thumbtack popover/outcome text.
+    description: Click the final Submit on the active Thumbtack quote step with the collected contact details (first/last name, email, phone); returns the resulting Thumbtack popover/outcome text.
     execute: { kind: remote, tool: AX_submit_quote, timeoutMs: 60000 }
     input:
       confirm: true
       phone: tool.args.submit_phone
       email: tool.args.submit_email
+      first_name: tool.args.submit_first_name
+      last_name: tool.args.submit_last_name
       zip_code: tool.args.zip_code
     output:
       next: { if: [{ var: result.flow_error }, "done", "done"] }
@@ -455,3 +452,5 @@ flowTools:
         zip_code: { type: [string, "null"] }
         submit_phone: { type: [string, "null"] }
         submit_email: { type: [string, "null"] }
+        submit_first_name: { type: [string, "null"] }
+        submit_last_name: { type: [string, "null"] }

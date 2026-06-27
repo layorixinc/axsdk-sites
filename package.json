@@ -1,0 +1,11 @@
+{
+  "name": "axsdk-sites",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Site-specific llms.txt sitemap data and AXSDK Lua scripts for the AXSDK Chrome extension.",
+  "scripts": {
+    "build:lua": "node tools/merge-lua.mjs",
+    "build:lua:self-contained": "node tools/merge-lua.mjs --self-contained",
+    "build:lua:check": "node tools/merge-lua.mjs --check"
+  }
+}

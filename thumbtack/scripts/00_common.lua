@@ -128,6 +128,19 @@ function M.current_results_match(query, zip_code)
   return true
 end
 
+-- Detect Thumbtack's "enter a valid zip code" rejection shown when the submitted ZIP is invalid or
+-- unsupported (the pro list never renders). dom is CSS-only (no text matching), so read the page text
+-- and match the banner phrase in Lua. Only meaningful to call when the pro list is empty.
+function M.zip_rejected()
+  local text = M.clean_text(dom.get_text("body")) or ""
+  text = text:lower()
+  if text == "" then
+    return false
+  end
+  return text:find("valid zip code", 1, true) ~= nil
+    or text:find("enter a valid zip", 1, true) ~= nil
+end
+
 -- Selectors for dismissable modal/overlay popups (e.g., instant-results project questions).
 M.MODAL_CLOSE_SELECTOR = '[aria-label="Close"], [data-test="close-modal"]'
 

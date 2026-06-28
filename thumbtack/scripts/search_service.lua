@@ -18,6 +18,19 @@ local function read_loaded(query, zip_code, timeout)
     candidates = M.read_search_candidates()
     tries = tries + 1
   end
+  if #candidates == 0 and M.zip_rejected() then
+    -- Invalid/unsupported ZIP: Thumbtack shows "Enter a valid zip code" and never renders pros.
+    -- Return the proven error shape (an `error` field, no status) so the search contract routes to
+    -- its `error` outcome -> the no_results terminal, instead of "navigating" which self-loops to
+    -- exhaustion. Fast-fails here rather than burning the per-call result wait every loop.
+    return {
+      query = query,
+      zip_code = zip_code,
+      error = "invalid_zip",
+      zip_status = "invalid_zip",
+      message = "Thumbtack rejected the ZIP code as invalid. Ask the user for a valid US ZIP code or a more specific city and state."
+    }
+  end
   return {
     query = query,
     zip_code = zip_code,

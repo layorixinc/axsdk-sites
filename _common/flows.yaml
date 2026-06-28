@@ -156,8 +156,8 @@ flows:
         next:
           done: pick_quote
           read: search
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+          error: no_results
+        fallback: { invalidNext: no_results, exhaustedNext: no_results }
 
       pick_quote:
         kind: action_contract
@@ -207,6 +207,13 @@ flows:
           reproduce that popover text exactly. State how many quotes were attempted (quote_count).
           The Submit used the collected contact details (name, email, phone). Do NOT include the searched pro list or any search results; output the quote
           outcomes only.
+
+      no_results:
+        kind: terminal
+        respond: |-
+          Reply in the user's language. No pros were found for the requested service at the given
+          location, which usually means the ZIP code is invalid or unsupported. Ask the user to
+          double-check it and provide a valid US ZIP code (or a more specific city and state).
 
       error:
         kind: terminal

@@ -157,7 +157,7 @@ flows:
           done: pick_quote
           read: search
           error: no_results
-        fallback: { invalidNext: no_results, exhaustedNext: no_results }
+        fallback: { invalidNext: error, exhaustedNext: error }
 
       pick_quote:
         kind: action_contract

@@ -20,9 +20,11 @@ planner:
     conversationSummary: conversationSummary
     latestMessageInterpretation: latestMessageInterpretation
   prompt: |-
-    You orchestrate the request_service_quote flow. Call decide exactly once.
-    - If an active request_service_quote flow is awaiting the user's answer (an active flow / active prompt exists), call decide with action=continue_current and the latest user message. Do NOT restart the flow.
-    - Otherwise, for a new service-quote request, call decide with action=replace_current and intent=request_service_quote.
+    You route the latest user message to a flow. Call decide exactly once.
+    - If an active flow is awaiting the user's answer (an active flow / active prompt exists), call decide with action=continue_current and the latest user message. Do NOT restart or switch flows.
+    - Otherwise classify the NEW request and call decide with action=replace_current and the matching intent:
+      - intent=shopping — the user wants to find, buy, or order one or more products (e.g. "신발 사줘", "내가 아래 불러주는 물건 구매해줘", "buy airpods").
+      - intent=request_service_quote — the user wants a quote/estimate for a local service (e.g. "핸디맨 견적", "house cleaning quote").
 router:
   mode: fixed
   defaultIntent: request_service_quote
@@ -34,6 +36,14 @@ router:
         - 열쇠공 견적줘
         - 샌프란시스코 핸디맨 견적 받아줘
         - get a house cleaning quote in San Francisco
+    - intent: shopping
+      entry: shopping.collect_shopping
+      description: Find, buy, or order one or more products (online shopping).
+      examples:
+        - 신발 사줘
+        - 내가 아래 불러주는 물건 구매해줘
+        - 아이팟 사줘
+        - buy me some shoes
 flows:
   request_service_quote:
     goal: Collect a service-quote request (service, requirements, ZIP/address, and the contact details the pros will use to reach the user — first name, last name, email, and phone — all collected up front; never proceed until every contact field is present), search Thumbtack, open quote requests for the top pros, then attempt the final Submit with the collected contact, and report each quote's outcome including the exact text of any Thumbtack validation/error popover.
@@ -201,6 +211,118 @@ flows:
       error:
         kind: terminal
         respond: 견적 요청에 필요한 정보를 수집하지 못했습니다. 다시 시도해 주세요.
+
+  shopping:
+    goal: Buy products for the user — clarify the shopping list (each product and quantity), then on the shopping site search for each item in turn and add it to the cart, and report what was added. Never place an order.
+    contexts: [memory]
+    inputSelector:
+      - requestText
+    state:
+      site: amazon
+      shop_plan: null
+      shop_index: null
+      query: null
+      quantity: null
+      candidates: null
+      search_status: null
+      product_id: null
+      product_name: null
+      add_status: null
+      add_error: null
+      shop_results: ""
+      shop_count: null
+    nodes:
+      collect_shopping:
+        kind: action_unit
+        description: Build the shopping list — split the request into individual products, each with an English search query and a quantity; ask only if no product can be identified at all.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-5.4-mini
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: medium }
+        inputSelector:
+          - requestText
+          - shop_plan
+        allowedTools: [collect_shopping]
+        prompt: |-
+          Build the shopping list, then finish. The current value is the projected shop_plan; ALSO extract products from the latest user message (requestText) and <memory>.
+
+          SPLIT a multi-item request into SEPARATE items — "아이폰이랑 계란 사줘" / "buy an iPhone and eggs" becomes TWO items [iPhone, eggs], NEVER one combined query. Each item is an object { query, quantity }:
+          - query: a SHORT English product search term for an online store. Translate to English ("아이폰" -> "iPhone", "계란" -> "eggs", "건전지" -> "batteries", "운동화" -> "running shoes"). Keep it broad enough to return results; do NOT demand brand/size/color unless the user already gave one.
+          - quantity: an integer; DEFAULT to 1 whenever the user did not state a number. Never ask just to learn a quantity.
+
+          One tool — collect_shopping:
+          - collect_shopping(next, question?, shop_plan?): ALWAYS re-emit the FULL shop_plan you already know on every call — never drop an item. shop_plan is an ARRAY of { query, quantity }. next is "ask" or "done" ONLY; "ask" needs a `question` in the user's language.
+
+          Make ONE tool call — the FIRST rule that applies:
+          - NO product can be identified at all (the request names nothing concrete to buy) -> collect_shopping next="ask" with a question asking what to buy.
+          - At least one product is identified -> collect_shopping next="done", emitting the full shop_plan (every item with an English query and an integer quantity, default 1).
+        next:
+          ask: collect_shopping
+          done: open_amazon
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      open_amazon:
+        kind: action
+        run: open_site
+        inputSelector:
+          - site
+        next:
+          search: next_product
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      next_product:
+        kind: action_contract
+        id: next_product
+        description: Record the item just processed and pick the next item from shop_plan (sets query/quantity, advances shop_index). No LLM, no navigation.
+        next:
+          shop: search_item
+          done: shopping_done
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      search_item:
+        kind: action_contract
+        id: search_product
+        description: Search the shopping site for the current item's query. Single durable call — fires the search, suspends across the results navigation, then resumes to read candidates.
+        next:
+          done: pick_item
+          error: next_product
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      pick_item:
+        kind: action_contract
+        id: pick_product
+        description: Deterministically pick the first usable search candidate (sets product_id/product_name). No LLM, no navigation.
+        next:
+          add: add_item
+          skip: next_product
+        fallback: { invalidNext: skip, exhaustedNext: skip }
+
+      add_item:
+        kind: action_contract
+        id: add_to_cart
+        description: Add the picked product to the cart with the requested quantity. Single durable call — navigates to the product page, clicks Add to Cart, declines the optional warranty, and reads the confirmation. Never places an order.
+        next:
+          done: next_product
+          error: next_product
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      shopping_done:
+        kind: terminal
+        respond: |-
+          Reply in the user's language. Output a short Cart summary built VERBATIM from the shop_results
+          value in the Flow state JSON: one line per item — the product and whether it was added to the
+          cart (with the reason when it was not). State how many items were processed (shop_count). Make
+          clear the items are in the cart but NO order has been placed. Do NOT invent items, brands,
+          quantities, or prices.
+
+      error:
+        kind: terminal
+        respond: 무엇을 살지 확인하지 못했습니다. 구매할 품목을 다시 알려주세요.
 flowTools:
   collect_fields:
     description: Fill the collected request fields and choose the next step (ask the user or finish).
@@ -225,6 +347,141 @@ flowTools:
         submit_first_name: { type: string }
         submit_last_name: { type: string }
         message: { type: string }
+
+  collect_shopping:
+    description: Fill the shopping list (shop_plan — an array of { query, quantity }) and choose the next step (ask the user to clarify, or finish).
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, done] }
+        question: { type: string }
+        shop_plan:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              query: { type: string }
+              quantity: { type: [integer, number] }
+        message: { type: string }
+
+  next_product:
+    description: Record the item just processed into shop_results and pick the next item from shop_plan (sets query/quantity, advances shop_index). No LLM, no navigation.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |
+        local plan = args.shop_plan or {}
+        local idx = args.shop_index or 0
+        local results = args.shop_results or ""
+        local function nz(v) if v == nil or v == "" then return nil end return v end
+        if idx > 0 then
+          local prev = plan[idx] or {}
+          local q = tostring(prev.query or "?")
+          local qty = prev.quantity or 1
+          local outcome
+          if args.add_status == "added" then
+            outcome = "added (x" .. tostring(qty) .. ")" .. (nz(args.product_name) and (" - " .. tostring(args.product_name)) or "")
+          elseif args.add_status == "pending" then
+            outcome = "add pending (x" .. tostring(qty) .. ")"
+          elseif nz(args.add_error) then
+            outcome = "NOT added (" .. tostring(args.add_error) .. ")"
+          elseif not nz(args.product_id) then
+            outcome = "no product found"
+          else
+            outcome = "skipped"
+          end
+          results = (results ~= "" and (results .. "\n") or "") .. q .. ": " .. outcome
+        end
+        if idx < #plan then
+          local item = plan[idx + 1] or {}
+          return {
+            next = "shop",
+            query = item.query,
+            quantity = item.quantity or 1,
+            shop_index = idx + 1,
+            shop_results = results,
+            search_status = "",
+            product_id = "",
+            product_name = "",
+            add_status = "",
+            add_error = "",
+          }
+        end
+        return { next = "done", shop_index = idx, shop_results = results, shop_count = idx }
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        shop_plan: { type: [array, "null"] }
+        shop_index: { type: [integer, "null"] }
+        shop_results: { type: [string, "null"] }
+        product_id: { type: [string, "null"] }
+        product_name: { type: [string, "null"] }
+        add_status: { type: [string, "null"] }
+        add_error: { type: [string, "null"] }
+
+  search_product:
+    description: Search the shopping site for the current item's query; returns candidate products.
+    execute: { kind: remote, tool: AX_search_product, timeoutMs: 90000 }
+    input:
+      query: tool.args.query
+    output:
+      next: { if: [{ var: result.error }, "error", "done"] }
+      candidates: result.candidates
+      search_status: { if: [{ var: result.error }, { var: result.error }, "ok"] }
+      error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: { type: string }
+
+  pick_product:
+    description: Pick the first usable search candidate to add to the cart. No LLM, no navigation.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |
+        local cands = args.candidates or {}
+        for i = 1, #cands do
+          local c = cands[i] or {}
+          local id = c.id
+          if id ~= nil and id ~= "" then
+            return { next = "add", product_id = id, product_name = c.name or c.title }
+          end
+        end
+        return { next = "skip", product_id = "", product_name = "" }
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        candidates: { type: [array, "null"] }
+
+  add_to_cart:
+    description: Add the picked product to the cart with the requested quantity. Navigates to the product page, clicks Add to Cart, declines optional warranty, reads the confirmation. Never places an order.
+    execute: { kind: remote, tool: AX_add_to_cart, timeoutMs: 90000 }
+    input:
+      product_id: tool.args.product_id
+      quantity: tool.args.quantity
+    output:
+      next: "done"
+      add_status: { if: [{ var: result.added }, "added", { var: result.pending }, "pending", "failed"] }
+      add_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [product_id]
+      properties:
+        product_id: { type: string }
+        quantity: { type: [integer, number, string] }
 
   verify_request:
     description: Check the collected request is complete — returns next=ok when service_query, zip_code, and all four contact fields (first/last name, email, phone) are present; otherwise next=collect to re-collect the missing field. Pure check; no navigation, no side effects.
@@ -281,7 +538,7 @@ flowTools:
       additionalProperties: false
       required: [site]
       properties:
-        site: { type: string, enum: [thumbtack] }
+        site: { type: string, enum: [thumbtack, amazon] }
 
   search_service:
     description: Search Thumbtack for local pros matching the service query in the resolved ZIP.

@@ -4,25 +4,15 @@ if not M then
 end
 
 -- Read the candidates on an already-loaded results page. Close any project-questions/search overlay
--- first so the pro list is readable, then wait briefly for it to hydrate. The wait stays under the SDK
--- per-call deadline so the call returns status="navigating" (prompting a re-call) rather than timing
--- out pending when the list is still loading.
+-- first so the pro list is readable, then poll briefly for it to hydrate. The invalid-ZIP banner is
+-- checked on EVERY poll iteration: for a bad ZIP, Thumbtack shows "Enter a valid zip code" and never
+-- renders pros, so it must be detected with a NON-suspending poll. A blocking dom.wait_for_selector
+-- would suspend the durable step until its deadline (returning pending) and never reach the banner
+-- check -- that is what made the search self-loop. dom.wait is a bounded sleep, so the poll stays
+-- under the per-call deadline and returns status="navigating" (prompting a re-call) while loading.
 local function read_loaded(query, zip_code, timeout)
   M.dismiss_modals()
-  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = timeout or 3000 })
-  M.dismiss_modals()
-  local candidates = M.read_search_candidates()
-  local tries = 0
-  while #candidates == 0 and tries < 2 do
-    dom.wait(300)
-    candidates = M.read_search_candidates()
-    tries = tries + 1
-  end
-  if #candidates == 0 and M.zip_rejected() then
-    -- Invalid/unsupported ZIP: Thumbtack shows "Enter a valid zip code" and never renders pros.
-    -- Return the proven error shape (an `error` field, no status) so the search contract routes to
-    -- its `error` outcome -> the no_results terminal, instead of "navigating" which self-loops to
-    -- exhaustion. Fast-fails here rather than burning the per-call result wait every loop.
+  local function rejected_zip()
     return {
       query = query,
       zip_code = zip_code,
@@ -30,6 +20,21 @@ local function read_loaded(query, zip_code, timeout)
       zip_status = "invalid_zip",
       message = "Thumbtack rejected the ZIP code as invalid. Ask the user for a valid US ZIP code or a more specific city and state."
     }
+  end
+  local candidates = M.read_search_candidates()
+  local tries = 0
+  local max_tries = math.max(1, math.floor((timeout or 3000) / 300))
+  while #candidates == 0 and tries < max_tries do
+    if M.zip_rejected() then
+      return rejected_zip()
+    end
+    dom.wait(300)
+    M.dismiss_modals()
+    candidates = M.read_search_candidates()
+    tries = tries + 1
+  end
+  if #candidates == 0 and M.zip_rejected() then
+    return rejected_zip()
   end
   return {
     query = query,

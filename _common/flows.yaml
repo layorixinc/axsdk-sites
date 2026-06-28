@@ -20,11 +20,25 @@ planner:
     conversationSummary: conversationSummary
     latestMessageInterpretation: latestMessageInterpretation
   prompt: |-
-    You route the latest user message to a flow. Call decide exactly once.
-    - If an active flow is awaiting the user's answer (an active flow / active prompt exists), call decide with action=continue_current and the latest user message. Do NOT restart or switch flows.
-    - Otherwise classify the NEW request and call decide with action=replace_current and the matching intent:
-      - intent=shopping — the user wants to find, buy, or order one or more products (e.g. "신발 사줘", "내가 아래 불러주는 물건 구매해줘", "buy airpods").
-      - intent=request_service_quote — the user wants a quote/estimate for a local service (e.g. "핸디맨 견적", "house cleaning quote").
+    You orchestrate the user's request: call decide EXACTLY ONCE. decide takes `action` and an ORDERED `intents` array. The runtime runs the intents as a QUEUE — it starts the first now and runs each next one after the previous flow finishes — so a message with several tasks is handled by listing several intents.
+
+    Configured intents:
+    - request_service_quote — a quote/estimate for a local SERVICE (청소/house cleaning, 핸디맨/handyman, 잔디 깎기/lawn mowing, 열쇠공/locksmith, …).
+    - shopping — find / buy / order one or more PRODUCTS (아이폰/iPhone, 신발/shoes, 계란/eggs, airpods, …).
+
+    action:
+    - continue_current — an active flow is awaiting the user's answer (an active flow / active prompt exists) and the latest message is that answer. intents = ONE entry for the active flow's intent, segments=[the latest message], state.requestText=the latest message. Never restart or switch flows.
+    - replace_current — a NEW request. Find EVERY distinct task and emit ONE intents entry per task, IN THE ORDER stated. Per entry set `intent`, `segments` (the exact phrase(s) for that task), and `state.requestText` (ONLY that task's portion of the message — never another task's text). Different tasks => multiple entries (they run in sequence). The SAME intent with multiple items ("아이폰이랑 계란 사줘" = two products, both shopping) is ONE entry — NEVER split same-intent items into separate intents.
+    - clarify — ambiguous / unclassifiable: set `question` plus a single best-guess entry.
+    - out_of_scope — nothing matches a configured intent.
+
+    Also set conversationSummary (brief running summary) and latestMessageInterpretation (your reading of the latest message).
+
+    Examples:
+    - "청소 견적 줘" → replace_current, intents=[{intent:request_service_quote, segments:["청소 견적 줘"], state:{requestText:"청소 견적 줘"}}]
+    - "아이폰 사줘" → intents=[{intent:shopping, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
+    - "청소 견적 주고 아이폰 사줘" → intents=[{intent:request_service_quote, segments:["청소 견적 주고"], state:{requestText:"청소 견적 줘"}}, {intent:shopping, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
+    - "아이폰이랑 계란 사줘" → intents=[{intent:shopping, segments:["아이폰이랑 계란 사줘"], state:{requestText:"아이폰이랑 계란 사줘"}}]
 router:
   mode: fixed
   defaultIntent: request_service_quote
@@ -331,6 +345,45 @@ flows:
         kind: terminal
         respond: 무엇을 살지 확인하지 못했습니다. 구매할 품목을 다시 알려주세요.
 flowTools:
+  decide:
+    description: Select configured intent flows and initial runtime state for the config-runtime planner.
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [action, intents]
+      properties:
+        set: { type: boolean }
+        action: { type: string, enum: [continue_current, replace_current, clarify, out_of_scope] }
+        intents:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [intent, segments]
+            properties:
+              intent: { type: string, enum: [request_service_quote, shopping] }
+              segments:
+                type: array
+                minItems: 1
+                items: { type: string }
+              state:
+                type: object
+                additionalProperties: false
+                properties:
+                  requestText: { type: string, minLength: 1 }
+                  followup:
+                    type: object
+                    additionalProperties: true
+                    required: [type, question]
+                    properties:
+                      type: { type: string, enum: [info_question] }
+                      question: { type: string, minLength: 1 }
+                      topic: { type: string, minLength: 1 }
+                      scope: { type: string, enum: [active_state] }
+        question: { type: string }
+        conversationSummary: { type: string }
+        latestMessageInterpretation: { type: string }
+        reason: { type: string }
   collect_fields:
     description: Fill the collected request fields and choose the next step (ask the user or finish).
     execute:

@@ -1,15 +1,15 @@
 AX_AMAZON = {}
 local M = AX_AMAZON
 
-M.AMAZON_SEARCH_NAVIGATION_URL = "http://www.amazon.com/s"
-M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX = "http://www.amazon.com/dp/"
+M.AMAZON_SEARCH_NAVIGATION_URL = "https://www.amazon.com/s"
+M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX = "https://www.amazon.com/dp/"
 M.AMAZON_PRODUCT_URL_PREFIX = "https://www.amazon.com/dp/"
 M.RESULT_SELECTOR = '[data-component-type="s-search-result"][data-asin]'
 M.RESULT_ADD_TO_CART_SELECTOR = 'button[name="submit.addToCart"], input[name="submit.addToCart"]'
 M.LOGIN_SELECTOR = 'form[name="signIn"], #authportal-main-section, #ap_email, #ap_password'
 M.RESULT_READY_SELECTOR = M.RESULT_SELECTOR .. ', .s-no-results-result, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.PRODUCT_READY_SELECTOR = 'span#productTitle, #centerCol, #buybox, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
-M.CART_NAVIGATION_URL = "http://www.amazon.com/gp/cart/view.html"
+M.CART_NAVIGATION_URL = "https://www.amazon.com/gp/cart/view.html"
 M.CART_READY_SELECTOR = '#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.ADD_TO_CART_CONFIRM_SELECTOR = '#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin]'
 M.ATTACH_PANE_SELECTOR = '#attach-warranty-pane:not(.aok-hidden)'
@@ -203,11 +203,18 @@ function M.product_page_matches(product_id)
 end
 
 function M.navigate_product(product_id)
-  nav.navigate(M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX .. product_id, {})
+  -- Force a full load (reload=true) so the product page actually renders; a default same-origin pushState
+  -- would change the URL without loading. Clear the beforeunload guard so the navigation is never blocked.
+  nav.clear_beforeunload()
+  nav.navigate(M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX .. product_id, {}, { reload = true })
 end
 
 function M.ensure_product_page(product_id)
-  M.navigate_product(product_id)
+  -- Skip the navigation when already on the target product so a durable resume does not re-issue a nav
+  -- that would suspend the call again (a redundant same-page nav cannot resume after a script reload).
+  if not M.product_page_matches(product_id) then
+    M.navigate_product(product_id)
+  end
   dom.wait_for_selector(M.PRODUCT_READY_SELECTOR, { timeout = 30000 })
 
   if dom.exists('form[action*="validateCaptcha"]') then
@@ -281,7 +288,11 @@ function M.read_candidates()
   for index = 1, #rows do
     local row = rows[index]
     local asin = M.non_empty(row.asin)
-    if asin and not seen[asin] and row.add_to_cart == true then
+    -- Keep every real product result (valid ASIN). Do NOT require a search-row "Add to cart" button:
+    -- most products (e.g. iPhone) have none on the results page and those buttons render lazily, yet
+    -- the item is added from its product page by AX_add_to_cart. Filtering on it dropped real results,
+    -- leaving 0 candidates -> pick_product "skip" -> "no product found" despite visible results.
+    if asin and not seen[asin] then
       local candidate = M.candidate_from_row(row)
       if candidate then
         seen[asin] = true
@@ -333,7 +344,7 @@ function M.force_full_navigation_url(url)
     return "http://" .. value:sub(9)
   end
   if value:find("^/") then
-    return "http://www.amazon.com" .. value
+    return "https://www.amazon.com" .. value
   end
   return value
 end
@@ -386,22 +397,28 @@ end
 
 function M.navigate_search(query, cursor)
   local target = M.non_empty(cursor)
-
+  -- Skip the navigation when already on the matching results page so a durable resume does not re-issue a
+  -- nav that would suspend the call again; otherwise force a full load (reload=true), since a same-origin
+  -- pushState would change the URL without re-rendering results. Clear the beforeunload guard first.
   if target then
+    if M.current_page_matches_cursor(target) then return end
+    nav.clear_beforeunload()
     if M.looks_like_url(target) then
-      nav.navigate(M.force_full_navigation_url(target), {})
+      nav.navigate(M.force_full_navigation_url(target), {}, { reload = true })
       return
     end
 
     local page = tonumber(target)
     if page then
-      nav.navigate(M.AMAZON_SEARCH_NAVIGATION_URL, { k = query or "", page = page })
+      nav.navigate(M.AMAZON_SEARCH_NAVIGATION_URL, { k = query or "", page = page }, { reload = true })
       return
     end
   end
 
   if query and query ~= "" then
-    nav.navigate(M.AMAZON_SEARCH_NAVIGATION_URL, { k = query })
+    if M.current_page_matches_query(query) then return end
+    nav.clear_beforeunload()
+    nav.navigate(M.AMAZON_SEARCH_NAVIGATION_URL, { k = query }, { reload = true })
   end
 end
 
@@ -881,7 +898,13 @@ function M.cart_page_matches()
 end
 
 function M.navigate_cart()
-  nav.navigate(M.CART_NAVIGATION_URL, {})
+  -- Skip the navigation when already on the cart so a durable resume does not re-issue a nav that would
+  -- suspend the call again (a redundant same-page nav cannot resume after a script reload); otherwise
+  -- force a full load (reload=true) so the cart re-renders instead of a same-origin pushState. Clear the
+  -- beforeunload guard (checkout/sidesheet flows can set one) so the navigation is not blocked.
+  if M.cart_page_matches() then return end
+  nav.clear_beforeunload()
+  nav.navigate(M.CART_NAVIGATION_URL, {}, { reload = true })
 end
 
 function M.read_cart_count()

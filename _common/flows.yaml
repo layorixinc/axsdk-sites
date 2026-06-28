@@ -109,6 +109,8 @@ flows:
 
           To finish you MUST have ALL of: service_query, user_requirements, a 5-digit zip_code, AND the four contact fields the pros use to reach the user for the bulk quote requests — submit_first_name, submit_last_name, submit_email, submit_phone. NEVER invent or guess a contact field.
 
+          This flow ONLY handles the service quote, never a product purchase. If the latest message ALSO contains a clearly separate request to BUY/PURCHASE a product online (e.g. "아이폰 사줘" / "buy an iPhone"), do NOT collect or act on that product here. But whenever you emit next="ask", append ONE short sentence to your `question` telling the user you will handle the service quote first and they can ask you to buy the product right afterward.
+
           Two tools:
           - resolve_zip(address): turns an ENGLISH US city/address into a zip_code (sets zip_code, zip_status). Use it to obtain a zip; never guess one. "resolve" is NOT a next value.
           - collect_fields(next, question?, service_query?, user_requirements?, address?, zip_code?, submit_phone?, submit_email?, submit_first_name?, submit_last_name?): ALWAYS re-emit EVERY field you already know (service_query, user_requirements, zip_code, AND every contact field you have) on every call — not just newly-learned ones — so a field collected earlier is never dropped. OMIT only fields that are still unknown (never pass null). next is "ask" or "done" ONLY; "ask" needs a `question` in the user's language.
@@ -255,6 +257,8 @@ flows:
         allowedTools: [collect_shopping]
         prompt: |-
           Build the shopping list, then finish. The current value is the projected shop_plan; ALSO extract products from the latest user message (requestText) and <memory>.
+
+          This flow ONLY handles product shopping, never a local service quote. If the latest message ALSO contains a clearly separate request for a SERVICE quote/estimate (e.g. "청소 견적 줘" / "get a cleaning quote"), do NOT act on that here. Whenever you emit next="ask", append ONE short sentence noting you will handle the shopping first and they can ask for the service quote afterward.
 
           SPLIT a multi-item request into SEPARATE items — "아이폰이랑 계란 사줘" / "buy an iPhone and eggs" becomes TWO items [iPhone, eggs], NEVER one combined query. Each item is an object { query, quantity }:
           - query: a SHORT English product search term for an online store. Translate to English ("아이폰" -> "iPhone", "계란" -> "eggs", "건전지" -> "batteries", "운동화" -> "running shoes"). Keep it broad enough to return results; do NOT demand brand/size/color unless the user already gave one.

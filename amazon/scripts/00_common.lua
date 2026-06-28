@@ -234,8 +234,9 @@ end
 function M.result_fields()
   return {
     asin = { attr = "data-asin" },
-    title = { selector = "h2 span" },
-    title_alt = { selector = "h2 a span" },
+    title = { selector = "h2" },
+    title_alt = { selector = "h2 a" },
+    image_alt = { selector = "img.s-image", attr = "alt" },
     url = { selector = 'h2 a, a.a-link-normal.s-no-outline, a[href*="/dp/"], a[href*="/gp/product/"]', attr = "href" },
     image_url = { selector = "img.s-image", attr = "src" },
     price_text = { selector = ".a-price .a-offscreen" },
@@ -250,7 +251,7 @@ end
 
 function M.candidate_from_row(row)
   local asin = M.non_empty(row.asin)
-  local title = M.non_empty(row.title) or M.non_empty(row.title_alt)
+  local title = M.non_empty(row.image_alt) or M.non_empty(row.title) or M.non_empty(row.title_alt)
   if not asin or not title then
     return nil
   end
@@ -280,7 +281,30 @@ function M.candidate_from_row(row)
   }
 end
 
-function M.read_candidates()
+-- Non-new condition listings (Renewed/Refurbished/Open Box) are "See all buying options" pages on
+-- Amazon with no direct Add button -- AX_add_to_cart cannot add them and its durable call stalls, so
+-- they must never be picked. A keyword is ignored when the query itself asks for it.
+M.NON_PRODUCT_KEYWORDS = {
+  "renewed", "refurbished", "pre-owned", "preowned", "open box", "open-box", "recertified"
+}
+
+function M.is_excluded_candidate(text, query)
+  local t = M.normalize_query(text)
+  local q = M.normalize_query(query)
+  -- Amazon prefixes a sponsored card's image alt with "Sponsored Ad"; these injected ads are usually
+  -- an accessory or a competing item, not the searched product -- skip them.
+  if t:find("sponsored", 1, true) and not q:find("sponsored", 1, true) then
+    return true
+  end
+  for _, kw in ipairs(M.NON_PRODUCT_KEYWORDS) do
+    if t:find(kw, 1, true) and not q:find(kw, 1, true) then
+      return true
+    end
+  end
+  return false
+end
+
+function M.read_candidates(query)
   local rows = dom.query_all(M.RESULT_SELECTOR, M.result_fields(), M.RESULT_LIMIT)
   local candidates = ax.array()
   local seen = {}
@@ -288,11 +312,13 @@ function M.read_candidates()
   for index = 1, #rows do
     local row = rows[index]
     local asin = M.non_empty(row.asin)
-    -- Keep every real product result (valid ASIN). Do NOT require a search-row "Add to cart" button:
-    -- most products (e.g. iPhone) have none on the results page and those buttons render lazily, yet
-    -- the item is added from its product page by AX_add_to_cart. Filtering on it dropped real results,
-    -- leaving 0 candidates -> pick_product "skip" -> "no product found" despite visible results.
-    if asin and not seen[asin] then
+    -- The image alt is the reliable full title (h2 can be just a brand fragment on ad/3rd-party cards).
+    local title = M.non_empty(row.image_alt) or M.non_empty(row.title) or M.non_empty(row.title_alt)
+    -- Skip sponsored ad cards and non-new "See all buying options" listings (Renewed/Refurbished) whose
+    -- product pages have no direct Add button (AX_add_to_cart would stall). When only such rows exist
+    -- this yields no candidates -> "no product found", and a never-addable item is never picked.
+    if asin and title and not seen[asin]
+       and not M.is_excluded_candidate(title, query) then
       local candidate = M.candidate_from_row(row)
       if candidate then
         seen[asin] = true

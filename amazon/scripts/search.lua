@@ -25,7 +25,7 @@ function AX_search_product(args)
     return M.login_required_result()
   end
 
-  local candidates = M.read_candidates()
+  local candidates = M.read_candidates(query)
   return {
     total_count = M.read_total_count(#candidates),
     candidates = candidates,

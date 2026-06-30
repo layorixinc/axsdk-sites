@@ -3,6 +3,27 @@
 Manually drive the site Lua commands (Amazon, Thumbtack) from the Chrome DevTools console.
 See `SCHEMA.md` for the full parameter schema of every command.
 
+## Daily driver: the `ax` CLI (recommended)
+
+`tools/ax.mjs` does everything below from your shell — launch/attach the dev Chrome, find the
+`AXSDK Assistant` context, inject your LOCAL Lua, and run any `AX_*` command — without opening
+DevTools, pushing to GitHub, or reloading the extension.
+
+```bash
+node tools/ax.mjs chrome thumbtack                 # launch dev Chrome (port 9224) + open the site
+node tools/ax.mjs --local run AX_resolve_zip '{"address":"San Francisco, CA"}'
+node tools/ax.mjs --local run AX_search_service '{"query":"house cleaning","zip_code":"94101"}'
+node tools/ax.mjs run AX_detect_page '{}'          # page type + ids
+node tools/ax.mjs page                             # current url + AX_read_page situational read
+node tools/ax.mjs ls                               # loaded commands (shows local overrides)
+node tools/ax.mjs repl                             # interactive loop
+```
+
+`--local` (and `ax load`) inject `_common/scripts/*` + `<site>/scripts/*` from your working copy into
+the live runtime, overriding the GitHub-fetched scripts — the fastest edit→test loop. Overrides reset
+on a full navigation; re-run `--local`. `node tools/ax.mjs help` lists all commands/flags. The console
+workflow below remains valid for ad-hoc poking inside DevTools.
+
 ## 1. Select the right execution context
 
 `window._AXSDK` exists only when the extension runs in **debug mode**, and only in the
@@ -65,6 +86,7 @@ async function axcall(cmd, args = {}) {
 | Command | Side effect | Example |
 |---|---|---|
 | `AX_resolve_zip` | net fetch | `axrun("AX_resolve_zip", { address: "San Francisco, CA" })` |
+| `AX_read_page` | read-only | `axrun("AX_read_page", { mode: "article" })` · `axrun("AX_read_page", { scope: "[data-test=\"request-flow-step--active\"]", mode: "structure" })` |
 | `AX_search_service` | nav | `axrun("AX_search_service", { query: "house cleaning", zip_code: "94105" })` |
 | `AX_view_service` | nav | `axrun("AX_view_service", { url: "<pro URL from search>" })` |
 | `AX_update_search` | filter change | `axrun("AX_update_search", { value: "Every 2 weeks", option: "Frequency" })` |
@@ -74,10 +96,17 @@ async function axcall(cmd, args = {}) {
 
 - `AX_search_service` requires `query` plus `zip_code` **or** `address`.
 - `AX_resolve_zip` is **site-agnostic** — it lives in `_common/scripts/` and loads on every site, so you can
-  call it from any page (e.g. google.com) before navigating to a provider. Resolution order: a 5-digit ZIP in
-  the text is used directly; otherwise a `"City, ST"` (or the city parsed from a full address) resolves to a
-  representative ZIP via **Zippopotam** (primary); the US **Census** geocoder is only a fallback for addresses
-  Zippopotam can't resolve.
+  call it from any page (e.g. google.com) before navigating to a provider. Resolution ladder: explicit 5-digit
+  `zip_code` → a 5-digit ZIP embedded in the text → forward geocode (**Photon** primary, **Nominatim** fallback)
+  + **US Census ZCTA** reverse (robust for `"City, ST"` and full addresses) → Census `onelineaddress` (full
+  street only). No API key. US-only.
+- `AX_read_page` is **site-agnostic** (in `_common/scripts/`, loads everywhere) and **read-only** — it converts
+  the current page's HTML at `scope` (CSS selector, default `body`) to Markdown for LLM situational awareness.
+  `mode`: `article` (Readability strips nav/ads — best for content/profile pages), `structure` (keeps forms,
+  options, buttons — best for the quote dialog / results), `auto` (article when a real article is found, else
+  structure). Returns `{ ok, markdown, mode_used, title, url, length, extracted, truncated }` or
+  `{ ok: false, error }` (`scope_not_found` when the selector matches nothing). Output is capped by `max_chars`
+  (default 6000; `truncated: true` when cut). Requires the rebuilt extension that exposes the `html` Lua namespace.
 - `AX_view_service` / `AX_open_quote` `url` = a pro profile URL from `AX_search_service` results.
 
 ### Quote request flow test recipe
@@ -99,10 +128,10 @@ Set `advance: false` to select/fill the current step without moving forward.
 ### Live multi-service and multi-quote runners
 
 ```bash
-node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-service --submit-quote --max-quote-steps=20 --keep-open
-node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --multi-quote --quote-count=3 --submit-quote --max-quote-steps=20 --keep-open
-# Actual submit for one scenario/item:
-node thumbtack/scripts/test_thumbtack_lua.mjs --cdp=http://127.0.0.1:9223 --scenario="handyman|San Francisco, CA" --actual-submit --max-quote-steps=20 --keep-open
+node thumbtack/scripts/test_thumbtack_lua.mjs --multi-service --submit-quote --max-quote-steps=20 --keep-open
+node thumbtack/scripts/test_thumbtack_lua.mjs --multi-quote --quote-count=3 --submit-quote --max-quote-steps=20 --keep-open
+# Actual submit for one scenario/item (default port 9224):
+node thumbtack/scripts/test_thumbtack_lua.mjs --scenario="handyman|San Francisco, CA" --actual-submit --max-quote-steps=20 --keep-open
 ```
 
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.
@@ -145,9 +174,13 @@ individual tool call under 3s.
 
 ## 6. Relaunch the dev Chrome with CDP
 
+Easiest: `node tools/ax.mjs chrome` (launches detached on port 9224 with the right flags; reuses the
+running instance if already up). Manual equivalent:
+
 ```bash
-chrome --remote-debugging-port=9223 --user-data-dir=%LOCALAPPDATA%/AXSDKSitesChromeDevProfile
+chrome --remote-debugging-port=9224 --remote-allow-origins=* --user-data-dir=%LOCALAPPDATA%/AXSDKSitesChromeDevProfile --load-extension=../axsdk-sdk-js/packages/axsdk-extension/dist --disable-features=DisableLoadExtensionCommandLineSwitch
 ```
 
-The profile persists the login. Chrome exits when the last tab/connection closes; relaunch with the
-same `--user-data-dir`. Override the port/profile in the test runners via `CDP_PORT` / `CHROME_PROFILE`.
+`--remote-allow-origins=*` is required for the Node CDP client to attach; **never** add
+`--enable-unsafe-extension-debugging` (it breaks the WebSocket connect). The profile persists login +
+the extension. Override port/profile via `CDP_PORT` / `CHROME_PROFILE` (also honored by the runners).

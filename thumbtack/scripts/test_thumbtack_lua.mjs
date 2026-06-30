@@ -517,7 +517,7 @@ async function readQuoteStep(page) {
         disabled: Boolean(button.disabled)
       }))
       .filter(button => button.label);
-    const safeButton = buttons.find(button => /^(next|continue|skip)$/i.test(button.label));
+    const safeRaw = buttons.find(button => /^(next|continue|skip)$/i.test(button.label));
     const fields = [...active.querySelectorAll('input, textarea, select')]
       .map((field, index) => ({
         index,
@@ -531,7 +531,16 @@ async function readQuoteStep(page) {
         value: field.value || '',
         visible: visible(field)
       }));
-    const submitButton = buttons.find(button => /(send|submit|quote|request|get quotes?|get estimate|check availability)/i.test(button.label));
+    const explicitSubmit = buttons.find(button => /(send|submit|quote|request|get quotes?|get estimate|check availability)/i.test(button.label));
+    const recaptcha = Boolean(active.querySelector('[name="g-recaptcha-response"], .g-recaptcha, [data-sitekey]'));
+    // A consent/recaptcha step submits the request when its advance button is clicked ("By selecting
+    // Next you agree to the Terms ... Privacy Policy") even though the button reads "Next" — treat that
+    // advance button as the submit button (filled but NEVER auto-clicked) and clear safeButton.
+    const consentSubmit = /you agree to .{0,80}(terms|privacy)/i.test(activeText)
+      || /by (selecting|clicking|tapping|pressing) [a-z]+,? you agree/i.test(activeText);
+    const sendStep = consentSubmit;
+    const submitButton = explicitSubmit?.label || (sendStep ? (safeRaw?.label || null) : null);
+    const safeButton = sendStep ? null : (safeRaw?.label || null);
     return {
       active: true,
       url,
@@ -541,13 +550,31 @@ async function readQuoteStep(page) {
       textareaCount: active.querySelectorAll('textarea').length,
       textareaValue: active.querySelector('textarea')?.value || '',
       buttons,
-      safeButton: safeButton?.label || null,
-      submitButton: submitButton?.label || null,
+      safeButton,
+      submitButton,
+      recaptcha,
+      consentSubmit,
       signedOut,
       loginGate: /continue with google|continue with apple|enter your email|where should we send the pro.?s response|we don.?t share your email|log in|sign in|sign up/i.test(activeText)
         || /login|signup|sign-in/i.test(url)
     };
   })()`);
+}
+
+// Wait out transient "Loading" advance-button states (e.g. "LoadingNext" after a contact step) so the
+// next request-flow step — including the later contact steps (email → first/last name) and the final
+// Submit button — has rendered before we read/act. Returns once the active step has no loading button
+// (or there is no active step), else the last read at timeout.
+async function settleQuoteStep(page, timeoutMs = 8000) {
+  const deadline = Date.now() + timeoutMs;
+  let step = await readQuoteStep(page);
+  while (Date.now() < deadline) {
+    const loading = (step.buttons || []).some(button => /loading/i.test(button.label || ''));
+    if (!step.active || !loading) return step;
+    await sleep(300);
+    step = await readQuoteStep(page);
+  }
+  return step;
 }
 function contactArgsForStep(step) {
   const args = {};
@@ -606,7 +633,14 @@ async function inspectQuoteCandidate(page, options, scenario, candidate, label, 
   };
 
   console.log(`[${label}] Testing AX_view_service service_id=${candidate.service_id}`);
-  const view = await callLuaSettled(page, options, 'AX_view_service', { url: candidate.url, service_id: candidate.service_id });
+  let view = await callLuaSettled(page, options, 'AX_view_service', { url: candidate.url, service_id: candidate.service_id });
+  // The pro page can be mid-load on a slow live nav, yielding an empty name on the first read; the
+  // re-entrant tool re-reads the (now-settled) page on a second call.
+  if (view?.ok && !view.value?.name) {
+    await waitForSettle(page);
+    await sleep(800);
+    view = await callLuaSettled(page, options, 'AX_view_service', { url: candidate.url, service_id: candidate.service_id });
+  }
   if (!view?.ok || !view.value?.name) {
     if (!tolerant) {
       assertCondition(view?.ok, `[${label}] AX_view_service call failed`, view);
@@ -627,7 +661,14 @@ async function inspectQuoteCandidate(page, options, scenario, candidate, label, 
   };
 
   console.log(`[${label}] Testing AX_open_quote submit=false service_id=${candidate.service_id}`);
-  const quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
+  let quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
+  // open_quote is re-entrant (clicks the quote CTA, waits for the request-flow active step); on a slow
+  // live load the dialog may not be ready on the first call — retry until it opens (or is unavailable).
+  for (let attempt = 0; attempt < 3 && !(quote?.ok && (quote.value?.status === 'open' || quote.value?.error === 'quote_unavailable')); attempt += 1) {
+    await waitForSettle(page);
+    await sleep(800);
+    quote = await callLuaSettled(page, options, 'AX_open_quote', { url: candidate.url, service_id: candidate.service_id, submit: false });
+  }
   if (!quote?.ok) {
     if (!tolerant) assertCondition(quote?.ok, `[${label}] AX_open_quote call failed`, quote);
     summary.status = 'blocked';
@@ -674,7 +715,7 @@ async function progressQuoteFlow(page, options, scenario) {
   let finalSubmit = null;
   let blocker = null;
   for (let index = 1; index <= options.maxQuoteSteps; index += 1) {
-    const before = await readQuoteStep(page);
+    const before = await settleQuoteStep(page);
     if (!before.active) {
       blocker = before.loginGate || before.signedOut
         ? { type: 'login_gate', signedOut: before.signedOut, url: before.url }
@@ -691,7 +732,7 @@ async function progressQuoteFlow(page, options, scenario) {
         update = await callLuaSettled(page, options, 'AX_answer_quote', { ...args, advance: false });
         assertCondition(update?.ok, 'AX_answer_quote failed while filling submit step fields', update);
         await waitForSettle(page);
-        after = await readQuoteStep(page);
+        after = await settleQuoteStep(page);
       }
       steps.push({
         index,
@@ -723,7 +764,7 @@ async function progressQuoteFlow(page, options, scenario) {
     const update = await callLuaSettled(page, options, 'AX_answer_quote', args);
     assertCondition(update?.ok, 'AX_answer_quote call failed while progressing quote flow', update);
     await waitForSettle(page);
-    const after = await readQuoteStep(page);
+    const after = await settleQuoteStep(page);
     const flow = update.value?.flow || {};
     const stepChanged = after.active === true && after.text && after.text !== before.text;
     steps.push({
@@ -761,7 +802,7 @@ async function progressQuoteFlow(page, options, scenario) {
       break;
     }
   }
-  const final = await readQuoteStep(page);
+  const final = await settleQuoteStep(page);
   return {
     steps,
     finalSubmit,

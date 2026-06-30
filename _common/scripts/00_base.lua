@@ -530,3 +530,78 @@ function B.resolve_zip(args)
     message = "No ZIP for this address. Provide a full street address or a 5-digit ZIP."
   }
 end
+
+-- ── page content (read current page as Markdown for LLM situational awareness) ──
+-- Reads the current page's HTML at `scope` and converts it to Markdown so an LLM can understand
+-- what is on screen. Site-agnostic: callers pass the scope/mode for the detected surface —
+-- "article" for content pages (Readability strips nav/ads), "structure" for interactive
+-- dialogs/lists/forms (keeps questions, options, buttons; script/style pruned either way).
+-- args: { scope?="body", mode?="auto"|"article"|"structure", max_chars?=6000, url? }
+-- Returns { ok=true, scope, mode_used, url, title?, byline?, excerpt?, site_name?, length,
+--           markdown, extracted, truncated } | { ok=false, error[, scope] }.
+function B.read_page(args)
+  args = args or {}
+  local scope = B.non_empty(args.scope) or "body"
+  local mode = B.non_empty(args.mode) or "auto"
+  local max_chars = tonumber(args.max_chars) or 6000
+  if max_chars < 1 then max_chars = 6000 end
+  local url = B.non_empty(args.url) or B.current_url()
+
+  if not (dom and dom.get_outerHTML) then return { ok = false, error = "no_dom" } end
+  local raw = dom.get_outerHTML(scope)
+  if not raw or raw == "" then return { ok = false, error = "scope_not_found", scope = scope } end
+  if not (html and html.to_markdown) then return { ok = false, error = "html_capability_unavailable" } end
+
+  -- Document <title> as a reliable page title independent of scope/mode (the scoped HTML usually
+  -- excludes <head>, so Readability cannot recover it); used as the title fallback below.
+  local doc_title = dom.get_text and B.non_empty(dom.get_text("title")) or nil
+
+  -- Convert the scoped HTML as-is (preserves forms/lists/buttons; non-content tags pruned by the
+  -- converter). document=true only for a full <html>/doctype scope, else fragment parsing.
+  local function structure()
+    local head = raw:sub(1, 48):lower()
+    local doc = (scope == "html") or head:match("^%s*<!doctype") ~= nil or head:match("^%s*<html") ~= nil
+    return { markdown = html.to_markdown(raw, doc and { document = true } or {}), mode_used = "structure" }
+  end
+
+  local out
+  if mode == "structure" then
+    out = structure()
+  elseif html.extract then
+    local ex = html.extract(raw, url ~= "" and { url = url } or {})
+    -- Use the article only when Readability truly isolated meaningful content (or caller forced it);
+    -- otherwise fall back to structure so interactive surfaces aren't reduced to nothing.
+    if ex and ex.ok and (mode == "article" or (ex.extracted and (tonumber(ex.length) or 0) >= 200)) then
+      out = {
+        markdown = ex.markdown or "", mode_used = "article", extracted = ex.extracted == true,
+        title = ex.title, byline = ex.byline, excerpt = ex.excerpt, site_name = ex.siteName,
+      }
+    else
+      out = structure()
+    end
+  else
+    out = structure()
+  end
+
+  local md = out.markdown or ""
+  local truncated = false
+  if #md > max_chars then
+    md = md:sub(1, max_chars) .. "\n…[truncated]"
+    truncated = true
+  end
+
+  return {
+    ok = true,
+    scope = scope,
+    mode_used = out.mode_used,
+    url = url,
+    title = B.non_empty(out.title) or doc_title,
+    byline = B.non_empty(out.byline),
+    excerpt = B.non_empty(out.excerpt),
+    site_name = B.non_empty(out.site_name),
+    length = #md,
+    markdown = md,
+    extracted = out.extracted == true,
+    truncated = truncated,
+  }
+end

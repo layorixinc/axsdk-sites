@@ -145,6 +145,30 @@
     }
   },
   {
+    "name": "AX_read_page",
+    "description": "Read the current web page as Markdown so an LLM can understand the on-screen content. Site-agnostic and read-only (never navigates, clicks, or submits). scope is a CSS selector (default body); mode is auto, article (strips nav/ads for content pages), or structure (keeps forms/lists/buttons for interactive surfaces).",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "scope": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "auto",
+            "article",
+            "structure"
+          ],
+          "type": "string"
+        },
+        "max_chars": {
+          "type": "number"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
     "name": "AX_search_service",
     "description": "Search Thumbtack services and local pros by query and ZIP code or address.",
     "parameters": {

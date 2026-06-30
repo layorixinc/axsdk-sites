@@ -376,3 +376,121 @@ export async function loadLocal(session, { site } = {}) {
   }
   return { site: slug, loaded, failed };
 }
+
+// ── store-based local Lua + flows (build/read -> stores -> remote off) ────────
+// Production-faithful alternative to loadLocal(): writes the local working copy into the extension's
+// PERSISTED stores and turns OFF the matching remote sources, then reloads so the SDK runs what is in
+// the store instead of fetching GitHub. Persisted, so it survives the navigations of a multi-step flow.
+//   - Lua:   build per-layer bundles -> `axsdk:lua` (":" = _common, ":"+domain = site); "Use remote
+//            site Lua scripts" OFF (`remoteLuaEnabled` -> core `remote_lua=false`). Applied as scriptId
+//            `stored-lua:` / `stored-lua:<domain>` (not remote `<site>/scripts/*`).
+//   - Flows: read raw `_common/flows.yaml` (":") + `<site>/flows.yaml` (":"+domain) -> `axsdk:flows`;
+//            "Use remote sites flows" OFF + "Use saved flows" ON (clientFlows {remoteSites:false, stored:true}).
+export const LUA_STATE_KEY = 'axsdk:lua';
+export const FLOWS_STATE_KEY = 'axsdk:flows';
+export const EXTENSION_CONFIG_KEY = 'axsdk:extension:config';
+
+// Build dist/_common.lua + dist/<site>.lua via tools/merge-lua.mjs (= npm run build:lua).
+export function buildLua({ selfContained = false } = {}) {
+  return new Promise((resolveBuild, rejectBuild) => {
+    const args = [join(repoRoot, 'tools', 'merge-lua.mjs')];
+    if (selfContained) args.push('--self-contained');
+    const child = spawn(process.execPath, args, { cwd: repoRoot, stdio: 'inherit' });
+    child.on('error', rejectBuild);
+    child.on('exit', code => (code === 0 ? resolveBuild() : rejectBuild(new Error(`build:lua exited with code ${code}`))));
+  });
+}
+
+// The SDK's domain for the current site (from the always-fetched sites index); equals the repo slug.
+export async function siteDomain(session, { timeoutMs = 12000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const domain = await callInAxContext(session.page, session.options, `function(){
+      const s = globalThis._AXSDK || globalThis.AXSDK;
+      try { return s?.getSitesStore?.().getState?.().currentSite?.domain ?? null; } catch { return null; }
+    }`).catch(() => null);
+    if (domain) return domain;
+    await sleep(400);
+  }
+  return null;
+}
+
+// Group listCommands() scriptIds by source so callers can verify which layer served each command.
+export function classifyCommandSources(commands) {
+  const by = { store: [], remote: [], local: [], builtin: [] };
+  for (const c of commands || []) {
+    const id = String(c.scriptId || '');
+    const bucket = id.startsWith('stored-lua:') ? 'store'
+      : /\/scripts\//.test(id) ? 'remote'
+      : id.startsWith('ax-local-') ? 'local'
+      : 'builtin';
+    by[bucket].push(c.command);
+  }
+  return by;
+}
+
+// Build/read local layers -> write flows store + lua store -> disable remote flows & lua -> reload ->
+// verify. Flows are injected just before Lua (same store pattern), as raw YAML (no build step).
+export async function syncStore(session, { site, build = true, reload = true } = {}) {
+  if (build) await buildLua();
+  const url = await currentUrl(session);
+  const slug = site || siteForUrl(url);
+  if (!slug) throw new Error(`cannot determine site for "${url}"; pass { site }`);
+  const distDir = join(repoRoot, 'dist');
+  const readDist = async name => {
+    try { return await readFile(join(distDir, name), 'utf8'); }
+    catch { throw new Error(`dist/${name} missing — run "npm run build:lua" first`); }
+  };
+  const readMaybe = async path => { try { return await readFile(path, 'utf8'); } catch { return ''; } };
+  const commonLua = await readDist('_common.lua');
+  const siteLua = await readDist(`${slug}.lua`);
+  const commonFlows = await readMaybe(join(repoRoot, '_common', 'flows.yaml'));
+  const siteFlows = await readMaybe(join(repoRoot, slug, 'flows.yaml'));
+  await waitForLuaRuntime(session.page, session.options);
+  const domain = (await siteDomain(session)) || slug;
+  // Write flows store, then lua store, then config — all from the content-script context (chrome.storage.local).
+  const written = await callInAxContext(session.page, session.options, `async function(common, siteSrc, commonFlows, siteFlows, domain, luaKey, flowsKey, cfgKey) {
+    if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
+      throw new Error('chrome.storage.local unavailable in this context');
+    }
+    const flows = { ':': commonFlows };
+    if (siteFlows && siteFlows.trim()) flows[':' + domain] = siteFlows;
+    await chrome.storage.local.set({ [flowsKey]: JSON.stringify({ state: { flows }, version: 0 }) });
+    const lua = { ':': common, [':' + domain]: siteSrc };
+    await chrome.storage.local.set({ [luaKey]: JSON.stringify({ state: { lua }, version: 0 }) });
+    const got = await chrome.storage.local.get(cfgKey);
+    const cfg = (got && got[cfgKey] && typeof got[cfgKey] === 'object') ? got[cfgKey] : {};
+    await chrome.storage.local.set({ [cfgKey]: { ...cfg, remoteLuaEnabled: false, remoteSiteFlowsEnabled: false, storedFlowsEnabled: true } });
+    return { luaKeys: Object.keys(lua), flowsKeys: Object.keys(flows), hadConfig: Boolean(got && got[cfgKey]) };
+  }`, [commonLua, siteLua, commonFlows, siteFlows, domain, LUA_STATE_KEY, FLOWS_STATE_KEY, EXTENSION_CONFIG_KEY]);
+  let verify = null;
+  let flowsCfg = null;
+  if (reload) {
+    await navigate(session.page, url); // reload -> boot() rehydrates stores + applies stored scripts/flows
+    await waitForLuaRuntime(session.page, session.options);
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      verify = classifyCommandSources(await listCommands(session));
+      if (verify.store.length > 0 && verify.remote.length === 0) break;
+      await sleep(500);
+    }
+    flowsCfg = await callInAxContext(session.page, session.options, `function(){
+      const s = globalThis._AXSDK || globalThis.AXSDK;
+      let cf = null; try { cf = s?.config?.clientFlows ?? null; } catch {}
+      let keys = []; try { keys = Object.keys(s?.getFlowsStore?.().getState?.().flows ?? {}); } catch {}
+      return { clientFlows: cf, flowsStoreKeys: keys };
+    }`).catch(() => null);
+  }
+  return {
+    site: slug,
+    domain,
+    luaStoreKeys: written.luaKeys,
+    flowsStoreKeys: written.flowsKeys,
+    remoteLuaDisabled: true,
+    remoteFlowsDisabled: true,
+    storedFlowsEnabled: true,
+    hadExistingConfig: written.hadConfig,
+    ...(verify ? { fromStore: verify.store.length, fromRemote: verify.remote.length, sources: verify } : {}),
+    ...(flowsCfg ? { appliedClientFlows: flowsCfg.clientFlows, appliedFlowsStoreKeys: flowsCfg.flowsStoreKeys } : {}),
+  };
+}

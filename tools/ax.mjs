@@ -27,7 +27,7 @@
 import { createInterface } from 'node:readline/promises';
 import {
   DEFAULTS, SITE_HOME, resolveOptions, ensureChrome, attachActive, listTargets,
-  openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl,
+  openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl, syncStore,
 } from './harness/cdp.mjs';
 
 const USAGE = `ax — daily driver for the AXSDK live harness
@@ -40,6 +40,7 @@ Commands:
   run <CMD> [json]      Durable lua.run — handles nav/reload flows. Prints the parsed result.
   call <CMD> [json]     Single lua.call turn — read-only / no-navigation checks.
   load [site]           Inject LOCAL working-copy Lua (_common + <site>) into the live runtime.
+  sync [site|url]       Build+inject local Lua AND flows into the stores (":" + ":"+domain); turn OFF remote Lua+flows; reload; verify.
   page                  Print the current url + a quick AX_read_page situational read.
   ls                    lua.listCommands() for the current site.
   status                lua.status() (enabled + loaded scripts).
@@ -55,6 +56,8 @@ Flags:
   --match=SUBSTR        Pick the tab whose url contains SUBSTR (when several are open).
   --site=SLUG           Force the site for "load" when off-domain.
   --local               For "run"/"call": inject local Lua before running.
+  --store               For "run"/"call": build + store-inject Lua (remote off) before running.
+  --no-build            With "sync"/"--store": skip the build step (use the existing dist/).
   --no-launch           Never auto-launch Chrome; fail if it is not already up.
   --timeout=MS          Durable run timeout (default 60000).`;
 
@@ -63,6 +66,8 @@ function parseFlags(argv) {
   const positionals = [];
   for (const arg of argv) {
     if (arg === '--local') flags.local = true;
+    else if (arg === '--store') flags.store = true;
+    else if (arg === '--no-build') flags.build = false;
     else if (arg === '--no-launch') flags.launch = false;
     else if (arg === '--help' || arg === '-h') flags.help = true;
     else if (arg.startsWith('--cdp=')) flags.cdp = arg.slice(6);
@@ -160,6 +165,13 @@ async function cmdOpen(options, positionals) {
   out({ opened: finalUrl });
 }
 
+async function cmdSync(options, positionals) {
+  const { cdpUrl } = await ensureChrome(options, { launch: options.launch !== false });
+  if (positionals[0]) await openSite(cdpUrl, options, resolveTarget(positionals[0]));
+  const siteArg = (positionals[0] && !/^https?:\/\//.test(positionals[0])) ? positionals[0] : options.site;
+  return withSession(options, async session => out(await syncStore(session, { site: siteArg, build: options.build !== false })));
+}
+
 async function cmdPage(session) {
   const url = await currentUrl(session);
   const read = await run(session, 'AX_read_page', { mode: 'auto', max_chars: 1500 }).catch(e => ({ error: String(e.message || e) }));
@@ -186,7 +198,10 @@ async function main() {
       if (!rest[0]) throw new Error(`${command} needs a command, e.g. ax ${command} AX_read_page '{}'`);
       const args = parseJsonArg(rest[1]);
       return withSession(options, async session => {
-        if (flags.local) {
+        if (flags.store) {
+          const synced = await syncStore(session, { site: flags.site, build: options.build !== false });
+          console.error(`[store] ${synced.site}@${synced.domain}: lua store=${synced.fromStore ?? '?'} remote=${synced.fromRemote ?? '?'}, flows=[${synced.flowsStoreKeys.join(', ')}]`);
+        } else if (flags.local) {
           const loaded = await loadLocal(session, { site: flags.site });
           console.error(`[load] ${loaded.site || '?'}: ${loaded.loaded.length} files${loaded.failed.length ? `, ${loaded.failed.length} failed` : ''}`);
         }
@@ -196,6 +211,8 @@ async function main() {
         out(res);
       });
     }
+    case 'sync':
+      return cmdSync(options, rest);
     case 'load':
       return withSession(options, async session => out(await loadLocal(session, { site: rest[0] || flags.site })));
     case 'page':

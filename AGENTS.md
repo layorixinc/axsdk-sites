@@ -160,6 +160,7 @@ node tools/ax.mjs open  <site|url>     # navigate the dev tab (thumbtack|amazon|
 node tools/ax.mjs load  [site]         # inject LOCAL working-copy Lua (_common + <site>) — site auto-detected
 node tools/ax.mjs run   <CMD> [json]   # durable lua.run; prints parsed result   (--local = load first)
 node tools/ax.mjs call  <CMD> [json]   # single lua.call turn (read-only checks)
+node tools/ax.mjs sync  [site|url]     # build+inject Lua AND flows → stores → remote OFF → reload → verify
 node tools/ax.mjs page                 # current url + quick AX_read_page situational read
 node tools/ax.mjs ls | status          # lua.listCommands() / lua.status()
 node tools/ax.mjs repl                 # interactive loop (".help" for meta-commands)
@@ -177,8 +178,20 @@ node tools/ax.mjs --local run AX_search_service '{"query":"house cleaning","zip_
 `overriddenBy: ax-local-...`). This sidesteps the cache-stickiness problem in §9. Overrides are lost
 on the next full navigation — just re-run `ax load` / `--local`.
 
+**Two local-source modes.** `--local` / `ax load` is the quick in-memory `lua.load` override (above).
+**`ax sync [site]`** is the production-faithful path: it builds the Lua bundles (`npm run build:lua`)
+**and** reads the local flows, writes both to the extension's persisted stores — `axsdk:lua` and
+`axsdk:flows` (each keyed `":"` = _common, `":"+domain` = site) — turns **OFF** "Use remote site Lua
+scripts" **and** "Use remote sites flows" (saved flows stay ON → core `remote_lua=false`,
+`clientFlows {remoteSites:false, stored:true}`), and reloads so the SDK applies the STORED Lua
+(scriptId `stored-lua:` / `stored-lua:<domain>`) + STORED flows instead of remote GitHub. Persisted →
+**survives a flow's navigations** (unlike `--local`). `ax sync` / `run --store` print
+`fromStore`/`fromRemote` + `appliedClientFlows`. (Live-verified: `fromStore:11, fromRemote:0`,
+`clientFlows {remoteSites:false, stored:true}`.)
+
 Flags: `--port`, `--cdp`, `--chrome`, `--profile`, `--extension-id`, `--extension`, `--match=<url
-substr>` (pick a tab), `--site=<slug>` (force site for `load`), `--timeout=<ms>`, `--no-launch`.
+substr>` (pick a tab), `--site=<slug>`, `--store` (build + store-inject before run), `--no-build`,
+`--timeout=<ms>`, `--no-launch`.
 
 > The `ax` CLI is the canonical shared-plumbing path. The heavy E2E runner
 > `thumbtack/scripts/test_thumbtack_lua.mjs` still has its own copy of the CDP primitives and is a

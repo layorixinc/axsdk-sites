@@ -11,6 +11,7 @@ DevTools, pushing to GitHub, or reloading the extension.
 
 ```bash
 node tools/ax.mjs chrome thumbtack                 # launch dev Chrome (port 9224) + open the site
+node tools/ax.mjs sync thumbtack                   # build -> store Lua + flows -> remote OFF -> reload -> verify
 node tools/ax.mjs --local run AX_resolve_zip '{"address":"San Francisco, CA"}'
 node tools/ax.mjs --local run AX_search_service '{"query":"house cleaning","zip_code":"94101"}'
 node tools/ax.mjs run AX_detect_page '{}'          # page type + ids
@@ -19,10 +20,19 @@ node tools/ax.mjs ls                               # loaded commands (shows loca
 node tools/ax.mjs repl                             # interactive loop
 ```
 
-`--local` (and `ax load`) inject `_common/scripts/*` + `<site>/scripts/*` from your working copy into
-the live runtime, overriding the GitHub-fetched scripts — the fastest edit→test loop. Overrides reset
-on a full navigation; re-run `--local`. `node tools/ax.mjs help` lists all commands/flags. The console
-workflow below remains valid for ad-hoc poking inside DevTools.
+Two ways to run your LOCAL Lua (and flows) against the live extension:
+- **`ax sync [site]`** (production-faithful): builds the Lua bundles + reads the local flows, writes
+  both to the extension stores (`axsdk:lua` and `axsdk:flows`, keyed `":"` = _common, `":"+domain` =
+  site), turns **OFF** "Use remote site Lua scripts" **and** "Use remote sites flows" (saved flows stay
+  ON → `clientFlows {remoteSites:false, stored:true}`), and reloads so the SDK runs the STORED scripts
+  (scriptId `stored-lua:` / `stored-lua:<domain>`) + STORED flows instead of remote GitHub. **Persisted
+  → survives the navigations of a multi-step flow.** `sync` prints `fromStore`/`fromRemote` +
+  `appliedClientFlows`; verify with `ax ls` (no `<site>/scripts/...` ids). `run --store` builds+syncs then runs.
+- **`--local` / `ax load`** (quick, in-memory): `lua.load`-overrides the GitHub scripts (`ax ls`
+  shows `overriddenBy: ax-local-...`). Fast, but overrides reset on a full navigation; re-run it.
+
+`node tools/ax.mjs help` lists all commands/flags. The console workflow below remains valid for
+ad-hoc poking inside DevTools.
 
 ## 1. Select the right execution context
 

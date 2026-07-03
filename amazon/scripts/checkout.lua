@@ -16,38 +16,43 @@ end
 function AX_checkout(args)
   args = args or {}
 
-  M.navigate_cart()
-  dom.wait_for_selector(M.CART_READY_SELECTOR, { timeout = 30000 })
+  -- A durable replay re-enters AFTER the checkout click navigated to the checkout page; re-navigating to
+  -- the cart would undo progress, so only navigate to the cart and click "proceed to checkout" while we
+  -- are not yet on the checkout page.
+  if not on_checkout_page() then
+    M.navigate_cart()
+    dom.wait_for_selector(M.CART_READY_SELECTOR, { timeout = 30000 })
 
-  if dom.exists('form[action*="validateCaptcha"]') then
-    return {
-      error = "captcha_required"
-    }
-  end
-
-  if M.is_login_page() then
-    return M.login_required_result()
-  end
-
-  if M.cart_page_matches() then
-    local cart = M.read_cart_view()
-    if cart.empty then
+    if dom.exists('form[action*="validateCaptcha"]') then
       return {
-        status = "cart_empty",
-        error = "cart_empty",
-        item_count = cart.item_count
+        error = "captcha_required"
       }
     end
-    if not dom.exists(M.CHECKOUT_BUTTON_SELECTOR) then
-      return {
-        status = "checkout_unavailable",
-        error = "checkout_unavailable",
-        item_count = cart.item_count
-      }
-    end
-  end
 
-  dom.click(M.CHECKOUT_BUTTON_SELECTOR)
+    if M.is_login_page() then
+      return M.login_required_result()
+    end
+
+    if M.cart_page_matches() then
+      local cart = M.read_cart_view()
+      if cart.empty then
+        return {
+          status = "cart_empty",
+          error = "cart_empty",
+          item_count = cart.item_count
+        }
+      end
+      if not dom.exists(M.CHECKOUT_BUTTON_SELECTOR) then
+        return {
+          status = "checkout_unavailable",
+          error = "checkout_unavailable",
+          item_count = cart.item_count
+        }
+      end
+    end
+
+    dom.click(M.CHECKOUT_BUTTON_SELECTOR)
+  end
   dom.wait_for_selector(M.CHECKOUT_READY_SELECTOR, { timeout = 30000 })
 
   if dom.exists('form[action*="validateCaptcha"]') then

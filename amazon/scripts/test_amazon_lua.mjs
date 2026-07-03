@@ -8,7 +8,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..', '..');
 const scriptDir = resolve(repoRoot, 'amazon', 'scripts');
 
-const DEFAULT_EXTENSION_ID = 'dldlgmekahifbogjphgglkhibclglmpf';
+export const DEFAULT_EXTENSION_ID = 'dldlgmekahifbogjphgglkhibclglmpf';
 const DEFAULT_CHROME = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
 const DEFAULT_PROFILE = process.env.CHROME_PROFILE || `${process.env.LOCALAPPDATA || ''}/AXSDKSitesChromeDevProfile`;
 const DEFAULT_PORT = Number(process.env.CDP_PORT || 9223);
@@ -22,6 +22,10 @@ const LUA_FILES = [
   'update_cart.lua',
   'checkout.lua',
 ];
+
+let luaContextDirty = true;
+const __t0 = Date.now();
+const el = () => ((Date.now() - __t0) / 1000).toFixed(1);
 
 function parseArgs(argv) {
   const options = {
@@ -204,11 +208,14 @@ class CdpClient {
   }
 }
 
-async function openPage(cdpUrl, initialUrl) {
+export async function openPage(cdpUrl, initialUrl) {
   const target = await createTarget(cdpUrl, 'about:blank');
   const page = new CdpClient(target.webSocketDebuggerUrl);
   await page.ready;
   await page.send('Page.enable');
+  page.on('Page.javascriptDialogOpening', () => {
+    page.send('Page.handleJavaScriptDialog', { accept: true }).catch(() => null);
+  });
   await page.send('Runtime.enable');
   await navigate(page, initialUrl);
   await page.send('Page.bringToFront').catch(() => null);
@@ -220,6 +227,7 @@ async function navigate(page, url) {
   await page.send('Page.navigate', { url });
   await loaded;
   await sleep(1000);
+  luaContextDirty = true;
 }
 
 async function findAxContext(page, extensionId, timeoutMs = 15000) {
@@ -259,33 +267,91 @@ async function callInAxContext(page, extensionId, functionDeclaration, args = []
   return result.result?.value;
 }
 
-async function loadLuaFiles(page, options) {
-  for (const file of LUA_FILES) {
-    const source = await readFile(resolve(scriptDir, file), 'utf8');
-    const id = `amazon-test-${file}-${Date.now()}`;
-    const result = await callInAxContext(
-      page,
-      options.extensionId,
-      'async function(source, id) { return await _AXLUA.load(source, { id }); }',
-      [source, id],
-    );
-    if (!result?.ok) throw new Error(`Failed to load ${file}: ${JSON.stringify(result)}`);
+export async function waitForLuaRuntime(page, options, timeoutMs = 12000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    try {
+      const status = await callInAxContext(page, options.extensionId, `function() {
+        const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
+        return {
+          available: Boolean(lua),
+          hasRun: typeof lua?.run === 'function' || typeof lua?.call === 'function',
+          hasLoad: typeof lua?.load === 'function' || typeof lua?.loadSiteScript === 'function'
+        };
+      }`);
+      if (status?.available && status?.hasRun && status?.hasLoad) return status;
+      last = status;
+    } catch (error) {
+      last = String(error?.message || error);
+    }
+    await sleep(500);
   }
+  throw new Error(`AX Lua runtime is not available after wait: ${JSON.stringify(last)}`);
+}
+
+async function loadLuaFiles(page, options) {
+  // Durable navigations re-init the AXSDK runtime on the new page, so the scripts must be reloaded
+  // after every navigating command. Skip the reload when the context is still clean.
+  if (!luaContextDirty) return;
+  let lastError = null;
+  // A late resource can reset the context mid-load, leaving a later file loaded before 00_common.
+  // Retry the whole ordered load once on failure.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await waitForLuaRuntime(page, options);
+    try {
+      for (const file of LUA_FILES) {
+        const source = await readFile(resolve(scriptDir, file), 'utf8');
+        const result = await callInAxContext(page, options.extensionId, `async function(source, id) {
+          const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
+          if (!lua) throw new Error('AX Lua runtime is not available');
+          if (typeof lua.load === 'function') return await lua.load(source, { id });
+          return await lua.loadSiteScript(source, { id, replace: true, kind: 'devtools' });
+        }`, [source, `amazon-test-${file}-${Date.now()}`]);
+        if (!result?.ok && result?.status !== 'loaded') throw new Error(`Failed to load ${file}: ${JSON.stringify(result)}`);
+      }
+      luaContextDirty = false;
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(700);
+    }
+  }
+  throw lastError;
+}
+
+async function callInAxContextCmd(page, options, command, args) {
+  // Durable command path: lua.run suspends/resumes across the navigation (full page reload) the
+  // command triggers, and returns the settled result. lua.call (legacy) is a single non-durable turn
+  // that never waits for navigation, so prefer lua.run whenever it exists.
+  return callInAxContext(page, options.extensionId, `async function(command, args) {
+    const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
+    if (!lua) throw new Error('AX Lua runtime is not available');
+    if (typeof lua.run === 'function') {
+      const result = await lua.run(command, args, { timeoutMs: 30000, timeout: 30000 });
+      let value = null;
+      if (result?.result) {
+        try { value = JSON.parse(result.result); } catch { value = result.result; }
+      }
+      return {
+        ok: result?.status === 'completed',
+        status: result?.status,
+        deferId: result?.deferId,
+        value,
+        error: result?.error || (value && value.error)
+      };
+    }
+    return await lua.call(command, args);
+  }`, [command, args]);
 }
 
 async function callLua(page, options, command, args) {
   await loadLuaFiles(page, options);
-  return callInAxContext(
-    page,
-    options.extensionId,
-    'async function(command, args) { return await _AXLUA.call(command, args); }',
-    [command, args],
-  );
-}
-
-function needsReplay(result) {
-  const value = result?.value;
-  return value?.error === 'navigation_pending' || (value?.pending === true && value?.error === 'navigation_pending');
+  const ret = await callInAxContextCmd(page, options, command, args);
+  // Every Amazon command navigates (search / product / cart / checkout pages), re-initializing the
+  // AXSDK runtime on the new page; mark the context dirty so the next call reloads the scripts.
+  luaContextDirty = true;
+  return ret;
 }
 
 function isContextLostError(error) {
@@ -297,40 +363,46 @@ function isContextLostError(error) {
     || message.includes('Target closed');
 }
 
-async function waitForNavigationOrSettle(page) {
-  await page.waitFor('Page.loadEventFired', () => true, 30000).catch(() => null);
-  await sleep(2000);
+function isPendingResult(result) {
+  return result?.status === 'pending'
+    || (result?.ok === false && result?.reason === 'pending')
+    || result?.value?.pending === true
+    || result?.value?.error === 'navigation_pending'
+    || result?.value?.error === 'pending';
 }
 
-async function callLuaWithNavigationReplay(page, options, command, args) {
-  let lastResult = null;
-  let lastContextError = null;
+function isResumeFailure(result) {
+  // A durable call can fail to resume after a redundant same-page navigation reloaded the runtime (the
+  // deferred handler/command is briefly unavailable on the freshly-loaded page). Retrying with reloaded
+  // scripts on the now-settled page recovers, so treat it like a pending result and retry.
+  const detail = typeof result?.value === 'string' ? result.value : (result?.value?.error || result?.error || '');
+  return /cannot resume|command unavailable|handler code changed/i.test(String(detail));
+}
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
+async function waitForSettle(page) {
+  // Lua tools wait for their own readiness selectors; a brief settle is enough between durable retries.
+  await sleep(400);
+}
+
+export async function callLuaSettled(page, options, command, args, maxAttempts = 5) {
+  const started = Date.now();
+  let last = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
-      const result = await callLua(page, options, command, args);
-      if (!needsReplay(result)) return result;
-      lastResult = result;
+      last = await callLua(page, options, command, args);
+      if (isResumeFailure(last)) luaContextDirty = true; // deferred could not resume -> reload + retry
+      else if (!isPendingResult(last)) break;
     } catch (error) {
       if (!isContextLostError(error)) throw error;
-      lastContextError = error;
+      luaContextDirty = true; // context gone -> force a reload on retry
+      last = { ok: false, reason: 'context_lost', error: String(error.message || error) };
     }
-
-    await waitForNavigationOrSettle(page);
+    await waitForSettle(page);
   }
-
-  if (lastResult) return lastResult;
-  throw lastContextError || new Error(`Failed to call ${command} after navigation replay`);
-}
-
-async function callLuaUntilNotPending(page, options, command, args) {
-  let result = null;
-  for (let attempt = 0; attempt < 4; attempt += 1) {
-    result = await callLuaWithNavigationReplay(page, options, command, args);
-    if (result?.value?.pending !== true) return result;
-    await waitForNavigationOrSettle(page);
-  }
-  return result;
+  const ms = Date.now() - started;
+  if (last) last.ms = ms;
+  console.log(`  [${el()}s] · ${command} ${ms}ms${ms > 3000 ? '  [SLOW >3s]' : ''}`);
+  return last;
 }
 
 function assertCondition(condition, message, details) {
@@ -353,7 +425,7 @@ const CHECKOUT_STATUSES = ['login_required', 'checkout', 'cart_empty', 'checkout
 
 async function runCheckout(page, options, summary) {
   console.log('Testing AX_checkout. This navigates to the cart and proceeds to checkout; it does not place an order.');
-  const checkout = await callLuaUntilNotPending(page, options, 'AX_checkout', {});
+  const checkout = await callLuaSettled(page, options, 'AX_checkout', {}, 6);
   assertCondition(checkout?.ok, 'AX_checkout call failed', checkout);
   assertCondition(checkout.value?.pending !== true, 'AX_checkout is still pending', checkout.value);
   assertCondition(CHECKOUT_STATUSES.includes(checkout.value?.status), 'AX_checkout returned an unexpected status', checkout.value);
@@ -382,7 +454,11 @@ async function runTests(page, options) {
   if (options.checkoutOnly) return runCheckout(page, options, summary);
 
   console.log(`Testing AX_search_product query=${JSON.stringify(options.query)}`);
-  const search = await callLuaWithNavigationReplay(page, options, 'AX_search_product', { query: options.query });
+  let search = await callLuaSettled(page, options, 'AX_search_product', { query: options.query }, 5);
+  for (let attempt = 0; attempt < 3 && !(search?.ok && (search.value?.candidates?.length || 0) > 0); attempt += 1) {
+    await sleep(800);
+    search = await callLuaSettled(page, options, 'AX_search_product', { query: options.query }, 5);
+  }
   assertCondition(search?.ok, 'AX_search_product call failed', search);
   assertCondition((search.value?.candidates?.length || 0) > 0, 'AX_search_product returned no candidates', search.value);
   summary.search = {
@@ -393,13 +469,13 @@ async function runTests(page, options) {
   };
 
   console.log(`Testing AX_view_product product_id=${options.productId}`);
-  const view = await callLuaWithNavigationReplay(page, options, 'AX_view_product', { product_id: options.productId });
+  const view = await callLuaSettled(page, options, 'AX_view_product', { product_id: options.productId });
   assertCondition(view?.ok, 'AX_view_product call failed', view);
   assertCondition(Boolean(view.value?.title), 'AX_view_product returned no title', view.value);
   summary.view_product = compactProduct(view.value);
 
   console.log('Testing AX_update_product with generic variation/form input');
-  const update = await callLuaWithNavigationReplay(page, options, 'AX_update_product', {
+  const update = await callLuaSettled(page, options, 'AX_update_product', {
     product_id: options.productId,
     variations: { size_name: '16 Oz (Pack of 1)' },
     form_values: { quantity: '1' },
@@ -414,7 +490,7 @@ async function runTests(page, options) {
 
   if (options.mutateCart) {
     console.log('Testing AX_add_to_cart. This mutates the real Amazon cart.');
-    const add = await callLuaWithNavigationReplay(page, options, 'AX_add_to_cart', {
+    const add = await callLuaSettled(page, options, 'AX_add_to_cart', {
       product_id: options.productId,
       quantity: '1',
     });
@@ -426,7 +502,7 @@ async function runTests(page, options) {
   }
 
   console.log('Testing AX_view_cart');
-  const cart = await callLuaWithNavigationReplay(page, options, 'AX_view_cart', {});
+  const cart = await callLuaSettled(page, options, 'AX_view_cart', {});
   assertCondition(cart?.ok, 'AX_view_cart call failed', cart);
   assertCondition(Array.isArray(cart.value?.items), 'AX_view_cart did not return items array', cart.value);
   summary.view_cart = {
@@ -444,7 +520,7 @@ async function runTests(page, options) {
   const updateCartTarget = cart.value.items.find(item => item.product_id && item.quantity > 0);
   if (updateCartTarget) {
     console.log(`Testing AX_update_cart product_id=${updateCartTarget.product_id} quantity=${updateCartTarget.quantity}`);
-    const updateCart = await callLuaUntilNotPending(page, options, 'AX_update_cart', {
+    const updateCart = await callLuaSettled(page, options, 'AX_update_cart', {
       product_id: updateCartTarget.product_id,
       quantity: String(updateCartTarget.quantity),
     });
@@ -463,7 +539,7 @@ async function runTests(page, options) {
 
   if (options.deleteCartProductId) {
     console.log(`Testing AX_update_cart delete product_id=${options.deleteCartProductId}`);
-    const deleteCart = await callLuaUntilNotPending(page, options, 'AX_update_cart', {
+    const deleteCart = await callLuaSettled(page, options, 'AX_update_cart', {
       product_id: options.deleteCartProductId,
       quantity: '0',
     });
@@ -509,8 +585,10 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  console.error('\nFAIL');
-  console.error(error.stack || error.message || error);
-  process.exitCode = 1;
-});
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  main().catch(error => {
+    console.error('\nFAIL');
+    console.error(error.stack || error.message || error);
+    process.exitCode = 1;
+  });
+}

@@ -162,7 +162,7 @@ local function apply_variation_update(variation, entry, applied)
   end
 
   if option_product_id and option_product_id ~= M.current_product_id() then
-    nav.navigate(M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX .. option_product_id, {})
+    M.navigate_product(option_product_id)
     append_applied(applied, "variation", variation.id, option_value, true, "product_navigated")
     return "product_navigated"
   end

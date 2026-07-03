@@ -135,13 +135,14 @@ function makeHarness({ start, navTo, clickTo }) {
   const globals = {
     nav: {
       navigate(url) {
+        // Durable nav: issue once (record done), then unwind for replay. On resume the cached 'done'
+        // result replays without re-navigating, matching the live deferred engine's fire-once semantics.
         return step('nav.navigate', { url }, () => {
-          const dest = navTo(url, state.current);
-          if (state.current === dest) return { ok: true, url };
-          state.current = dest;
-          return { ok: false, reason: 'navigation_pending' };
-        }, 'await', r => r && r.ok === true);
+          state.current = navTo(url, state.current);
+          return { ok: true, url };
+        }, 'pause');
       },
+      clear_beforeunload() { return true; },
     },
     dom: {
       get_location_href: () => cur().href,

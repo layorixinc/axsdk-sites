@@ -69,52 +69,64 @@ function AX_add_to_cart(args)
     }
   end
 
-  local update_result = apply_update_args(args)
-  if update_result then
-    return {
-      product_id = update_result.product_id or product_id,
-      pending = update_result.pending == true,
-      error = update_result.error,
-      update = update_result
-    }
-  end
-
-  product_id = requested_product_id or M.current_product_id() or product_id
-  local page_error = M.ensure_product_page(product_id)
-  if page_error then
-    return page_error
-  end
+  -- A durable replay re-enters AFTER the add navigated off the product page (to the confirmation/cart or
+  -- a login/captcha interstitial). Re-applying updates or re-navigating there would undo the add or bounce
+  -- off the result page, so only update + add while we have NOT yet landed on a post-add page; otherwise
+  -- fall through to read the result. This check MUST precede apply_update_args (which navigates).
+  local post_add = dom.exists(M.ADD_TO_CART_CONFIRM_SELECTOR)
+    or M.cart_page_matches()
+    or M.is_login_page()
+    or dom.exists('form[action*="validateCaptcha"]')
 
   local before_count = M.read_cart_count()
 
-  -- Add the item while on the product page. The add click (and the optional
-  -- "Add to your order" protection-plan sidesheet) navigates to the confirmation
-  -- page, so on a durable replay we re-enter here off the product page and fall
-  -- through to read the result instead of re-evaluating the buy box.
-  if M.product_page_matches(product_id) then
-    local selector = add_button_selector()
-    if not selector then
+  if not post_add then
+    local update_result = apply_update_args(args)
+    if update_result then
       return {
-        product_id = M.current_product_id() or product_id,
-        error = "add_to_cart_unavailable"
+        product_id = update_result.product_id or product_id,
+        pending = update_result.pending == true,
+        error = update_result.error,
+        update = update_result
       }
     end
 
-    local clicked = dom.click(selector)
-    if clicked ~= true then
-      return {
-        product_id = M.current_product_id() or product_id,
-        added = false,
-        error = "click_failed"
-      }
+    product_id = requested_product_id or M.current_product_id() or product_id
+    before_count = M.read_cart_count()
+
+    local page_error = M.ensure_product_page(product_id)
+    if page_error then
+      return page_error
     end
 
-    dom.wait_for_selector(M.ADD_TO_CART_READY_SELECTOR, { timeout = 30000 })
+    -- Add the item while on the product page. The add click (and the optional "Add to your order"
+    -- protection-plan sidesheet) navigates to the confirmation page; the post_add guard above lets a
+    -- durable replay fall through to read the result instead of re-evaluating the buy box.
+    if M.product_page_matches(product_id) then
+      local selector = add_button_selector()
+      if not selector then
+        return {
+          product_id = M.current_product_id() or product_id,
+          error = "add_to_cart_unavailable"
+        }
+      end
 
-    -- Decline the optional "Add to your order" protection-plan sidesheet by default.
-    if dom.exists(M.ATTACH_PANE_SELECTOR) then
-      dom.click(M.ATTACH_DECLINE_SELECTOR)
-      dom.wait_for_selector(M.ADD_TO_CART_CONFIRM_SELECTOR, { timeout = 30000 })
+      local clicked = dom.click(selector)
+      if clicked ~= true then
+        return {
+          product_id = M.current_product_id() or product_id,
+          added = false,
+          error = "click_failed"
+        }
+      end
+
+      dom.wait_for_selector(M.ADD_TO_CART_READY_SELECTOR, { timeout = 30000 })
+
+      -- Decline the optional "Add to your order" protection-plan sidesheet by default.
+      if dom.exists(M.ATTACH_PANE_SELECTOR) then
+        dom.click(M.ATTACH_DECLINE_SELECTOR)
+        dom.wait_for_selector(M.ADD_TO_CART_CONFIRM_SELECTOR, { timeout = 30000 })
+      end
     end
   end
 

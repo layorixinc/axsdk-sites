@@ -1,6 +1,7 @@
 extends: app
 defaults:
   maxSteps: 64
+  mapping: legacy   # §9.7 — overlay uses bare dotted paths (tool.args / result.x), no interpolation; pin legacy so an interpolation base cannot literalize them
 app:                                                                                                                                                                                                     
   terminal:
     llm: { maxOutputTokens: 2048 }
@@ -25,9 +26,10 @@ planner:
     Configured intents:
     - request_service_quote — a quote/estimate for a local SERVICE (청소/house cleaning, 핸디맨/handyman, 잔디 깎기/lawn mowing, 열쇠공/locksmith, …).
     - shopping — find / buy / order one or more PRODUCTS (아이폰/iPhone, 신발/shoes, 계란/eggs, airpods, …).
+    - end_conversation — the user wants to STOP/END the conversation with no further task (farewell / thanks-and-done: "그만할게", "됐어 그만", "이제 그만", "고마워요", "종료").
 
     action:
-    - continue_current — an active flow is awaiting the user's answer (an active flow / active prompt exists) and the latest message is that answer. intents = ONE entry for the active flow's intent, segments=[the latest message], state.requestText=the latest message. Never restart or switch flows.
+    - continue_current — an active flow is awaiting the user's answer (an active flow / active prompt exists) and the latest message is that answer. intents = ONE entry for the active flow's intent, segments=[the latest message], state.requestText=the latest message. Never restart or switch flows. EXCEPTION: if the latest message is a clear farewell / stop with no further task ("그만할게", "됐어 그만", "고마워요", "종료"), use replace_current with intent=end_conversation instead — end the conversation even while a flow is active.
     - replace_current — a NEW request. Find EVERY distinct task and emit ONE intents entry per task, IN THE ORDER stated. Per entry set `intent`, `segments` (the exact phrase(s) for that task), and `state.requestText` (ONLY that task's portion of the message — never another task's text). Different tasks => multiple entries (they run in sequence). The SAME intent with multiple items ("아이폰이랑 계란 사줘" = two products, both shopping) is ONE entry — NEVER split same-intent items into separate intents.
     - clarify — ambiguous / unclassifiable: set `question` plus a single best-guess entry.
     - out_of_scope — nothing matches a configured intent.
@@ -39,6 +41,7 @@ planner:
     - "아이폰 사줘" → intents=[{intent:shopping, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
     - "청소 견적 주고 아이폰 사줘" → intents=[{intent:request_service_quote, segments:["청소 견적 주고"], state:{requestText:"청소 견적 줘"}}, {intent:shopping, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
     - "아이폰이랑 계란 사줘" → intents=[{intent:shopping, segments:["아이폰이랑 계란 사줘"], state:{requestText:"아이폰이랑 계란 사줘"}}]
+    - "고마워 그만할게" → replace_current, intents=[{intent:end_conversation, segments:["고마워 그만할게"], state:{requestText:"고마워 그만할게"}}]
 router:
   mode: fixed
   defaultIntent: request_service_quote
@@ -58,9 +61,18 @@ router:
         - 내가 아래 불러주는 물건 구매해줘
         - 아이팟 사줘
         - buy me some shoes
+    - intent: end_conversation
+      entry: end_conversation.done
+      description: The user wants to end/stop the conversation (farewell, thanks-and-done) with no further task.
+      examples:
+        - 고마워 그만할게
+        - 됐어 그만
+        - 이제 그만
+        - 고마워요
+        - 종료
 flows:
   request_service_quote:
-    goal: Collect a service-quote request (service, requirements, ZIP/address, and the contact details the pros will use to reach the user — first name, last name, email, and phone — all collected up front; never proceed until every contact field is present), search Thumbtack, open quote requests for the top pros, then attempt the final Submit with the collected contact, and report each quote's outcome including the exact text of any Thumbtack validation/error popover.
+    goal: Collect a service-quote request (service, requirements, ZIP/address, and the contact details the pros use to reach the user — first name, last name, email, phone — all up front; never proceed until every contact field is present), search Thumbtack, then run an AGENTIC REFINEMENT with the user — surface the found pros' attributes, ask for a filter/sort criterion, shortlist the matching pros and summarize; then ALWAYS ask the user for explicit approval BEFORE opening any quote request (never contact a pro without it); on approval open quote requests for the chosen pros, attempt the final Submit with the collected contact, and report each quote's outcome including the exact text of any Thumbtack validation/error popover; after reporting, PAUSE and ask whether to request more quotes or start another request — never a hard stop.
     contexts: [memory]
     inputSelector:
       - requestText
@@ -95,6 +107,10 @@ flows:
       submit_last_name: null
       quote_results: ""
       quote_count: null
+      refine_stage: null
+      refine_selected: null
+      quote_confirm_stage: null
+      followup_stage: null
     nodes:
       collect_request:
         kind: action_unit
@@ -168,10 +184,93 @@ flows:
         maxSelfSteps: 8
         description: Search Thumbtack for the collected service in the resolved ZIP. Single durable call — start_search fires the search and the command suspends across the results navigation, then resumes on the loaded page to read candidates (robust cross-nav durable; no LLM loop, no separate read phase).
         next:
-          done: pick_quote
+          done: refine_search
           read: search
           error: no_results
         fallback: { invalidNext: error, exhaustedNext: error }
+
+      refine_search:
+        kind: action_unit
+        description: Agentic search refinement — surface the searched pros' attributes, ask the user for a filter/sort criterion, shortlist the matching pros and summarize, then confirm before requesting quotes; loop with a new criterion when nothing matches.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-5.4-mini
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: medium }
+        inputSelector:
+          - requestText
+          - service_query
+          - user_requirements
+          - candidates
+          - total_count
+          - refine_stage
+          - refine_selected
+        allowedTools: [refine_candidates]
+        prompt: |-
+          You help the user choose WHICH Thumbtack pros to request quotes from, BEFORE any quote is requested. The searched pros are in `candidates` (each has: name, service_id, url, rating, review_count, price_text, response_time, hire_count, summary). `service_query`/`user_requirements` are the request; `requestText` is the latest user message; `refine_stage` tracks where the dialog is.
+
+          Call refine_candidates EXACTLY ONCE — the FIRST rule that applies:
+
+          1. refine_stage is empty/absent (results just arrived, no criterion asked yet):
+             next="ask", refine_stage="criteria", question=<in the user's language: state how many pros were found, then offer concrete options GROUNDED in the available attributes — e.g. 평점 높은 순(rating), 리뷰 많은 순(review_count), 저렴한 순(price_text), 빠른 응답(response_time), 또는 이름/설명 키워드(예: 성실)로 찾기. Ask which they want.>. Do NOT set refine_selected.
+
+          2. refine_stage="criteria" (requestText is the user's criterion):
+             Rank/filter `candidates` by that criterion (highest rating, most reviews, lowest price_text, fastest response_time, a keyword that appears in name/summary, …).
+             - If one or more pros match: next="done", refine_selected=[the matching pros, each {service_id, name, url, rating, price_text, why}]. Do NOT ask to confirm here — the next step (confirm_quote) asks the user for explicit approval before any quote is opened. Each entry MUST keep its url AND service_id copied from candidates.
+             - If NONE match: next="ask", refine_stage="criteria", question=<in the user's language: say no pro matched, restate the available attributes, ask for a different criterion>. Do NOT set refine_selected.
+
+          Write `question` in the user's language whenever next="ask". When next="done", refine_selected MUST be a non-empty array whose entries each carry a url AND a service_id.
+        next:
+          ask: refine_search
+          done: confirm_quote
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      confirm_quote:
+        kind: action_unit
+        description: Guaranteed approval gate — before ANY quote request is opened, present the shortlisted pros and ask the user to approve; proceed only on explicit approval, otherwise return to refinement.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-5.4-mini
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: medium }
+        inputSelector:
+          - requestText
+          - service_query
+          - refine_selected
+          - quote_confirm_stage
+        allowedTools: [confirm_quote_decision]
+        prompt: |-
+          You are the approval gate that runs BEFORE any quote request is opened — no pro is contacted until the user explicitly approves here. `refine_selected` is the shortlist of pros to request quotes from (each has name, rating, price_text, url). `quote_confirm_stage` tracks this gate. `requestText` is the latest user message.
+
+          Call confirm_quote_decision EXACTLY ONCE — the FIRST rule that applies:
+          1. `quote_confirm_stage` is empty/absent (approval NOT asked yet): next="ask", quote_confirm_stage="asked", question=<in the user's language: list the shortlisted pro name(s) with rating/price, then ask clearly, e.g. "이 전문가(들)에게 견적을 요청할까요? 진행하려면 '예', 다시 고르려면 알려주세요.">. IGNORE requestText here — always ask first.
+          2. `quote_confirm_stage`="asked" (the user is answering the approval question):
+             - requestText APPROVES (yes / 예 / 응 / 진행 / 요청해줘 / 좋아 / go ahead): next="proceed", quote_confirm_stage="".
+             - requestText DECLINES, or asks to choose differently / gives a new criterion: next="refine", refine_stage="", quote_confirm_stage="".
+
+          Write `question` in the user's language whenever next="ask".
+        next:
+          ask: confirm_quote
+          proceed: select_pros
+          refine: refine_search
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      select_pros:
+        kind: action_contract
+        id: select_pros
+        description: Set the user-approved shortlist (refine_selected) as the candidate list the quote loop drives, and reset the loop index. No LLM, no navigation.
+        inputSelector:
+          - refine_selected
+        next:
+          pick: pick_quote
+          done: no_results
+        fallback: { invalidNext: done, exhaustedNext: done }
 
       pick_quote:
         kind: action_contract
@@ -212,15 +311,46 @@ flows:
         fallback: { invalidNext: done, exhaustedNext: done }
 
       quotes_done:
+        kind: action_unit
+        description: Report the quote-request outcomes, then PAUSE and ask whether to request more quotes (from the current results) or start another request — never a hard stop, so the user can request again.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-5.4-mini
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: medium }
+        inputSelector:
+          - requestText
+          - service_query
+          - quote_results
+          - quote_count
+          - candidates
+          - followup_stage
+        allowedTools: [followup_decision]
+        prompt: |-
+          Quote requests have just been attempted. `quote_results` holds one line per pro (name, service_id, outcome); `quote_count` is how many were attempted; `candidates` are the pros from the current search (still available to request more from); `service_query` is the current service. `followup_stage` tracks this step. `requestText` is the latest user message.
+
+          Call followup_decision EXACTLY ONCE — the FIRST rule that applies:
+          1. `followup_stage` is empty/absent (outcomes NOT reported yet — you just arrived from the quote loop): next="ask", followup_stage="asked", question=<in the user's language: FIRST the "Quote requests" report built VERBATIM from quote_results (one line per pro — its name, service_id, and outcome; reproduce any Thumbtack popover/validation text exactly; state how many were attempted, quote_count), THEN ask e.g. "추가로 다른 전문가에게도 견적을 요청할까요, 다른 서비스를 찾을까요, 아니면 마칠까요?">. IGNORE requestText here — always report and ask first.
+          2. `followup_stage`="asked" (the user is answering):
+             - requestText asks for MORE quotes from the current results (다른 전문가, 더, 하나 더, 다시 요청): next="more", refine_stage="", followup_stage="".
+             - requestText asks for a NEW / different service search: next="new", service_query="", user_requirements="", refine_stage="", refine_selected=null, quote_results="", followup_stage="".
+             - requestText says finish / no / 괜찮아 / 마쳐 / 그만: next="done".
+
+          Write `question` in the user's language whenever next="ask".
+        next:
+          ask: quotes_done
+          more: refine_search
+          new: collect_request
+          done: all_done
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      all_done:
         kind: terminal
         respond: |-
-          Reply in the user's language. Output ONLY a "Quote requests" section built VERBATIM from the
-          quote_results value in the Flow state JSON: one line per pro a quote request was opened for,
-          each carrying the pro's name, its service_id, and the outcome. When an outcome includes the
-          exact text of a Thumbtack popover returned on Submit (a validation error or a sign-in prompt),
-          reproduce that popover text exactly. State how many quotes were attempted (quote_count).
-          The Submit used the collected contact details (name, email, phone). Do NOT include the searched pro list or any search results; output the quote
-          outcomes only.
+          Reply briefly in the user's language: confirm the quote-request session is complete and invite
+          the user to start another request whenever they want.
 
       no_results:
         kind: terminal
@@ -344,6 +474,11 @@ flows:
       error:
         kind: terminal
         respond: 무엇을 살지 확인하지 못했습니다. 구매할 품목을 다시 알려주세요.
+  end_conversation:
+    nodes:
+      done:
+        kind: terminal
+        respond: 도움이 되었길 바랍니다. 필요하면 언제든 다시 불러 주세요.
 flowTools:
   decide:
     description: Select configured intent flows and initial runtime state for the config-runtime planner.
@@ -407,6 +542,44 @@ flowTools:
         submit_first_name: { type: string }
         submit_last_name: { type: string }
         message: { type: string }
+
+  confirm_quote_decision:
+    description: Record the user's approval decision before any quote is requested — proceed, return to refine the selection, or keep asking.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, proceed, refine] }
+        question: { type: string }
+        refine_stage: { type: [string, "null"] }
+        quote_confirm_stage: { type: [string, "null"] }
+        message: { type: string }
+
+  followup_decision:
+    description: After reporting quote outcomes, choose whether to request more quotes from the current results, start a new service request, or finish — carrying any state reset needed.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, more, new, done] }
+        question: { type: string }
+        message: { type: string }
+        refine_stage: { type: [string, "null"] }
+        refine_selected: { type: [array, "null"] }
+        service_query: { type: [string, "null"] }
+        user_requirements: { type: [string, "null"] }
+        quote_results: { type: [string, "null"] }
+        followup_stage: { type: [string, "null"] }
 
   collect_shopping:
     description: Fill the shopping list (shop_plan — an array of { query, quantity }) and choose the next step (ask the user to clarify, or finish).
@@ -699,6 +872,60 @@ flowTools:
         quote_submit_status: { type: [string, "null"] }
         quote_submit_message: { type: [string, "null"] }
         quote_submit_error: { type: [string, "null"] }
+
+  refine_candidates:
+    description: Refine the searched pros — ask the user for a filter/sort criterion, or (after they answer) record the shortlist of matching pros and ask to confirm, or finish once the user approves. The LLM ranks/filters the candidates; this tool captures the decision.
+    execute:
+      kind: runtime
+      implementation: passthrough
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, done] }
+        question: { type: string }
+        refine_stage: { type: string }
+        refine_selected:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              service_id: { type: string }
+              name: { type: string }
+              url: { type: string }
+              rating: { type: [number, string, "null"] }
+              price_text: { type: [string, "null"] }
+              why: { type: string }
+        message: { type: string }
+
+  select_pros:
+    description: Replace the candidate list with the user-approved shortlist (refine_selected) and reset the quote loop index. No LLM, no navigation.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |
+        local sel = args.refine_selected or {}
+        local list = {}
+        for i = 1, #sel do
+          local c = sel[i] or {}
+          local url = c.url
+          local sid = c.service_id
+          if (url and url ~= "") or (sid and sid ~= "") then
+            list[#list + 1] = { name = c.name, service_id = sid, url = url }
+          end
+        end
+        if #list == 0 then
+          return { next = "done" }
+        end
+        return { next = "pick", candidates = list, quote_index = 0, quote_results = "" }
+    parameters:
+      type: object
+      additionalProperties: true
+      properties:
+        refine_selected: { type: [array, "null"] }
 
   open_quote:
     description: Navigate to the picked pro and open its "Request estimate" dialog. Never submits or sends.

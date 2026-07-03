@@ -8,3 +8,6 @@ dist/
 
 # Working backups
 *.legacy.yaml
+
+# Internal research/IP planning — moved to ../patents, never publish here
+PAPER_PROPOSAL.md

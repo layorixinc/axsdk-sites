@@ -67,7 +67,7 @@ async function clickRequestEstimate(page) {
 function check(name, got, expectPage) {
   const v = got?.value || {};
   const ok = got?.status === 'completed' && v.page === expectPage;
-  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}: page=${v.page} ready=${v.ready} service_id=${v.service_id || ''} zip=${v.zip_code || ''} keyword_pk=${v.keyword_pk || ''}`);
+  console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}: page=${v.page} ready=${v.ready} slug=${v.slug || ''} service_id=${v.service_id || ''} zip=${v.zip_code || ''} keyword_pk=${v.keyword_pk || ''}`);
   return ok;
 }
 
@@ -80,6 +80,14 @@ async function main() {
 
   await navigate(page, `https://www.thumbtack.com/instant-results/?keyword_pk=${KEYWORD_PK}&zip_code=94101`);
   await loadDetect(page); allOk &= check('instant_results', await detect(page), 'instant_results');
+
+  await navigate(page, 'https://www.thumbtack.com/k/lawn-care/near-me/?zip_code=94101');
+  await loadDetect(page);
+  const kr = await detect(page);
+  allOk &= check('category_results', kr, 'category_results');
+  const kslug = kr?.value?.slug;
+  console.log(`${kslug === 'lawn-care' ? 'PASS' : 'FAIL'}  category_results.slug: ${kslug}`);
+  allOk &= (kslug === 'lawn-care' ? 1 : 0);
 
   await navigate(page, PRO_URL);
   await loadDetect(page); allOk &= check('pro_profile', await detect(page), 'pro_profile');

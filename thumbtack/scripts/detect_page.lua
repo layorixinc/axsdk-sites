@@ -8,9 +8,9 @@
 --
 -- AX_detect_page() -> {
 --   url,                         -- current location href
---   page,                        -- "home" | "instant_results" | "pro_profile" | "quote_dialog" | "other"
+--   page,                        -- "home" | "instant_results" | "category_results" | "pro_profile" | "quote_dialog" | "other"
 --   ready,                       -- true when the page's readiness selector is present (else still loading)
---   service_id?, zip_code?, keyword_pk?
+--   service_id?, slug?, zip_code?, keyword_pk?   -- slug: the /k/<slug>/ category (results identity)
 -- }
 
 local PAGE = {}
@@ -85,6 +85,18 @@ function PAGE.detect()
     result.page = "instant_results"
     result.zip_code = PAGE.query_param(url, "zip_code")
     result.keyword_pk = PAGE.query_param(url, "keyword_pk")
+    result.ready = PAGE.exists(PAGE.SELECTORS.results_ready)
+    return result
+  end
+
+  -- Category results page /k/<slug>/near-me/ (what start_search navigates to). The <slug> segment is
+  -- the stable service identity a re-entrant search tool matches against; a redirect (plumbing->plumbers)
+  -- yields the canonical slug here. results_ready gates on the pro list actually being present.
+  local slug = path:match("^/k/([^/]+)/")
+  if slug then
+    result.page = "category_results"
+    result.slug = slug
+    result.zip_code = PAGE.query_param(url, "zip_code")
     result.ready = PAGE.exists(PAGE.SELECTORS.results_ready)
     return result
   end

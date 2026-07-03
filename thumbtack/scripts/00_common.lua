@@ -111,23 +111,6 @@ function M.is_results_page()
   return href:find("/instant-results/", 1, true) ~= nil or href:find("/near-me", 1, true) ~= nil
 end
 
-function M.current_results_match(query, zip_code)
-  local href = M.current_url()
-  local slug = M.category_slug(query)
-  -- Match the category results page for this query's slug, or a legacy instant-results page.
-  local on_results = (slug ~= "" and href:find("/k/" .. slug .. "/", 1, true) ~= nil)
-    or href:find("/instant-results/", 1, true) ~= nil
-  if not on_results then
-    return false
-  end
-  -- Reject only when an explicit zip is present and differs (results may still be hydrating).
-  local zip_value = href:match("[?&]zip_code=(%d%d%d%d%d)") or M.non_empty(dom.get_attr(M.SEARCH_ZIP_SELECTOR, "value"))
-  if zip_code and zip_value and zip_value ~= zip_code then
-    return false
-  end
-  return true
-end
-
 -- Detect Thumbtack's "enter a valid zip code" rejection shown when the submitted ZIP is invalid or
 -- unsupported (the pro list never renders). dom is CSS-only (no text matching), so read the page text
 -- and match the banner phrase in Lua. Only meaningful to call when the pro list is empty.
@@ -164,19 +147,70 @@ function M.category_slug(query)
   return s
 end
 
+-- Load-determination primitive: poll a cheap state fingerprint until it stops changing for a quiet
+-- window (quiescence/debounce), or until timeout. NON-suspending (bounded dom.wait), so it stays under
+-- the durable per-call deadline. Iteration-based (no wall clock): quiet/timeout are ms -> poll counts.
+-- probe() must return a comparable scalar (number/string). Returns { settled, state, iters }.
+-- A hydrating page keeps changing (never quiet); a settled page (pros, empty, or a hub) reaches a
+-- stable fingerprint; a transient (hub -> pros) settles on the FINAL value -- so callers never read a
+-- mid-transition state, and "slow" is cleanly distinct from "absent" (no fixed-timeout guessing).
+function M.wait_settled(probe, opts)
+  opts = opts or {}
+  local interval = opts.interval or 250
+  local max_iters = math.max(1, math.floor((opts.timeout or 8000) / interval))
+  local quiet_iters = math.max(1, math.floor((opts.quiet or 600) / interval))
+  local last = probe()
+  local stable = 0
+  local iters = 0
+  while iters < max_iters do
+    dom.wait(interval)
+    iters = iters + 1
+    local s = probe()
+    if s == last then
+      stable = stable + 1
+      if stable >= quiet_iters then
+        return { settled = true, state = s, iters = iters }
+      end
+    else
+      last = s
+      stable = 0
+    end
+  end
+  return { settled = false, state = last, iters = iters }
+end
+
+-- Clean, replay-safe navigation to `url`: dismiss any beforeunload guard, then a FULL reload -- never a
+-- soft SPA nav, which can inherit the current page's SPA/session state (e.g. Thumbtack re-attaching an
+-- active project to a new slug URL). nav.navigate is durable: the command suspends across the reload and
+-- resumes on the freshly loaded destination, where the caller re-detects the page and reads it.
+function M.go(url)
+  nav.clear_beforeunload()
+  nav.navigate(url, {}, { reload = true })
+end
+
 function M.start_search(query, zip_code)
-  -- Submit the homepage search box. Type the query and zip into the search FORM's fields, wait for the
-  -- autocomplete to resolve the query into a keyword (a [role="option"] suggestion appears), then submit
-  -- the form, which navigates to /instant-results?keyword_pk=...&zip_code=<zip>. Submitting
-  -- BEFORE the autocomplete resolves is a no-op (the form's onSubmit needs the resolved keyword), so the
-  -- option wait + short settle are required. read_search_candidates parses the resulting pro list.
+  -- Navigate to the query's category results page: /k/<slug>/near-me/?zip_code=<zip>. Use a FULL reload
+  -- (reload=true), NOT a soft SPA nav: a soft nav from a stale results page lets Thumbtack re-attach the
+  -- session's active project (project_pk/encoded_answers) to the new slug URL and render the PREVIOUS
+  -- service's pros. A full load fetches the slug page fresh, so the requested service's pros render.
+  -- nav.navigate is durable: the command suspends across the nav and, on resume, AX_search_service
+  -- detects the loaded /k/<slug>/ page (via detect_page) and read_search_candidates parses the pros.
+  local slug = M.category_slug(query)
   local zip = M.non_empty(zip_code)
+  if slug ~= "" then
+    local url = M.HOME_URL .. "k/" .. slug .. "/near-me/"
+    if zip then
+      url = url .. "?zip_code=" .. zip
+    end
+    M.go(url)
+    return
+  end
+  -- Fallback for a query with no ASCII slug (e.g. non-Latin text): submit the homepage search box.
+  -- Wait for the autocomplete to resolve a keyword before submitting (submitting earlier is a no-op).
   local actions = { { set = M.SEARCH_INPUT_SELECTOR, value = query } }
   if zip then
     actions[#actions + 1] = { set = M.SEARCH_ZIP_SELECTOR, value = zip }
   end
-  -- Keep the option wait + settle well under the SDK per-call deadline so the whole fill (then the
-  -- form submit) completes in one durable call and the next call lands on the loaded results page.
   actions[#actions + 1] = { wait = M.SEARCH_AUTOCOMPLETE_SELECTOR, timeout = 2500 }
   actions[#actions + 1] = { delay = 800 }
   dom.fill(actions)
@@ -1145,27 +1179,37 @@ function M.open_quote_modal()
     'main button:not(:last-child)',
     'main button',
   }
-  for index = 1, #selectors do
-    local selector = selectors[index]
-    local rows = dom.query_all(selector, { text = true }, 1)
-    if #rows > 0 then
-      local text = M.normalize_text(rows[1].text)
-      local matched = false
-      for p = 1, #phrases do
-        if text:find(phrases[p], 1, true) then
-          matched = true
-          break
+  -- navigate_verified only gates on SERVICE_READY_SELECTOR ('h1, button, ...'), which an early
+  -- header/nav button satisfies BEFORE the aside sidebar (and its "Request estimate" CTA) hydrates.
+  -- A single scan right after the nav races ahead of the CTA -- reading "no quote available" and
+  -- skipping a quotable pro (the reported "navigated to the pro but never quoted" symptom). Wait for
+  -- the sidebar, then POLL for the labeled CTA (its element and/or text can mount a beat late) rather
+  -- than deciding after one scan. Genuine no-CTA pros fall through once the bounded window elapses.
+  dom.wait_for_selector('aside button, main button', { timeout = 6000 })
+  for attempt = 1, 12 do
+    if attempt > 1 then
+      dom.wait(300)
+    end
+    if dom.exists(M.REQUEST_FLOW_ACTIVE_SELECTOR) then
+      return true
+    end
+    for index = 1, #selectors do
+      local selector = selectors[index]
+      local rows = dom.query_all(selector, { text = true }, 1)
+      if #rows > 0 then
+        local text = M.normalize_text(rows[1].text)
+        for p = 1, #phrases do
+          if text:find(phrases[p], 1, true) then
+            -- Verify the request-flow dialog actually mounts; a bare click can fire without opening
+            -- it (the page pre-renders empty placeholders). click_verified retries the click itself.
+            return B.click_verified({
+              selector = selector,
+              navigates = false,
+              expect = M.REQUEST_FLOW_ACTIVE_SELECTOR,
+              timeout = 6000
+            }).ok
+          end
         end
-      end
-      if matched then
-        -- Verify the request-flow dialog actually mounts; a bare click can fire without opening it
-        -- (the page pre-renders empty placeholders), which previously read as a false "open".
-        return B.click_verified({
-          selector = selector,
-          navigates = false,
-          expect = M.REQUEST_FLOW_ACTIVE_SELECTOR,
-          timeout = 6000
-        }).ok
       end
     end
   end

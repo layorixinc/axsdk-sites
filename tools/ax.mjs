@@ -27,7 +27,7 @@
 import { createInterface } from 'node:readline/promises';
 import {
   DEFAULTS, SITE_HOME, resolveOptions, ensureChrome, attachActive, listTargets,
-  openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl, syncStore,
+  openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl, syncStore, sendMessage, reloadExtension,
 } from './harness/cdp.mjs';
 
 const USAGE = `ax — daily driver for the AXSDK live harness
@@ -44,6 +44,7 @@ Commands:
   page                  Print the current url + a quick AX_read_page situational read.
   ls                    lua.listCommands() for the current site.
   status                lua.status() (enabled + loaded scripts).
+  send "<text>"         Drive the flow ENGINE: send a user message, wait for the turn, print the reply + tool parts.
   repl                  Interactive loop (type "AX_cmd {json}"; ".help" for meta-commands).
 
 Flags:
@@ -213,6 +214,15 @@ async function main() {
     }
     case 'sync':
       return cmdSync(options, rest);
+    case 'reload-ext': {
+      const { cdpUrl } = await ensureChrome(options, { launch: options.launch !== false });
+      const res = await reloadExtension(cdpUrl, options, { url: rest[0] ? resolveTarget(rest[0]) : undefined });
+      try { res.page.close(); } catch { /* one-shot */ }
+      out({ reloaded: res.reloaded, url: res.url });
+      return;
+    }
+    case 'send':
+      return withSession(options, async session => out(await sendMessage(session, rest.join(' '), { timeoutMs: options.timeout || 180000 })));
     case 'load':
       return withSession(options, async session => out(await loadLocal(session, { site: rest[0] || flags.site })));
     case 'page':

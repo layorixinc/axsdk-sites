@@ -191,11 +191,24 @@ export async function openPage(cdpUrl, url) {
   return page;
 }
 
-export async function navigate(page, url) {
-  const loaded = page.waitFor('Page.loadEventFired', () => true, 10000).catch(() => null);
+// Fire a document navigation and confirm it via the document lifecycle (performance.timeOrigin =
+// document identity), not the load event or a URL match (NAVIGATION.md). Returns
+// { fired, arrived, kind, url }; a no-op (document + URL unchanged past firedTimeout) reports fired:false.
+export async function navigate(page, url, { firedTimeout = 2500, timeout = 20000, interval = 150 } = {}) {
+  const before = await navBefore(page);
+  const firedAt = Date.now();
   await page.send('Page.navigate', { url });
-  await loaded;
-  await sleep(500);
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const st = await readNavState(page, before);
+    if (st.arrived) { await sleep(250); return st; }
+    if (!st.pending) return st;
+    if (Date.now() - firedAt > firedTimeout && st.url === before.url && !st.contextLost) {
+      return { fired: false, arrived: false, kind: 'none', url: before.url };
+    }
+    await sleep(interval);
+  }
+  return { fired: true, arrived: false, kind: 'document', url: before.url, timedOut: true };
 }
 
 // ── AXSDK Assistant context + Lua runtime ─────────────────────────────────────
@@ -305,17 +318,91 @@ export async function attachActive(cdpUrl, options, { match, allowBlank = false 
   return { page, target };
 }
 
-// Durable run (lua.run) — handles nav/reload-driven flows. Returns { ok, status, deferId, value, error }.
+// Capture the current document identity (performance.timeOrigin) + URL before firing a navigation.
+async function navBefore(page) {
+  return evaluatePage(page, '({ timeOrigin: performance.timeOrigin, url: location.href })')
+    .catch(() => ({ timeOrigin: null, url: null }));
+}
+
+// Resolve navigation state from web-standard signals only (NAVIGATION.md §3): a changed
+// performance.timeOrigin = a fresh document (arrived, kind 'document'); a same-document URL change =
+// 'within_document'; otherwise pending. A transient context loss (evaluate throws during a document
+// swap) is reported as pending.
+async function readNavState(page, before) {
+  try {
+    const s = await evaluatePage(page, '({ t: performance.timeOrigin, u: location.href })');
+    if (!s || typeof s.t !== 'number') return { pending: true };
+    if (s.t !== before.timeOrigin) return { fired: true, arrived: true, kind: 'document', url: s.u };
+    if (s.u !== before.url) return { fired: true, arrived: true, kind: 'within_document', url: s.u };
+    return { pending: true, url: s.u };
+  } catch {
+    return { pending: true, contextLost: true };
+  }
+}
+
+// Wait until a fresh document (or same-document URL change) appears after `before`, or timeout. The
+// durable nav is async and may commit seconds after lua.run returns; timeOrigin identity detects it
+// deterministically and handles same-URL reloads / redirects that a URL comparison misses.
+async function waitForArrival(page, before, { timeout = 15000, interval = 200 } = {}) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const st = await readNavState(page, before);
+    if (st.arrived) return st;
+    await sleep(interval);
+  }
+  return null;
+}
+
+// Durable run (lua.run), resilient across full-reload navigations (NAVIGATION.md). A Thumbtack full
+// reload destroys the execution context mid-run; when a run ends ambiguously (context lost, a
+// value-less "completed" turn after a durable nav, or pending) we wait for a fresh document via
+// performance.timeOrigin, then read that page with a single-turn call. A value-less completion with no
+// navigation is terminal.
 export async function run(session, command, args, { timeoutMs = 60000 } = {}) {
-  return callInAxContext(session.page, session.options, `async function(command, args, timeoutMs) {
-    const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
-    if (!lua) throw new Error('AX Lua runtime is not available');
-    if (typeof lua.run !== 'function') { const r = await lua.call(command, args); return { ok: true, status: 'completed', value: r }; }
-    const result = await lua.run(command, args, { timeoutMs, timeout: timeoutMs });
-    let value = null;
-    if (result?.result) { try { value = JSON.parse(result.result); } catch { value = result.result; } }
-    return { ok: result?.status === 'completed', status: result?.status, deferId: result?.deferId, value, error: result?.error || (value && value.error) };
-  }`, [command, args ?? {}, timeoutMs]);
+  const deadline = Date.now() + timeoutMs;
+  let last = { status: 'timeout' };
+  for (let turn = 0; turn < 12 && Date.now() < deadline; turn++) {
+    const perAttempt = Math.min(20000, Math.max(4000, deadline - Date.now()));
+    const before = await navBefore(session.page);
+    let result = null;
+    let navLost = false;
+    try {
+      result = await callInAxContext(session.page, session.options, `async function(command, args, perAttempt) {
+        const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
+        if (!lua) return { status: 'pending', reason: 'no_runtime' };
+        if (typeof lua.run !== 'function') { const r = await lua.call(command, args); return { ok: true, status: 'completed', value: r }; }
+        const out = await lua.run(command, args, { timeoutMs: perAttempt, timeout: perAttempt });
+        let value = null;
+        if (out?.result) { try { value = JSON.parse(out.result); } catch { value = out.result; } }
+        return { ok: out?.status === 'completed', status: out?.status, deferId: out?.deferId, value, error: out?.error || (value && value.error) };
+      }`, [command, args ?? {}, perAttempt]);
+    } catch (error) {
+      if (!isContextLostError(error)) throw error;
+      navLost = true; // a full reload destroyed the execution context mid-run
+      last = { status: 'navigating', reason: 'context_lost' };
+    }
+    if (result) {
+      last = result;
+      if (result.value && result.value.error) return result;                        // tool surfaced an error
+      if (result.status === 'completed' && result.value != null) return result;      // done, with a value
+      if (result.status !== 'completed' && !isPendingResult(result)) return result;  // non-pending terminal
+    }
+    // A durable nav may be in flight (async — sometimes seconds after lua.run returns). Wait for a fresh
+    // document (timeOrigin identity) if one is coming.
+    const arrival = await waitForArrival(session.page, before, { timeout: Math.min(15000, Math.max(2000, deadline - Date.now())) });
+    // Read the current page with a single-turn call (bypasses the SDK per-execution durable cache, which
+    // can serve a value-less result on re-invoke). Retry briefly for runtime readiness right after a nav.
+    for (let r = 0; r < 3 && Date.now() < deadline; r++) {
+      await waitForLuaRuntime(session.page, session.options, Math.max(2000, deadline - Date.now())).catch(() => {});
+      const settled = await call(session, command, args).catch(() => null);
+      if (settled && settled.status && settled.status !== 'pending' && settled.pending !== true) {
+        return { ok: settled.status === 'completed', status: settled.status, value: settled, error: settled.error || (settled.value && settled.value.error) };
+      }
+      await sleep(500);
+    }
+    if (!arrival && !navLost && result && result.status === 'completed') return result; // genuine value-less
+  }
+  return last;
 }
 
 // Single Lua turn (lua.call) — read-only / no-navigation checks; navigating steps return a pending marker.
@@ -364,7 +451,7 @@ export async function loadLocal(session, { site } = {}) {
         const result = await callInAxContext(session.page, session.options, `async function(source, id) {
           const lua = globalThis._AXSDK?.lua || globalThis._AXLUA;
           if (!lua) throw new Error('AX Lua runtime is not available');
-          if (typeof lua.load === 'function') return await lua.load(source, { id });
+          if (typeof lua.load === 'function') return await lua.load(source, { id, replace: true });
           return await lua.loadSiteScript(source, { id, replace: true, kind: 'devtools' });
         }`, [source, id]);
         if (!result?.ok && result?.status !== 'loaded') throw new Error(JSON.stringify(result));
@@ -375,6 +462,29 @@ export async function loadLocal(session, { site } = {}) {
     }
   }
   return { site: slug, loaded, failed };
+}
+
+// Reload the unpacked extension via chrome.runtime.reload() (fired from its options page), then
+// re-attach and land on `url` with the Lua runtime ready. The runtime applies site scripts by
+// scriptId, so same-name edits are sticky (a store re-sync or `ax load` may not re-run them); an
+// extension reload re-reads the persisted stores (axsdk:lua/flows) fresh. Returns a fresh session page.
+export async function reloadExtension(cdpUrl, options, { url } = {}) {
+  const extId = options.extensionId;
+  const first = await attachActive(cdpUrl, options, { match: options.match, allowBlank: true });
+  let dest = url;
+  if (!dest) {
+    dest = await evaluatePage(first.page, 'location.href').catch(() => null);
+    if (!dest || !/^https?:/.test(dest)) dest = SITE_HOME[options.site] || SITE_HOME.thumbtack;
+  }
+  await navigate(first.page, `chrome-extension://${extId}/options.html`).catch(() => {});
+  await sleep(700);
+  try { await evaluatePage(first.page, 'setTimeout(function(){ try { chrome.runtime.reload(); } catch (e) {} }, 50); true'); } catch { /* context dies on reload */ }
+  try { first.page.close(); } catch { /* ws may already be gone */ }
+  await sleep(2800);
+  const { page, target } = await attachActive(cdpUrl, options, { match: options.match, allowBlank: true });
+  await navigate(page, dest);
+  await waitForLuaRuntime(page, options, 20000);
+  return { page, target, reloaded: true, extensionId: extId, url: dest };
 }
 
 // ── store-based local Lua + flows (build/read -> stores -> remote off) ────────
@@ -493,4 +603,50 @@ export async function syncStore(session, { site, build = true, reload = true } =
     ...(verify ? { fromStore: verify.store.length, fromRemote: verify.remote.length, sources: verify } : {}),
     ...(flowsCfg ? { appliedClientFlows: flowsCfg.clientFlows, appliedFlowsStoreKeys: flowsCfg.flowsStoreKeys } : {}),
   };
+}
+
+// Read a compact chat-store snapshot (status + last message parts). Re-finds the AXSDK context per
+// call, so polling with it tolerates the flow's mid-turn page navigations.
+export async function readChat(session) {
+  return callInAxContext(session.page, session.options, `function() {
+    const s = globalThis._AXSDK || globalThis.AXSDK;
+    const chat = s && s.getChatStore && s.getChatStore();
+    if (!chat) return null;
+    const st = chat.getState();
+    const status = st.status || (st.session && st.session.status) || (st.isBusy || st.busy ? 'busy' : 'idle');
+    const msgs = st.messages || [];
+    const parseOut = v => { try { return typeof v === 'string' ? JSON.parse(v) : v; } catch { return v; } };
+    const last = msgs[msgs.length - 1] || {};
+    const parts = (last.parts || []).map(p => {
+      if (p.type === 'text') return { type: 'text', text: p.text };
+      if (p.type === 'tool' || p.tool || p.toolName) return { type: 'tool', tool: p.tool || p.toolName, status: p.state && p.state.status, output: parseOut(p.state ? p.state.output : p.output) };
+      return { type: p.type };
+    });
+    return { status, messageCount: msgs.length, parts };
+  }`);
+}
+
+// Drive the flow ENGINE: send a user message, then poll the chat store FROM NODE (re-finding the
+// context each read so it survives the flow's navigations) until the assistant turn settles. Returns
+// the assistant reply text + the last message's tool/text parts.
+export async function sendMessage(session, text, { timeoutMs = 180000 } = {}) {
+  const before = (await readChat(session).catch(() => null))?.messageCount ?? 0;
+  await callInAxContext(session.page, session.options, `async function(text) {
+    const s = globalThis._AXSDK || globalThis.AXSDK;
+    if (!s || typeof s.sendMessage !== 'function') throw new Error('AXSDK.sendMessage is not available');
+    await s.sendMessage(text);
+    return true;
+  }`, [text]);
+  const deadline = Date.now() + timeoutMs;
+  let sawBusy = false, idleStreak = 0, snap = null;
+  while (Date.now() < deadline) {
+    await sleep(1000);
+    const s = await readChat(session).catch(() => null);
+    if (!s) { idleStreak = 0; continue; }       // context lost mid-navigation; retry
+    snap = s;
+    if (s.status === 'busy') { sawBusy = true; idleStreak = 0; } else idleStreak += 1;
+    if (s.messageCount >= before + 2 && (sawBusy || idleStreak >= 5) && idleStreak >= 2) break;
+  }
+  const reply = (snap?.parts || []).filter(p => p.type === 'text').map(p => p.text).filter(Boolean).join('\n');
+  return { status: snap?.status, messageCount: snap?.messageCount, reply, parts: snap?.parts };
 }

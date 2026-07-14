@@ -7,9 +7,10 @@
 // Drives the REAL backend flow engine through the debug `_AXSDK` core instance. No git push needed.
 //
 // Usage:
-//   node _common/scripts/test_collect_request_flow.mjs                 # launch/reuse on :9225
+//   node _common/scripts/test_collect_request_flow.mjs                 # launch/reuse on :9224
 //   node _common/scripts/test_collect_request_flow.mjs --only=S2 --keep-open
-//   node _common/scripts/test_collect_request_flow.mjs --cdp=http://127.0.0.1:9225   # reuse only
+//   node _common/scripts/test_collect_request_flow.mjs --cdp=http://127.0.0.1:9224   # reuse only
+import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
@@ -21,7 +22,7 @@ const FLOWS_FILE = resolve(__dirname, '..', 'flows.yaml');
 const arg = (k, d) => { const a = process.argv.find(x => x.startsWith(`${k}=`)); return a ? a.slice(k.length + 1) : d; };
 const has = k => process.argv.includes(k);
 const EXT = process.env.AXSDK_EXTENSION_ID || 'dldlgmekahifbogjphgglkhibclglmpf';
-const PORT = Number(arg('--port', process.env.CDP_PORT || 9225));
+const PORT = Number(arg('--port', process.env.CDP_PORT || 9224));
 const CDP = arg('--cdp', process.env.CDP_URL || '');           // if set, reuse only (never launch)
 const ENDPOINT = CDP || `http://127.0.0.1:${PORT}`;
 const CHROME = arg('--chrome', process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe');
@@ -113,37 +114,195 @@ const SETUP = `function(yaml){const a=globalThis._AXSDK;a.config.clientFlows={re
 const RESET = `function(mem){const a=globalThis._AXSDK;const cs=a.getChatStore().getState();try{cs.setSession&&cs.setSession(undefined);}catch(e){}try{cs.setMessages&&cs.setMessages([]);}catch(e){}try{cs.setQuestions&&cs.setQuestions(null);}catch(e){}try{cs.setSessionClosed&&cs.setSessionClosed(false);}catch(e){}try{a.getErrorStore&&a.getErrorStore().getState().clearErrors&&a.getErrorStore().getState().clearErrors();}catch(e){}try{a.getMemoryStore().getState().setMemory(':',mem||'');}catch(e){}const ns=a.getChatStore().getState();return{messageCount:(ns.messages||[]).length,session:ns.session?.id||null};}`;
 const SEND = `function(text){globalThis._AXSDK.sendMessage(text);return {sent:true,via:'api'};}`;
 const POLL = `function(){const a=globalThis._AXSDK;const cs=a.getChatStore().getState();const as=a.getAppStore?a.getAppStore().getState():{};const es=a.getErrorStore?a.getErrorStore().getState():{};const T=(v,n)=>{try{if(v==null)return undefined;const s=typeof v==='string'?v:JSON.stringify(v);return s.length>n?s.slice(0,n)+'\\u2026':s;}catch(e){return String(v);}};const D=o=>{try{return JSON.parse(o);}catch(e){return o;}};const msgs=(cs.messages||[]).slice(-3).map(m=>({role:m.role,text:T(m.text||m.content,300),parts:(m.parts||[]).map(p=>p.type==='tool'?{tool:p.tool||p.toolName,status:p.state?.status||p.status,out:D(p.state&&p.state.output)}:{type:p.type,txt:T(p.text||p.question,220)})}));return{appReady:!!as.appInfoReady,loading:cs.isLoading,sessionId:cs.session?.id||null,sessionStatus:cs.session?.status,errors:(es.errors||[]).slice(0,3).map(e=>T(e.message||e.error||e,200)),deferred:(cs.deferredCalls||[]).map(d=>T(d.command||d.tool||d,80)),questionCount:(cs.questions||[]).length,questions:(cs.questions||[]).map(q=>T(q.text||q.question||q,260)),messageCount:(cs.messages||[]).length,messages:msgs};}`;
+const TABLE_WIDGETS = `function(){const found=[];const roots=[document];const seen=new Set();while(roots.length){const root=roots.shift();if(!root||seen.has(root))continue;seen.add(root);for(const table of root.querySelectorAll?.('[data-ax-widget="table"]')||[]){found.push({caption:table.querySelector('caption')?.textContent?.trim()||'',headers:Array.from(table.querySelectorAll('th'),el=>el.textContent?.trim()||''),rows:table.querySelectorAll('tbody tr').length,actions:table.querySelectorAll('[data-ax-widget-cell-action="true"]').length});}for(const el of root.querySelectorAll?.('*')||[]){if(el.shadowRoot)roots.push(el.shadowRoot);}}return found;}`;
 
 const t0 = Date.now();
 const el = () => ((Date.now() - t0) / 1000).toFixed(1);
 
 async function pollTurn(page, maxMs = 90000) {
-  const dl = Date.now() + maxMs; let idle = 0, sawBusy = false, last = null, start = Date.now();
+  const dl = Date.now() + maxMs; let idle = 0, last = null;
   while (Date.now() < dl) {
     await sleep(1200);
     const s = await callAx(page, POLL).catch(e => ({ error: String(e?.message || e) }));
     last = s;
     const running = (s?.messages || []).some(m => (m.parts || []).some(p => p.status === 'running'));
     const busy = s?.sessionStatus === 'busy' || running || s?.loading === true || (s?.deferred?.length ?? 0) > 0;
-    if (busy) sawBusy = true;
+    const finished = (s?.messages || []).at(-1)?.parts?.some(p => p.type === 'step-finish') === true;
     console.log(`  [${el()}s] status=${s?.sessionStatus} run=${running} load=${s?.loading} msgs=${s?.messageCount} q=${s?.questionCount} defer=${s?.deferred?.length || 0} err=${s?.errors?.length || 0}`);
     const seq = (s?.messages || []).at(-1)?.parts?.filter(p => p.tool)?.map(p => p.tool.split('.').pop() + '=' + (p.status === 'error' ? 'ERR' : (p.out?.next ?? p.status))) || [];
     if (seq.length) console.log('    tools:', seq.join(' '));
-    if (s?.questionCount > 0) return s;
     if (s?.errors?.length) return s;
-    if (sawBusy && !busy) { idle += 1; if (idle >= 2) return s; } else idle = 0;
-    if (!sawBusy && Date.now() - start > 25000) return s;
+    if (!busy && finished) { idle += 1; if (idle >= 2) return s; } else idle = 0;
   }
   return last;
 }
 
+function completedTools(state, leaf) {
+  return (state?.messages || []).at(-1)?.parts?.filter(
+    part => part.tool?.split('.').pop() === leaf && part.status === 'completed',
+  ) || [];
+}
+
+function collectOutputs(state) {
+  return completedTools(state, 'collect_request').map(part => part.out);
+}
+
+function replyText(state) {
+  return (state?.messages || []).at(-1)?.parts?.filter(part => part.type === 'text').map(part => part.txt).join('\n') || '';
+}
+
+async function waitForTableWidget(page, caption, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const widgets = await callAx(page, TABLE_WIDGETS);
+    const match = widgets.find(widget => widget.caption === caption);
+    if (match) return match;
+    await sleep(250);
+  } while (Date.now() < deadline);
+  return null;
+}
+
+function assertCleanOutputs(outputs) {
+  assert.doesNotMatch(JSON.stringify(outputs), /:"(?:null|none|unknown|n\/a)"/i);
+}
+
+function verifyS2(turn, state) {
+  assert.deepEqual(state.errors, []);
+  const outputs = collectOutputs(state);
+  assertCleanOutputs(outputs);
+  if (turn === 0) {
+    assert.equal(outputs.length, 1);
+    assert.match(outputs[0].question, /서비스|작업|견적/);
+    assert.match(replyText(state), /[가-힣]/);
+    return;
+  }
+  assert.equal(outputs.length, 4);
+  assert.equal(outputs[0].service_query, 'lawn mowing');
+  assert.match(outputs[0].user_requirements, /one-time/i);
+  assert.equal(outputs[1].address, 'San Francisco, CA');
+  assert.match(outputs[2].zip_code, /^[0-9]{5}$/);
+  assert.match(outputs[3].question, /이름|이메일|전화/);
+  assert.equal(completedTools(state, 'search_service').length, 0);
+}
+
+async function verifyS5(turn, state, page) {
+  assert.deepEqual(state.errors, []);
+  const parts = (state?.messages || []).at(-1)?.parts || [];
+  assert.equal(parts.filter(part => part.tool && part.status === 'error').length, 0);
+  if (turn === 1) {
+    assert.equal(completedTools(state, 'present_service_results')[0]?.out?.next, 'refine');
+    assert.equal(completedTools(state, 'refine_search')[0]?.out?.next, 'done');
+
+    const prepared = completedTools(state, 'prepare_refined_results_table')[0]?.out;
+    assert.equal(prepared?.next, 'render');
+    assert.match(prepared?.refined_results_table?.caption, /^Selected Thumbtack professionals \([1-9][0-9]*\)$/);
+    assert.deepEqual(
+      prepared?.refined_results_table?.columns?.map(column => column.label),
+      ['Professional', 'Rating', 'Price', 'Why selected'],
+    );
+    assert.ok(prepared?.refined_results_table?.rows?.length > 0);
+    assert.equal(prepared?.refined_results_table?.rows?.every(row => row.pro?.action?.type === 'link'), true);
+
+    const rendered = completedTools(state, 'render_refined_results')[0]?.out;
+    assert.equal(rendered?.next, 'present');
+    const widgetMatch = rendered?.refined_results_widget?.match(/^```ax-widget\n([\s\S]+)\n```$/);
+    assert.ok(widgetMatch, 'refined results must use one canonical ax-widget fence');
+    const widgetPayload = JSON.parse(widgetMatch[1]);
+    assert.equal(widgetPayload.template, 'table');
+    assert.equal(widgetPayload.version, 1);
+    assert.deepEqual(widgetPayload.data, prepared.refined_results_table);
+
+    const presented = completedTools(state, 'present_refined_results')[0]?.out;
+    assert.equal(presented?.next, 'ask');
+    assert.equal(presented?.quote_confirm_stage, 'asked');
+    assert.equal(presented?.question?.startsWith(`${rendered.refined_results_widget}\n\n`), true);
+    assert.match(presented?.question, /선택된 전문가를 표로 정리했습니다/);
+    assert.equal(completedTools(state, 'confirm_quote').length, 0);
+    assert.equal(completedTools(state, 'open_quote').length, 0);
+    assert.equal(completedTools(state, 'submit_quote').length, 0);
+
+    const domTable = await waitForTableWidget(page, prepared.refined_results_table.caption);
+    assert.ok(domTable, 'refined table widget must exist in the live AXSDK DOM');
+    assert.deepEqual(domTable.headers, ['Professional', 'Rating', 'Price', 'Why selected']);
+    assert.equal(domTable.rows, prepared.refined_results_table.rows.length);
+    assert.equal(domTable.actions, prepared.refined_results_table.rows.length);
+    return;
+  }
+  if (turn === 2) {
+    assert.equal(completedTools(state, 'present_refined_results')[0]?.out?.next, 'confirm');
+    assert.equal(completedTools(state, 'confirm_quote')[0]?.out?.next, 'refine');
+    assert.equal(completedTools(state, 'refine_search')[0]?.out?.next, 'ask');
+    assert.match(completedTools(state, 'refine_search')[0]?.out?.question, /평점|리뷰|가격|기준/);
+    assert.equal(completedTools(state, 'open_quote').length, 0);
+    assert.equal(completedTools(state, 'submit_quote').length, 0);
+    return;
+  }
+  const outputs = collectOutputs(state);
+  assertCleanOutputs(outputs);
+  assert.equal(outputs.length, 4);
+  assert.equal(outputs[0].service_query, 'handyman');
+  assert.equal(outputs[1].zip_code, '94103');
+  assert.deepEqual(
+    [outputs[2].submit_first_name, outputs[2].submit_last_name, outputs[2].submit_email, outputs[2].submit_phone],
+    ['Test', 'User', 'thumbtack-test@example.com', '415-555-0100'],
+  );
+  assert.equal(outputs[3].next, 'done');
+  assert.equal(completedTools(state, 'verify_request')[0]?.out?.next, 'ok');
+  assert.equal(completedTools(state, 'search_service').length, 1);
+
+  const prepared = completedTools(state, 'prepare_service_results_table')[0]?.out;
+  assert.equal(prepared?.next, 'render');
+  assert.equal(prepared?.service_results_table?.caption, 'Thumbtack results for handyman (10)');
+  assert.deepEqual(
+    prepared?.service_results_table?.columns?.map(column => column.label),
+    ['Professional', 'Rating', 'Reviews', 'Price', 'Response', 'Hires'],
+  );
+  assert.equal(prepared?.service_results_table?.rows?.length, 10);
+  assert.equal(prepared?.service_results_table?.rows?.every(row => row.pro?.action?.type === 'link'), true);
+
+  const rendered = completedTools(state, 'render_service_results')[0]?.out;
+  assert.equal(rendered?.next, 'present');
+  const widgetMatch = rendered?.service_results_widget?.match(/^```ax-widget\n([\s\S]+)\n```$/);
+  assert.ok(widgetMatch, 'AX_render_widget must return one canonical ax-widget fence');
+  const widgetPayload = JSON.parse(widgetMatch[1]);
+  assert.equal(widgetPayload.template, 'table');
+  assert.equal(widgetPayload.version, 1);
+  assert.deepEqual(widgetPayload.data, prepared.service_results_table);
+
+  const presented = completedTools(state, 'present_service_results')[0]?.out;
+  assert.equal(presented?.next, 'ask');
+  assert.equal(presented?.refine_stage, 'criteria');
+  assert.equal(presented?.question?.startsWith(`${rendered.service_results_widget}\n\n`), true);
+  assert.match(presented?.question, /검색 결과를 표로 정리했습니다/);
+  assert.match(replyText(state), /^```ax-widget/);
+
+  const domTable = await waitForTableWidget(page, prepared.service_results_table.caption);
+  assert.ok(domTable, 'rendered table widget must exist in the live AXSDK DOM');
+  assert.deepEqual(domTable.headers, ['Professional', 'Rating', 'Reviews', 'Price', 'Response', 'Hires']);
+  assert.equal(domTable.rows, 10);
+  assert.equal(domTable.actions, 10);
+}
+
+function verifyS6(_turn, state) {
+  assert.deepEqual(state.errors, []);
+  const outputs = collectOutputs(state);
+  assertCleanOutputs(outputs);
+  assert.equal(outputs.length, 3);
+  assert.equal(outputs[0].service_query, 'handyman');
+  assert.equal(outputs[1].zip_code, '94103');
+  assert.match(outputs[2].question, /이름|이메일|전화/);
+  assert.match(replyText(state), /[가-힣]/);
+  assert.equal(completedTools(state, 'verify_request').length, 0);
+  assert.equal(completedTools(state, 'search_service').length, 0);
+}
+
 const SCENARIOS = [
   { id: 'S1', name: 'one-shot (service+requirements+city in message)', memory: '', turns: ['샌프란시스코에서 핸디맨으로 작은 집 한 번 청소 견적 받아줘. 48시간 내 일회성.'] },
-  { id: 'S2', name: 'ask -> resume (vague, then answer)', memory: '', turns: ['견적 받아줘', '샌프란시스코에서 잔디 깎기 일회성으로 해줘'] },
-  { id: 'S3', name: 'memory path (address from memory, no location in message)', memory: '# Service address\n- 123 Market St, San Francisco, CA', turns: ['핸디맨으로 집 청소 견적 받아줘. 작은 집, 일회성.'] },
+  { id: 'S2', name: 'ask -> resume through forced stages', memory: '', turns: ['견적 받아줘', '샌프란시스코에서 잔디 깎기 일회성으로 해줘'], verify: verifyS2 },
+  { id: 'S3', name: 'memory is not implicitly read', memory: '# Service address\n- 123 Market St, San Francisco, CA', turns: ['핸디맨으로 집 청소 견적 받아줘. 작은 집, 일회성.'] },
   { id: 'S4', name: 'explicit ZIP (bypass resolve_zip)', memory: '', turns: ['핸디맨으로 작은 집 청소 견적 받아줘. 샌프란시스코 94103, 48시간 내 일회성.'] },
-  { id: 'S5', name: 'full incl contact + explicit zip (happy path -> verify_request -> search)', memory: '', turns: ['샌프란시스코 94103에서 핸디맨으로 작은 집 청소 견적 받아줘. 48시간 내 일회성. 이름 Test, 성 User, 이메일 thumbtack-test@example.com, 전화 415-555-0100.'] },
-  { id: 'S6', name: 'missing contact (gate must ask, never reach search)', memory: '', turns: ['샌프란시스코 94103에서 핸디맨으로 작은 집 청소 견적 받아줘. 48시간 내 일회성.'] },
+  { id: 'S5', name: 'search and refined shortlist both render table widgets', memory: '', turns: ['샌프란시스코 94103에서 핸디맨으로 작은 집 청소 견적 받아줘. 48시간 내 일회성. 이름 Test, 성 User, 이메일 thumbtack-test@example.com, 전화 415-555-0100.', '평점 높은 순으로 골라줘.', '아니, 다시 고를게.'], verify: verifyS5 },
+  { id: 'S6', name: 'missing contact pauses before verification and search', memory: '', turns: ['샌프란시스코 94103에서 핸디맨으로 작은 집 청소 견적 받아줘. 48시간 내 일회성.'], verify: verifyS6 },
 ];
 
 async function main() {
@@ -177,20 +336,25 @@ async function main() {
   if (has('--remote')) console.log('REMOTE_SETUP:', JSON.stringify(await callAx(page, REMOTE_SETUP)));
   else console.log('SETUP:', JSON.stringify(await callAx(page, SETUP, [yaml])));
 
-  for (const sc of SCENARIOS) {
-    if (ONLY && sc.id !== ONLY) continue;
-    console.log(`\n===== ${sc.id} ${sc.name} =====`);
-    console.log('reset:', JSON.stringify(await callAx(page, RESET, [sc.memory])));
-    for (const turn of sc.turns) {
-      console.log(`\n>> USER: ${turn}`);
-      console.log('send:', JSON.stringify(await callAx(page, SEND, [turn])));
-      await sleep(800);
-      const s = await pollTurn(page, 300000);
-      console.log('<< STATE:', JSON.stringify(s, null, 1));
+  try {
+    for (const sc of SCENARIOS) {
+      if (ONLY && sc.id !== ONLY) continue;
+      console.log(`\n===== ${sc.id} ${sc.name} =====`);
+      console.log('reset:', JSON.stringify(await callAx(page, RESET, [sc.memory])));
+      for (const [turnIndex, turn] of sc.turns.entries()) {
+        console.log(`\n>> USER: ${turn}`);
+        console.log('send:', JSON.stringify(await callAx(page, SEND, [turn])));
+        await sleep(800);
+        const state = await pollTurn(page, 300000);
+        console.log('<< STATE:', JSON.stringify(state, null, 1));
+        await sc.verify?.(turnIndex, state, page);
+        console.log(`PASS ${sc.id} turn ${turnIndex + 1}`);
+      }
     }
+    console.log('\nDONE');
+  } finally {
+    if (launched && !KEEP_OPEN) launched.kill();
+    page.close();
   }
-  console.log('\nDONE');
-  if (launched && !KEEP_OPEN) launched.kill();
-  page.close();
 }
 main().catch(e => { console.error('FATAL', e?.stack || e?.message || e); process.exitCode = 1; });

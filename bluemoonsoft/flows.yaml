@@ -1,0 +1,52 @@
+# BlueMoonSoft site flow overlay.
+#
+# Loaded ONLY while on bluemoonsoft.com (store key `:bluemoonsoft`), deep-merged onto the base
+# `_common/flows.yaml` (see AGENTS.md §3 / siteclientflows). Three effects:
+#
+#  1. Site-aware routing (omit the site name on-site): provides the `current_site` context (empty in
+#     the base) so the planner's CURRENT SITE rule classifies bare on-topic requests as bluemoonsoft —
+#     e.g. on the news page "유튜브 보여줘" needs no "블루문소프트" prefix. `router.defaultIntent:
+#     bluemoonsoft` reinforces this in the fixed router. Off-domain the overlay is not loaded, so the
+#     base `current_site` ("") and `defaultIntent` (request_service_quote) apply unchanged.
+#  2. Sitemap navigation: refines the `bluemoonsoft` flow's `resolve` / `go_page` nodes with the real
+#     sitemap-driven prompts (the `_common` bases are compile-safe dummies).
+#
+# Never redefine `router.routes` here (arrays replace on merge, dropping the base routes) — only the
+# scalar `defaultIntent` is overridden; `mode` and `routes` are kept from the base.
+extends: app
+contexts:
+  current_site: |-
+    bluemoonsoft — the user is CURRENTLY ON the BlueMoonSoft website (bluemoonsoft.com). Its pages/topics:
+    회사 소개/about, 제품 다큐레이/DocuRay, 보안 모듈/security modules, 새소식/news, 유튜브/videos,
+    고객사/reference, 특허/patents, 오시는 길/contact, 견적 문의/quote inquiry. Treat a bare on-topic
+    request (no other site or task named) as the bluemoonsoft intent even without the site name.
+router:
+  defaultIntent: bluemoonsoft
+flows:
+  bluemoonsoft:
+    nodes:
+      resolve:
+        description: Resolve the BlueMoonSoft page for the request from the live site sitemap (bluemoonsoft/sitemap.md).
+        prompt: |-
+          You are on bluemoonsoft.com. Find the BlueMoonSoft page that best satisfies the user's
+          request (requestText), using the site sitemap. Call sitemap_search EXACTLY ONCE with a
+          case-insensitive regex OR-ing the request's key Korean/English terms, then stop — the next
+          step navigates. Guide (request term → regex):
+            - 회사/소개/about/company            → "회사|소개|about|company|main"
+            - 다큐레이/DocuRay/DRM/오피스가드/코드가드 → "다큐레이|docuray|drm|guard"
+            - 랜섬/랜섬웨어/ransom                → "랜섬|ransom"
+            - 보안 모듈/서비스 모듈/모듈/module/서비스 소개 → "모듈|module|서비스"
+            - 새소식/뉴스/news                   → "새소식|뉴스|news"
+            - 유튜브/영상/video                  → "유튜브|youtube|video"
+            - 고객/고객사/레퍼런스/reference       → "고객|레퍼런스|reference"
+            - 특허/인증/patent                  → "특허|인증|patent"
+            - 오시는 길/주소/연락처/contact        → "오시는|주소|연락처|contact"
+            - 견적/문의/도입 상담/quote            → "견적|문의|상담|contact"
+      go_page:
+        description: Navigate to the BlueMoonSoft page path that best matches the request, chosen from the sitemap hits.
+        prompt: |-
+          You are on bluemoonsoft.com. `sitemap_hits` holds sitemap lines, each ending in a path —
+          e.g. "- **다큐레이 / DocuRay**: /front/main#modal/docuray". Pick the SINGLE path that best
+          matches the user's request (requestText) and call navigate_page(link=<that path>). Prefer
+          the most specific match; if several fit, choose the primary page. If nothing matches, call
+          navigate_page(link="/front/main"). Navigation only — never fill or submit a form.

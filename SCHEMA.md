@@ -476,5 +476,81 @@
       ],
       "type": "object"
     }
+  },
+  {
+    "name": "AX_get_memory",
+    "description": "Read one exact saved memory key. Omit key to list all saved keys.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_search_memory",
+    "description": "Search saved memory by a case-insensitive regex and return matching keys with bounded Markdown.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "regex": {
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "regex"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_set_memory_bulk",
+    "description": "Set final memory values in one call. Non-empty Markdown saves; an empty string deletes the exact key.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "memory": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "minProperties": 1,
+          "type": "object"
+        }
+      },
+      "required": [
+        "memory"
+      ],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_delete_memory",
+    "description": "Delete one or more exact GLOBAL memory keys. The calling flow must pass only keys the user explicitly selected. Keys are case-sensitive; never trim, translate, normalize, or invent them. Use a one-item array for one deletion.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "keys"
+      ],
+      "properties": {
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 200,
+          "uniqueItems": true,
+          "description": "Exact GLOBAL logical memory keys to delete.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
   }
 ]

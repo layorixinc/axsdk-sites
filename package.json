@@ -7,8 +7,12 @@
     "build:lua": "node tools/merge-lua.mjs",
     "build:lua:self-contained": "node tools/merge-lua.mjs --self-contained",
     "build:lua:check": "node tools/merge-lua.mjs --check",
+    "check:flows": "node --test tools/flow-conformance.test.mjs",
     "ax": "node tools/ax.mjs",
     "chrome": "node tools/ax.mjs chrome",
     "repl": "node tools/ax.mjs repl"
+  },
+  "devDependencies": {
+    "yaml": "2.9.0"
   }
 }

@@ -1,0 +1,69 @@
+{
+  "fixtureId": "axsdk-flow-conformance-v1",
+  "fixtureVersion": 1,
+  "flowContractVersion": 1,
+  "roles": [
+    {
+      "id": "production-client-overlay",
+      "repository": "axsdk-sites",
+      "path": "_common/flows.yaml",
+      "documentKind": "app-overlay"
+    },
+    {
+      "id": "sdk-playground-reference",
+      "repository": "axsdk-sdk-js",
+      "path": "packages/axsdk-react/apps/browser-extension/flows.yaml",
+      "documentKind": "app"
+    }
+  ],
+  "mutationCases": [
+    {
+      "name": "complete mutation adapter",
+      "valid": true,
+      "adapter": {
+        "effect": "mutation",
+        "consent": "required",
+        "idempotent": true,
+        "require": {
+          "confirmed": true
+        }
+      }
+    },
+    {
+      "name": "missing consent",
+      "valid": false,
+      "issue": "mutation.consent.required",
+      "adapter": {
+        "effect": "mutation",
+        "idempotent": true,
+        "require": {
+          "confirmed": true
+        }
+      }
+    },
+    {
+      "name": "non-idempotent mutation",
+      "valid": false,
+      "issue": "mutation.idempotent.required",
+      "adapter": {
+        "effect": "mutation",
+        "consent": "required",
+        "idempotent": false,
+        "require": {
+          "confirmed": true
+        }
+      }
+    },
+    {
+      "name": "empty state gate",
+      "valid": false,
+      "issue": "mutation.require.nonempty",
+      "adapter": {
+        "effect": "mutation",
+        "consent": "required",
+        "idempotent": true,
+        "require": {}
+      }
+    }
+  ]
+}

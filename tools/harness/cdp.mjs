@@ -553,26 +553,32 @@ export async function syncStore(session, { site, build = true, reload = true } =
   };
   const readMaybe = async path => { try { return await readFile(path, 'utf8'); } catch { return ''; } };
   const commonLua = await readDist('_common.lua');
-  const siteLua = await readDist(`${slug}.lua`);
   const commonFlows = await readMaybe(join(repoRoot, '_common', 'flows.yaml'));
-  const siteFlows = await readMaybe(join(repoRoot, slug, 'flows.yaml'));
+  // Remote Lua/flows are OFF in stored mode, so the store must carry EVERY published site (not just the
+  // one being synced) — otherwise a cross-site flow (e.g. bluemoonsoft -> shopping/amazon) lands on a
+  // site whose Lua is absent and a durable call fails "command unavailable". Slug == SDK domain (AGENTS §6).
+  const siteSlugs = (await readdir(distDir)).filter(f => f.endsWith('.lua') && f !== '_common.lua').map(f => f.slice(0, -4)).sort();
+  const lua = { ':': commonLua };
+  const flows = { ':': commonFlows };
+  for (const s of siteSlugs) {
+    lua[':' + s] = await readDist(`${s}.lua`);
+    const sf = await readMaybe(join(repoRoot, s, 'flows.yaml'));
+    if (sf && sf.trim()) flows[':' + s] = sf;
+  }
   await waitForLuaRuntime(session.page, session.options);
   const domain = (await siteDomain(session)) || slug;
-  // Write flows store, then lua store, then config — all from the content-script context (chrome.storage.local).
-  const written = await callInAxContext(session.page, session.options, `async function(common, siteSrc, commonFlows, siteFlows, domain, luaKey, flowsKey, cfgKey) {
+  // Write flows + lua stores (ALL sites) and pin remote OFF / stored ON — from the content-script context.
+  const written = await callInAxContext(session.page, session.options, `async function(lua, flows, luaKey, flowsKey, cfgKey) {
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
       throw new Error('chrome.storage.local unavailable in this context');
     }
-    const flows = { ':': commonFlows };
-    if (siteFlows && siteFlows.trim()) flows[':' + domain] = siteFlows;
     await chrome.storage.local.set({ [flowsKey]: JSON.stringify({ state: { flows }, version: 0 }) });
-    const lua = { ':': common, [':' + domain]: siteSrc };
     await chrome.storage.local.set({ [luaKey]: JSON.stringify({ state: { lua }, version: 0 }) });
     const got = await chrome.storage.local.get(cfgKey);
     const cfg = (got && got[cfgKey] && typeof got[cfgKey] === 'object') ? got[cfgKey] : {};
     await chrome.storage.local.set({ [cfgKey]: { ...cfg, remoteLuaEnabled: false, remoteSiteFlowsEnabled: false, storedFlowsEnabled: true } });
     return { luaKeys: Object.keys(lua), flowsKeys: Object.keys(flows), hadConfig: Boolean(got && got[cfgKey]) };
-  }`, [commonLua, siteLua, commonFlows, siteFlows, domain, LUA_STATE_KEY, FLOWS_STATE_KEY, EXTENSION_CONFIG_KEY]);
+  }`, [lua, flows, LUA_STATE_KEY, FLOWS_STATE_KEY, EXTENSION_CONFIG_KEY]);
   let verify = null;
   let flowsCfg = null;
   if (reload) {

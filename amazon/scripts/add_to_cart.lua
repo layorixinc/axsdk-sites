@@ -4,8 +4,9 @@ if not M then
 end
 
 local function has_update_args(args)
-  return args.quantity ~= nil
-    or args.variations ~= nil
+  -- A bare quantity is applied directly on the buy box in the add path (no AX_update_product
+  -- navigation + full product-view read); only real variation/form changes need the update flow.
+  return args.variations ~= nil
     or args.variation_values ~= nil
     or args.variation ~= nil
     or args.options ~= nil
@@ -103,6 +104,13 @@ function AX_add_to_cart(args)
     -- protection-plan sidesheet) navigates to the confirmation page; the post_add guard above lets a
     -- durable replay fall through to read the result instead of re-evaluating the buy box.
     if M.product_page_matches(product_id) then
+      -- Apply a non-default quantity directly on the buy box (avoids AX_update_product's extra
+      -- navigation + product-view read). Quantity may arrive as a float (e.g. 1.0), so compare numerically.
+      local qty = tonumber(M.non_empty(args.quantity))
+      if qty and qty > 1 and dom.exists("#quantity") then
+        dom.set_value("#quantity", tostring(math.floor(qty)))
+      end
+
       local selector = add_button_selector()
       if not selector then
         return {
@@ -120,12 +128,12 @@ function AX_add_to_cart(args)
         }
       end
 
-      dom.wait_for_selector(M.ADD_TO_CART_READY_SELECTOR, { timeout = 30000 })
+      dom.wait_for_selector(M.ADD_TO_CART_READY_SELECTOR, { timeout = 8000 })
 
       -- Decline the optional "Add to your order" protection-plan sidesheet by default.
       if dom.exists(M.ATTACH_PANE_SELECTOR) then
         dom.click(M.ATTACH_DECLINE_SELECTOR)
-        dom.wait_for_selector(M.ADD_TO_CART_CONFIRM_SELECTOR, { timeout = 30000 })
+        dom.wait_for_selector(M.ADD_TO_CART_CONFIRM_SELECTOR, { timeout = 8000 })
       end
     end
   end

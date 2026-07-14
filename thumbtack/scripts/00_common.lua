@@ -545,6 +545,11 @@ function M.read_service_view(service_id)
   local url = M.current_url()
   local resolved_id = service_id or M.service_id_from_url(url)
   local rating_text = M.non_empty(dom.get_text('[data-test="review-summary"]')) or body
+  -- Scope descriptive reads to the word-based id section container (thumbtack/CONTRACT.md §3):
+  -- #ServicePageBusinessInfoSection holds About/Overview/Business hours/Payment methods. Scoping
+  -- removes section_between's whole-body mis-anchor risk; body stays as the last-resort fallback so
+  -- a missing/renamed section degrades to today's behavior (zero regression).
+  local biz = M.non_empty(dom.get_text('#ServicePageBusinessInfoSection')) or body
   return {
     service_id = resolved_id,
     id = resolved_id,
@@ -553,10 +558,11 @@ function M.read_service_view(service_id)
     category = M.non_empty(dom.get_text('a[href*="/k/"]')) or M.non_empty(dom.get_text('input[aria-label="Search on Thumbtack"]')),
     rating = M.parse_rating(rating_text),
     review_count = M.parse_review_count(rating_text),
-    about = M.section_between(body, "About", { "Overview", "Services offered", "Projects and media", "Reviews" }),
-    overview = M.section_between(body, "Overview", { "Business hours", "Payment methods", "Social media", "Message", "Request" }),
-    business_hours = M.section_between(body, "Business hours", { "Payment methods", "Social media", "Message", "Request", "Services offered" }),
-    payment_methods = M.section_between(body, "Payment methods", { "Social media", "Message", "Request", "Services offered" }),
+    about = M.non_empty(M.truncate_text(dom.get_text('[id^="profile-description-"]'), 1200))
+      or M.section_between(biz, "About", { "Overview", "Business hours", "Payment methods", "Services offered", "Projects and media", "Reviews" }),
+    overview = M.section_between(biz, "Overview", { "Business hours", "Payment methods", "Social media", "Message", "Request" }),
+    business_hours = M.section_between(biz, "Business hours", { "Payment methods", "Social media", "Message", "Request", "Services offered" }),
+    payment_methods = M.section_between(biz, "Payment methods", { "Social media", "Message", "Request", "Services offered" }),
     services_offered = M.read_text_array('[data-test="specialties-section__interested-item"]', 20),
     photos = M.read_images('[data-test="media-section-carousel-container"] img, img[src*="production-next-images-cdn.thumbtack.com"]', 80),
     reviews = M.read_text_array('[data-test="qna-content"], [data-test="review-summary"]', 20),

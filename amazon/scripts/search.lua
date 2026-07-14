@@ -10,7 +10,7 @@ function AX_search_product(args)
 
   M.navigate_search(query, cursor)
 
-  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = 30000 })
+  dom.wait_for_selector(M.RESULT_READY_SELECTOR, { timeout = 8000 })
 
   if dom.exists('form[action*="validateCaptcha"]') then
     return {

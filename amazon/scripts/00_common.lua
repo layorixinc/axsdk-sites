@@ -215,7 +215,7 @@ function M.ensure_product_page(product_id)
   if not M.product_page_matches(product_id) then
     M.navigate_product(product_id)
   end
-  dom.wait_for_selector(M.PRODUCT_READY_SELECTOR, { timeout = 30000 })
+  dom.wait_for_selector(M.PRODUCT_READY_SELECTOR, { timeout = 8000 })
 
   if dom.exists('form[action*="validateCaptcha"]') then
     return {

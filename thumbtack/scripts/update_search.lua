@@ -16,7 +16,10 @@ function AX_update_search(args)
   end
   local group = M.non_empty(args.option or args.group or args.title)
 
-  if not M.is_results_page() then
+  -- Single detect_page coordinator (thumbtack/CONTRACT.md §5): confirm a results surface via the
+  -- detector's classification, not an ad-hoc is_results_page URL check.
+  local page = (type(AX_detect_page) == "function") and AX_detect_page() or {}
+  if not (page.page == "category_results" or page.page == "instant_results") then
     return {
       error = "not_on_results",
       message = "Run AX_search_service first to reach the results screen."

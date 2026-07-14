@@ -1,7 +1,7 @@
 [
   {
     "name": "AX_search_product",
-    "description": "Search Amazon products by query. Use cursor from a previous result to fetch the next page.",
+    "description": "Search products on the active commerce site (Amazon or eBay) by query. Amazon also accepts a cursor from a previous result.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -60,7 +60,7 @@
   },
   {
     "name": "AX_add_to_cart",
-    "description": "Add an Amazon product to the cart, optionally applying quantity, variations, and form values first.",
+    "description": "Add a product on the active commerce site (Amazon or eBay) to the cart, optionally applying quantity and a stale-price precondition. Never checks out or places an order.",
     "parameters": {
       "additionalProperties": false,
       "properties": {
@@ -70,6 +70,14 @@
         "quantity": {
           "minimum": 1,
           "type": "integer"
+        },
+        "expected_unit_price": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "expected_currency": {
+          "minLength": 3,
+          "type": "string"
         },
         "variations": {
           "additionalProperties": true,
@@ -551,6 +559,106 @@
           }
         }
       }
+    }
+  },
+  {
+    "name": "AX_search_store_product",
+    "description": "Navigate to Amazon or eBay, search one product query, and return live candidates normalized to USD item-plus-shipping cost with FX evidence.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "enum": ["amazon", "ebay"],
+          "type": "string"
+        },
+        "query": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "quantity": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": ["site", "query"],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_rank_store_offers",
+    "description": "Deterministically flatten and rank normalized store-search results by complete total cost, rating, reviews, site, and product id.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "results": {
+          "items": { "type": "object" },
+          "type": "array"
+        },
+        "quantity": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": ["results"],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_resolve_store_offer",
+    "description": "Validate a numbered current comparison offer and return its exact cart mutation fields plus scoped approval marker.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "offers": {
+          "items": { "type": "object" },
+          "type": "array"
+        },
+        "choice_index": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "quantity": {
+          "minimum": 1,
+          "type": "integer"
+        }
+      },
+      "required": ["offers", "choice_index"],
+      "type": "object"
+    }
+  },
+  {
+    "name": "AX_add_store_product_to_cart",
+    "description": "Navigate to the selected Amazon or eBay offer, enforce scoped approval and stale-price preconditions, and add it to the cart without checkout.",
+    "parameters": {
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "enum": ["amazon", "ebay"],
+          "type": "string"
+        },
+        "product_id": {
+          "minLength": 1,
+          "type": "string"
+        },
+        "quantity": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "expected_unit_price": {
+          "minimum": 0,
+          "type": "number"
+        },
+        "expected_currency": {
+          "minLength": 3,
+          "type": "string"
+        },
+        "cart_approval": {
+          "const": "user_selected_compared_offer",
+          "type": "string"
+        }
+      },
+      "required": ["site", "product_id", "cart_approval"],
+      "type": "object"
     }
   }
 ]

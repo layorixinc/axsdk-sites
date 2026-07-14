@@ -33,12 +33,14 @@ export const DEFAULTS = {
 const SITE_HOSTS = [
   ['thumbtack.com', 'thumbtack'],
   ['amazon.', 'amazon'],
+  ['ebay.com', 'ebay'],
   ['bluemoonsoft.com', 'bluemoonsoft'],
 ];
 
 export const SITE_HOME = {
   thumbtack: 'https://www.thumbtack.com/',
   amazon: 'https://www.amazon.com/',
+  ebay: 'https://www.ebay.com/',
   bluemoonsoft: 'http://bluemoonsoft.com/',
 };
 

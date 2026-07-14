@@ -41,12 +41,13 @@ planner:
     Configured intents:
     - request_service_quote — a quote/estimate for a local SERVICE (청소/house cleaning, 핸디맨/handyman, 잔디 깎기/lawn mowing, 열쇠공/locksmith, …).
     - shopping_single_site — find / buy / order one or more PRODUCTS (아이폰/iPhone, 신발/shoes, 계란/eggs, airpods, …).
+    - shopping_multi_store_total_cost — compare one PRODUCT across Amazon and eBay by item price plus shipping, then add only the offer the user explicitly selects. Use this when the request names multiple stores, asks for cross-store comparison, or asks for the cheapest shipping-inclusive/total cost.
     - bluemoonsoft — explore BlueMoonSoft (블루문소프트), a Korean information-security software company: company/about info, products (다큐레이/DOCURAY), security modules (보안 모듈/서비스 모듈), news (새소식), customers/reference, patents, or the quote-inquiry page. NOT buying consumer products (that is shopping_single_site).
     - end_conversation — the user wants to STOP/END the conversation with no further task (farewell / thanks-and-done: "그만할게", "됐어 그만", "이제 그만", "고마워요", "종료").
     - checkout — proceed to PAYMENT/CHECKOUT for whatever is already in the shopping cart (체크아웃/결제/결제해줘/결제 진행/주문할게/장바구니 결제/checkout). NOT buying a new product (that is shopping_single_site) and NOT a service quote. No order is ever placed — it only opens the checkout page for review.
     - memory — explicitly save/remember, delete/forget, list/show, read, or search information the user asked AXSDK to remember. Memory requires an explicit memory action or a question asking to retrieve remembered information. A declarative statement that only supplies a value ("내 이메일은 ...이야", "my email is ...") is NEVER memory and MUST NOT be saved.
 
-    PRODUCT ROUTING INVARIANT: the only valid product intent literal is `shopping_single_site`.
+    PRODUCT ROUTING INVARIANT: use `shopping_multi_store_total_cost` for explicit multi-store or total-cost comparison; otherwise use `shopping_single_site`. These are the only valid product intent literals.
     NEVER emit `shopping`; that inherited base intent runs a different flow.
 
     CURRENT SITE: The <current_site> context, when non-empty, names the website the user is currently on. If the latest message fits that site — it names a page/section/topic of the site, or is a generic "show/open/find X" that maps to the site's own content — and does NOT clearly match a different task (buying consumer products = shopping_single_site; a local SERVICE quote = request_service_quote; ending), classify it as that site's intent via replace_current EVEN IF the site name is omitted; do NOT return out_of_scope or clarify for such an on-site request. E.g. while on bluemoonsoft: "유튜브 보여줘" / "뉴스" / "다큐레이" / "견적 문의" → intent=bluemoonsoft.
@@ -67,6 +68,7 @@ planner:
     Examples:
     - "청소 견적 줘" → replace_current, intents=[{intent:request_service_quote, segments:["청소 견적 줘"], state:{requestText:"청소 견적 줘"}}]
     - "아이폰 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
+    - "Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘" → intents=[{intent:shopping_multi_store_total_cost, segments:["Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"], state:{requestText:"Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"}}]
     - "청소 견적 주고 아이폰 사줘" → intents=[{intent:request_service_quote, segments:["청소 견적 주고"], state:{requestText:"청소 견적 줘"}}, {intent:shopping_single_site, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
     - "아이폰이랑 계란 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰이랑 계란 사줘"], state:{requestText:"아이폰이랑 계란 사줘"}}]
     - "온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어." → replace_current, intents=[{intent:shopping_single_site, segments:["온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."], state:{requestText:"온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."}}] — use shopping_single_site even when the product is still missing; that flow asks what to buy.
@@ -92,6 +94,13 @@ router:
         - 열쇠공 견적줘
         - 샌프란시스코 핸디맨 견적 받아줘
         - get a house cleaning quote in San Francisco
+    - intent: shopping_multi_store_total_cost
+      entry: shopping_multi_store_total_cost.collect_request
+      description: Compare one product across Amazon and eBay by normalized item-plus-shipping cost, then prepare only the explicitly selected offer's cart.
+      examples:
+        - Logitech M185를 아마존과 이베이에서 총비용 비교해줘
+        - compare AirPods across Amazon and eBay including shipping
+        - 두 쇼핑몰에서 배송비 포함 가장 싼 마우스를 장바구니에 담아줘
     - intent: shopping_single_site
       entry: shopping_single_site.collect_shopping
       description: Find, buy, or order one or more products (online shopping).
@@ -996,6 +1005,244 @@ flows:
           (login_required, cart_empty, checkout_unavailable, checkout_pending, captcha_required), say the
           checkout could not be completed and state the reason briefly. ALWAYS state clearly that NO order has
           been placed. Do NOT invent addresses, totals, or payment details.
+  shopping_multi_store_total_cost:
+    goal: Compare one product across Amazon and eBay by normalized item price plus shipping, present the evidence, and add only the offer the user explicitly selects. Never enters checkout or places an order.
+    inputSelector:
+      - requestText
+    state:
+      query: null
+      quantity: 1
+      stores:
+        - { site: amazon }
+        - { site: ebay }
+      store_results: null
+      offers: null
+      failures: null
+      comparison_text: null
+      incomplete_count: null
+      choice_stage: null
+      choice_index: null
+      selection_error: null
+      selected_offer: null
+      selected_rank: null
+      site: null
+      product_id: null
+      product_name: null
+      expected_unit_price: null
+      expected_currency: null
+      approved_total_base: null
+      cart_approval: null
+      cart_status: null
+      cart_error: null
+      cart_confirmation: null
+    nodes:
+      collect_request:
+        kind: action_unit
+        description: Extract exactly one product query and quantity for a real Amazon/eBay total-cost comparison; ask when the product is missing or the request contains several distinct products.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - requestText
+          - query
+          - quantity
+        allowedTools: [collect_total_cost_request]
+        prompt: |-
+          Prepare one cross-store product comparison. Read the latest requestText and call
+          collect_total_cost_request exactly once.
+
+          - If no concrete product is named, use next="ask" and ask what product to compare.
+          - If several materially different products are named, use next="ask" and ask which ONE to compare first.
+          - Otherwise use next="done", query=<a concise English search query preserving every model/spec/option
+            the user stated>, quantity=<positive integer; default 1>.
+          - Never invent a model, size, color, condition, or quantity.
+          - Remove retailer names (Amazon/eBay), comparison language, and price/shipping instructions from
+            query. Keep only the product identity and user-stated model/spec/option words.
+        next:
+          ask: collect_request
+          done: search_stores
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      search_stores:
+        kind: action_contract
+        id: shopping_search_stores
+        description: Run the keyed, bounded store-search task over Amazon and eBay and retain every completed or failed store result.
+        inputSelector:
+          - stores
+          - query
+          - quantity
+        next:
+          done: normalize_rank
+          partial: normalize_rank
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      normalize_rank:
+        kind: action_contract
+        id: shopping_rank_store_offers
+        description: Deterministically flatten and rank normalized offers by complete landed cost, with stable rating/review/site/product tie-breaks.
+        inputSelector:
+          - store_results
+          - quantity
+        next:
+          done: choose_offer
+          partial: choose_offer
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      choose_offer:
+        kind: action_unit
+        description: Present the comparison before any cart mutation and accept only an explicit current offer number or cancellation.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - requestText
+          - comparison_text
+          - offers
+          - failures
+          - incomplete_count
+          - choice_stage
+          - selection_error
+        allowedTools: [choose_store_offer]
+        prompt: |-
+          You are the approval gate for a live shopping-cart mutation. Call choose_store_offer exactly once.
+
+          comparison_text is deterministic and already numbered. Preserve its facts and numbers VERBATIM.
+          offers contains the same current ranked offers. failures lists stores that failed or returned no result.
+
+          FIRST call (`choice_stage` empty): ALWAYS use next="ask", choice_stage="asked". In the user's
+          language, show comparison_text, identify failed stores, explain that totals containing
+          "unknown shipping/fees" are incomplete, and ask: "Which numbered offer should I add to the cart?
+          Reply with a number, or cancel." Do not infer approval from the original request.
+
+          FOLLOW-UP (`choice_stage`="asked"):
+          - clear cancellation ("cancel", "취소", "그만", "담지 마") -> next="cancel".
+          - "recommended", "best", "cheapest", "first", "추천", "최저", "가장 싼", or explicit approval
+            of the recommended offer -> next="select", choice_index=1.
+          - a clear numbered offer -> next="select", choice_index=<that integer>.
+          - otherwise -> next="ask", choice_stage="asked", and ask for one valid number from the current
+            list or cancellation.
+
+          If selection_error is present, state that the previous number was invalid and ask again.
+          Never emit product IDs, prices, site names, or approval markers; the deterministic resolver copies them.
+        next:
+          ask: choose_offer
+          select: resolve_offer
+          cancel: cancelled
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      resolve_offer:
+        kind: action_contract
+        id: shopping_resolve_store_offer
+        description: Validate the chosen integer against the current ranked list and copy the selected offer plus a scoped cart-approval marker.
+        inputSelector:
+          - offers
+          - choice_index
+          - quantity
+        next:
+          add: open_selected_store
+          invalid: choose_offer
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      open_selected_store:
+        kind: action_contract
+        id: shopping_open_selected_store
+        description: Open the approved offer's store before the mutation; an off-site navigation resumes this flow on arrival.
+        inputSelector:
+          - site
+        next:
+          add: add_selected_offer
+          error: report_cart
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      add_selected_offer:
+        kind: action_contract
+        id: shopping_add_selected_store_offer
+        description: Navigate to the selected store, re-read the product price, and add the approved offer to the cart only when its preconditions still hold.
+        inputSelector:
+          - site
+          - product_id
+          - quantity
+          - expected_unit_price
+          - expected_currency
+          - cart_approval
+        next:
+          done: report_cart
+          error: report_cart
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      report_cart:
+        kind: terminal
+        respond: |-
+          Reply in the user's language using only the Flow state. Name the selected site and product.
+          If cart_status is "added", confirm it was added and quote cart_confirmation when present.
+          Otherwise state that it was NOT added and report cart_error exactly (including price_changed,
+          currency_changed, login_required, captcha_required, quantity_unavailable, or unavailable).
+          Always state that checkout was not opened and no order was placed. Do not invent totals or guarantees.
+
+      cancelled:
+        kind: terminal
+        respond: 비교만 완료했고 장바구니에는 아무것도 추가하지 않았습니다. 체크아웃이나 주문도 진행하지 않았습니다.
+
+      no_results:
+        kind: terminal
+        respond: |-
+          Reply in the user's language. No comparable live offer was available. Summarize failures from
+          the Flow state without inventing products or prices, and ask for a more exact model/spec query.
+          Nothing was added to a cart.
+
+      error:
+        kind: terminal
+        respond: 다중 쇼핑몰 총비용 비교를 완료하지 못했습니다. 상품 모델이나 사양을 더 정확히 알려주세요. 장바구니와 주문은 변경하지 않았습니다.
+
+  shopping_search_one_store:
+    goal: Search one real commerce adapter and return its normalized candidates to the parent task map without asking the user.
+    state:
+      store_result: null
+    nodes:
+      open:
+        kind: action_contract
+        id: shopping_open_mapped_store
+        description: Open the mapped store before search; an off-site navigation resumes this task on arrival.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+        next:
+          search: search
+          error: complete
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      search:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Search the mapped store for the shared query and normalize its live candidates.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+        next:
+          done: complete
+        fallback: { invalidNext: done, exhaustedNext: done }
+      complete:
+        kind: terminal
+
   bluemoonsoft:
     goal: Help the user explore BlueMoonSoft (company info, DOCURAY / products, security modules, news, customers) by navigating bluemoonsoft.com to the page that satisfies the request, resolved from the site sitemap. Never fills or submits forms.
     inputSelector:
@@ -1095,6 +1342,235 @@ flows:
         kind: terminal
         respond: 도움이 되었길 바랍니다. 필요하면 언제든 다시 불러 주세요.
 flowTools:
+  collect_total_cost_request:
+    description: Capture one exact product query and quantity for a two-store total-cost comparison, or ask for clarification.
+    execute: { kind: runtime, implementation: passthrough }
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, done] }
+        question: { type: string }
+        query: { type: string }
+        quantity: { type: [integer, number] }
+
+  shopping_search_stores:
+    description: Run the real store-search subflow for each uniquely keyed store and collect completed, failed, or input-needed results.
+    execute:
+      kind: runtime
+      implementation: flow.map
+      flow: shopping_search_one_store
+      itemsArg: stores
+      resultFrom: store_result
+      maxItems: 2
+      concurrency: 1
+      onItemError: collect
+      task:
+        keyFrom: site
+        resultSchema:
+          type: object
+          additionalProperties: true
+          required: [site, candidates]
+          properties:
+            site: { type: string }
+            query: { type: string }
+            candidates: { type: array, items: { type: object, additionalProperties: true } }
+            error: { type: [string, "null"] }
+        budget:
+          maxNodes: 8
+          maxModelCalls: 0
+          maxRemoteCalls: 2
+          timeoutMs: 120000
+    output:
+      next: result.next
+      store_results: result.results
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [stores, query]
+      properties:
+        stores:
+          type: array
+          minItems: 1
+          maxItems: 2
+          items:
+            type: object
+            additionalProperties: false
+            required: [site]
+            properties:
+              site: { type: string, enum: [amazon, ebay] }
+        query: { type: string, minLength: 1 }
+        quantity: { type: [integer, number] }
+
+  shopping_open_mapped_store:
+    description: Re-entrantly open one mapped store before invoking its site-specific search adapter.
+    execute: { kind: remote, tool: AX_open_site, timeoutMs: 30000 }
+    input:
+      site: tool.args.item.site
+    output:
+      next: { if: [{ var: result.error }, "error", "search"] }
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, index, key, context]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, ebay] }
+        index: { type: number }
+        key: { type: string }
+        context:
+          type: object
+          additionalProperties: true
+
+  shopping_search_one_store:
+    description: Search one mapped real store through the common cross-site commerce dispatcher.
+    execute: { kind: remote, tool: AX_search_store_product, timeoutMs: 120000 }
+    input:
+      site: tool.args.item.site
+      query: tool.args.context.query
+      quantity: tool.args.context.quantity
+    output:
+      next: done
+      store_result: result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, index, key, context]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, ebay] }
+        index: { type: number }
+        key: { type: string }
+        context:
+          type: object
+          additionalProperties: true
+          required: [query]
+          properties:
+            query: { type: string }
+            quantity: { type: [integer, number] }
+
+  shopping_rank_store_offers:
+    description: Flatten and deterministically rank normalized store candidates while preserving failures and cost coverage.
+    execute: { kind: remote, tool: AX_rank_store_offers, timeoutMs: 30000 }
+    input:
+      results: tool.args.store_results
+      quantity: tool.args.quantity
+    output:
+      next: result.next
+      offers: result.offers
+      failures: result.failures
+      comparison_text: result.comparison_text
+      incomplete_count: result.incomplete_count
+      complete_count: result.complete_count
+      base_currency: result.base_currency
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [store_results]
+      properties:
+        store_results: { type: array, items: { type: object, additionalProperties: true } }
+        quantity: { type: [integer, number] }
+
+  choose_store_offer:
+    description: Ask for, cancel, or record the user's numbered offer selection. The deterministic resolver validates the number and copies all mutation fields.
+    execute: { kind: runtime, implementation: passthrough }
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, select, cancel] }
+        question: { type: string }
+        choice_stage: { type: [string, "null"] }
+        choice_index: { type: [integer, number, "null"] }
+
+  shopping_resolve_store_offer:
+    description: Validate a current ranked offer number and emit only the selected offer plus its scoped cart approval.
+    execute: { kind: remote, tool: AX_resolve_store_offer, timeoutMs: 30000 }
+    input:
+      offers: tool.args.offers
+      choice_index: tool.args.choice_index
+      quantity: tool.args.quantity
+    output:
+      next: result.next
+      selection_error: result.error
+      selected_offer: result.selected_offer
+      selected_rank: result.selected_rank
+      site: result.site
+      product_id: result.product_id
+      product_name: result.product_name
+      quantity: result.quantity
+      expected_unit_price: result.expected_unit_price
+      expected_currency: result.expected_currency
+      approved_total_base: result.approved_total_base
+      cart_approval: result.cart_approval
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [offers, choice_index]
+      properties:
+        offers: { type: array, items: { type: object, additionalProperties: true } }
+        choice_index: { type: [integer, number] }
+        quantity: { type: [integer, number] }
+
+  shopping_open_selected_store:
+    description: Re-entrantly open the deterministically selected store before running its guarded cart adapter.
+    execute: { kind: remote, tool: AX_open_site, timeoutMs: 30000 }
+    input:
+      site: tool.args.site
+    output:
+      next: { if: [{ var: result.error }, "error", "add"] }
+      cart_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [site]
+      properties:
+        site: { type: string, enum: [amazon, ebay] }
+
+  shopping_add_selected_store_offer:
+    description: Revalidate and add the explicitly selected Amazon or eBay offer to its cart. Never checks out or places an order.
+    execute: { kind: remote, tool: AX_add_store_product_to_cart, timeoutMs: 120000 }
+    input:
+      site: tool.args.site
+      product_id: tool.args.product_id
+      quantity: tool.args.quantity
+      expected_unit_price: tool.args.expected_unit_price
+      expected_currency: tool.args.expected_currency
+      cart_approval: tool.args.cart_approval
+    output:
+      next: { if: [{ var: result.added }, "done", "error"] }
+      cart_status: { if: [{ var: result.added }, "added", "failed"] }
+      cart_error: { if: [{ var: result.login_required }, "login_required", { var: result.error }] }
+      cart_confirmation: result.confirmation
+      cart_url: result.cart_url
+    effect: mutation
+    consent: required
+    idempotent: true
+    require: { cart_approval: user_selected_compared_offer }
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [site, product_id, cart_approval]
+      properties:
+        site: { type: string, enum: [amazon, ebay] }
+        product_id: { type: string, minLength: 1 }
+        quantity: { type: [integer, number] }
+        expected_unit_price: { type: [number, "null"] }
+        expected_currency: { type: [string, "null"] }
+        cart_approval: { type: string, enum: [user_selected_compared_offer] }
+
   decide:
     description: Select configured intent flows and initial runtime state for the config-runtime planner.
     parameters:
@@ -1111,7 +1587,7 @@ flowTools:
             additionalProperties: false
             required: [intent, segments, state]
             properties:
-              intent: { type: string, enum: [request_service_quote, shopping_single_site, bluemoonsoft, end_conversation, checkout, memory] }
+              intent: { type: string, enum: [request_service_quote, shopping_single_site, shopping_multi_store_total_cost, bluemoonsoft, end_conversation, checkout, memory] }
               segments:
                 type: array
                 minItems: 1

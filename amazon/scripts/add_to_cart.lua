@@ -60,6 +60,14 @@ local function add_confirmation_text()
   })
 end
 
+local function product_is_confirmed(product_id)
+  if M.cart_page_matches() then
+    local asin = tostring(product_id or ""):gsub("[^%w]", "")
+    return asin ~= "" and dom.exists('.sc-list-item[data-asin="' .. asin .. '"]')
+  end
+  return dom.exists(M.ADD_TO_CART_CONFIRM_SELECTOR)
+end
+
 function AX_add_to_cart(args)
   args = args or {}
   local requested_product_id = M.normalize_product_id(args.product_id or args.id or args.asin)
@@ -74,8 +82,7 @@ function AX_add_to_cart(args)
   -- a login/captcha interstitial). Re-applying updates or re-navigating there would undo the add or bounce
   -- off the result page, so only update + add while we have NOT yet landed on a post-add page; otherwise
   -- fall through to read the result. This check MUST precede apply_update_args (which navigates).
-  local post_add = dom.exists(M.ADD_TO_CART_CONFIRM_SELECTOR)
-    or M.cart_page_matches()
+  local post_add = product_is_confirmed(product_id)
     or M.is_login_page()
     or dom.exists('form[action*="validateCaptcha"]')
 
@@ -104,6 +111,41 @@ function AX_add_to_cart(args)
     -- protection-plan sidesheet) navigates to the confirmation page; the post_add guard above lets a
     -- durable replay fall through to read the result instead of re-evaluating the buy box.
     if M.product_page_matches(product_id) then
+      local expected_price = tonumber(args.expected_unit_price)
+      local expected_currency = M.non_empty(args.expected_currency)
+      if expected_price or expected_currency then
+        local current = M.read_product_view(product_id)
+        if not current.price or not current.currency then
+          return {
+            product_id = product_id,
+            added = false,
+            error = "price_revalidation_failed",
+            current_price_text = current.price_text
+          }
+        end
+        if expected_currency and current.currency:upper() ~= expected_currency:upper() then
+          return {
+            product_id = product_id,
+            added = false,
+            error = "currency_changed",
+            expected_currency = expected_currency:upper(),
+            current_currency = current.currency:upper(),
+            current_price = current.price,
+            current_price_text = current.price_text
+          }
+        end
+        if expected_price and current.price > expected_price + 0.005 then
+          return {
+            product_id = product_id,
+            added = false,
+            error = "price_changed",
+            expected_unit_price = expected_price,
+            current_price = current.price,
+            current_currency = current.currency,
+            current_price_text = current.price_text
+          }
+        end
+      end
       -- Apply a non-default quantity directly on the buy box (avoids AX_update_product's extra
       -- navigation + product-view read). Quantity may arrive as a float (e.g. 1.0), so compare numerically.
       local qty = tonumber(M.non_empty(args.quantity))
@@ -150,7 +192,9 @@ function AX_add_to_cart(args)
     return M.login_required_result()
   end
 
-  local confirmed = dom.exists(M.ADD_TO_CART_CONFIRM_SELECTOR)
+  local confirmed = product_is_confirmed(product_id)
+  local add_error = nil
+  if not confirmed then add_error = "add_to_cart_pending" end
   local confirmation = nil
   if confirmed then
     confirmation = add_confirmation_text()
@@ -160,7 +204,7 @@ function AX_add_to_cart(args)
     product_id = M.current_product_id() or product_id,
     added = confirmed,
     pending = not confirmed,
-    error = (not confirmed) and "add_to_cart_pending" or nil,
+    error = add_error,
     previous_cart_count = before_count,
     cart_count = M.read_cart_count(),
     confirmation = confirmation

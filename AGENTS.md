@@ -16,8 +16,8 @@ directory holds that site's `llms.txt`-style sitemap data and AXSDK Lua scripts;
 the shared, site-agnostic base. The extension fetches these from GitHub
 (`raw.githubusercontent.com/layorixinc/axsdk-sites/main/...`) at runtime.
 
-Published sites (see `index.md`, keep it in sync): **amazon**, **thumbtack**, **bluemoonsoft**
-(`docuray/` is an empty placeholder — not supported data).
+Published sites (see `index.md`, keep it in sync): **amazon**, **ebay**, **thumbtack**,
+**bluemoonsoft** (`docuray/` is an empty placeholder — not supported data).
 
 ### Gitignored (never committed)
 `.env` (holds `AXSDK_API_KEY` and friends — **secret**) · `dist/`
@@ -113,6 +113,7 @@ Design rules:
 | `20_echo.lua` | `AX_echo` | diagnostic/echo |
 | `30_resolve_zip.lua` | `AX_resolve_zip` | US ZIP from address/city (ladder in §7) |
 | `40_read_page.lua` | `AX_read_page` | current page HTML→Markdown for LLM situational awareness (`mode`: article/structure/auto) |
+| `50_commerce.lua` | `AX_COMMERCE`, `AX_search_store_product`, `AX_rank_store_offers`, `AX_resolve_store_offer`, `AX_add_store_product_to_cart` | cross-site commerce registry/dispatch, FX-backed total-cost normalization, deterministic ranking, scoped cart approval |
 
 The extension also ships **default form tools** present on every site: `AX_get_form`, `AX_set_form`,
 `AX_submit_form`, `AX_navigate` (scriptId `axsdk-default-form-tools`).
@@ -129,6 +130,10 @@ needs `confirm:true`).
 `00_common.lua` + `AX_search_product`, `AX_view_product`, `AX_update_product`, `AX_add_to_cart`,
 `AX_view_cart`, `AX_update_cart` (qty `0` = delete), `AX_checkout` (stops at checkout, **never places
 an order**; warranty/protection upsell auto-declined).
+
+### `ebay/scripts/` (on ebay.com)
+`00_common.lua` + `AX_search_product`, `AX_add_to_cart`; reads stable search-card fields, item/shipping
+cost, condition, seller signal, and return text, then revalidates product-page price before a cart add.
 
 ### `bluemoonsoft/scripts/` (on bluemoonsoft.com)
 `form.lua` — company/product/security info + quote-inquiry form read/fill/submit.
@@ -255,6 +260,12 @@ addresses) → Census `onelineaddress` (full street only) → error. No API key 
 
 Other tools:
 
+- **Multi-store commerce:** `npm run test:commerce` runs deterministic Lua scenarios; `npm run
+  test:commerce:live` runs one Amazon/eBay comparison, invalid-choice guard, approved cart add, and
+  no-checkout assertion in the extension. Add `-- --cancel` for the read-only cancellation path.
+  While a new site exists only in the working tree, the live runner serves local `index.md` to the
+  dedicated dev tab through CDP Fetch; Lua and flows still come from the `ax sync` stored layers with
+  remote sources off.
 - **E2E scenario runner** `thumbtack/scripts/test_thumbtack_lua.mjs` (CDP, port 9224 default):
   ```bash
   node thumbtack/scripts/test_thumbtack_lua.mjs --multi-quote --quote-count=2 --submit-quote --max-quote-steps=20 --keep-open

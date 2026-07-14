@@ -6,7 +6,7 @@ M.AMAZON_PRODUCT_NAVIGATION_URL_PREFIX = "https://www.amazon.com/dp/"
 M.AMAZON_PRODUCT_URL_PREFIX = "https://www.amazon.com/dp/"
 M.RESULT_SELECTOR = '[data-component-type="s-search-result"][data-asin]'
 M.RESULT_ADD_TO_CART_SELECTOR = 'button[name="submit.addToCart"], input[name="submit.addToCart"]'
-M.LOGIN_SELECTOR = 'form[name="signIn"], #authportal-main-section, #ap_email, #ap_password'
+M.LOGIN_SELECTOR = '#authportal-main-section, #ap_email, #ap_password'
 M.RESULT_READY_SELECTOR = M.RESULT_SELECTOR .. ', .s-no-results-result, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.PRODUCT_READY_SELECTOR = 'span#productTitle, #centerCol, #buybox, ' .. M.LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]'
 M.CART_NAVIGATION_URL = "https://www.amazon.com/gp/cart/view.html"
@@ -90,6 +90,47 @@ function M.parse_price(price_text)
 
   local amount = M.parse_number_text(text)
   return amount, currency
+end
+
+function M.clean_shipping_text(value)
+  local text = M.non_empty(value)
+  if not text then return nil end
+  local lowered = text:lower()
+  local start = lowered:find("free delivery", 1, true)
+    or lowered:find("free shipping", 1, true)
+    or lowered:find("무료 배송", 1, true)
+    or lowered:find("배송비 무료", 1, true)
+  if start then
+    text = text:sub(start)
+  end
+  local member_suffix = text:find("Or Non-members", 1, true)
+  if member_suffix then
+    text = text:sub(1, member_suffix - 1)
+  end
+  return M.truncate_text(text, 180)
+end
+
+function M.parse_shipping(value, fallback_currency)
+  local text = M.clean_shipping_text(value)
+  if not text then
+    return nil, fallback_currency
+  end
+  local lowered = text:lower()
+  if lowered:find("free shipping", 1, true)
+      or lowered:find("free delivery", 1, true)
+      or lowered:find("shipping: free", 1, true)
+      or lowered:find("무료 배송", 1, true)
+      or lowered:find("배송비 무료", 1, true) then
+    return 0, fallback_currency
+  end
+  local at = lowered:find("shipping", 1, true)
+    or lowered:find("delivery", 1, true)
+    or lowered:find("배송비", 1, true)
+  if not at then
+    return nil, fallback_currency
+  end
+  local amount, currency = M.parse_price(text)
+  return amount, currency or fallback_currency
 end
 
 function M.parse_rating(rating_text)
@@ -240,6 +281,7 @@ function M.result_fields()
     url = { selector = 'h2 a, a.a-link-normal.s-no-outline, a[href*="/dp/"], a[href*="/gp/product/"]', attr = "href" },
     image_url = { selector = "img.s-image", attr = "src" },
     price_text = { selector = ".a-price .a-offscreen" },
+    shipping_text = { selector = '[data-cy="delivery-block"], [data-cy="delivery-recipe"]' },
     rating_text = { selector = "i.a-icon-star-small span.a-icon-alt, .a-icon-alt" },
     reviews_text = { selector = 'a[href*="#customerReviews"] span, a[href*="#customerReviews"]' },
     badge = { selector = ".a-badge-text, .s-label-popover-default" },
@@ -260,6 +302,13 @@ function M.candidate_from_row(row)
   local rating = M.parse_rating(row.rating_text)
   local review_count = M.parse_review_count(row.reviews_text)
   local row_text = M.clean_text(row.text)
+  local shipping_text = M.clean_shipping_text(row.shipping_text)
+  local shipping_cost, shipping_currency = M.parse_shipping(shipping_text, currency)
+  local return_terms = nil
+  local lowered = row_text:lower()
+  if lowered:find("free returns", 1, true) or lowered:find("무료 반품", 1, true) then
+    return_terms = lowered:find("무료 반품", 1, true) and "무료 반품" or "Free returns"
+  end
   local sponsored = row.sponsored == true
     or row_text:find("^Sponsored") ~= nil
     or row_text:find("^후원") ~= nil
@@ -273,6 +322,11 @@ function M.candidate_from_row(row)
     price = price,
     price_text = M.non_empty(row.price_text),
     currency = currency,
+    shipping_cost = shipping_cost,
+    shipping_text = shipping_text,
+    shipping_currency = shipping_currency,
+    delivery_text = shipping_text,
+    return_terms = return_terms,
     rating = rating,
     review_count = review_count,
     badge = M.non_empty(row.badge),
@@ -1171,4 +1225,22 @@ function M.read_checkout_view()
     order_summary = M.read_checkout_summary(),
     place_order_available = M.checkout_place_order_available()
   }
+end
+
+if AX_COMMERCE and type(AX_COMMERCE.register_adapter) == "function" then
+  AX_COMMERCE.register_adapter("amazon", {
+    home_url = "https://www.amazon.com/",
+    host_matches = function(url)
+      local href = M.non_empty(url) or ""
+      return href:match("^https?://[^/]*amazon%.[^/]+[/]") ~= nil
+    end,
+    search = function(args)
+      if type(AX_search_product) ~= "function" then return { error = "search_unsupported" } end
+      return AX_search_product(args)
+    end,
+    add_to_cart = function(args)
+      if type(AX_add_to_cart) ~= "function" then return { added = false, error = "add_to_cart_unsupported" } end
+      return AX_add_to_cart(args)
+    end
+  })
 end

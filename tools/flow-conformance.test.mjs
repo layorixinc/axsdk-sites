@@ -47,6 +47,8 @@ test('production mutations use the current mutation contract', () => {
   assertMutation(common.flowTools?.set_memory, 'set_memory');
   assertMutation(common.flowTools?.delete_memory, 'delete_memory');
   assertMutation(common.flowTools?.shopping_add_to_cart, 'shopping_add_to_cart');
+  assertMutation(common.flowTools?.shopping_add_selected_store_offer, 'shopping_add_selected_store_offer');
+  assert.deepEqual(common.flowTools.shopping_add_selected_store_offer.require, { cart_approval: 'user_selected_compared_offer' });
   assertMutation(common.flowTools?.submit_quote, 'submit_quote');
 });
 

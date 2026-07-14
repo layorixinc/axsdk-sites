@@ -22,6 +22,7 @@ local SITE = {}
 -- Add a row here when a new site directory is published.
 SITE.HOME = {
   amazon = "https://www.amazon.com/",
+  ebay = "https://www.ebay.com/",
   bluemoonsoft = "http://bluemoonsoft.com/",
   thumbtack = "https://www.thumbtack.com/",
 }

@@ -1,0 +1,470 @@
+extends: app
+defaults:
+  mapping: legacy
+router:
+  mode: fixed
+  defaultIntent: playground_durable_checkpoint
+  routes:
+    - intent: playground_durable_checkpoint
+      entry: playground_durable_checkpoint.run
+      description: Run the isolated durable-operation checkpoint diagnostic.
+      examples:
+        - run playground durable checkpoint test
+        - durable checkpoint test
+    - intent: playground_amazon_search
+      entry: playground_amazon_search.run
+      description: Run the stored Amazon durable-search fixture while the Amazon site layer is active.
+      examples:
+        - run playground Amazon durable search test
+        - test the Playground Amazon search
+
+    - intent: playground_multi_site_search
+      priority: 140
+      entry: playground_multi_site_search.collect
+      description: Search one product across two or more explicitly selected Playground commerce sites through serial portable durable-v2 handoffs. It is read-only and never adds to a cart or checks out.
+      examples:
+        - wireless trackball mouse를 Amazon과 Walmart에서 찾아줘
+        - eBay, Etsy, AliExpress에서 bluetooth keyboard 검색해줘
+        - 쿠팡과 네이버 쇼핑에서 무선 마우스 찾아줘
+
+    - intent: shopping
+      priority: 130
+      entry: shopping.collect_query
+      description: Product shopping requests search Amazon only in this isolated Playground. From any current site, use the portable durable-v2 handoff to www.amazon.com before the Amazon search command runs. Never add an item to a cart or place an order.
+      examples:
+        - 무선 트랙볼 마우스 찾아줘
+        - buy a wireless trackball mouse
+        - compare wireless trackball mice
+flows:
+  playground_durable_checkpoint:
+    goal: Verify that the host grants operation-private durable state only to the registered playground checkpoint command.
+    state:
+      label: flow-checkpoint
+    nodes:
+      run:
+        kind: action_contract
+        id: playground_durable_checkpoint
+        inputSelector: [label]
+        next:
+          done: done
+          grant_required: grant_required
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: []
+        respond: Durable checkpoint fixture completed. Inspect the tool result for checkpoint phase and revision.
+      grant_required:
+        kind: terminal
+        inputSelector: []
+        respond: The fixture is loaded, but durable.state is unavailable until the host registers AX_playground_durable_checkpoint as a Lua operation.
+      error:
+        kind: terminal
+        inputSelector: []
+        respond: The host rejected this command before the Lua fixture ran. no_durable_context is expected until AX_playground_durable_checkpoint has a lua.operations grant; inspect any different tool error.
+
+  playground_amazon_search:
+    goal: Test replay-safe Amazon result extraction through the stored Amazon site-layer command. This fixture requires the active host to be www.amazon.com.
+    state:
+      query: wireless trackball mouse
+      candidates: null
+      total_count: null
+      cursor: null
+      search_error: null
+    nodes:
+      run:
+        kind: action_contract
+        id: playground_amazon_search
+        inputSelector: [query]
+        next:
+          done: done
+          grant_required: grant_required
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: []
+        respond: Amazon durable search fixture completed. Inspect the tool result for query, candidates, total count, cursor, phase, and revision.
+      grant_required:
+        kind: terminal
+        inputSelector: []
+        respond: The Amazon fixture is loaded, but the host must register AX_search_product in lua.operations before its checkpoint can run.
+      error:
+        kind: terminal
+        inputSelector: []
+        respond: Amazon search did not complete. Run this fixture while stored-lua:amazon is active; captcha_required and login_required are real Amazon access states.
+
+  shopping:
+    goal: Use the shopping request as an Amazon search query, hand off from the current site to Amazon, then read Amazon search candidates. Never add an item to a cart or place an order.
+    state:
+      site: amazon
+      query: null
+      candidates: null
+      total_count: null
+      cursor: null
+      open_site_status: null
+      search_error: null
+    nodes:
+      collect_query:
+        kind: action_contract
+        id: playground_query_from_request
+        inputSelector:
+          - requestText
+        description: Preserve the current shopping request as the Amazon search query without an extra model turn.
+        next:
+          search: open_amazon
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      open_amazon:
+        kind: action_contract
+        id: playground_open_site
+        inputSelector:
+          - site
+        description: Use the portable durable-v2 operation to hand off to Amazon from the current site.
+        next:
+          search: search_amazon
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      search_amazon:
+        kind: action_contract
+        id: playground_search_amazon
+        inputSelector:
+          - query
+        description: Run the replay-safe Amazon product search after the Amazon site layer is active.
+        next:
+          done: done
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: []
+        respond: Amazon search completed. Inspect the tool result for the query, candidates, total count, cursor, phase, and revision.
+      error:
+        kind: terminal
+        inputSelector: []
+        respond: Amazon search did not complete. The result may require a durable-operation grant, Amazon access, or a retry after the destination site layer loads.
+
+  playground_multi_site_search:
+    goal: Search one user-requested product across two to ten explicitly selected Playground commerce sites. Each store is opened through the portable durable-v2 entry command, then searched through its site-local replay-safe AX_search_product command. Never changes a cart, checkout, or order.
+    state:
+      query: null
+      stores: null
+      store_results: null
+      search_error: null
+    nodes:
+      collect:
+        kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
+        description: Extract one product search query and two to ten explicitly requested supported stores, or ask which product/stores to search.
+        inputSelector:
+          - requestText
+          - query
+          - stores
+        allowedTools: [playground_collect_multi_site_request]
+        prompt: |-
+          Call playground_collect_multi_site_request exactly once.
+
+          Supported site slugs and aliases:
+          - amazon (Amazon/아마존), walmart (Walmart/월마트), ebay (eBay/이베이),
+            aliexpress (AliExpress/알리익스프레스), etsy (Etsy/엣시)
+          - coupang (Coupang/쿠팡), naver-shopping (Naver Shopping/네이버 쇼핑/네이버쇼핑),
+            gmarket (Gmarket/G마켓/지마켓), 11st (11st/11번가), ssg (SSG/쓱)
+
+          If a product query and at least two supported stores are explicit, set next="done", preserve
+          every product-identifying term in query, and set stores to unique {site:<slug>} objects in
+          the user's order. If either is missing, set next="ask" with a concise Korean question. Never
+          invent stores, variants, or a product query. This is read-only search: do not propose a cart,
+          checkout, or purchase.
+        next:
+          ask: collect
+          done: search_stores
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      search_stores:
+        kind: action_contract
+        id: shopping_search_sites
+        description: Serially open and search every selected site with the shared query.
+        inputSelector:
+          - query
+          - stores
+        next:
+          done: done
+          partial: partial
+          empty: empty
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: []
+        respond: 다중 사이트 검색을 완료했습니다. 각 사이트의 실제 후보와 접근 오류는 tool result의 store_results에서 확인하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+      partial:
+        kind: terminal
+        inputSelector: []
+        respond: 일부 사이트 검색만 완료했습니다. 성공 후보와 CAPTCHA·로그인·접근 제한 오류는 tool result의 store_results에서 확인하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+      empty:
+        kind: terminal
+        inputSelector: []
+        respond: 선택한 사이트에서 읽을 수 있는 후보를 찾지 못했습니다. 더 구체적인 상품명을 입력하거나 다른 사이트를 선택하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+      error:
+        kind: terminal
+        inputSelector: []
+        respond: 다중 사이트 durable 검색을 완료하지 못했습니다. 상품명과 두 개 이상의 지원 사이트를 다시 지정하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+
+  playground_search_one_site:
+    goal: Open one selected commerce site and return its replay-safe search result to the parent task map without asking the user.
+    state:
+      store_result: null
+    nodes:
+      open:
+        kind: action_contract
+        id: playground_open_mapped_site
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+        next:
+          search: search
+          error: complete
+        fallback: { invalidNext: error, exhaustedNext: error }
+      search:
+        kind: action_contract
+        id: playground_search_one_site
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+        next:
+          complete: complete
+        fallback: { invalidNext: complete, exhaustedNext: complete }
+      complete:
+        kind: terminal
+        inputSelector: []
+
+flowTools:
+  playground_durable_checkpoint:
+    description: Run the playground-only durable checkpoint diagnostic. It has no browser side effect and reports whether the host operation grant is available.
+    execute: { kind: remote, tool: AX_playground_durable_checkpoint, timeoutMs: 30000 }
+    input:
+      label: tool.args.label
+    output:
+      next:
+        if:
+          - { "===": [{ var: result.ok }, true] }
+          - done
+          - { "===": [{ var: result.error }, "durable_operation_required"] }
+          - grant_required
+          - error
+      result: result
+      error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [label]
+      properties:
+        label: { type: string, minLength: 1 }
+
+  playground_amazon_search:
+    description: Run one read-only Amazon durable-search fixture with its fixed query. It never adds an item to a cart or checks out.
+    execute: { kind: remote, tool: AX_search_product, timeoutMs: 90000 }
+    input:
+      query: tool.args.query
+    output:
+      next:
+        if:
+          - { "===": [{ var: result.ok }, true] }
+          - done
+          - { "===": [{ var: result.error }, "durable_operation_required"] }
+          - grant_required
+          - error
+      result: result
+      query: result.query
+      candidates: result.candidates
+      total_count: result.total_count
+      cursor: result.cursor
+      search_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1 }
+
+  playground_query_from_request:
+    description: Convert a non-empty shopping request into the Amazon search query without a model call.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |-
+        local query = type(args.requestText) == "string" and args.requestText:gsub("^%s+", ""):gsub("%s+$", "") or ""
+        if query == "" then return { next = "error", error = "query_required" } end
+        return { next = "search", query = query }
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [requestText]
+      properties:
+        requestText: { type: string, minLength: 1 }
+
+  playground_open_site:
+    description: Hand off from any current site to one explicitly supported Playground commerce search origin.
+    execute: { kind: remote, tool: AX_playground_open_site, timeoutMs: 90000 }
+    input:
+      site: tool.args.site
+    output:
+      next: { if: [{ var: result.error }, "error", "search"] }
+      open_site_status: result.status
+      error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [site]
+      properties:
+        site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+
+  playground_search_amazon:
+    description: Run one read-only replay-safe Amazon product search after the durable Amazon handoff. It never adds an item to a cart or checks out.
+    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
+    input:
+      query: tool.args.query
+    output:
+      next: { if: [{ "===": [{ var: result.ok }, true] }, "done", "error"] }
+      query: result.query
+      candidates: result.candidates
+      total_count: result.total_count
+      cursor: result.cursor
+      search_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [query]
+      properties:
+        query: { type: string, minLength: 1 }
+
+  playground_collect_multi_site_request:
+    description: Capture one product search query and two to ten explicitly selected supported commerce sites, or ask for missing scope.
+    execute: { kind: runtime, implementation: passthrough }
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, done] }
+        question: { type: [string, "null"] }
+        query: { type: [string, "null"] }
+        stores:
+          type: [array, "null"]
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [site]
+            properties:
+              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+
+  shopping_search_sites:
+    description: Serially run the portable store-entry plus replay-safe site search subflow for every selected Playground commerce site.
+    execute:
+      kind: runtime
+      implementation: flow.map
+      flow: playground_search_one_site
+      itemsArg: stores
+      resultFrom: store_result
+      maxItems: 10
+      concurrency: 1
+      onItemError: collect
+      task:
+        keyFrom: site
+        resultSchema:
+          type: object
+          additionalProperties: true
+          required: [site, candidates]
+          properties:
+            site: { type: string }
+            query: { type: [string, "null"] }
+            candidates: { type: array, items: { type: object, additionalProperties: true } }
+            error: { type: [string, "null"] }
+        budget:
+          maxNodes: 4
+          maxModelCalls: 0
+          maxRemoteCalls: 2
+          timeoutMs: 120000
+    output:
+      next: result.next
+      store_results: result.results
+      search_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [stores, query]
+      properties:
+        stores:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [site]
+            properties:
+              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        query: { type: string, minLength: 1 }
+
+  playground_open_mapped_site:
+    description: Re-entrantly open one explicitly mapped Playground commerce origin before its site-local product search command runs.
+    execute: { kind: remote, tool: AX_playground_open_site, timeoutMs: 90000 }
+    input:
+      site: tool.args.item.site
+    output:
+      next: { if: [{ var: result.error }, "error", "search"] }
+      open_site_status: result.status
+      error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, index, key, context]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        index: { type: number }
+        key: { type: string }
+        context:
+          type: object
+          additionalProperties: true
+          required: [query]
+          properties:
+            query: { type: string }
+
+  playground_search_one_site:
+    description: Run the active site's durable-v2 AX_search_product command after the portable handoff completes.
+    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
+    input:
+      query: tool.args.context.query
+    output:
+      next: complete
+      store_result: result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, index, key, context]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        index: { type: number }
+        key: { type: string }
+        context:
+          type: object
+          additionalProperties: true
+          required: [query]
+          properties:
+            query: { type: string }

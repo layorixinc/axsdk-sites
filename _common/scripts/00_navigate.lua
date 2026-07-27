@@ -21,10 +21,18 @@ local SITE = {}
 -- Site slug -> home URL. Mirrors the published site directories in index.md (lowercase host/slug).
 -- Add a row here when a new site directory is published.
 SITE.HOME = {
+  ["11st"] = "https://www.11st.co.kr/",
+  aliexpress = "https://www.aliexpress.com/",
   amazon = "https://www.amazon.com/",
-  ebay = "https://www.ebay.com/",
   bluemoonsoft = "http://bluemoonsoft.com/",
+  coupang = "https://www.coupang.com/",
+  ebay = "https://www.ebay.com/",
+  etsy = "https://www.etsy.com/",
+  gmarket = "https://www.gmarket.co.kr/",
+  ["naver-shopping"] = "https://search.shopping.naver.com/search/all?query=%EC%87%BC%ED%95%91",
+  ssg = "https://www.ssg.com/",
   thumbtack = "https://www.thumbtack.com/",
+  walmart = "https://www.walmart.com/",
 }
 
 function SITE.current_url()

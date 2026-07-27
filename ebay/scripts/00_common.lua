@@ -108,18 +108,25 @@ function M.item_url(product_id)
   return M.ITEM_URL_PREFIX .. tostring(product_id)
 end
 
-function M.current_search_matches(query)
+-- eBay pages results through `_pgn` on the same search URL. The search-box value alone cannot tell page
+-- one from page two, so the page number is compared explicitly before deciding a navigation is needed.
+function M.current_search_matches(query, page)
   local href = M.non_empty(dom.get_location_href()) or ""
   if href:find("/sch/i.html", 1, true) == nil then return false end
+  local current_page = tonumber(href:match("[%?&]_pgn=(%d+)")) or 1
+  if current_page ~= (tonumber(page) or 1) then return false end
   local value = M.non_empty(dom.get_attr("#gh-ac", "value"))
     or M.non_empty(dom.get_attr("input[aria-label='Search for anything']", "value"))
   return value and M.normalize_query(value) == M.normalize_query(query) or false
 end
 
-function M.navigate_search(query)
-  if M.current_search_matches(query) then return end
+function M.navigate_search(query, page)
+  local target = math.max(1, math.floor(tonumber(page) or 1))
+  if M.current_search_matches(query, target) then return end
   if nav and type(nav.clear_beforeunload) == "function" then nav.clear_beforeunload() end
-  nav.navigate(M.SEARCH_URL, { _nkw = query }, { reload = true })
+  local params = { _nkw = query }
+  if target > 1 then params._pgn = target end
+  nav.navigate(M.SEARCH_URL, params, { reload = true })
 end
 
 function M.navigate_product(product_id)

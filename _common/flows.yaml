@@ -5,6 +5,15 @@ extends: app
 defaults:
   maxSteps: 64
   mapping: legacy   # §9.7 — overlay uses bare dotted paths (tool.args / result.x), no interpolation; pin legacy so an interpolation base cannot literalize them
+  # Every LLM call in this overlay runs on gpt-oss-120b. Nodes still pin it explicitly; this default
+  # covers the calls that have no node of their own — the terminal renderer and out-of-scope replies.
+  model:
+    providerID: openrouter
+    modelID: openai/gpt-oss-120b
+    providerOptions:
+      openrouter:
+        provider: { sort: latency, allow_fallbacks: true }
+        reasoning: { effort: low }
 app:                                                                                                                                                                                                     
   terminal:
     llm: { maxOutputTokens: 2048 }
@@ -26,28 +35,29 @@ planner:
         provider: { sort: latency, allow_fallbacks: true }
         reasoning: { effort: low }
   inputSelector:
-    - active
+    - active.status
+    - active.intent
+    - active.activeNode
     - queue
     - conversationSummary
     - latestMessageInterpretation
+    - contexts.current_site
   outputMap:
     conversationSummary: conversationSummary
     latestMessageInterpretation: latestMessageInterpretation
-  contexts:
-    - current_site
   prompt: |-
     You orchestrate the user's request. Your ONLY job is to call decide EXACTLY ONCE to ROUTE the message into the configured intents. decide takes `action` and an ORDERED `intents` array. The runtime runs the intents as a QUEUE — it starts the first now and runs each next one after the previous flow finishes — so a message with several tasks is handled by listing several intents.
 
     Configured intents:
     - request_service_quote — a quote/estimate for a local SERVICE (청소/house cleaning, 핸디맨/handyman, 잔디 깎기/lawn mowing, 열쇠공/locksmith, …).
     - shopping_single_site — find / buy / order one or more PRODUCTS (아이폰/iPhone, 신발/shoes, 계란/eggs, airpods, …).
-    - shopping_multi_store_total_cost — compare one PRODUCT across Amazon and eBay by item price plus shipping, then add only the offer the user explicitly selects. Use this when the request names multiple stores, asks for cross-store comparison, or asks for the cheapest shipping-inclusive/total cost.
+    - shopping_multi_store_total_cost — compare one PRODUCT across any of the ten supported representative commerce sites (Amazon, Walmart, eBay, AliExpress, Etsy, Coupang, Naver Shopping, Gmarket, 11st, SSG) by item price plus shipping, then add only the offer the user explicitly selects. Use this when the request names multiple stores, asks for cross-store comparison, or asks for the cheapest shipping-inclusive/total cost.
     - bluemoonsoft — explore BlueMoonSoft (블루문소프트), a Korean information-security software company: company/about info, products (다큐레이/DOCURAY), security modules (보안 모듈/서비스 모듈), news (새소식), customers/reference, patents, or the quote-inquiry page. NOT buying consumer products (that is shopping_single_site).
     - end_conversation — the user wants to STOP/END the conversation with no further task (farewell / thanks-and-done: "그만할게", "됐어 그만", "이제 그만", "고마워요", "종료").
     - checkout — proceed to PAYMENT/CHECKOUT for whatever is already in the shopping cart (체크아웃/결제/결제해줘/결제 진행/주문할게/장바구니 결제/checkout). NOT buying a new product (that is shopping_single_site) and NOT a service quote. No order is ever placed — it only opens the checkout page for review.
     - memory — explicitly save/remember, delete/forget, list/show, read, or search information the user asked AXSDK to remember. Memory requires an explicit memory action or a question asking to retrieve remembered information. A declarative statement that only supplies a value ("내 이메일은 ...이야", "my email is ...") is NEVER memory and MUST NOT be saved.
 
-    PRODUCT ROUTING INVARIANT: use `shopping_multi_store_total_cost` for explicit multi-store or total-cost comparison; otherwise use `shopping_single_site`. These are the only valid product intent literals.
+    PRODUCT ROUTING INVARIANT: use `shopping_multi_store_total_cost` for explicit multi-store or total-cost comparison across supported commerce sites; otherwise use `shopping_single_site`. These are the only valid product intent literals.
     NEVER emit `shopping`; that inherited base intent runs a different flow.
 
     CURRENT SITE: The <current_site> context, when non-empty, names the website the user is currently on. If the latest message fits that site — it names a page/section/topic of the site, or is a generic "show/open/find X" that maps to the site's own content — and does NOT clearly match a different task (buying consumer products = shopping_single_site; a local SERVICE quote = request_service_quote; ending), classify it as that site's intent via replace_current EVEN IF the site name is omitted; do NOT return out_of_scope or clarify for such an on-site request. E.g. while on bluemoonsoft: "유튜브 보여줘" / "뉴스" / "다큐레이" / "견적 문의" → intent=bluemoonsoft.
@@ -62,13 +72,36 @@ planner:
     message answers the pending deletion question. Always use continue_current with one memory intent,
     copy the reply verbatim into segments and state.requestText, and never classify it as out_of_scope.
 
+    SERVICE SHORTLIST FOLLOW-UP: if activeFlow=request_service_quote and activeNode is browse_candidates,
+    present_results, or present_refined_table, a numbered list of pros is on screen and the latest message
+    answers it. Always use continue_current with that flow first and copy the message VERBATIM into
+    segments and state.requestText — the deterministic browser reads it from there. This covers a number
+    ("1번이랑 2번"), a page move ("다음"), a ranking criterion ("리뷰 많은 순", "저렴한 순", "평점 높은 순"),
+    a keyword, and a cancellation. Without the verbatim copy the browser never sees the reply and silently
+    keeps the previous ranking.
+
+    A refusal at a gate ("아니요", "취소할게요", "됐어요") while request_service_quote or
+    shopping_multi_store_total_cost is active is ALWAYS continue_current with that flow: the flow owns its
+    own cancel path and answers with what was and was not done. Routing it to out_of_scope or
+    end_conversation leaves the user unsure whether anything was sent.
+
+    COMPARISON BROWSING FOLLOW-UP: if activeFlow=shopping_multi_store_total_cost and activeNode is
+    choose_offer or browse_offers, a numbered comparison is on screen and the latest message is almost
+    always the user answering it. Use continue_current with that flow first — and copy the message
+    verbatim into segments and state.requestText — for a bare number ("2번", "3"), a page move ("다음",
+    "이전", "3페이지", "more"), and ANY narrowing/sorting/unfolding phrase about the SAME product
+    ("무료배송만", "3만원 이하만 보여줘", "평점 높은 순", "쿠팡 것만", "미확인 포함", "필터 해제").
+    Those read like new shopping requests but they are answers: replacing the flow throws away the
+    comparison the user is looking at and its numbering. Use replace_current only when the message names
+    a DIFFERENT product or a different task (a service quote, checkout, memory, farewell).
+
     Also set conversationSummary (brief running summary) and latestMessageInterpretation (your reading of the latest message).
 
 
     Examples:
     - "청소 견적 줘" → replace_current, intents=[{intent:request_service_quote, segments:["청소 견적 줘"], state:{requestText:"청소 견적 줘"}}]
     - "아이폰 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
-    - "Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘" → intents=[{intent:shopping_multi_store_total_cost, segments:["Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"], state:{requestText:"Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"}}]
+    - "Logitech M185를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘" → intents=[{intent:shopping_multi_store_total_cost, segments:["Logitech M185를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"], state:{requestText:"Logitech M185를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"}}]
     - "청소 견적 주고 아이폰 사줘" → intents=[{intent:request_service_quote, segments:["청소 견적 주고"], state:{requestText:"청소 견적 줘"}}, {intent:shopping_single_site, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
     - "아이폰이랑 계란 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰이랑 계란 사줘"], state:{requestText:"아이폰이랑 계란 사줘"}}]
     - "온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어." → replace_current, intents=[{intent:shopping_single_site, segments:["온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."], state:{requestText:"온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."}}] — use shopping_single_site even when the product is still missing; that flow asks what to buy.
@@ -88,7 +121,7 @@ router:
   fallbackIntent: unsupported_request
   routes:
     - intent: request_service_quote
-      entry: request_service_quote.collect_request
+      entry: request_service_quote.entry_guard
       description: Request quotes from Thumbtack service professionals.
       examples:
         - 열쇠공 견적줘
@@ -96,11 +129,11 @@ router:
         - get a house cleaning quote in San Francisco
     - intent: shopping_multi_store_total_cost
       entry: shopping_multi_store_total_cost.collect_request
-      description: Compare one product across Amazon and eBay by normalized item-plus-shipping cost, then prepare only the explicitly selected offer's cart.
+      description: Compare one product across explicitly selected representative commerce sites by normalized item-plus-shipping cost, then prepare only the explicitly selected offer's cart.
       examples:
-        - Logitech M185를 아마존과 이베이에서 총비용 비교해줘
-        - compare AirPods across Amazon and eBay including shipping
-        - 두 쇼핑몰에서 배송비 포함 가장 싼 마우스를 장바구니에 담아줘
+        - Logitech M185를 아마존, 월마트, 이베이에서 총비용 비교해줘
+        - compare AirPods across all five global stores including shipping
+        - 쿠팡, 네이버쇼핑, G마켓, 11번가, SSG에서 배송비 포함 가장 싼 마우스를 찾아줘
     - intent: shopping_single_site
       entry: shopping_single_site.collect_shopping
       description: Find, buy, or order one or more products (online shopping).
@@ -149,7 +182,6 @@ hooks:
 flows:
   memory:
     goal: Handle one explicit memory request with one remote AX memory call.
-    inputSelector: [requestText]
     state:
       memory_result: null
       operation: null
@@ -298,12 +330,15 @@ flows:
         next: { report: report, error: error }
       not_found:
         kind: terminal
+        inputSelector: []
         respond: 일치하는 저장된 memory key가 없습니다. 아무것도 삭제하지 않았습니다.
       cancelled:
         kind: terminal
+        inputSelector: []
         respond: Memory 삭제를 취소했습니다. 아무것도 삭제하지 않았습니다.
       prepare_memory:
         kind: action_contract
+        inputSelector: [memory_entries]
         id: prepare_memory
         next: { set: set_memory, error: error }
       set_memory:
@@ -313,6 +348,7 @@ flows:
         next: { report: report, error: error }
       report:
         kind: terminal
+        inputSelector: [memory_result, operation]
         respond: |-
           Reply briefly in the user's language using only memory_result and operation from the Flow
           state JSON.
@@ -328,19 +364,19 @@ flows:
           inside it and never invent values.
       error:
         kind: terminal
+        inputSelector: []
         respond: The memory request could not be completed. Do not assume anything was saved or deleted.
   unsupported_request:
     nodes:
       reply:
         kind: terminal
+        inputSelector: []
         respond: |-
           Reply briefly in the user's language. This request is unsupported. State that you can help
           with service quotes, shopping, checkout review, BlueMoonSoft navigation, and explicit memory
           requests. Never claim anything was saved or deleted.
   request_service_quote:
     goal: Collect a service-quote request (service, requirements, ZIP/address, and the contact details the pros use to reach the user — first name, last name, email, phone — all up front; never proceed until every contact field is present), search Thumbtack, then run an AGENTIC REFINEMENT with the user — surface the found pros' attributes, ask for a filter/sort criterion, shortlist the matching pros and summarize; then ALWAYS ask the user for explicit approval BEFORE opening any quote request (never contact a pro without it); on approval open quote requests for the chosen pros, attempt the final Submit with the collected contact, and report each quote's outcome including the exact text of any Thumbtack validation/error popover; after reporting, PAUSE and ask whether to request more quotes or start another request — never a hard stop.
-    inputSelector:
-      - requestText
     state:
       service_query: null
       site: thumbtack
@@ -351,6 +387,16 @@ flows:
       query: null
       candidates: null
       total_count: null
+      shortlist: null
+      shortlist_text: null
+      view_page: null
+      view_pages: null
+      view_total: null
+      refine_request: null
+      refine_error: null
+      page_command: null
+      page_number: null
+      choice_numbers: null
       service_results_table: null
       service_results_widget: null
       refined_results_table: null
@@ -381,6 +427,17 @@ flows:
       quote_confirm_stage: null
       followup_stage: null
     nodes:
+      entry_guard:
+        kind: action_contract
+        id: detect_cancellation
+        description: Recognise a standalone refusal before anything is collected, so a user who says no is never asked to start over. No LLM.
+        inputSelector:
+          - requestText
+        next:
+          cancel: quote_cancelled
+          continue: collect_request
+        fallback: { invalidNext: continue, exhaustedNext: continue }
+
       collect_request:
         kind: action_unit
         description: Field-driven quote-request controller. State eligibility forces exactly one collection, ZIP-resolution, retry, or finish tool at each step.
@@ -404,6 +461,8 @@ flows:
           - submit_first_name
           - submit_last_name
         allowedTools:
+          # Always eligible: a user who declines must never be answered with another question.
+          - cancel_quote_request
           - tool: collect_quote_service
             when:
               fields: { anyMissing: [service_query, user_requirements] }
@@ -435,6 +494,11 @@ flows:
         prompt: |-
           Collect one service-quote request with the single eligible tool. Tool eligibility is the
           controller: call the offered tool exactly once and never call a different stage.
+
+          EXCEPTION, checked first: if the latest message is a standalone refusal or cancellation
+          (아니요 / 취소할게요 / 그만할게요 / 됐어요 / no thanks / never mind) rather than information for the
+          request, call cancel_quote_request exactly once and stop. Never answer a refusal with another
+          question — nothing has been searched or sent, and the terminal says so.
 
           `requestText` is the complete latest user message and remains available at every internal
           controller step. Inspect the entire requestText again at every stage, even after another
@@ -489,6 +553,7 @@ flows:
         next:
           collect: collect_request
           done: verify_request
+          cancel: quote_cancelled
           error: error
         fallback:
           invalidNext: error
@@ -497,6 +562,14 @@ flows:
           stalledNext: error
       verify_request:
         kind: action_contract
+        inputSelector:
+          - service_query
+          - user_requirements
+          - zip_code
+          - submit_first_name
+          - submit_last_name
+          - submit_email
+          - submit_phone
         id: verify_request
         description: Deterministically verify the collected request is complete (service_query, user_requirements, a resolved 5-digit zip_code, and all four contact fields) before leaving collection. No LLM, no navigation. Routes back to collect_request whenever anything is still missing.
         next:
@@ -517,6 +590,7 @@ flows:
 
       search:
         kind: action_contract
+        inputSelector: [service_query, zip_code]
         id: search_service
         maxSelfSteps: 8
         description: Search Thumbtack for the collected service in the resolved ZIP. Single durable call — start_search fires the search and the command suspends across the results navigation, then resumes on the loaded page to read candidates (robust cross-nav durable; no LLM loop, no separate read phase).
@@ -560,48 +634,28 @@ flows:
           - service_results_widget
         next:
           ask: present_results
-          refine: refine_search
+          refine: browse_candidates
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
-      refine_search:
-        kind: action_unit
-        description: Agentic search refinement — surface the searched pros' attributes, ask the user for a filter/sort criterion, shortlist the matching pros and summarize, then confirm before requesting quotes; loop with a new criterion when nothing matches.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
+      browse_candidates:
+        kind: action_contract
+        id: browse_service_candidates
+        description: Rank, filter, window, and select searched pros from the site data and the user's own reply. No LLM — the rendered window is the question, so the flow pauses on it until the user answers.
         inputSelector:
           - requestText
-          - service_query
-          - user_requirements
           - candidates
-          - total_count
-          - refine_stage
-          - refine_selected
-        allowedTools: [refine_candidates]
-        prompt: |-
-          You help the user choose WHICH Thumbtack pros to request quotes from, BEFORE any quote is requested. The searched pros are in `candidates` (each has: name, service_id, url, rating, review_count, price_text, response_time, hire_count, summary). `service_query`/`user_requirements` are the request; `requestText` is the latest user message; `refine_stage` tracks where the dialog is.
-
-          Call refine_candidates EXACTLY ONCE — the FIRST rule that applies:
-
-          1. refine_stage is empty/absent (results just arrived, no criterion asked yet):
-             next="ask", refine_stage="criteria", question=<in the user's language: state how many pros were found, then offer concrete options GROUNDED in the available attributes — e.g. 평점 높은 순(rating), 리뷰 많은 순(review_count), 저렴한 순(price_text), 빠른 응답(response_time), 또는 이름/설명 키워드(예: 성실)로 찾기. Ask which they want.>. Do NOT set refine_selected.
-
-          2. refine_stage="criteria" (requestText is the user's criterion):
-             Rank/filter `candidates` by that criterion (highest rating, most reviews, lowest price_text, fastest response_time, a keyword that appears in name/summary, …).
-             - If one or more pros match: next="done", refine_selected=[the matching pros, each {service_id, name, url, rating, price_text, why}]. Do NOT ask to confirm here — the next deterministic table-presentation step shows the shortlist and asks for explicit approval before any quote is opened. Each entry MUST keep its url AND service_id copied from candidates.
-             - If NONE match: next="ask", refine_stage="criteria", question=<in the user's language: say no pro matched, restate the available attributes, ask for a different criterion>. Do NOT set refine_selected.
-
-          Write `question` in the user's language whenever next="ask". When next="done", refine_selected MUST be a non-empty array whose entries each carry a url AND a service_id.
+          - refine_request
+          - page_command
+          - page_number
+          - choice_numbers
+          - view_page
         next:
-          ask: refine_search
+          ask: browse_candidates
           done: prepare_refined_table
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+          cancel: all_done
+          error: no_results
+        fallback: { invalidNext: ask, exhaustedNext: ask, maxStalledSteps: 3, stalledNext: error }
 
       prepare_refined_table:
         kind: action_contract
@@ -662,15 +716,20 @@ flows:
           1. `quote_confirm_stage` is empty/absent (approval NOT asked yet): next="ask", quote_confirm_stage="asked", question=<in the user's language: list the shortlisted pro name(s) with rating/price, then ask clearly, e.g. "이 전문가(들)에게 견적을 요청할까요? 진행하려면 '예', 다시 고르려면 알려주세요.">. IGNORE requestText here — always ask first.
           2. `quote_confirm_stage`="asked" (the user is answering the approval question):
              - requestText APPROVES (yes / 예 / 응 / 진행 / 요청해줘 / 좋아 / go ahead): next="proceed", quote_confirm_stage="".
-             - requestText DECLINES, or asks to choose differently / gives a new criterion: next="refine", refine_stage="", quote_confirm_stage="".
+             - requestText DECLINES but wants a different pro, or gives a new criterion or number:
+               next="refine", refine_stage="", quote_confirm_stage="".
+             - requestText CANCELS the whole thing (아니요 / 취소 / 됐어요 / 그만할게요 / no thanks / never
+               mind, with no request to look at other pros): next="cancel". Saying no at this gate must
+               always be possible — never re-ask a user who declined, and never treat it as off-topic.
 
           Write `question` in the user's language whenever next="ask".
         next:
           ask: confirm_quote
           proceed: select_pros
-          refine: refine_search
+          refine: browse_candidates
+          cancel: quote_cancelled
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error , maxStalledSteps: 3, stalledNext: error }
 
       select_pros:
         kind: action_contract
@@ -685,6 +744,18 @@ flows:
 
       pick_quote:
         kind: action_contract
+        inputSelector:
+          - candidates
+          - quote_index
+          - quote_results
+          - quote_error
+          - quote_reached_submit
+          - quote_answer_status
+          - quote_status
+          - quote_advance_reason
+          - quote_submit_status
+          - quote_submit_message
+          - quote_submit_error
         id: pick_quote
         description: Deterministically pick the next candidate pro and advance quote_index (no LLM, no navigation).
         next:
@@ -694,6 +765,7 @@ flows:
 
       open_quote:
         kind: action_contract
+        inputSelector: [quote_url, quote_target_service_id]
         id: open_quote
         description: Navigate to the picked pro and open its "Request estimate" dialog (never submits or sends). Detect-page aware — skips the cross-nav when already on the pro, then opens the same-context request-flow overlay.
         next:
@@ -703,6 +775,13 @@ flows:
 
       answer_quote:
         kind: action_contract
+        inputSelector:
+          - user_requirements
+          - submit_email
+          - submit_first_name
+          - submit_last_name
+          - submit_phone
+          - zip_code
         id: answer_quote
         maxSelfSteps: 16
         description: Auto-answer the active request-flow step (auto mode answers from user_requirements and clicks Next/Continue/Skip), then self-loop to the next step; route to submit once only the final Submit remains. NEVER submits or sends. Deterministic — the answer/submit decision is computed from the tool result (no LLM).
@@ -714,6 +793,12 @@ flows:
 
       submit_quote:
         kind: action_contract
+        inputSelector:
+          - submit_phone
+          - submit_email
+          - submit_first_name
+          - submit_last_name
+          - zip_code
         id: submit_quote
         description: Click the final Submit on the active quote step with the collected contact details (first/last name, email, phone). Captures the Thumbtack popover or outcome that results (e.g. a validation error or a sign-in prompt).
         next:
@@ -752,19 +837,26 @@ flows:
           Write `question` in the user's language whenever next="ask".
         next:
           ask: quotes_done
-          more: refine_search
+          more: browse_candidates
           new: collect_request
           done: all_done
-        fallback: { invalidNext: done, exhaustedNext: done }
+        fallback: { invalidNext: done, exhaustedNext: done , maxStalledSteps: 3, stalledNext: done }
+
+      quote_cancelled:
+        kind: terminal
+        inputSelector: []
+        respond: 견적 요청을 취소했습니다. 어떤 전문가에게도 연락하지 않았고 요청도 보내지 않았습니다. 다시 찾아보고 싶으시면 말씀해 주세요.
 
       all_done:
         kind: terminal
+        inputSelector: []
         respond: |-
           Reply briefly in the user's language: confirm the quote-request session is complete and invite
           the user to start another request whenever they want.
 
       no_results:
         kind: terminal
+        inputSelector: []
         respond: |-
           Reply in the user's language. No pros were found for the requested service at the given
           location, which usually means the ZIP code is invalid or unsupported. Ask the user to
@@ -772,12 +864,11 @@ flows:
 
       error:
         kind: terminal
+        inputSelector: []
         respond: 견적 요청에 필요한 정보를 수집하지 못했습니다. 다시 시도해 주세요.
 
   shopping_single_site:
     goal: Buy products for the user — clarify the shopping list (each product and quantity), then on the shopping site search for each item in turn and add it to the cart, and report what was added. Never place an order.
-    inputSelector:
-      - requestText
     state:
       site: amazon
       shop_plan: null
@@ -843,6 +934,14 @@ flows:
 
       next_product:
         kind: action_contract
+        inputSelector:
+          - shop_plan
+          - shop_index
+          - shop_results
+          - product_id
+          - product_name
+          - add_status
+          - add_error
         id: next_product
         description: Record the item just processed and pick the next item from shop_plan (sets query/quantity, advances shop_index). No LLM, no navigation.
         next:
@@ -852,6 +951,7 @@ flows:
 
       search_item:
         kind: action_contract
+        inputSelector: [query]
         id: shopping_search_product
         description: Search the shopping site for the current item's query. Single durable call — fires the search, suspends across the results navigation, then resumes to read candidates.
         next:
@@ -900,6 +1000,7 @@ flows:
 
       add_item:
         kind: action_contract
+        inputSelector: [product_id, quantity]
         id: shopping_add_to_cart
         description: Add the picked product to the cart with the requested quantity. Single durable call — navigates to the product page, clicks Add to Cart, declines the optional warranty, and reads the confirmation. Never places an order.
         next:
@@ -942,6 +1043,7 @@ flows:
 
       do_checkout:
         kind: action_contract
+        inputSelector: []
         id: checkout
         description: Navigate to the cart and proceed to the Amazon checkout page for review. Single durable call — never places an order.
         next:
@@ -951,6 +1053,7 @@ flows:
 
       checkout_done:
         kind: terminal
+        inputSelector: [checkout_status, checkout_view, checkout_error]
         respond: |-
           Reply in the user's language, using the Flow state JSON. If checkout_status is "checkout", confirm the
           checkout page was reached and summarize checkout_view VERBATIM when present (delivering_to,
@@ -961,6 +1064,7 @@ flows:
 
       shopping_done:
         kind: terminal
+        inputSelector: [shop_results, shop_count]
         respond: |-
           Reply in the user's language. Output a short Cart summary built VERBATIM from the shop_results
           value in the Flow state JSON: one line per item — the product and whether it was added to the
@@ -970,6 +1074,7 @@ flows:
 
       error:
         kind: terminal
+        inputSelector: []
         respond: 무엇을 살지 확인하지 못했습니다. 구매할 품목을 다시 알려주세요.
   checkout:
     goal: Proceed to the shopping cart's checkout page for review, invoked from anywhere. Navigate to the shopping site first (idempotent; a cross-domain nav resumes on arrival), then open the checkout page. Never places an order.
@@ -990,6 +1095,7 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       run:
         kind: action_contract
+        inputSelector: []
         id: run_checkout
         description: Navigate to the cart and proceed to the Amazon checkout page for review. Single durable call — never places an order.
         next:
@@ -998,6 +1104,7 @@ flows:
         fallback: { invalidNext: done, exhaustedNext: done }
       report:
         kind: terminal
+        inputSelector: [checkout_status, checkout_view, checkout_error]
         respond: |-
           Reply in the user's language, using the Flow state JSON. If checkout_status is "checkout", confirm the
           checkout page was reached and summarize checkout_view VERBATIM when present (delivering_to,
@@ -1006,23 +1113,64 @@ flows:
           checkout could not be completed and state the reason briefly. ALWAYS state clearly that NO order has
           been placed. Do NOT invent addresses, totals, or payment details.
   shopping_multi_store_total_cost:
-    goal: Compare one product across Amazon and eBay by normalized item price plus shipping, present the evidence, and add only the offer the user explicitly selects. Never enters checkout or places an order.
-    inputSelector:
-      - requestText
+    goal: Discover and lock one grounded product identity, compare only equivalent live offers across explicitly selected supported commerce sites by normalized item price plus shipping, and add only the current offer the user explicitly selects. Never enters checkout or places an order.
     state:
       query: null
       quantity: 1
-      stores:
-        - { site: amazon }
-        - { site: ebay }
+      stores: null
+      product_category: null
+      requested_brand: null
+      requested_model: null
+      hard_constraints: null
+      soft_preferences: null
+      identity_status: null
+      identity_kind: null
+      identity_brand: null
+      identity_model: null
+      identity_name: null
+      identity_id: null
+      identity_fingerprint: null
+      identity_approval: null
+      canonical_query: null
+      locked_hard_constraints: null
+      locked_soft_preferences: null
+      identity_source_refs: null
+      discovery_query: null
+      discovery_sites: null
+      discovery_results: null
+      discovery_failures: null
+      product_options: null
+      options_version: null
+      product_choice_stage: null
+      product_choice_index: null
+      product_choice_id: null
+      choice_options_version: null
+      selected_option: null
+      selected_option_id: null
+      selection_error: null
       store_results: null
+      verified_offers: null
+      ambiguous_offers: null
+      excluded_offers: null
       offers: null
       failures: null
+      comparison_id: null
+      comparison_approval: null
       comparison_text: null
+      store_status: null
+      all_offers: null
+      view_sort: null
+      view_page: null
+      view_pages: null
+      view_total: null
+      page_command: null
+      page_number: null
+      refine_request: null
+      refine_error: null
       incomplete_count: null
       choice_stage: null
       choice_index: null
-      selection_error: null
+      choice_comparison_id: null
       selected_offer: null
       selected_rank: null
       site: null
@@ -1030,6 +1178,7 @@ flows:
       product_name: null
       expected_unit_price: null
       expected_currency: null
+      expected_identity_model: null
       approved_total_base: null
       cart_approval: null
       cart_status: null
@@ -1038,7 +1187,7 @@ flows:
     nodes:
       collect_request:
         kind: action_unit
-        description: Extract exactly one product query and quantity for a real Amazon/eBay total-cost comparison; ask when the product is missing or the request contains several distinct products.
+        description: Extract one product category, optional explicit brand/model and constraints, quantity, and at least two supported representative commerce sites; ask when required scope is missing.
         model:
           providerID: openrouter
           modelID: openai/gpt-oss-120b
@@ -1050,32 +1199,239 @@ flows:
           - requestText
           - query
           - quantity
+          - stores
+          - product_category
+          - requested_brand
+          - requested_model
+          - hard_constraints
+          - soft_preferences
         allowedTools: [collect_total_cost_request]
         prompt: |-
           Prepare one cross-store product comparison. Read the latest requestText and call
           collect_total_cost_request exactly once.
 
-          - If no concrete product is named, use next="ask" and ask what product to compare.
-          - If several materially different products are named, use next="ask" and ask which ONE to compare first.
-          - Otherwise use next="done", query=<a concise English search query preserving every model/spec/option
-            the user stated>, quantity=<positive integer; default 1>.
-          - Never invent a model, size, color, condition, or quantity.
-          - Remove retailer names (Amazon/eBay), comparison language, and price/shipping instructions from
-            query. Keep only the product identity and user-stated model/spec/option words.
+          Supported site slugs and user-facing aliases:
+          - amazon (Amazon/아마존), walmart (Walmart/월마트), ebay (eBay/이베이),
+            aliexpress (AliExpress/알리익스프레스), etsy (Etsy/엣시)
+          - coupang (Coupang/쿠팡), naver-shopping (Naver Shopping/네이버쇼핑/네이버 쇼핑),
+            gmarket (Gmarket/G마켓/지마켓), 11st (11st/11번가), ssg (SSG.COM/SSG/쓱)
+
+          Site groups:
+          - "all global stores" means amazon, walmart, ebay, aliexpress, etsy.
+          - "all Korean stores" means coupang, naver-shopping, gmarket, 11st, ssg.
+          - "all representative stores" means all ten sites above.
+
+          - If no product category or product is named, use next="ask" and ask what to compare.
+          - If several materially different product categories are named, use next="ask" and ask which ONE first.
+          - If fewer than two supported sites or a supported site group are specified, use next="ask" and ask
+            which sites or group to compare. Never silently choose stores.
+          - Otherwise use next="done". Set product_category to the grounded product family, requested_brand and
+            requested_model only when the user stated them, and query to a concise discovery/search query that
+            preserves every user-stated identity or variant term.
+          - Split must-match attributes such as size, capacity, color, condition, or edition into hard_constraints.
+            Put preferences that may be ranked but need not match into soft_preferences. Use objects, not prose.
+          - Set quantity to a positive integer (default 1). Set stores to unique {site:<supported slug>} objects
+            in stated order or the group order above. Include EVERY explicitly named supported site.
+          - Treat "11st" and "11번가" as the 11st site, never as a quantity.
+          - Never invent a brand, model, variant, quantity, retailer, or constraint.
+          - Remove retailer names, comparison language, and price/shipping instructions from query.
+          - Keep the user's own wording and script. Storefront listings are matched against these terms, and a
+            Korean store lists "아디다스"/"러닝화" while an English translation matches nothing, so never
+            translate or romanize product_category, requested_brand, requested_model, or query. Copy the terms
+            the user wrote; add a translation only when the user wrote it themselves.
+          - Whenever you use next="ask", end the question with one short sentence in the user's language
+            saying that once the sites are set you will search them one by one and that it usually takes
+            about 1-2 minutes (사이트를 순서대로 검색하므로 보통 1~2분 정도 걸립니다). A multi-store search is
+            slow by nature; the user must know that before the wait, not after it.
         next:
           ask: collect_request
-          done: search_stores
+          done: prepare_identity
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error , maxStalledSteps: 3, stalledNext: error }
+
+      prepare_identity:
+        kind: action_contract
+        id: shopping_prepare_product_identity
+        description: Deterministically decide whether the request already names an exact model or needs grounded discovery.
+        inputSelector:
+          - product_category
+          - requested_brand
+          - requested_model
+          - hard_constraints
+          - soft_preferences
+          - stores
+        next:
+          discover: discover_products
+          lock: lock_requested_identity
+          ask_scope: error
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      lock_requested_identity:
+        kind: action_contract
+        id: shopping_lock_product_identity
+        description: Create a stable product-identity snapshot from an explicit user model or a grounded selected option.
+        inputSelector:
+          - identity_kind
+          - identity_name
+          - identity_brand
+          - identity_model
+          - product_category
+          - canonical_query
+          - hard_constraints
+          - soft_preferences
+          - identity_source_refs
+        next:
+          compare: search_stores
+          invalid: choose_product
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      discover_products:
+        kind: action_contract
+        id: shopping_discover_products
+        description: Search a bounded subset of the selected real stores for grounded product models before price comparison.
+        inputSelector:
+          - stores
+          - discovery_sites
+          - query
+          - quantity
+          - discovery_query
+          - product_category
+          - requested_brand
+          - hard_constraints
+        next:
+          done: build_product_options
+          partial: build_product_options
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      build_product_options:
+        kind: action_contract
+        id: shopping_build_product_options
+        description: Deterministically group grounded discovery listings by manufacturer model without merging variants.
+        inputSelector:
+          - discovery_results
+          - discovery_query
+          - product_category
+          - requested_brand
+          - hard_constraints
+          - soft_preferences
+        next:
+          choose: choose_product
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      choose_product:
+        kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
+        description: Present grounded model options before comparison and accept only an explicit current option, exact model refinement, or cancellation.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - requestText
+          - product_options
+          - options_version
+          - product_choice_stage
+          - selected_option
+          - selection_error
+          - requested_brand
+          - product_category
+          - hard_constraints
+          - soft_preferences
+        allowedTools: [choose_product_identity]
+        prompt: |-
+          You are the product-identity approval gate. Call choose_product_identity exactly once.
+          product_options is a deterministic, current list grounded in live source_refs.
+
+          FIRST call (`product_choice_stage` empty): use next="ask", product_choice_stage="asked",
+          and list the options in order while preserving display_name, identity_confidence, sample prices,
+          and provenance exactly:
+          `source_site_count` is the number of distinct source sites and `source_sites` is their exact
+          list; never describe the number of `source_refs` or sample prices as a site count. Ask which
+          numbered model to compare, for an exact manufacturer model refinement, or for cancellation.
+          Do not imply that sample prices are the final cross-store comparison.
+
+          FOLLOW-UP (`product_choice_stage`="asked"):
+          - clear cancellation -> next="cancel".
+          - a clear current option number -> next="select", product_choice_index=<integer>,
+            choice_options_version=<the current options_version>.
+          - an exact manufacturer model supplied by the user -> next="model", identity_kind="standardized_model",
+            identity_brand=<only a stated/current grounded brand>, identity_model=<exact user model>,
+            product_category=<current category>, canonical_query=<brand + model + category>,
+            hard_constraints=<current constraints>, soft_preferences=<current preferences>.
+          - otherwise use next="ask" and request one current number, an exact model, or cancellation.
+
+          If `product_choice_stage` is "enrich", the selected listing lacked a reliable manufacturer
+          model. Explain that it cannot safely be compared across stores; ask for its exact model or
+          another current option. Never invent or extract a model from a URL.
+        next:
+          ask: choose_product
+          select: resolve_product
+          model: lock_requested_identity
+          cancel: cancelled
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error , maxStalledSteps: 3, stalledNext: cancel }
+
+      resolve_product:
+        kind: action_contract
+        id: shopping_resolve_product_option
+        description: Validate the current discovery snapshot and lock only the selected grounded model identity.
+        inputSelector:
+          - product_options
+          - options_version
+          - product_choice_index
+          - product_choice_id
+          - choice_options_version
+          - hard_constraints
+          - soft_preferences
+        next:
+          lock: search_stores
+          enrich: choose_product
+          invalid: choose_product
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
       search_stores:
         kind: action_contract
         id: shopping_search_stores
-        description: Run the keyed, bounded store-search task over Amazon and eBay and retain every completed or failed store result.
+        description: Search every selected store with the locked canonical product query.
         inputSelector:
           - stores
           - query
           - quantity
+          - identity_id
+          - identity_kind
+          - identity_brand
+          - identity_model
+          - product_category
+          - locked_hard_constraints
+        next:
+          done: verify_offers
+          partial: verify_offers
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      verify_offers:
+        kind: action_contract
+        id: shopping_verify_product_offers
+        description: Deterministically exclude model and hard-variant mismatches and preserve ambiguous evidence separately.
+        inputSelector:
+          - store_results
+          - identity_id
+          - identity_kind
+          - identity_brand
+          - identity_model
+          - product_category
+          - locked_hard_constraints
         next:
           done: normalize_rank
           partial: normalize_rank
@@ -1086,9 +1442,11 @@ flows:
       normalize_rank:
         kind: action_contract
         id: shopping_rank_store_offers
-        description: Deterministically flatten and rank normalized offers by complete landed cost, with stable rating/review/site/product tie-breaks.
+        description: Rank only identity-verified offers by complete landed cost with stable tie-breaks and issue a comparison snapshot.
         inputSelector:
-          - store_results
+          - verified_offers
+          - failures
+          - identity_id
           - quantity
         next:
           done: choose_offer
@@ -1097,9 +1455,11 @@ flows:
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
+
       choose_offer:
         kind: action_unit
-        description: Present the comparison before any cart mutation and accept only an explicit current offer number or cancellation.
+        messagePolicy: { currentUserText: active_node_only }
+        description: Present the current verified comparison before mutation, then accept only an explicit current offer number or cancellation.
         model:
           providerID: openrouter
           modelID: openai/gpt-oss-120b
@@ -1109,48 +1469,100 @@ flows:
               reasoning: { effort: low }
         inputSelector:
           - requestText
-          - comparison_text
-          - offers
-          - failures
-          - incomplete_count
+          - comparison_id
           - choice_stage
           - selection_error
-        allowedTools: [choose_store_offer]
+          - refine_error
+          - store_status
+          - view_page
+          - view_pages
+          - view_total
+        allowedTools: [present_store_offers, choose_store_offer]
         prompt: |-
-          You are the approval gate for a live shopping-cart mutation. Call choose_store_offer exactly once.
+          You are the approval gate for a live shopping-cart mutation.
 
-          comparison_text is deterministic and already numbered. Preserve its facts and numbers VERBATIM.
-          offers contains the same current ranked offers. failures lists stores that failed or returned no result.
+          FIRST call (`choice_stage` empty): call present_store_offers exactly once with next="ask",
+          choice_stage="asked", and comparison_id=<current comparison_id>. The tool retrieves the
+          deterministic, numbered comparison verbatim from the current comparison snapshot. Never
+          call choose_store_offer on this first presentation.
 
-          FIRST call (`choice_stage` empty): ALWAYS use next="ask", choice_stage="asked". In the user's
-          language, show comparison_text, identify failed stores, explain that totals containing
-          "unknown shipping/fees" are incomplete, and ask: "Which numbered offer should I add to the cart?
-          Reply with a number, or cancel." Do not infer approval from the original request.
+          FOLLOW-UP (`choice_stage`="asked"): call choose_store_offer exactly once using only the
+          user's current answer to the presented comparison.
+          - clear cancellation -> next="cancel".
+          - "recommended", "best", "cheapest", "first", or explicit approval of the recommended offer
+            -> next="select", choice_index=1, choice_comparison_id=<current comparison_id>.
+          - a clear numbered offer -> next="select", choice_index=<integer>,
+            choice_comparison_id=<current comparison_id>. The numbers are global across the whole
+            comparison, so a number from an earlier window stays valid until the listing changes.
+          - asking for another window of the same listing ("다음", "이전", "next", "more", "3페이지",
+            "처음", "마지막") -> next="page" with page_command="next"|"prev"|"first"|"last", or
+            page_number=<integer> when the user names a page. Never invent the resulting list.
+          - narrowing, filtering, sorting, or re-searching in the user's own words ("무료배송만",
+            "3만원 이하", "평점 높은 순", "쿠팡 것만", "필터 해제", "M240으로 다시 찾아줘")
+            -> next="refine" with refine_request=<the user's sentence, copied verbatim, untranslated>.
+            Do not interpret it yourself: the deterministic parser decides what it means and rejects
+            what it cannot ground.
+          - otherwise -> next="ask" and request one valid current number, a page move, or cancellation.
 
-          FOLLOW-UP (`choice_stage`="asked"):
-          - clear cancellation ("cancel", "취소", "그만", "담지 마") -> next="cancel".
-          - "recommended", "best", "cheapest", "first", "추천", "최저", "가장 싼", or explicit approval
-            of the recommended offer -> next="select", choice_index=1.
-          - a clear numbered offer -> next="select", choice_index=<that integer>.
-          - otherwise -> next="ask", choice_stage="asked", and ask for one valid number from the current
-            list or cancellation.
+          next="ask" NEVER performs anything. It is only for asking a question, so its `question` must not
+          claim that a filter, sort, page move, or selection happened — the deterministic tools are the
+          only thing that can change the list, and a sentence like "무료배송만 보여드렸습니다" after
+          next="ask" is a false report of work that never ran. If the user's message contains ANY
+          narrowing, sorting, or paging intent, you MUST use next="refine" or next="page" instead.
+          The window itself is re-rendered deterministically and shown to the user, so never restate,
+          summarize, or re-order the offers in your own words.
 
-          If selection_error is present, state that the previous number was invalid and ask again.
-          Never emit product IDs, prices, site names, or approval markers; the deterministic resolver copies them.
+          `view_page`/`view_pages`/`view_total` describe the window the user is looking at, and
+          `store_status` (when present) names the stores that failed. When `refine_error` is set the LAST
+          refinement did not apply: say why in the user's language and ask for different wording, and
+          NEVER resend the same refine_request. "no_matches" means nothing in the listing matched,
+          "price_currency_unknown" means no offer is priced in that currency (name the currency the
+          listing does use), "unparsed" means the condition was not understood. If selection_error is
+          present, state it plainly and ask again. Never emit product IDs, prices, site names,
+          choice_stage, or approval markers through choose_store_offer; the deterministic resolver copies
+          them and rejects selection before a completed presentation turn.
         next:
           ask: choose_offer
           select: resolve_offer
+          page: browse_offers
+          refine: browse_offers
           cancel: cancelled
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+          expired: comparison_lost
+        fallback: { invalidNext: error, exhaustedNext: error , maxStalledSteps: 2, stalledNext: expired }
+
+      browse_offers:
+        kind: action_contract
+        id: shopping_refine_store_offers
+        description: Move the comparison window, or filter and sort the listing, without letting the model rewrite the offers.
+        inputSelector:
+          - comparison_id
+          - offers
+          - all_offers
+          - failures
+          - identity_id
+          - view_page
+          - view_sort
+          - page_command
+          - page_number
+          - refine_request
+        next:
+          ask: choose_offer
+          research: collect_request
+          error: comparison_lost
+        fallback: { invalidNext: ask, exhaustedNext: ask }
 
       resolve_offer:
         kind: action_contract
         id: shopping_resolve_store_offer
-        description: Validate the chosen integer against the current ranked list and copy the selected offer plus a scoped cart-approval marker.
+        description: Validate the chosen integer and comparison snapshot, then copy scoped identity, comparison, and cart approvals.
         inputSelector:
           - offers
           - choice_index
+          - choice_comparison_id
+          - comparison_id
+          - identity_id
+          - choice_stage
           - quantity
         next:
           add: open_selected_store
@@ -1161,7 +1573,7 @@ flows:
       open_selected_store:
         kind: action_contract
         id: shopping_open_selected_store
-        description: Open the approved offer's store before the mutation; an off-site navigation resumes this flow on arrival.
+        description: Open the approved offer's store before mutation; off-site navigation resumes this flow on arrival.
         inputSelector:
           - site
         next:
@@ -1172,47 +1584,119 @@ flows:
       add_selected_offer:
         kind: action_contract
         id: shopping_add_selected_store_offer
-        description: Navigate to the selected store, re-read the product price, and add the approved offer to the cart only when its preconditions still hold.
+        description: Revalidate locked product identity and price, then add only the selected current offer.
         inputSelector:
           - site
           - product_id
           - quantity
           - expected_unit_price
           - expected_currency
+          - expected_identity_model
+          - identity_id
+          - comparison_id
+          - identity_approval
+          - comparison_approval
           - cart_approval
         next:
+          navigating: add_selected_offer_after_navigation
+          done: report_cart
+          error: report_cart
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      add_selected_offer_after_navigation:
+        kind: action_contract
+        id: shopping_add_selected_store_offer
+        description: Re-enter on the selected product page, then revalidate and perform the approved cart click.
+        inputSelector:
+          - site
+          - product_id
+          - quantity
+          - expected_unit_price
+          - expected_currency
+          - expected_identity_model
+          - identity_id
+          - comparison_id
+          - identity_approval
+          - comparison_approval
+          - cart_approval
+        next:
+          navigating: confirm_selected_offer_after_navigation
+          done: report_cart
+          error: report_cart
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      confirm_selected_offer_after_navigation:
+        kind: action_contract
+        id: shopping_add_selected_store_offer
+        description: Confirm the approved product in the cart after an optional cart-page navigation.
+        inputSelector:
+          - site
+          - product_id
+          - quantity
+          - expected_unit_price
+          - expected_currency
+          - expected_identity_model
+          - identity_id
+          - comparison_id
+          - identity_approval
+          - comparison_approval
+          - cart_approval
+        next:
+          navigating: report_cart
           done: report_cart
           error: report_cart
         fallback: { invalidNext: error, exhaustedNext: error }
 
       report_cart:
         kind: terminal
+        inputSelector: [site, product_name, product_id, cart_status, cart_confirmation, cart_error, store_status]
         respond: |-
           Reply in the user's language using only the Flow state. Name the selected site and product.
           If cart_status is "added", confirm it was added and quote cart_confirmation when present.
-          Otherwise state that it was NOT added and report cart_error exactly (including price_changed,
-          currency_changed, login_required, captcha_required, quantity_unavailable, or unavailable).
+          Otherwise state that it was NOT added and report cart_error exactly, including identity_changed,
+          identity_revalidation_failed, stale_comparison, price_changed, currency_changed, login_required,
+          captcha_required, quantity_unavailable, or unavailable.
+          When store_status is present, repeat it verbatim as a separate line so the user knows which
+          stores were compared and which need action from them.
           Always state that checkout was not opened and no order was placed. Do not invent totals or guarantees.
+
+      comparison_lost:
+        kind: terminal
+        inputSelector: [store_status]
+        respond: |-
+          Reply in the user's language using only the Flow state. Say plainly that the comparison list is no
+          longer available (it expired or was replaced), so the earlier numbers cannot be used any more, and
+          ask the user to repeat the request to run a fresh comparison. When store_status is present, repeat
+          it verbatim as a separate line. State that nothing was added to a cart and no order was placed.
 
       cancelled:
         kind: terminal
+        inputSelector: []
         respond: 비교만 완료했고 장바구니에는 아무것도 추가하지 않았습니다. 체크아웃이나 주문도 진행하지 않았습니다.
 
       no_results:
         kind: terminal
+        inputSelector: [failures, ambiguous_offers, excluded_offers, store_status]
         respond: |-
-          Reply in the user's language. No comparable live offer was available. Summarize failures from
-          the Flow state without inventing products or prices, and ask for a more exact model/spec query.
-          Nothing was added to a cart.
+          Reply in the user's language using only Flow state. No live offer was verified as the same locked
+          product identity. Summarize failures, ambiguous_offers, and excluded_offers without inventing facts.
+          When a failure names security_verification_required, captcha_required, or login_required, say that the
+          site asked the user to verify or sign in, and that the user must complete it in the browser before that
+          store can be searched again; list the stores that did return offers separately.
+          Ask for a more exact manufacturer model or hard variant. Nothing was added to a cart.
 
       error:
         kind: terminal
-        respond: 다중 쇼핑몰 총비용 비교를 완료하지 못했습니다. 상품 모델이나 사양을 더 정확히 알려주세요. 장바구니와 주문은 변경하지 않았습니다.
+        inputSelector: []
+        respond: 다중 쇼핑몰 상품 식별 또는 총비용 비교를 완료하지 못했습니다. 상품 종류와 제조사 모델을 더 정확히 알려주세요. 장바구니와 주문은 변경하지 않았습니다.
 
   shopping_search_one_store:
-    goal: Search one real commerce adapter and return its normalized candidates to the parent task map without asking the user.
+    goal: Search one real commerce adapter, read up to its page budget of result pages, and return the accumulated normalized candidates to the parent task map without asking the user.
     state:
       store_result: null
+      collected: null
+      page: 1
+      page_stop_reason: null
     nodes:
       open:
         kind: action_contract
@@ -1237,16 +1721,102 @@ flows:
           - index
           - key
           - context
+          - page
         next:
+          navigating: search_after_navigation
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+      search_after_navigation:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Re-invoke the page-detecting search once after its first call fired a document navigation.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+          - page
+        next:
+          navigating: search_after_navigation_retry
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+      search_after_navigation_retry:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Make one final page-detecting read after a canonicalizing search redirect.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+          - page
+        next:
+          navigating: normalize
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      normalize:
+        kind: action_contract
+        id: shopping_normalize_store_result
+        description: Normalize the site adapter result only after the current site layer is ready.
+        inputSelector:
+          - item
+          - context
+          - store_result
+        next:
+          done: collect
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      collect:
+        kind: action_contract
+        id: shopping_collect_store_page
+        description: Merge this result page into the store's accumulated candidates and decide whether one more page is worth a navigation.
+        inputSelector:
+          - item
+          - context
+          - store_result
+          - collected
+          - page
+        next:
+          more: search_next_page
           done: complete
         fallback: { invalidNext: done, exhaustedNext: done }
+
+      search_next_page:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Fire the navigation to the next result page of the same store search.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+          - page
+        next:
+          navigating: search_next_page_after_navigation
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+      search_next_page_after_navigation:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Read the next result page once its navigation has landed.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+          - page
+        next:
+          navigating: normalize
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+
       complete:
         kind: terminal
+        inputSelector: []
 
   bluemoonsoft:
     goal: Help the user explore BlueMoonSoft (company info, DOCURAY / products, security modules, news, customers) by navigating bluemoonsoft.com to the page that satisfies the request, resolved from the site sitemap. Never fills or submits forms.
-    inputSelector:
-      - requestText
     state:
       site: bluemoonsoft
       requestText: null
@@ -1329,21 +1899,24 @@ flows:
 
       served:
         kind: terminal
+        inputSelector: []
         respond: |-
           Reply in the user's language: confirm you moved to the BlueMoonSoft page that matches the user's request, and invite them to ask for anything else (another page, product, or info). Do not invent page contents.
 
       error:
         kind: terminal
+        inputSelector: []
         respond: 블루문소프트에서 원하는 페이지를 찾지 못했어요. 무엇을 찾으시는지 다시 알려주세요.
 
   end_conversation:
     nodes:
       done:
         kind: terminal
+        inputSelector: []
         respond: 도움이 되었길 바랍니다. 필요하면 언제든 다시 불러 주세요.
 flowTools:
   collect_total_cost_request:
-    description: Capture one exact product query and quantity for a two-store total-cost comparison, or ask for clarification.
+    description: Capture one product category, optional exact brand/model and constraints, quantity, and two to ten supported commerce sites, or ask for clarification.
     execute: { kind: runtime, implementation: passthrough }
     output: tool.args
     parameters:
@@ -1354,17 +1927,122 @@ flowTools:
         next: { type: string, enum: [ask, done] }
         question: { type: string }
         query: { type: string }
+        product_category: { type: string }
+        requested_brand: { type: [string, "null"] }
+        requested_model: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+        soft_preferences: { type: [object, "null"], additionalProperties: true }
         quantity: { type: [integer, number] }
+        stores:
+          type: array
+          minItems: 2
+          maxItems: 10
+          uniqueItems: true
+          items:
+            type: object
+            additionalProperties: false
+            required: [site]
+            properties:
+              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
 
-  shopping_search_stores:
-    description: Run the real store-search subflow for each uniquely keyed store and collect completed, failed, or input-needed results.
+  shopping_prepare_product_identity:
+    description: Classify product scope and deterministically select at most three stores for grounded model discovery.
+    execute: { kind: remote, tool: AX_prepare_product_identity, timeoutMs: 30000 }
+    input:
+      product_category: tool.args.product_category
+      requested_brand: tool.args.requested_brand
+      requested_model: tool.args.requested_model
+      hard_constraints: tool.args.hard_constraints
+      soft_preferences: tool.args.soft_preferences
+      stores: tool.args.stores
+    output:
+      next: result.next
+      identity_status: result.identity_status
+      identity_kind: result.identity_kind
+      product_category: result.product_category
+      identity_brand: result.identity_brand
+      identity_model: result.identity_model
+      discovery_query: result.discovery_query
+      discovery_sites: result.discovery_sites
+      canonical_query: result.canonical_query
+      hard_constraints: result.hard_constraints
+      soft_preferences: result.soft_preferences
+      selection_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [product_category, stores]
+      properties:
+        product_category: { type: string, minLength: 1 }
+        requested_brand: { type: [string, "null"] }
+        requested_model: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+        soft_preferences: { type: [object, "null"], additionalProperties: true }
+        stores:
+          type: array
+          minItems: 2
+          maxItems: 10
+          items:
+            type: object
+            additionalProperties: false
+            required: [site]
+            properties:
+              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+
+  shopping_lock_product_identity:
+    description: Lock one exact manufacturer model or grounded identity into a stable comparison snapshot.
+    execute: { kind: remote, tool: AX_lock_product_identity, timeoutMs: 30000 }
+    input:
+      identity_kind: tool.args.identity_kind
+      identity_name: tool.args.identity_name
+      identity_brand: tool.args.identity_brand
+      identity_model: tool.args.identity_model
+      product_category: tool.args.product_category
+      canonical_query: tool.args.canonical_query
+      hard_constraints: tool.args.hard_constraints
+      soft_preferences: tool.args.soft_preferences
+      source_refs: tool.args.identity_source_refs
+    output:
+      next: result.next
+      identity_status: result.identity_status
+      identity_id: result.identity_id
+      identity_fingerprint: result.identity_fingerprint
+      identity_kind: result.identity_kind
+      identity_name: result.identity_name
+      identity_brand: result.identity_brand
+      identity_model: result.identity_model
+      product_category: result.product_category
+      canonical_query: result.canonical_query
+      query: result.canonical_query
+      locked_hard_constraints: result.locked_hard_constraints
+      locked_soft_preferences: result.locked_soft_preferences
+      identity_source_refs: result.identity_source_refs
+      identity_approval: result.identity_approval
+      selection_error: result.error
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [identity_kind, identity_model, product_category]
+      properties:
+        identity_kind: { type: string, enum: [standardized_model, spec_equivalent, unique_listing] }
+        identity_name: { type: [string, "null"] }
+        identity_brand: { type: [string, "null"] }
+        identity_model: { type: string, minLength: 1 }
+        product_category: { type: string, minLength: 1 }
+        canonical_query: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+        soft_preferences: { type: [object, "null"], additionalProperties: true }
+        identity_source_refs: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+
+  shopping_discover_products:
+    description: Search at most three deterministic frontier stores for live product-model evidence.
     execute:
       kind: runtime
       implementation: flow.map
       flow: shopping_search_one_store
-      itemsArg: stores
+      itemsArg: discovery_sites
       resultFrom: store_result
-      maxItems: 2
+      maxItems: 3
       concurrency: 1
       onItemError: collect
       task:
@@ -1379,30 +2057,186 @@ flowTools:
             candidates: { type: array, items: { type: object, additionalProperties: true } }
             error: { type: [string, "null"] }
         budget:
-          maxNodes: 8
+          maxNodes: 16
           maxModelCalls: 0
-          maxRemoteCalls: 2
+          maxRemoteCalls: 10
+          timeoutMs: 120000
+    output:
+      next: result.next
+      discovery_results: result.results
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [discovery_sites, query]
+      properties:
+        discovery_sites:
+          type: array
+          minItems: 1
+          maxItems: 3
+          items:
+            type: object
+            additionalProperties: false
+            required: [site]
+            properties:
+              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        query: { type: string, minLength: 1 }
+        quantity: { type: [integer, number] }
+        discovery_query: { type: [string, "null"] }
+        product_category: { type: [string, "null"] }
+        requested_brand: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+
+  shopping_build_product_options:
+    description: Group live discovery evidence into versioned manufacturer-model choices.
+    execute: { kind: remote, tool: AX_build_product_options, timeoutMs: 30000 }
+    input:
+      results: tool.args.discovery_results
+      query: tool.args.discovery_query
+      product_category: tool.args.product_category
+      requested_brand: tool.args.requested_brand
+      hard_constraints: tool.args.hard_constraints
+      soft_preferences: tool.args.soft_preferences
+      max_options: 6
+    output:
+      next: result.next
+      product_options: result.options
+      options_version: result.options_version
+      discovery_failures: result.failures
+      product_choice_stage: null
+      selection_error: null
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [discovery_results, discovery_query, product_category]
+      properties:
+        discovery_results: { type: array, items: { type: object, additionalProperties: true } }
+        discovery_query: { type: string, minLength: 1 }
+        product_category: { type: string, minLength: 1 }
+        requested_brand: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+        soft_preferences: { type: [object, "null"], additionalProperties: true }
+
+  choose_product_identity:
+    description: Ask for, cancel, or record one current grounded product option or an exact user-supplied model.
+    execute: { kind: runtime, implementation: passthrough }
+    output: tool.args
+    parameters:
+      type: object
+      additionalProperties: true
+      required: [next]
+      properties:
+        next: { type: string, enum: [ask, select, model, cancel] }
+        question: { type: string }
+        product_choice_stage: { type: [string, "null"] }
+        product_choice_index: { type: [integer, number, "null"] }
+        product_choice_id: { type: [string, "null"] }
+        choice_options_version: { type: [string, "null"] }
+        identity_kind: { type: [string, "null"], enum: [standardized_model, spec_equivalent, unique_listing, null] }
+        identity_name: { type: [string, "null"] }
+        identity_brand: { type: [string, "null"] }
+        identity_model: { type: [string, "null"] }
+        product_category: { type: [string, "null"] }
+        canonical_query: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+        soft_preferences: { type: [object, "null"], additionalProperties: true }
+
+  shopping_resolve_product_option:
+    description: Resolve one current discovery option and create a locked identity only from its grounded evidence.
+    execute: { kind: remote, tool: AX_resolve_product_option, timeoutMs: 30000 }
+    input:
+      options: tool.args.product_options
+      options_version: tool.args.options_version
+      choice_index: tool.args.product_choice_index
+      choice_id: tool.args.product_choice_id
+      choice_options_version: tool.args.choice_options_version
+      hard_constraints: tool.args.hard_constraints
+      soft_preferences: tool.args.soft_preferences
+    output:
+      next: result.next
+      selection_error: result.error
+      product_choice_stage: result.next
+      selected_option: result.selected_option
+      selected_option_id: result.selected_option_id
+      identity_status: result.identity_status
+      identity_id: result.identity_id
+      identity_fingerprint: result.identity_fingerprint
+      identity_kind: result.identity_kind
+      identity_name: result.identity_name
+      identity_brand: result.identity_brand
+      identity_model: result.identity_model
+      product_category: result.product_category
+      canonical_query: result.canonical_query
+      query: result.canonical_query
+      locked_hard_constraints: result.locked_hard_constraints
+      locked_soft_preferences: result.locked_soft_preferences
+      identity_source_refs: result.identity_source_refs
+      identity_approval: result.identity_approval
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [product_options, options_version, choice_options_version]
+      properties:
+        product_options: { type: array, minItems: 1, items: { type: object, additionalProperties: true } }
+        options_version: { type: string, minLength: 1 }
+        product_choice_index: { type: [integer, number, "null"] }
+        product_choice_id: { type: [string, "null"] }
+        choice_options_version: { type: [string, "null"] }
+        hard_constraints: { type: [object, "null"], additionalProperties: true }
+        soft_preferences: { type: [object, "null"], additionalProperties: true }
+
+  shopping_search_stores:
+    description: Run the real store-search subflow for every selected store using the locked canonical product query.
+    execute:
+      kind: runtime
+      implementation: flow.map
+      flow: shopping_search_one_store
+      itemsArg: stores
+      resultFrom: store_result
+      maxItems: 10
+      concurrency: 1
+      onItemError: collect
+      task:
+        keyFrom: site
+        resultSchema:
+          type: object
+          additionalProperties: true
+          required: [site, candidates]
+          properties:
+            site: { type: string }
+            query: { type: string }
+            candidates: { type: array, items: { type: object, additionalProperties: true } }
+            error: { type: [string, "null"] }
+        budget:
+          maxNodes: 16
+          maxModelCalls: 0
+          maxRemoteCalls: 10
           timeoutMs: 120000
     output:
       next: result.next
       store_results: result.results
     parameters:
       type: object
-      additionalProperties: false
-      required: [stores, query]
+      additionalProperties: true
+      required: [stores, query, identity_id]
       properties:
         stores:
           type: array
-          minItems: 1
-          maxItems: 2
+          minItems: 2
+          maxItems: 10
           items:
             type: object
             additionalProperties: false
             required: [site]
             properties:
-              site: { type: string, enum: [amazon, ebay] }
+              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
         query: { type: string, minLength: 1 }
         quantity: { type: [integer, number] }
+        identity_id: { type: string, minLength: 1 }
+        identity_kind: { type: [string, "null"] }
+        identity_brand: { type: [string, "null"] }
+        identity_model: { type: [string, "null"] }
+        product_category: { type: [string, "null"] }
+        locked_hard_constraints: { type: [object, "null"], additionalProperties: true }
 
   shopping_open_mapped_store:
     description: Re-entrantly open one mapped store before invoking its site-specific search adapter.
@@ -1421,22 +2255,27 @@ flowTools:
           additionalProperties: false
           required: [site]
           properties:
-            site: { type: string, enum: [amazon, ebay] }
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
         index: { type: number }
         key: { type: string }
-        context:
-          type: object
-          additionalProperties: true
+        context: { type: object, additionalProperties: true }
 
   shopping_search_one_store:
-    description: Search one mapped real store through the common cross-site commerce dispatcher.
-    execute: { kind: remote, tool: AX_search_store_product, timeoutMs: 120000 }
+    description: Search one mapped store through its adapter command so runtime readiness can load the current site layer.
+    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
     input:
       site: tool.args.item.site
       query: tool.args.context.query
       quantity: tool.args.context.quantity
+      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
+      requested_brand: tool.args.context.requested_brand
+      identity_brand: tool.args.context.identity_brand
+      identity_model: tool.args.context.identity_model
+      product_category: tool.args.context.product_category
+      hard_constraints: tool.args.context.locked_hard_constraints
+      page: tool.args.page
     output:
-      next: done
+      next: { if: [{ var: result.pending }, "navigating", { var: result.navigated }, "navigating", { "==": [{ var: result.status }, "navigating"] }, "navigating", "done"] }
       store_result: result
     parameters:
       type: object
@@ -1448,7 +2287,7 @@ flowTools:
           additionalProperties: false
           required: [site]
           properties:
-            site: { type: string, enum: [amazon, ebay] }
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
         index: { type: number }
         key: { type: string }
         context:
@@ -1458,31 +2297,219 @@ flowTools:
           properties:
             query: { type: string }
             quantity: { type: [integer, number] }
+        page: { type: [integer, number] }
 
-  shopping_rank_store_offers:
-    description: Flatten and deterministically rank normalized store candidates while preserving failures and cost coverage.
-    execute: { kind: remote, tool: AX_rank_store_offers, timeoutMs: 30000 }
+  shopping_collect_store_page:
+    description: Merge one read result page into this store's accumulated candidates and decide whether another page is worth a navigation.
+    execute: { kind: remote, tool: AX_collect_store_page, timeoutMs: 30000 }
+    input:
+      result: tool.args.store_result
+      collected: tool.args.collected
+      page: tool.args.page
+      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
+    output:
+      next: result.next
+      page: result.page
+      collected: result.collected
+      page_stop_reason: result.stop_reason
+      store_result: result.store_result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, context, store_result, page]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        context:
+          type: object
+          additionalProperties: true
+          required: [query]
+          properties:
+            query: { type: string }
+            quantity: { type: [integer, number] }
+        store_result: { type: object, additionalProperties: true }
+        collected: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+        page: { type: [integer, number] }
+
+  shopping_normalize_store_result:
+    description: Apply common relevance, provenance, FX, and landed-cost normalization to one ready site adapter result.
+    execute: { kind: remote, tool: AX_normalize_store_product_result, timeoutMs: 30000 }
+    input:
+      site: tool.args.item.site
+      query: tool.args.context.query
+      quantity: tool.args.context.quantity
+      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
+      requested_brand: tool.args.context.requested_brand
+      identity_brand: tool.args.context.identity_brand
+      identity_model: tool.args.context.identity_model
+      product_category: tool.args.context.product_category
+      hard_constraints: tool.args.context.locked_hard_constraints
+      result: tool.args.store_result
+    output:
+      next: done
+      store_result: result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, context, store_result]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        context:
+          type: object
+          additionalProperties: true
+          required: [query]
+          properties:
+            query: { type: string }
+            quantity: { type: [integer, number] }
+        store_result: { type: object, additionalProperties: true }
+
+  shopping_verify_product_offers:
+    description: Classify live offers against the locked model and hard variants before ranking.
+    execute: { kind: remote, tool: AX_verify_product_offers, timeoutMs: 30000 }
     input:
       results: tool.args.store_results
+      identity_id: tool.args.identity_id
+      identity_kind: tool.args.identity_kind
+      identity_brand: tool.args.identity_brand
+      identity_model: tool.args.identity_model
+      product_category: tool.args.product_category
+      hard_constraints: tool.args.locked_hard_constraints
+    output:
+      next: result.next
+      verified_offers: result.verified_offers
+      ambiguous_offers: result.ambiguous_offers
+      excluded_offers: result.excluded_offers
+      failures: result.failures
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [store_results, identity_id, identity_kind]
+      properties:
+        store_results: { type: array, items: { type: object, additionalProperties: true } }
+        identity_id: { type: string, minLength: 1 }
+        identity_kind: { type: string, enum: [standardized_model, spec_equivalent, unique_listing] }
+        identity_brand: { type: [string, "null"] }
+        identity_model: { type: [string, "null"] }
+        product_category: { type: [string, "null"] }
+        locked_hard_constraints: { type: [object, "null"], additionalProperties: true }
+
+  shopping_rank_store_offers:
+    description: Rank only identity-verified candidates while preserving failures and cost coverage.
+    execute: { kind: remote, tool: AX_rank_store_offers, timeoutMs: 30000 }
+    input:
+      verified_offers: tool.args.verified_offers
+      failures: tool.args.failures
+      identity_id: tool.args.identity_id
       quantity: tool.args.quantity
     output:
       next: result.next
       offers: result.offers
       failures: result.failures
+      comparison_id: result.comparison_id
+      comparison_approval: current_comparison
       comparison_text: result.comparison_text
+      store_status: result.store_status
+      all_offers: result.all_offers
       incomplete_count: result.incomplete_count
       complete_count: result.complete_count
       base_currency: result.base_currency
+      view_page: result.view_page
+      view_pages: result.view_pages
+      view_total: result.view_total
     parameters:
       type: object
       additionalProperties: false
-      required: [store_results]
+      required: [verified_offers, identity_id]
       properties:
-        store_results: { type: array, items: { type: object, additionalProperties: true } }
+        verified_offers: { type: array, items: { type: object, additionalProperties: true } }
+        failures: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+        identity_id: { type: string, minLength: 1 }
         quantity: { type: [integer, number] }
 
+  present_store_offers:
+    description: Retrieve the exact current comparison and force a separate approval turn before selection.
+    execute: { kind: remote, tool: AX_present_store_offers, timeoutMs: 30000 }
+    input:
+      comparison_id: tool.args.comparison_id
+    output:
+      next: { if: [{ var: result.error }, "error", { var: tool.args.next }] }
+      question: result.question
+      choice_stage: tool.args.choice_stage
+      error: result.error
+      view_page: result.view_page
+      view_pages: result.view_pages
+      view_total: result.view_total
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, choice_stage, comparison_id]
+      properties:
+        next: { type: string, enum: [ask] }
+        choice_stage: { type: string, enum: [asked] }
+        comparison_id: { type: string, minLength: 1 }
+
+  shopping_refine_store_offers:
+    description: Move the comparison window, or filter and sort the listing, from the user's own words.
+    execute: { kind: remote, tool: AX_refine_store_offers, timeoutMs: 30000 }
+    input:
+      comparison_id: tool.args.comparison_id
+      offers: tool.args.offers
+      all_offers: tool.args.all_offers
+      failures: tool.args.failures
+      identity_id: tool.args.identity_id
+      view_page: tool.args.view_page
+      view_sort: tool.args.view_sort
+      page_command: tool.args.page_command
+      page_number: tool.args.page_number
+      refine_request: tool.args.refine_request
+    output:
+      next: result.next
+      question: result.question
+      comparison_id: result.comparison_id
+      offers: result.offers
+      all_offers: result.all_offers
+      store_status: result.store_status
+      view_sort: result.view_sort
+      refine_error: result.refine_error
+      view_page: result.view_page
+      view_pages: result.view_pages
+      view_total: result.view_total
+      requestText: result.rescope_request
+      # A browsing turn always reopens the presentation gate: the next approval turn must show the new
+      # window before it may accept a number against it.
+      choice_stage: null
+      choice_index: null
+      choice_comparison_id: null
+      page_command: null
+      page_number: null
+      refine_request: null
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [comparison_id]
+      properties:
+        comparison_id: { type: string, minLength: 1 }
+        offers: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+        all_offers: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+        failures: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+        identity_id: { type: [string, "null"] }
+        view_page: { type: [integer, number, "null"] }
+        view_sort: { type: [string, "null"] }
+        page_command: { type: [string, "null"], enum: [next, prev, first, last, null] }
+        page_number: { type: [integer, number, "null"] }
+        refine_request: { type: [string, "null"] }
+
   choose_store_offer:
-    description: Ask for, cancel, or record the user's numbered offer selection. The deterministic resolver validates the number and copies all mutation fields.
+    description: Ask for, cancel, page through, refine, or record a numbered offer from the current comparison snapshot.
     execute: { kind: runtime, implementation: passthrough }
     output: tool.args
     parameters:
@@ -1490,17 +2517,24 @@ flowTools:
       additionalProperties: true
       required: [next]
       properties:
-        next: { type: string, enum: [ask, select, cancel] }
+        next: { type: string, enum: [ask, select, cancel, page, refine] }
         question: { type: string }
-        choice_stage: { type: [string, "null"] }
         choice_index: { type: [integer, number, "null"] }
+        choice_comparison_id: { type: [string, "null"] }
+        page_command: { type: [string, "null"], enum: [next, prev, first, last, null] }
+        page_number: { type: [integer, number, "null"] }
+        refine_request: { type: [string, "null"] }
 
   shopping_resolve_store_offer:
-    description: Validate a current ranked offer number and emit only the selected offer plus its scoped cart approval.
+    description: Validate a ranked offer and current comparison snapshot, then emit scoped mutation approvals.
     execute: { kind: remote, tool: AX_resolve_store_offer, timeoutMs: 30000 }
     input:
       offers: tool.args.offers
       choice_index: tool.args.choice_index
+      choice_comparison_id: tool.args.choice_comparison_id
+      comparison_id: tool.args.comparison_id
+      identity_id: tool.args.identity_id
+      choice_stage: tool.args.choice_stage
       quantity: tool.args.quantity
     output:
       next: result.next
@@ -1513,19 +2547,28 @@ flowTools:
       quantity: result.quantity
       expected_unit_price: result.expected_unit_price
       expected_currency: result.expected_currency
+      expected_identity_model: result.expected_identity_model
       approved_total_base: result.approved_total_base
+      identity_id: result.identity_id
+      comparison_id: result.comparison_id
+      identity_approval: result.identity_approval
+      comparison_approval: result.comparison_approval
       cart_approval: result.cart_approval
     parameters:
       type: object
       additionalProperties: false
-      required: [offers, choice_index]
+      required: [offers, choice_index, choice_comparison_id, comparison_id, identity_id, choice_stage]
       properties:
         offers: { type: array, items: { type: object, additionalProperties: true } }
         choice_index: { type: [integer, number] }
+        choice_comparison_id: { type: [string, "null"] }
+        comparison_id: { type: string, minLength: 1 }
+        identity_id: { type: string, minLength: 1 }
+        choice_stage: { type: string, enum: [asked] }
         quantity: { type: [integer, number] }
 
   shopping_open_selected_store:
-    description: Re-entrantly open the deterministically selected store before running its guarded cart adapter.
+    description: Re-entrantly open the deterministically selected store before the guarded cart adapter.
     execute: { kind: remote, tool: AX_open_site, timeoutMs: 30000 }
     input:
       site: tool.args.site
@@ -1537,10 +2580,10 @@ flowTools:
       additionalProperties: false
       required: [site]
       properties:
-        site: { type: string, enum: [amazon, ebay] }
+        site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
 
   shopping_add_selected_store_offer:
-    description: Revalidate and add the explicitly selected Amazon or eBay offer to its cart. Never checks out or places an order.
+    description: Revalidate product identity and price, then add only the explicitly selected current offer. Never checks out or orders.
     execute: { kind: remote, tool: AX_add_store_product_to_cart, timeoutMs: 120000 }
     input:
       site: tool.args.site
@@ -1548,29 +2591,41 @@ flowTools:
       quantity: tool.args.quantity
       expected_unit_price: tool.args.expected_unit_price
       expected_currency: tool.args.expected_currency
+      expected_identity_model: tool.args.expected_identity_model
+      identity_id: tool.args.identity_id
+      comparison_id: tool.args.comparison_id
+      identity_approval: tool.args.identity_approval
+      comparison_approval: tool.args.comparison_approval
       cart_approval: tool.args.cart_approval
     output:
-      next: { if: [{ var: result.added }, "done", "error"] }
-      cart_status: { if: [{ var: result.added }, "added", "failed"] }
-      cart_error: { if: [{ var: result.login_required }, "login_required", { var: result.error }] }
+      next: { if: [{ var: result.pending }, "navigating", { if: [{ var: result.added }, "done", "error"] }] }
+      cart_status: { if: [{ var: result.pending }, "navigating", { if: [{ var: result.added }, "added", "failed"] }] }
+      cart_error: { if: [{ var: result.pending }, "navigation_pending", { if: [{ var: result.login_required }, "login_required", { var: result.error }] }] }
       cart_confirmation: result.confirmation
       cart_url: result.cart_url
     effect: mutation
     consent: required
     idempotent: true
-    require: { cart_approval: user_selected_compared_offer }
+    require:
+      cart_approval: user_selected_compared_offer
+      identity_approval: locked_product_identity
+      comparison_approval: current_comparison
     parameters:
       type: object
       additionalProperties: false
-      required: [site, product_id, cart_approval]
+      required: [site, product_id, identity_id, comparison_id, identity_approval, comparison_approval, cart_approval]
       properties:
-        site: { type: string, enum: [amazon, ebay] }
+        site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
         product_id: { type: string, minLength: 1 }
         quantity: { type: [integer, number] }
         expected_unit_price: { type: [number, "null"] }
         expected_currency: { type: [string, "null"] }
+        expected_identity_model: { type: [string, "null"] }
+        identity_id: { type: string, minLength: 1 }
+        comparison_id: { type: string, minLength: 1 }
+        identity_approval: { type: string, enum: [locked_product_identity] }
+        comparison_approval: { type: string, enum: [current_comparison] }
         cart_approval: { type: string, enum: [user_selected_compared_offer] }
-
   decide:
     description: Select configured intent flows and initial runtime state for the config-runtime planner.
     parameters:
@@ -1871,6 +2926,7 @@ flowTools:
       lua: |
         local function clean(v)
           if v == nil then return nil end
+
           local lower = string.lower(tostring(v))
           if lower == "null" or lower == "none" or lower == "unknown" or lower == "n/a" then return nil end
           return v
@@ -1956,7 +3012,7 @@ flowTools:
       additionalProperties: true
       required: [next]
       properties:
-        next: { type: string, enum: [ask, proceed, refine] }
+        next: { type: string, enum: [ask, proceed, refine, cancel] }
         question: { type: string }
         refine_stage: { type: [string, "null"] }
         quote_confirm_stage: { type: [string, "null"] }
@@ -2170,6 +3226,7 @@ flowTools:
       properties:
         product_id: { type: string }
         quantity: { type: [integer, number, string] }
+
 
   refine_products:
     description: Refine the searched products for the current item — ask the user which product / how to narrow, or (after they answer) record the chosen product to add, or skip. The LLM ranks/filters the candidates; this tool captures the decision.
@@ -2471,6 +3528,7 @@ flowTools:
           local pro = name
           local url = candidate.url
           if type(url) == "string" and string.match(url, "^https?://") then
+
             pro = {
               text = name,
               action = { type = "link", url = url, target = "_blank" },
@@ -2663,33 +3721,70 @@ flowTools:
         quote_submit_message: { type: [string, "null"] }
         quote_submit_error: { type: [string, "null"] }
 
-  refine_candidates:
-    description: Refine the searched pros — ask the user for a filter/sort criterion, or (after they answer) record the shortlist of matching pros and ask to confirm, or finish once the user approves. The LLM ranks/filters the candidates; this tool captures the decision.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
+  cancel_quote_request:
+    description: Record that the user declined or cancelled the quote request. Nothing is searched, opened, or sent.
+    execute: { kind: runtime, implementation: passthrough }
+    output:
+      next: cancel
     parameters:
       type: object
-      additionalProperties: true
-      required: [next]
+      additionalProperties: false
       properties:
-        next: { type: string, enum: [ask, done] }
-        question: { type: string }
-        refine_stage: { type: string }
-        refine_selected:
-          type: array
-          items:
-            type: object
-            additionalProperties: true
-            properties:
-              service_id: { type: string }
-              name: { type: string }
-              url: { type: string }
-              rating: { type: [number, string, "null"] }
-              price_text: { type: [string, "null"] }
-              why: { type: string }
-        message: { type: string }
+        reason: { type: [string, "null"] }
+
+  detect_cancellation:
+    description: Decide whether the latest message is a standalone refusal rather than a request.
+    execute: { kind: remote, tool: AX_detect_cancellation, timeoutMs: 15000 }
+    input:
+      text: tool.args.requestText
+    output:
+      next: result.next
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        requestText: { type: [string, "null"] }
+
+  browse_service_candidates:
+    description: Rank, filter, window, and select searched Thumbtack pros deterministically from the site data.
+    execute: { kind: remote, tool: AX_browse_service_candidates, timeoutMs: 30000 }
+    input:
+      request_text: tool.args.requestText
+      candidates: tool.args.candidates
+      refine_request: tool.args.refine_request
+      page_command: tool.args.page_command
+      page_number: tool.args.page_number
+      choice_numbers: tool.args.choice_numbers
+      page: tool.args.view_page
+    output:
+      next: result.next
+      shortlist: result.shortlist
+      question: result.question
+      shortlist_text: result.shortlist_text
+      refine_selected: result.refine_selected
+      refine_error: result.refine_error
+      view_page: result.view_page
+      view_pages: result.view_pages
+      view_total: result.view_total
+      refine_stage: criteria
+      page_command: null
+      page_number: null
+      choice_numbers: null
+      # The active criterion must survive the turn: clearing it made the next selection resolve against
+      # the default ranking, so numbers from a sorted window picked different pros.
+      refine_request: result.refine_request
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [candidates]
+      properties:
+        requestText: { type: [string, "null"] }
+        candidates: { type: [array, "null"], items: { type: object, additionalProperties: true } }
+        refine_request: { type: [string, "null"] }
+        page_command: { type: [string, "null"], enum: [next, prev, first, last, null] }
+        page_number: { type: [integer, number, "null"] }
+        choice_numbers: { type: [string, "null"] }
+        view_page: { type: [integer, number, "null"] }
 
   select_pros:
     description: Replace the candidate list with the user-approved shortlist (refine_selected) and reset the quote loop index. No LLM, no navigation.

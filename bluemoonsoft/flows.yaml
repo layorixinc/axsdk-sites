@@ -1,18 +1,13 @@
 # BlueMoonSoft site flow overlay.
 #
 # Loaded ONLY while on bluemoonsoft.com (store key `:bluemoonsoft`), deep-merged onto the base
-# `_common/flows.yaml` (see AGENTS.md §3 / siteclientflows). Three effects:
+# `_common/flows.yaml` (see AGENTS.md §3 / siteclientflows). The config-runtime replaces a
+# `flows.<flowId>` override as a whole, so this layer owns a complete `bluemoonsoft` flow rather
+# than patching base nodes. Every node keeps its exact inputSelector here.
 #
-#  1. Site-aware routing (omit the site name on-site): provides the `current_site` context (empty in
-#     the base) so the planner's CURRENT SITE rule classifies bare on-topic requests as bluemoonsoft —
-#     e.g. on the news page "유튜브 보여줘" needs no "블루문소프트" prefix. `router.defaultIntent:
-#     bluemoonsoft` reinforces this in the fixed router. Off-domain the overlay is not loaded, so the
-#     base `current_site` ("") and `defaultIntent` (request_service_quote) apply unchanged.
-#  2. Sitemap navigation: refines the `bluemoonsoft` flow's `resolve` / `go_page` nodes with the real
-#     sitemap-driven prompts (the `_common` bases are compile-safe dummies).
-#
-# Never redefine `router.routes` here (arrays replace on merge, dropping the base routes) — only the
-# scalar `defaultIntent` is overridden; `mode` and `routes` are kept from the base.
+# The overlay supplies the site-aware current_site context and the real sitemap-driven resolve /
+# go_page prompts. It never redefines router.routes: arrays replace on merge, while the scalar
+# defaultIntent safely overrides the base default.
 extends: app
 contexts:
   current_site: |-
@@ -24,9 +19,57 @@ router:
   defaultIntent: bluemoonsoft
 flows:
   bluemoonsoft:
+    goal: Help the user explore BlueMoonSoft (company info, DOCURAY / products, security modules, news, customers) by navigating bluemoonsoft.com to the page that satisfies the request, resolved from the site sitemap. Never fills or submits forms.
+    state:
+      site: bluemoonsoft
+      requestText: null
+      sitemap_hits: null
     nodes:
+      enter:
+        kind: action
+        run: open_site
+        inputSelector:
+          - site
+        next:
+          search: assist
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      assist:
+        kind: action_unit
+        description: On arrival, route to sitemap navigation when the request already names a target page/topic, otherwise announce arrival and ask what the user needs.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - requestText
+        allowedTools: [assist_decide]
+        prompt: |-
+          You are the BlueMoonSoft assistant, now on bluemoonsoft.com. One tool: assist_decide.
+          Look at the user's request (requestText / the latest message):
+          - If it names ANY specific BlueMoonSoft page, section, product, service, or topic to view (e.g. 회사 정보/about, 다큐레이/DOCURAY, 랜섬제로/ransomware, 보안 모듈/security modules, 새소식/news, 유튜브·영상/videos, 고객사/reference, 특허/patent, 오시는 길/contact, 견적 문의 — or any similar concrete target) → call assist_decide(next="navigate").
+          - Only if the message is generic with NO concrete target (e.g. just "블루문소프트", "홈 열어줘", "도와줘") → call assist_decide(next="ask", question="블루문소프트에서 무엇을 도와드릴까요? (회사 소개, 제품/다큐레이, 보안 모듈, 새소식, 유튜브, 견적 문의 등)"). Ask in the user's language.
+        next:
+          navigate: resolve
+          ask: assist
+          error: error
+        fallback: { invalidNext: ask, exhaustedNext: ask }
       resolve:
+        kind: action_unit
         description: Resolve the BlueMoonSoft page for the request from the live site sitemap (bluemoonsoft/sitemap.md).
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - requestText
+        allowedTools: [sitemap_search]
         prompt: |-
           You are on bluemoonsoft.com. Find the BlueMoonSoft page that best satisfies the user's
           request (requestText), using the site sitemap. Call sitemap_search EXACTLY ONCE with a
@@ -42,11 +85,40 @@ flows:
             - 특허/인증/patent                  → "특허|인증|patent"
             - 오시는 길/주소/연락처/contact        → "오시는|주소|연락처|contact"
             - 견적/문의/도입 상담/quote            → "견적|문의|상담|contact"
+        next:
+          go: go_page
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
       go_page:
+        kind: action_unit
         description: Navigate to the BlueMoonSoft page path that best matches the request, chosen from the sitemap hits.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - requestText
+          - sitemap_hits
+        allowedTools: [navigate_page]
         prompt: |-
           You are on bluemoonsoft.com. `sitemap_hits` holds sitemap lines, each ending in a path —
           e.g. "- **다큐레이 / DocuRay**: /front/main#modal/docuray". Pick the SINGLE path that best
           matches the user's request (requestText) and call navigate_page(link=<that path>). Prefer
           the most specific match; if several fit, choose the primary page. If nothing matches, call
           navigate_page(link="/front/main"). Navigation only — never fill or submit a form.
+        next:
+          go: served
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+      served:
+        kind: terminal
+        inputSelector: []
+        respond: |-
+          Reply in the user's language: confirm you moved to the BlueMoonSoft page that matches the user's request, and invite them to ask for anything else (another page, product, or info). Do not invent page contents.
+      error:
+        kind: terminal
+        inputSelector: []
+        respond: 블루문소프트에서 원하는 페이지를 찾지 못했어요. 무엇을 찾으시는지 다시 알려주세요.

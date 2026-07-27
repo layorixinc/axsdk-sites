@@ -1,0 +1,133 @@
+import assert from 'node:assert/strict';
+import test, { after } from 'node:test';
+
+import { loadLuaModules } from './harness.mjs';
+
+const lua = loadLuaModules([
+  '_common/scripts/00_base.lua',
+  '_common/scripts/44_pagination.lua',
+  '_common/scripts/45_offer_view.lua',
+  '_common/scripts/50_commerce.lua',
+]);
+after(() => lua.close());
+
+// Korean storefronts title the same product without the English brand or the category word. Requiring
+// every query token silently emptied those stores: `Logitech M185 mouse` matched none of the three SSG
+// listings below while `Logitech M185` matched all three. Relevance therefore anchors on what identifies
+// the product (model code + brand) and scores the rest.
+const KOREAN_LISTINGS = [
+  { product_id: 'k1', name: '로지텍정품 M185 무선 광 마우스 그레이', price: 100, currency: 'USD', shipping_cost: 0 },
+  { product_id: 'k2', name: '로지텍코리아 공식 로지텍 M185 무선마우스', price: 101, currency: 'USD', shipping_cost: 0 },
+  { product_id: 'k3', name: '[SSG]로지텍 M185 실버', price: 102, currency: 'USD', shipping_cost: 0 },
+];
+
+function comparison(candidates, query, options = {}) {
+  const kept = lua.call('AX_COMMERCE.normalize_candidates', 'ssg', candidates, 1, query, { purpose: 'comparison', ...options });
+  // An empty Lua table arrives as {} — the documented array/object ambiguity, not a result shape.
+  return Array.isArray(kept) ? kept : [];
+}
+
+// ── anchors decide, descriptors only score ────────────────────────────────────
+
+test('a descriptive English query still reaches Korean listings', () => {
+  for (const query of ['Logitech M185 mouse', 'Logitech M185 wireless mouse', 'Logitech M185']) {
+    const kept = comparison(KOREAN_LISTINGS, query, { identity_model: 'M185', identity_brand: 'Logitech' });
+    assert.equal(kept.length, 3, `${query} kept ${kept.length}`);
+  }
+});
+
+test('a listing of a different model is still refused', () => {
+  const kept = comparison(
+    [...KOREAN_LISTINGS, { product_id: 'other', name: '로지텍 M170 무선마우스', price: 90, currency: 'USD', shipping_cost: 0 }],
+    'Logitech M185 mouse',
+    { identity_model: 'M185', identity_brand: 'Logitech' },
+  );
+  assert.deepEqual(kept.map((entry) => entry.product_id).sort(), ['k1', 'k2', 'k3']);
+});
+
+test('a listing of another brand is refused even when the model code collides', () => {
+  const kept = comparison(
+    [{ product_id: 'x', name: '샤오미 M185 무선마우스', price: 50, currency: 'USD', shipping_cost: 0 }],
+    'Logitech M185',
+    { identity_model: 'M185', identity_brand: 'Logitech' },
+  );
+  assert.equal(kept.length, 0);
+});
+
+test('every kept candidate is labelled exact or partial', () => {
+  const kept = comparison(
+    [
+      { product_id: 'full', name: 'Logitech M185 wireless mouse', price: 100, currency: 'USD', shipping_cost: 0 },
+      ...KOREAN_LISTINGS,
+    ],
+    'Logitech M185 wireless mouse',
+    { identity_brand: 'Logitech' },
+  );
+
+  const byId = Object.fromEntries(kept.map((entry) => [entry.product_id, entry]));
+  assert.equal(byId.full.match_level, 'exact');
+  assert.equal(byId.k1.match_level, 'partial');
+  assert.ok(Array.isArray(byId.k1.match_missing) || typeof byId.k1.match_missing === 'string');
+});
+
+test('exact matches are kept ahead of partial ones when the per-store cap bites', () => {
+  const candidates = [
+    ...KOREAN_LISTINGS,
+    { product_id: 'full', name: 'Logitech M185 wireless mouse black', price: 103, currency: 'USD', shipping_cost: 0 },
+  ];
+  const kept = comparison(candidates, 'Logitech M185 wireless mouse', { identity_brand: 'Logitech' });
+
+  assert.equal(kept.length, 3, 'the per-store cap still applies');
+  assert.equal(kept[0].product_id, 'full', 'an exact title must not be pushed out by partials');
+});
+
+test('a query with no model code keeps the strict all-token rule', () => {
+  // Without an anchor there is nothing to be confident about, so a loose match would let a keyboard
+  // through on a mouse comparison.
+  const candidates = [
+    { product_id: 'mouse', name: '로지텍 무선 마우스', price: 10, currency: 'USD', shipping_cost: 0 },
+    { product_id: 'keyboard', name: '로지텍 무선 키보드', price: 20, currency: 'USD', shipping_cost: 0 },
+  ];
+  const kept = comparison(candidates, '로지텍 무선 마우스');
+  assert.deepEqual(kept.map((entry) => entry.product_id), ['mouse']);
+});
+
+test('the model anchor tolerates the spacing and case storefronts use', () => {
+  const candidates = [
+    { product_id: 'a', name: '로지텍 m185 무선마우스', price: 10, currency: 'USD', shipping_cost: 0 },
+    { product_id: 'b', name: '로지텍 M-185 무선마우스', price: 11, currency: 'USD', shipping_cost: 0 },
+    { product_id: 'c', name: '로지텍 M185r 무선마우스', price: 12, currency: 'USD', shipping_cost: 0 },
+  ];
+  const kept = comparison(candidates, 'Logitech M185', { identity_model: 'M185', identity_brand: 'Logitech' });
+  const ids = kept.map((entry) => entry.product_id);
+
+  assert.ok(ids.includes('a'), 'lowercase model code must match');
+  assert.ok(ids.includes('b'), 'a hyphenated model code must match');
+  assert.ok(!ids.includes('c'), 'a longer model code is a different product');
+});
+
+// ── the window tells the user which rows are only similar ─────────────────────
+
+test('a partial match is marked in the rendered window', () => {
+  const ranked = lua.call('AX_rank_store_offers', {
+    identity_id: 'id-1',
+    failures: [],
+    verified_offers: [
+      {
+        site: 'ssg', product_id: 'k1', name: '로지텍정품 M185 무선 광 마우스', price: 19400, currency: 'KRW',
+        shipping_cost: 0, base_currency: 'USD', total_base: 13.2, total_for_quantity: 19400, cost_complete: true,
+        identity_id: 'id-1', match_level: 'partial',
+      },
+      {
+        site: 'amazon', product_id: 'a1', name: 'Logitech M185 Wireless Mouse', price: 13.95, currency: 'USD',
+        shipping_cost: 0, base_currency: 'USD', total_base: 13.95, total_for_quantity: 13.95, cost_complete: true,
+        identity_id: 'id-1', match_level: 'exact',
+      },
+    ],
+  });
+
+  const partialLine = ranked.comparison_text.split('\n').find((line) => line.includes('로지텍정품'));
+  const exactLine = ranked.comparison_text.split('\n').find((line) => line.includes('Logitech M185 Wireless'));
+  assert.match(partialLine, /유사/);
+  assert.doesNotMatch(exactLine, /유사/);
+});

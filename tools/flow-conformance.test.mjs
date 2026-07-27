@@ -48,8 +48,225 @@ test('production mutations use the current mutation contract', () => {
   assertMutation(common.flowTools?.delete_memory, 'delete_memory');
   assertMutation(common.flowTools?.shopping_add_to_cart, 'shopping_add_to_cart');
   assertMutation(common.flowTools?.shopping_add_selected_store_offer, 'shopping_add_selected_store_offer');
-  assert.deepEqual(common.flowTools.shopping_add_selected_store_offer.require, { cart_approval: 'user_selected_compared_offer' });
+  assert.deepEqual(common.flowTools.shopping_add_selected_store_offer.require, {
+    cart_approval: 'user_selected_compared_offer',
+    identity_approval: 'locked_product_identity',
+    comparison_approval: 'current_comparison',
+  });
   assertMutation(common.flowTools?.submit_quote, 'submit_quote');
+});
+
+test('thumbtack shortlisting ranks from site data, never from the model', () => {
+  // The refinement loop is deterministic end to end. With a model node inside it, the same criterion was
+  // re-sent on every pass (four rounds in one live turn) because the model kept seeing the user's
+  // unchanged message; the browser now reads the reply itself and pauses on the rendered window.
+  const commonFlow = parseFlow('_common/flows.yaml');
+  const quote = commonFlow.flows.request_service_quote;
+  assert.equal(quote.nodes.present_results.next.refine, 'browse_candidates');
+  assert.equal(quote.nodes.browse_candidates.kind, 'action_contract');
+  assert.equal(quote.nodes.browse_candidates.next.ask, 'browse_candidates', 'the browser must pause on its own window');
+  assert.equal(quote.nodes.browse_candidates.next.done, 'prepare_refined_table');
+  assert.equal(quote.nodes.browse_candidates.next.cancel, 'all_done');
+  assert.ok(quote.nodes.browse_candidates.inputSelector.includes('requestText'));
+  assert.equal(quote.nodes.refine_search, undefined, 'the model node in the refinement loop is gone');
+  assert.equal(commonFlow.flowTools.refine_candidates, undefined);
+  assert.equal(quote.nodes.confirm_quote.next.refine, 'browse_candidates');
+  assert.equal(quote.nodes.quotes_done.next.more, 'browse_candidates');
+  assert.equal(commonFlow.flowTools.browse_service_candidates.input.request_text, 'tool.args.requestText');
+  assert.equal(commonFlow.flowTools.browse_service_candidates.output.question, 'result.question');
+  // Live: a window sorted by reviews was shown, the user picked 1 and 2, and the selection resolved
+  // against the DEFAULT ranking because the criterion had been cleared — they got #4 and #5.
+  assert.equal(commonFlow.flowTools.browse_service_candidates.output.refine_request, 'result.refine_request',
+    'the active criterion must survive the turn that renders it');
+  assert.notEqual(commonFlow.flowTools.browse_service_candidates.output.view_page, null);
+
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows?.request_service_quote;
+  const nodes = flow.nodes;
+
+  // The searched pool must not reach a model node in the refinement or approval path. (`quotes_done`
+  // does select `candidates`, but by then `select_pros` has replaced it with the approved shortlist.)
+  assert.ok(!(nodes.confirm_quote.inputSelector || []).includes('candidates'),
+    'the approval gate must not receive the searched pro list');
+  assert.equal(nodes.select_pros.next.pick, 'pick_quote');
+  assert.equal(common.flowTools.browse_service_candidates.execute.tool, 'AX_browse_service_candidates');
+  assert.equal(common.flowTools.browse_service_candidates.output.refine_selected, 'result.refine_selected');
+  assert.equal(common.flowTools.browse_service_candidates.output.shortlist_text, 'result.shortlist_text');
+  for (const key of ['shortlist_text', 'view_page', 'view_pages', 'view_total', 'choice_numbers']) {
+    assert.ok(Object.hasOwn(flow.state, key), `quote flow state must include ${key}`);
+  }
+});
+
+test('multi-store shopping discovers and locks product identity before ranking', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows?.shopping_multi_store_total_cost;
+  assert.ok(flow, 'shopping_multi_store_total_cost must exist');
+  const nodes = flow.nodes;
+
+  assert.equal(nodes.collect_request.next.done, 'prepare_identity');
+  assert.equal(nodes.prepare_identity.id, 'shopping_prepare_product_identity');
+  assert.equal(nodes.prepare_identity.next.discover, 'discover_products');
+  assert.equal(nodes.prepare_identity.next.lock, 'lock_requested_identity');
+  assert.equal(nodes.discover_products.id, 'shopping_discover_products');
+  assert.equal(nodes.discover_products.next.done, 'build_product_options');
+  assert.equal(nodes.build_product_options.id, 'shopping_build_product_options');
+  assert.equal(nodes.build_product_options.next.choose, 'choose_product');
+  assert.deepEqual(nodes.choose_product.allowedTools, ['choose_product_identity']);
+  assert.equal(nodes.choose_product.next.select, 'resolve_product');
+  assert.equal(nodes.resolve_product.id, 'shopping_resolve_product_option');
+  assert.equal(nodes.resolve_product.next.lock, 'search_stores');
+  assert.equal(nodes.choose_product.messagePolicy?.currentUserText, 'active_node_only');
+  assert.equal(nodes.choose_offer.messagePolicy?.currentUserText, 'active_node_only');
+  assert.equal(nodes.search_stores.next.done, 'verify_offers');
+  assert.equal(nodes.verify_offers.id, 'shopping_verify_product_offers');
+  assert.equal(nodes.verify_offers.next.done, 'normalize_rank');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search.next.navigating, 'search_after_navigation');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search.next.done, 'normalize');
+  assert.equal(nodes.normalize_rank.next.done, 'choose_offer');
+  assert.deepEqual(nodes.choose_offer.allowedTools, ['present_store_offers', 'choose_store_offer']);
+  assert.ok(!nodes.choose_offer.inputSelector.includes('comparison_text'));
+  assert.ok(!nodes.choose_offer.inputSelector.includes('offers'), 'offer approval must not inject the full ranked-offer payload into the model prompt');
+  assert.ok(!nodes.choose_offer.inputSelector.includes('ambiguous_offers'));
+  assert.ok(!nodes.choose_offer.inputSelector.includes('excluded_offers'));
+  assert.equal(nodes.choose_offer.next.ask, 'choose_offer');
+  assert.equal(common.flowTools.present_store_offers.execute.tool, 'AX_present_store_offers');
+  assert.equal(common.flowTools.present_store_offers.output.question, 'result.question');
+  assert.equal(common.flowTools.shopping_present_store_offers, undefined);
+  assert.equal(Object.hasOwn(common.flowTools.choose_store_offer.parameters.properties, 'choice_stage'), false);
+
+  // Browsing a comparison stays inside the two approved tools: paging and refinement travel as
+  // `choose_store_offer` branches into one deterministic node, so no extra tool can reach the approval
+  // turn and no offer payload is injected into the prompt.
+  assert.deepEqual(
+    common.flowTools.choose_store_offer.parameters.properties.next.enum,
+    ['ask', 'select', 'cancel', 'page', 'refine'],
+  );
+  for (const key of ['page_command', 'page_number', 'refine_request']) {
+    assert.ok(Object.hasOwn(common.flowTools.choose_store_offer.parameters.properties, key), `choose_store_offer must accept ${key}`);
+  }
+  assert.equal(nodes.choose_offer.next.page, 'browse_offers');
+  assert.equal(nodes.choose_offer.next.refine, 'browse_offers');
+  assert.equal(nodes.browse_offers.id, 'shopping_refine_store_offers');
+  assert.equal(nodes.browse_offers.next.ask, 'choose_offer');
+  assert.equal(nodes.browse_offers.next.research, 'collect_request');
+  assert.ok(nodes.browse_offers.inputSelector.includes('offers'),
+    'the deterministic browsing node reads the listing from state; only the model prompt must stay free of it');
+  assert.equal(common.flowTools.shopping_refine_store_offers.input.offers, 'tool.args.offers');
+  assert.equal(common.flowTools.shopping_refine_store_offers.output.all_offers, 'result.all_offers');
+  assert.equal(common.flowTools.shopping_refine_store_offers.execute.tool, 'AX_refine_store_offers');
+  assert.equal(common.flowTools.shopping_refine_store_offers.output.question, 'result.question');
+  assert.equal(common.flowTools.shopping_refine_store_offers.output.comparison_id, 'result.comparison_id');
+  // A browsing turn must reopen the presentation gate, otherwise the next approval turn would accept a
+  // number against a window the user never saw.
+  assert.equal(common.flowTools.shopping_refine_store_offers.output.choice_stage, null);
+  for (const key of ['view_page', 'view_pages', 'view_total']) {
+    assert.ok(Object.hasOwn(flow.state, key), `flow state must include ${key}`);
+  }
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_after_navigation.next.done, 'normalize');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_after_navigation.next.navigating, 'search_after_navigation_retry');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_after_navigation_retry.next.done, 'normalize');
+  assert.equal(nodes.add_selected_offer.next.navigating, 'add_selected_offer_after_navigation');
+  assert.equal(nodes.add_selected_offer_after_navigation.next.navigating, 'confirm_selected_offer_after_navigation');
+  assert.equal(nodes.confirm_selected_offer_after_navigation.next.done, 'report_cart');
+  assert.deepEqual(common.flowTools.shopping_search_one_store.output.next.if.slice(-2), ['navigating', 'done']);
+  assert.equal(common.flows.shopping_search_one_store.nodes.normalize.id, 'shopping_normalize_store_result');
+  // A store search reads up to its page budget: normalize hands each page to the collector, which either
+  // asks for one more page or completes the worker. Collapsing this back to normalize -> complete would
+  // silently cap every store at its first result page again.
+  assert.equal(common.flows.shopping_search_one_store.nodes.normalize.next.done, 'collect');
+  assert.equal(common.flows.shopping_search_one_store.nodes.collect.id, 'shopping_collect_store_page');
+  assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.more, 'search_next_page');
+  assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.done, 'complete');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.navigating, 'search_next_page_after_navigation');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.done, 'normalize');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page_after_navigation.next.navigating, 'normalize');
+  assert.equal(common.flowTools.shopping_collect_store_page.execute.tool, 'AX_collect_store_page');
+  assert.equal(common.flowTools.shopping_collect_store_page.output.collected, 'result.collected');
+  assert.equal(common.flowTools.shopping_collect_store_page.output.page, 'result.page');
+  assert.equal(common.flowTools.shopping_collect_store_page.output.store_result, 'result.store_result');
+  assert.equal(common.flowTools.shopping_search_one_store.input.page, 'tool.args.page');
+  for (const key of ['page', 'collected']) {
+    assert.ok(Object.hasOwn(common.flows.shopping_search_one_store.state, key), `worker state must include ${key}`);
+  }
+  assert.equal(common.flowTools.shopping_search_one_store.execute.tool, 'AX_search_product');
+  assert.equal(common.flowTools.shopping_normalize_store_result.execute.tool, 'AX_normalize_store_product_result');
+  assert.ok(common.flowTools.shopping_discover_products.execute.task.budget.maxRemoteCalls >= 5);
+  assert.ok(common.flowTools.shopping_search_stores.execute.task.budget.maxRemoteCalls >= 5);
+
+  for (const key of ['identity_status', 'product_options', 'options_version', 'identity_id', 'identity_fingerprint', 'comparison_id']) {
+    assert.ok(Object.hasOwn(flow.state, key), `flow state must include ${key}`);
+  }
+
+  for (const tool of [
+    'shopping_prepare_product_identity',
+    'shopping_discover_products',
+    'shopping_build_product_options',
+    'choose_product_identity',
+    'shopping_resolve_product_option',
+    'shopping_verify_product_offers',
+  ]) {
+    assert.ok(common.flowTools?.[tool], `${tool} flowTool must exist`);
+  }
+});
+
+// A model that keeps answering the same way, or a tool that keeps returning the same error, used to burn
+// the whole step budget in silence: one live turn spent 176s repeating choose_offer -> browse_offers
+// seven times and told the user nothing. Every LLM node must have a way out that the user can see.
+function assertStallGuard(flow, flowName, nodeName) {
+  const node = flow.nodes[nodeName];
+  const guard = node.fallback || {};
+  assert.ok(guard.maxStalledSteps >= 1 && guard.maxStalledSteps <= 3,
+    `${flowName}.${nodeName}.fallback.maxStalledSteps must be 1-3, got ${guard.maxStalledSteps}`);
+  assert.ok(guard.stalledNext, `${flowName}.${nodeName}.fallback.stalledNext must be set`);
+  const target = node.next?.[guard.stalledNext];
+  assert.ok(target, `${flowName}.${nodeName}.next must declare ${guard.stalledNext}`);
+  assert.notEqual(target, nodeName, `${flowName}.${nodeName} must not stall into itself`);
+}
+
+test('every model-driven node can exit a stall into something the user sees', () => {
+  const common = parseFlow('_common/flows.yaml');
+  for (const flowName of ['shopping_multi_store_total_cost', 'request_service_quote']) {
+    const flow = common.flows[flowName];
+    const llmNodes = Object.entries(flow.nodes)
+      .filter(([, node]) => node.kind === 'action_unit')
+      .map(([name]) => name);
+    assert.ok(llmNodes.length > 0, `${flowName} must have model nodes`);
+    for (const nodeName of llmNodes) assertStallGuard(flow, flowName, nodeName);
+  }
+});
+
+test('a lost comparison ends in an explanation, never a retry loop', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+
+  assert.equal(flow.nodes.browse_offers.next.error, 'comparison_lost');
+  const terminal = flow.nodes.comparison_lost;
+  assert.equal(terminal.kind, 'terminal');
+  assert.match(terminal.respond, /장바구니|cart/, 'the recovery message must state that nothing was bought');
+  assert.ok(terminal.respond.length > 40, 'the recovery message must tell the user what to do next');
+});
+
+test('store outcomes reach the user, not just the log', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+
+  assert.ok(Object.hasOwn(flow.state, 'store_status'));
+  assert.equal(common.flowTools.shopping_rank_store_offers.output.store_status, 'result.store_status');
+  assert.equal(common.flowTools.shopping_rank_store_offers.output.all_offers, 'result.all_offers');
+  // The approval prompt may see the one-line status (it is short and actionable) but still never the offers.
+  assert.ok(flow.nodes.choose_offer.inputSelector.includes('store_status'));
+  assert.ok(!flow.nodes.choose_offer.inputSelector.includes('offers'));
+  for (const terminalName of ['no_results', 'report_cart']) {
+    assert.ok(flow.nodes[terminalName].inputSelector.includes('store_status'),
+      `${terminalName} must be able to report which stores failed`);
+  }
+});
+
+test('the user is told a multi-store search takes time before it starts', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const prompt = common.flows.shopping_multi_store_total_cost.nodes.collect_request.prompt;
+  assert.match(prompt, /분|minute/, 'the clarifying question must set the duration expectation');
+  assert.match(prompt, /검색|search/);
 });
 
 test('task research names the current canonical and SDK reference flows', () => {
@@ -73,4 +290,69 @@ test('shared v1 fixtures encode compiler mutation acceptance and rejection', () 
 
 test('compatibility record is present', () => {
   assert.equal(existsSync(new URL('FLOW_CONFORMANCE.md', root)), true);
+});
+
+test('the approval node cannot narrate work it did not do', () => {
+  // A live turn answered "무료배송만 보여주었습니다" through next="ask" while the listing was untouched.
+  // Only the deterministic tools change the list, so the prompt has to forbid claiming otherwise.
+  const common = parseFlow('_common/flows.yaml');
+  const prompt = common.flows.shopping_multi_store_total_cost.nodes.choose_offer.prompt;
+
+  assert.match(prompt, /next="ask" NEVER performs anything/);
+  assert.match(prompt, /next="refine" or next="page"/);
+  assert.match(prompt, /never restate,\s*\n?\s*summarize, or re-order the offers/i);
+});
+
+test('the user can decline at the quote approval gate', () => {
+  // Live: "아니요, 견적 요청은 취소할게요" at the approval gate came back as "out of scope" — the gate had
+  // no cancel branch at all, so a refusal had nowhere to go. Saying no to a mutation must always work.
+  const common = parseFlow('_common/flows.yaml');
+  const quote = common.flows.request_service_quote;
+
+  assert.equal(quote.nodes.confirm_quote.next.cancel, 'quote_cancelled');
+  // The router may restart the flow instead of resuming it, so the entry itself has to recognise a
+  // refusal — otherwise "취소할게요" is answered with "which service do you want?".
+  assert.equal(quote.nodes.entry_guard.id, 'detect_cancellation');
+  assert.equal(quote.nodes.entry_guard.next.cancel, 'quote_cancelled');
+  assert.equal(quote.nodes.entry_guard.next.continue, 'collect_request');
+  // The guard only runs on a fresh entry; a flow already parked on the collection question must accept a
+  // refusal too (live: a greeting had parked it there, and "취소할게요" was answered with another question).
+  assert.equal(quote.nodes.collect_request.next.cancel, 'quote_cancelled');
+  const collectTools = quote.nodes.collect_request.allowedTools.map((entry) => (typeof entry === 'string' ? entry : entry.tool));
+  assert.ok(collectTools.includes('cancel_quote_request'));
+  assert.equal(common.flowTools.cancel_quote_request.output.next, 'cancel');
+  assert.equal(common.flowTools.detect_cancellation.execute.tool, 'AX_detect_cancellation');
+  assert.deepEqual(common.flowTools.confirm_quote_decision.parameters.properties.next.enum,
+    ['ask', 'proceed', 'refine', 'cancel']);
+  assert.match(quote.nodes.confirm_quote.prompt, /cancel/);
+  const terminal = quote.nodes.quote_cancelled;
+  assert.equal(terminal.kind, 'terminal');
+  assert.match(terminal.respond, /견적|quote/);
+  // The planner must keep a refusal inside the flow rather than treating it as a new topic.
+  assert.match(common.planner.prompt, /취소|declin|cancel/);
+});
+
+test('a shortlist reply reaches the deterministic browser verbatim', () => {
+  // The browser reads the user's reply from state.requestText. On a follow-up turn the planner must copy
+  // it there: without the rule the criterion never arrived and the window silently kept the old ranking.
+  const common = parseFlow('_common/flows.yaml');
+  const prompt = common.planner.prompt;
+
+  assert.match(prompt, /request_service_quote/);
+  assert.match(prompt, /browse_candidates/);
+  assert.match(prompt, /state\.requestText/);
+});
+
+test('browsing a live comparison resumes it instead of starting a new search', () => {
+  // "3만원 이하만 보여줘" while a comparison was on screen was routed as a NEW shopping request: the
+  // planner replaced the active flow and the user lost the list they were looking at.
+  const common = parseFlow('_common/flows.yaml');
+  const prompt = common.planner.prompt;
+
+  assert.match(prompt, /shopping_multi_store_total_cost/);
+  assert.match(prompt, /continue_current/);
+  assert.match(prompt, /무료배송만|3만원 이하|평점 높은 순/, 'the planner must recognise refinement phrasing');
+  assert.match(prompt, /다음|이전/, 'the planner must recognise paging phrasing');
+  assert.ok(common.planner.inputSelector.includes('active.activeNode'));
+  assert.ok(common.planner.inputSelector.includes('active.intent'));
 });

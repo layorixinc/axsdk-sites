@@ -111,7 +111,9 @@ test('a second page is merged into one store result and re-ranked by page order'
   assert.equal(second.store_result.pages_read, 2);
 });
 
-test('the merged store result never exceeds the per-store offer cap', () => {
+test('the merged store result carries the screening set, not the comparison cap', () => {
+  // The comparison keeps three offers per store, but WHICH three is a relevance judgement, so the pages
+  // hand the wider recall set forward and the cap is applied after the verdict.
   const first = lua.call('AX_collect_store_page', {
     collected: null,
     page: 1,
@@ -124,11 +126,30 @@ test('the merged store result never exceeds the per-store offer cap', () => {
     page: 2,
     remote_used: 4,
     remote_budget: 10,
-    result: { site: 'coupang', query: 'M185', candidates: [candidate('c'), candidate('d'), candidate('e')], has_more: true, page: 2 },
+    result: {
+      site: 'coupang', query: 'M185', has_more: true, page: 2,
+      candidates: [candidate('c'), candidate('d'), candidate('e'), candidate('f'), candidate('g')],
+    },
   });
 
-  assert.ok(second.store_result.candidates.length <= 3, `got ${second.store_result.candidates.length}`);
-  assert.deepEqual(second.store_result.candidates.map((entry) => entry.product_id), ['a', 'b', 'c']);
+  assert.equal(second.store_result.candidates.length, 6, 'the screening set is six per store');
+  assert.deepEqual(second.store_result.candidates.map((entry) => entry.product_id), ['a', 'b', 'c', 'd', 'e', 'f']);
+});
+
+test('a full first page still stops the paging at the comparison target', () => {
+  // Widening what is CARRIED must not widen what is CHASED: three relevant rows already answer the store.
+  const step = lua.call('AX_collect_store_page', {
+    collected: null,
+    page: 1,
+    remote_used: 2,
+    remote_budget: 10,
+    result: {
+      site: 'coupang', query: 'M185', has_more: true, page: 1,
+      candidates: [candidate('a'), candidate('b'), candidate('c')],
+    },
+  });
+  assert.equal(step.next, 'done');
+  assert.equal(step.stop_reason, 'target_reached');
 });
 
 test('a store error keeps whatever earlier pages produced and stops', () => {
@@ -224,4 +245,162 @@ test('a blocked store stops even when it claims another page exists', () => {
   assert.equal(collected.next, 'done');
   assert.equal(collected.stop_reason, 'store_error');
   assert.equal(collected.store_result.error, 'security_verification_required');
+});
+
+// ── a page full of cards nobody could price ──────────────────────────────────
+// Walmart renders its search tiles with the price arriving separately, and it A/B tests which automation
+// id carries it. A read that finds 24 cards and prices none of them is not "this store has no such
+// product" — reporting it as no_results made the store look absent from the comparison.
+
+test('cards found but none priced is reported as an unreadable price', () => {
+  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 24, 0), 'price_unavailable');
+  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 1, 0), 'price_unavailable');
+});
+
+test('no cards at all is still no_results', () => {
+  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 0, 0), 'no_results');
+});
+
+test('any usable row means the read succeeded', () => {
+  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 24, 3) ?? null, null);
+  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 3, 3) ?? null, null);
+});
+
+// ── a price written twice in one string ──────────────────────────────────────
+// Walmart's tile prints the screen-reader form glued to the real one: "Now$4999current price Now
+// $49.99". Reading the first amount turned $49.99 into 4999 — a 100x error that would have poisoned
+// every comparison it entered.
+
+test('a price text holding both forms is read as the decimal one', () => {
+  const cases = [
+    ['Now$4999current price Now $49.99', 49.99],
+    ['$2612current price $26.12', 26.12],
+    ['current price $7.00', 7],
+  ];
+  for (const [text, expected] of cases) {
+    const amount = lua.call('AX_STOREFRONT.parse_candidate_price', text, 'USD', 'decimal_preferred');
+    assert.equal(amount, expected, `${text} -> ${amount}`);
+  }
+});
+
+test('two prices with no marker saying which is current are refused', () => {
+  // "$1452Options from $9.88" could be $14.52 or $9.88 and nothing in the text decides. A wrong price in
+  // a price comparison is worse than a missing row, which the store status already explains.
+  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '$1452Options from $9.88', 'USD', 'decimal_preferred') ?? null, null);
+});
+
+test('a price with no decimal form at all is still read', () => {
+  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '$120', 'USD', 'decimal_preferred'), 120);
+  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', 'US$1,299', 'USD', 'decimal_preferred'), 1299);
+});
+
+test('the other strategies are untouched', () => {
+  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '19,400원 무료배송 970원 적립', 'KRW', 'last_before_shipping'), 19400);
+  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '$49.99', 'USD'), 49.99);
+});
+
+// ── retrying a store with the other wording ──────────────────────────────────
+// A store that answers the first wording never pays for another navigation. One that returns nothing
+// relevant is asked again in the other wordings the model wrote for this request, before the loop gives
+// up on it. The wordings travel with the request; nothing here decides what a word means.
+
+function collect(args) {
+  return lua.call('AX_collect_store_page', {
+    remote_used: 2, remote_budget: 10, purpose: 'comparison',
+    context: { identity_brand: 'Logitech', identity_model: 'M185', query_variants: '로지텍 M185|로지텍 무선마우스 M185' },
+    ...args,
+  });
+}
+
+test('a store that found nothing is retried with the next wording', () => {
+  const step = collect({
+    page: 1, site: 'ssg', query: 'Logitech M185',
+    result: { site: 'ssg', query: 'Logitech M185', error: 'no_results', candidates: [], has_more: false },
+  });
+
+  assert.equal(step.next, 'retry_query');
+  assert.equal(step.page, 1, 'a new wording starts at page one');
+  assert.ok(/로지텍/.test(step.query), `expected the korean wording, got ${step.query}`);
+});
+
+test('a store that found something is never retried', () => {
+  const step = collect({
+    page: 1, site: 'ssg', query: 'Logitech M185',
+    result: { site: 'ssg', query: 'Logitech M185', candidates: [candidate('a')], has_more: false },
+  });
+  assert.equal(step.next, 'done');
+  assert.equal(step.stop_reason, 'no_more_pages');
+});
+
+test('the wordings run out and the loop stops', () => {
+  const step = collect({
+    page: 1, site: 'ssg', query: '로지텍 무선마우스 M185',
+    tried_queries: 'Logitech M185|로지텍 M185|로지텍 무선마우스 M185',
+    result: { site: 'ssg', query: '로지텍 무선마우스 M185', error: 'no_results', candidates: [], has_more: false },
+  });
+  assert.equal(step.next, 'done');
+  assert.equal(step.stop_reason, 'queries_exhausted');
+});
+
+test('a store is tried once when the model offered no other wording', () => {
+  const step = lua.call('AX_collect_store_page', {
+    remote_used: 2, remote_budget: 10, purpose: 'comparison',
+    page: 1, site: 'ssg', query: 'Logitech M185',
+    context: { identity_brand: 'Logitech', identity_model: 'M185' },
+    result: { site: 'ssg', query: 'Logitech M185', error: 'no_results', candidates: [], has_more: false },
+  });
+  assert.equal(step.next, 'done');
+  assert.equal(step.stop_reason, 'queries_exhausted');
+});
+
+test('a blocked store is not retried with other wordings', () => {
+  const step = collect({
+    page: 1, site: 'ssg', query: 'Logitech M185',
+    result: { site: 'ssg', error: 'security_verification_required', candidates: [] },
+  });
+  assert.equal(step.next, 'done');
+  assert.equal(step.stop_reason, 'store_error');
+});
+
+test('every attempted wording is recorded so none is repeated', () => {
+  const step = collect({
+    page: 1, site: 'ssg', query: 'Logitech M185',
+    result: { site: 'ssg', query: 'Logitech M185', error: 'no_results', candidates: [], has_more: false },
+  });
+  assert.match(step.tried_queries, /Logitech M185/);
+  assert.ok(!step.tried_queries.includes(step.query), 'the next wording has not been tried yet');
+});
+
+// ── the product id a card actually carries ───────────────────────────────────
+// 11st stopped putting a product link on its result cards: every anchor is an ad-server redirect and the
+// id survives only inside a data attribute (`data-log-body` = {"content_type":"PRODUCT","content_no":"917…"}).
+// Reading it needs two things this module owns: patterns must be tried against the ATTRIBUTE, not only
+// the href, and an attribute no pattern understands must not be mined for a first token — every card
+// would then answer "content_type", one id would swallow the whole grid, and 24 listings would arrive as
+// one row. That is exactly what a live search returned: 156 cards on the page, 1 candidate read.
+
+const ELEVEN = {
+  product_id_patterns: ['/products/(%d+)', '"content_no"%s*:%s*"(%d+)"'],
+};
+
+test('the id is read out of the attribute the card carries it in', () => {
+  const attr = '{"content_type":"PRODUCT","content_no":"9170626560","link_url":"https://action.adoffice.11st.co.kr/act"}';
+  assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, null, attr), '9170626560');
+});
+
+test('a href still wins when the card has a real product link', () => {
+  assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, 'https://www.11st.co.kr/products/1234567890', null), '1234567890');
+});
+
+test('a plain id attribute is still taken as the id', () => {
+  assert.equal(lua.call('AX_STOREFRONT.product_id_from', { product_id_patterns: [] }, null, 'v1-4455'), 'v1-4455');
+});
+
+test('a structured attribute nobody can parse yields no id at all', () => {
+  const attr = '{"content_type":"PRODUCT","other_no":"9170626560"}';
+  assert.equal(lua.call('AX_STOREFRONT.product_id_from', { product_id_patterns: ['/products/(%d+)'] }, null, attr), null);
+});
+
+test('a card with neither a link nor a usable attribute is dropped, not guessed', () => {
+  assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, 'https://action.adoffice.11st.co.kr/act/click/v1/landing?clickData=abc', null), null);
 });

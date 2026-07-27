@@ -75,7 +75,9 @@ function V.format_amount(value, currency)
   local numeric = tonumber(value)
   local code = trim(currency)
   if code == "" then code = "USD" end
-  if not numeric then return "unknown" end
+  -- The window is Korean end to end; an English placeholder mid-row reads as a broken row, not a
+  -- missing number (a live 11st comparison showed "총 unknown").
+  if not numeric then return "미확인" end
   if code == "KRW" or code == "JPY" then
     local rounded = string.format("%d", math.floor(numeric + 0.5))
     local grouped = rounded:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", "")
@@ -313,7 +315,9 @@ function V.resolve_page(current, command, number, pages)
   return page
 end
 
-local function clip(value, limit)
+--- Trims markup/whitespace and shortens to `limit` bytes without splitting a UTF-8 sequence. Every text
+--- surface built from live listing text goes through here, not only the comparison window.
+function V.clip(value, limit)
   local text = trim(value)
   if limit and #text > limit then
     -- Byte-safe clip: never split a UTF-8 sequence.
@@ -325,6 +329,7 @@ local function clip(value, limit)
   end
   return text
 end
+local clip = V.clip
 
 -- Field degradation order. Level 0 is the full line; each later level drops the least decision-relevant
 -- field first and only then shortens the product name. Number, site, and total always survive, and the

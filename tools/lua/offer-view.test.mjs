@@ -249,3 +249,10 @@ test('a bare number compares against the offer own price', () => {
   const kept = lua.call('AX_OFFER_VIEW.apply', mixed(), { filters: parsed.filters });
   assert.deepEqual(kept.map((entry) => entry.product_id).sort(), ['krw-cheap', 'usd-cheap', 'usd-dear']);
 });
+
+test('an amount nobody could read says so in the window language', () => {
+  // A live 11st comparison rendered "총 unknown": the window is Korean end to end (상품가/배송비/무료배송),
+  // and an English placeholder in the middle of it reads like a broken row rather than a missing number.
+  assert.equal(lua.call('AX_OFFER_VIEW.format_amount', null, 'KRW'), '미확인');
+  assert.equal(lua.call('AX_OFFER_VIEW.format_amount', 19400, 'KRW'), 'KRW 19,400');
+});

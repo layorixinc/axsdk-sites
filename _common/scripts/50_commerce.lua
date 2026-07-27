@@ -9,6 +9,13 @@ C.adapters = C.adapters or {}
 C.BASE_CURRENCY = "USD"
 C.FX_URL = "https://api.frankfurter.dev/v1/latest"
 C.MAX_OFFERS_PER_SITE = 3
+-- Relevance is decided in two stages. The deterministic pass keeps what COULD be the product, up to
+-- SCREEN_LIMIT_PER_SITE per store, because token rules cannot tell a mouse from a mouse pad; one model
+-- call then says which rows actually are it, and MAX_OFFERS_PER_SITE is applied to what survives. The
+-- screening list is the only part of this that ever enters a prompt, so it is bounded too.
+C.SCREEN_LIMIT_PER_SITE = 6
+C.SCREEN_MAX_ROWS = 30
+C.SCREEN_TITLE_CHARS = 70
 -- Ranking keeps more offers than one window shows: browsing pages through them, and only the window is
 -- ever rendered into a prompt. The cap bounds the serialized flow state, not the model's context.
 C.MAX_RANKED_OFFERS = 15
@@ -199,14 +206,47 @@ local RELEVANCE_STOP_WORDS = {
   ["new"] = true
 }
 
-local RELEVANCE_ALIASES = {
-  logitech = { "로지텍" },
-  ["로지텍"] = { "logitech" },
-  -- Spelling variants of the same loanword, not category synonyms: Korean storefronts write running
-  -- shoes both ways and a query in one spelling must still match a title in the other.
-  ["러닝화"] = { "런닝화" },
-  ["런닝화"] = { "러닝화" }
-}
+-- Equivalent wordings are NOT kept in this file. A storefront lists the same product in its own
+-- language, and which words mean the same thing is a language question, so the model that read the
+-- request supplies them: `query_variants` for the search box and `brand_aliases` for matching. This
+-- module only splits, orders, bounds, and applies them.
+local function split_list(value)
+  local items = array()
+  local seen = {}
+  for piece in tostring(value or ""):gmatch("[^|\n]+") do
+    local text = non_empty(piece)
+    if text and not seen[lower(text)] then
+      seen[lower(text)] = true
+      items[#items + 1] = text
+    end
+  end
+  return items
+end
+
+--- The wordings one store search may try, in order: the caller's own query first, then the model's
+--- alternatives as it ranked them. Each extra wording costs a navigation, so the list is bounded like
+--- the page budget, and a request with no alternatives is searched exactly once.
+function C.query_variants(options)
+  options = options or {}
+  local ordered = array()
+  local seen = {}
+  local function add(value)
+    local text = non_empty(value)
+    if not text or seen[lower(text)] then return end
+    seen[lower(text)] = true
+    ordered[#ordered + 1] = text
+  end
+
+  local base = non_empty(options.query)
+  if not base then return ordered end
+  add(base)
+
+  local supplied = split_list(options.query_variants)
+  for index = 1, #supplied do add(supplied[index]) end
+
+  while #ordered > 3 do table.remove(ordered) end
+  return ordered
+end
 
 local function relevance_tokens(value)
   local tokens = array()
@@ -217,12 +257,34 @@ local function relevance_tokens(value)
   return tokens
 end
 
-local function token_matches(haystack, token)
+--- A token matches when it appears, or when another spelling of THAT token does. The alias set names one
+--- thing written several ways ("Logitech|로지텍"), so it substitutes only for a token that is one of those
+--- spellings: applying it to every token let the brand's presence vouch for descriptor words too, and a
+--- listing that never mentioned "ergonomic" was reported as an exact match for it.
+local function token_matches(haystack, token, aliases)
   if haystack:find(token, 1, true) then return true end
-  for index = 1, #((RELEVANCE_ALIASES[token]) or {}) do
-    if haystack:find(RELEVANCE_ALIASES[token][index], 1, true) then return true end
+  local count = #(aliases or {})
+  if count == 0 then return false end
+
+  local in_set = false
+  for index = 1, count do
+    if aliases[index] == token then in_set = true break end
+  end
+  if not in_set then return false end
+
+  for index = 1, count do
+    local alias = aliases[index]
+    if alias ~= "" and alias ~= token and haystack:find(alias, 1, true) then return true end
   end
   return false
+end
+
+--- Every spelling of the brand the model listed, lowercased, or an empty list when it listed none.
+local function brand_alias_list(options)
+  local raw = split_list(options and options.brand_aliases)
+  local out = array()
+  for index = 1, #raw do out[#out + 1] = lower(raw[index]) end
+  return out
 end
 
 -- Korean storefronts return the brand as a separate field ("brandName": "아디다스") and leave it out of
@@ -245,12 +307,13 @@ function C.relevance_haystack(candidate)
   return lower(table.concat(parts, " "))
 end
 
-local function matches_query(candidate, query)
+local function matches_query(candidate, query, options)
+  local aliases = brand_alias_list(options)
   local haystack = C.relevance_haystack(candidate)
   local tokens = relevance_tokens(query)
   if #tokens == 0 then return false end
   for index = 1, #tokens do
-    if not token_matches(haystack, tokens[index]) then return false end
+    if not token_matches(haystack, tokens[index], aliases) then return false end
   end
   return true
 end
@@ -324,21 +387,22 @@ end
 
 --- nil when the candidate is a different product; otherwise how close the wording is.
 function C.relevance_match(candidate, query, options)
+  local aliases = brand_alias_list(options)
   local haystack = C.relevance_haystack(candidate)
   local anchors = C.relevance_anchors(query, options)
   if not anchors.model then
-    return matches_query(candidate, query) and { level = "exact", missing = "" } or nil
+    return matches_query(candidate, query, options) and { level = "exact", missing = "" } or nil
   end
 
   if not anchor_present(haystack, normalize_anchor(anchors.model)) then return nil end
   for index = 1, #anchors.brand_tokens do
-    if not token_matches(haystack, anchors.brand_tokens[index]) then return nil end
+    if not token_matches(haystack, anchors.brand_tokens[index], aliases) then return nil end
   end
 
   local missing = array()
   for index = 1, #anchors.descriptors do
     local token = anchors.descriptors[index]
-    if not token_matches(haystack, token) then missing[#missing + 1] = token end
+    if not token_matches(haystack, token, aliases) then missing[#missing + 1] = token end
   end
   return {
     level = #missing == 0 and "exact" or "partial",
@@ -347,6 +411,7 @@ function C.relevance_match(candidate, query, options)
 end
 
 local function matches_discovery_query(candidate, query, options)
+  local aliases = brand_alias_list(options)
   local haystack = C.relevance_haystack(candidate)
   local tokens = relevance_tokens(query)
   if #tokens == 0 then return false end
@@ -357,7 +422,7 @@ local function matches_discovery_query(candidate, query, options)
   for index = 1, #brand_tokens do
     local token = brand_tokens[index]
     brand_keys[token] = true
-    if not token_matches(haystack, token) then return false end
+    if not token_matches(haystack, token, aliases) then return false end
   end
 
   local considered = 0
@@ -365,7 +430,7 @@ local function matches_discovery_query(candidate, query, options)
     local token = tokens[index]
     if not brand_keys[token] then
       considered = considered + 1
-      if token_matches(haystack, token) then return true end
+      if token_matches(haystack, token, aliases) then return true end
     end
   end
   return #brand_tokens > 0 and considered == 0
@@ -374,7 +439,7 @@ end
 function C.normalize_candidates(site, candidates, quantity, query, options)
   local qty = math.max(1, math.floor(tonumber(quantity) or 1))
   local purpose = non_empty(options and options.purpose) or "comparison"
-  local limit = purpose == "discovery" and C.MAX_DISCOVERY_RESULTS or C.MAX_OFFERS_PER_SITE
+  local limit = purpose == "discovery" and C.MAX_DISCOVERY_RESULTS or C.SCREEN_LIMIT_PER_SITE
   local identity_model = non_empty(options and options.identity_model)
   local identity_brand = non_empty(options and options.identity_brand)
   local comparison_query = query
@@ -1001,6 +1066,7 @@ local STORE_ERRORS = {
   login_required = "로그인 필요 (브라우저에서 로그인 후 다시 시도)",
   access_denied = "접근 차단됨",
   no_results = "검색 결과 없음",
+  price_unavailable = "상품은 있었지만 가격을 읽지 못했습니다 (사이트 표시 방식 변경)",
   store_search_failed = "검색 실패",
   search_unsupported = "이 사이트는 검색을 지원하지 않음",
   pagination_unsupported = "추가 페이지를 지원하지 않음",
@@ -1222,10 +1288,13 @@ end
 
 --- The lines a window carries beyond the offers: store outcomes and rows folded for an unknown total.
 --- `answered` is the WHOLE listing, not the visible page: a folded row still proves its store answered.
-function C.comparison_notes(failures, answered, hidden_incomplete)
+function C.comparison_notes(failures, answered, hidden_incomplete, screened_out)
   local notes = array()
   local status = C.store_status(failures, answered)
   if status.text ~= "" then notes[#notes + 1] = status.text end
+  if (tonumber(screened_out) or 0) > 0 then
+    notes[#notes + 1] = string.format("관련 없는 %d건은 제외했습니다", math.floor(tonumber(screened_out)))
+  end
   if (hidden_incomplete or 0) > 0 then
     notes[#notes + 1] = string.format(
       "배송비/총액 미확인 %d건은 접었습니다 — '미확인 포함'이라고 하면 함께 보여드려요",
@@ -1252,6 +1321,121 @@ function C.comparison_answer(snapshot, extras)
   }
   for key, value in pairs(extras or {}) do answer[key] = value end
   return answer
+end
+
+-- Reading the worker records once, in one place: every store loop below needs the same unwrap.
+local function each_store_result(results, visit)
+  for index = 1, #(results or {}) do
+    local record = results[index] or {}
+    local value = record.status == "completed" and worker_value(record) or nil
+    visit(record, value, non_empty(value and value.site) or non_empty(record.key) or tostring(index), index)
+  end
+end
+
+--- The numbered list of live listings a model screens for relevance, and the ids that back the numbers.
+--- Stores take turns so a store listed later is not starved by one that returned more rows.
+function AX_build_offer_screening(args)
+  args = args or {}
+  local per_store = array()
+  each_store_result(args.store_results or args.results, function(_, value, site)
+    if value then per_store[#per_store + 1] = { site = site, candidates = value.candidates or {} } end
+  end)
+
+  local lines = array()
+  local ids = array()
+  local rank = 1
+  while #ids < C.SCREEN_MAX_ROWS do
+    local placed = false
+    for store_index = 1, #per_store do
+      local store = per_store[store_index]
+      local candidate = store.candidates[rank]
+      if candidate and #ids < C.SCREEN_MAX_ROWS then
+        local product_id = non_empty(candidate.product_id or candidate.id)
+        local name = non_empty(candidate.name or candidate.title)
+        if product_id and name then
+          placed = true
+          ids[#ids + 1] = store.site .. ":" .. product_id
+          local title = AX_OFFER_VIEW.clip(name, C.SCREEN_TITLE_CHARS)
+          local price = money(candidate.price, candidate.currency)
+          local line = string.format("%d. [%s] %s", #ids, store.site, title)
+          if price ~= "" then line = line .. " · " .. price end
+          if candidate.match_level == "partial" then line = line .. " · (유사)" end
+          lines[#lines + 1] = line
+        end
+      end
+    end
+    if not placed then break end
+    rank = rank + 1
+  end
+
+  return {
+    next = #ids > 0 and "judge" or "empty",
+    screening_text = table.concat(lines, "\n"),
+    screening_ids = table.concat(ids, "|"),
+    screening_count = #ids
+  }
+end
+
+--- Applies a screening verdict: keeps the numbered rows, caps each store at the comparison limit, and
+--- reports what was removed. An ABSENT verdict (a stalled or failed screening node) keeps everything —
+--- losing precision costs a wrong row in the window, losing the offers costs the whole turn.
+function AX_apply_offer_screening(args)
+  args = args or {}
+  local ids = split_list(args.screening_ids)
+  local verdict = args.keep
+  local skipped = verdict == nil
+
+  local keep = {}
+  local kept_total = 0
+  if not skipped then
+    for number in tostring(verdict):gmatch("%d+") do
+      local position = tonumber(number)
+      local id = position and ids[position]
+      if id and not keep[id] then
+        keep[id] = true
+        kept_total = kept_total + 1
+      end
+    end
+  end
+
+  local results = array()
+  local screened_out = 0
+  local capped_out = 0
+  local remaining = 0
+  each_store_result(args.store_results or args.results, function(record, value, site)
+    if not value then
+      results[#results + 1] = record
+      return
+    end
+    local candidates = value.candidates or {}
+    local kept = array()
+    for index = 1, #candidates do
+      local candidate = candidates[index]
+      local product_id = non_empty(candidate.product_id or candidate.id)
+      local wanted = skipped or (product_id and keep[site .. ":" .. product_id]) or false
+      if not wanted then
+        screened_out = screened_out + 1
+      elseif #kept >= C.MAX_OFFERS_PER_SITE then
+        capped_out = capped_out + 1
+      else
+        kept[#kept + 1] = candidate
+      end
+    end
+    remaining = remaining + #kept
+    local store_result = copy_table(value)
+    store_result.candidates = kept
+    store_result.total_count = #kept
+    results[#results + 1] = { key = non_empty(record.key) or site, status = "completed", value = { store_result = store_result } }
+  end)
+
+  return {
+    next = remaining > 0 and "done" or "empty",
+    store_results = results,
+    screened_out = screened_out,
+    capped_out = capped_out,
+    screened_kept = remaining,
+    screening_skipped = skipped or nil
+  }
 end
 
 function AX_rank_store_offers(args)
@@ -1317,7 +1501,7 @@ function AX_rank_store_offers(args)
   local visible = #complete > 0 and complete or offers
   local hidden_incomplete = #complete > 0 and incomplete or 0
 
-  local notes, status = C.comparison_notes(failures, offers, hidden_incomplete)
+  local notes, status = C.comparison_notes(failures, offers, hidden_incomplete, args.screened_out)
   local snapshot = C.open_comparison(visible, required_identity, {
     all_offers = offers,
     filters = hidden_incomplete > 0 and { complete_cost_only = true } or {},
@@ -1342,6 +1526,7 @@ function AX_rank_store_offers(args)
     stores_failed = status.failed_count,
     incomplete_count = incomplete,
     complete_count = #complete,
+    screened_out = tonumber(args.screened_out) or 0,
     base_currency = C.BASE_CURRENCY,
     display_currency = snapshot.display_currency or C.BASE_CURRENCY,
     view_page = snapshot.view.page,
@@ -1570,7 +1755,7 @@ function C.normalize_search_result(args, raw_result)
       candidate.brand_source = non_empty(candidate.brand_source) or "metadata"
     else
       local requested_brand = non_empty(args.requested_brand or args.identity_brand)
-      if requested_brand and matches_query({ name = candidate.name }, requested_brand) then
+      if requested_brand and matches_query({ name = candidate.name }, requested_brand, args) then
         candidate.brand = requested_brand
         candidate.brand_source = "title"
       else
@@ -1607,7 +1792,11 @@ function AX_collect_store_page(args)
 
   local merged = AX_PAGINATION.merge_pages(args.collected, result.candidates or {}, page)
   local collected = array()
-  for index = 1, math.min(#merged.items, target) do collected[index] = merged.items[index] end
+  -- `target` is the paging goal (is another navigation worth it), `keep_limit` is how many rows are
+  -- carried forward for screening. Raising the goal to the wider limit would buy a second page for every
+  -- store just to fill a list the model is about to cut down.
+  local keep_limit = math.max(target, purpose == "discovery" and C.MAX_DISCOVERY_RESULTS or C.SCREEN_LIMIT_PER_SITE)
+  for index = 1, math.min(#merged.items, keep_limit) do collected[index] = merged.items[index] end
 
   -- An empty page is not a broken store: "no_results" means this page held nothing relevant, and the
   -- next page is exactly where the match tends to be. Only a wall (captcha, login, access) stops here.
@@ -1646,9 +1835,46 @@ function AX_collect_store_page(args)
     store_result.error = page_error or "no_results"
   end
 
+  -- A store that answered nothing may simply have been asked in the wrong language: a Korean store lists
+  -- "로지텍 M185" and never matches "Logitech M185". Before giving up on it, the same search is retried in
+  -- the other wordings the model wrote for this request. A store that DID answer never pays for the extra
+  -- navigation, and a blocked store is not retried at all — the wall will not move for a synonym.
+  local attempted = non_empty(args.tried_queries) or ""
+  local active_query = non_empty(args.query) or non_empty(result.query)
+  if active_query and not attempted:find(active_query, 1, true) then
+    attempted = attempted == "" and active_query or (attempted .. "|" .. active_query)
+  end
+
+  if not decision.continue and #collected == 0 and not blocking then
+    local context = args.context or {}
+    local wordings = C.query_variants({
+      query = non_empty(context.query) or active_query,
+      query_variants = non_empty(args.query_variants) or non_empty(context.query_variants)
+    })
+    for index = 1, #wordings do
+      local wording = wordings[index]
+      if not attempted:find(wording, 1, true) then
+        return {
+          next = "retry_query",
+          page = 1,
+          query = wording,
+          tried_queries = attempted,
+          stop_reason = "retry_query",
+          collected = collected,
+          collected_count = #collected,
+          store_result = store_result
+        }
+      end
+    end
+    decision = { continue = false, reason = "queries_exhausted" }
+    store_result.stop_reason = decision.reason
+  end
+
   return {
     next = decision.continue and "more" or "done",
     page = decision.continue and (page + 1) or page,
+    query = active_query,
+    tried_queries = attempted,
     stop_reason = decision.reason,
     collected = collected,
     collected_count = #collected,

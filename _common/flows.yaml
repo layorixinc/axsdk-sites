@@ -1121,6 +1121,8 @@ flows:
       product_category: null
       requested_brand: null
       requested_model: null
+      query_variants: null
+      brand_aliases: null
       hard_constraints: null
       soft_preferences: null
       identity_status: null
@@ -1149,6 +1151,12 @@ flows:
       selected_option_id: null
       selection_error: null
       store_results: null
+      screening_text: null
+      screening_ids: null
+      screening_count: null
+      screening_keep: null
+      screened_out: null
+      screening_skipped: null
       verified_offers: null
       ambiguous_offers: null
       excluded_offers: null
@@ -1203,6 +1211,8 @@ flows:
           - product_category
           - requested_brand
           - requested_model
+          - query_variants
+          - brand_aliases
           - hard_constraints
           - soft_preferences
         allowedTools: [collect_total_cost_request]
@@ -1235,10 +1245,22 @@ flows:
           - Treat "11st" and "11번가" as the 11st site, never as a quantity.
           - Never invent a brand, model, variant, quantity, retailer, or constraint.
           - Remove retailer names, comparison language, and price/shipping instructions from query.
-          - Keep the user's own wording and script. Storefront listings are matched against these terms, and a
-            Korean store lists "아디다스"/"러닝화" while an English translation matches nothing, so never
-            translate or romanize product_category, requested_brand, requested_model, or query. Copy the terms
-            the user wrote; add a translation only when the user wrote it themselves.
+          - Keep the user's own wording and script in product_category, requested_brand, requested_model and
+            query. Copy the terms the user wrote; never translate or romanize them there.
+          - With next="done" you MUST also send query_variants and brand_aliases. They are the only place a
+            translation is allowed, and leaving them out is a mistake: a storefront finds only what its own
+            listings are titled, so a Korean store returns nothing for "Logitech M185" and an English store
+            returns nothing for "로지텍 M185". Both are "|"-separated strings.
+            - query_variants: up to 3 other phrasings of the SAME product, most likely first — the other
+              language of the stores in scope, the local spelling of the brand, a common synonym for the
+              category, and the bare model code when there is one. Never a different model, capacity, colour,
+              generation, or a broader category.
+            - brand_aliases: every spelling of the ONE requested brand, including the one the user wrote.
+              Listings are matched against these, so a wrong entry admits a wrong product.
+            - For query "Logitech M185 마우스": query_variants="로지텍 M185 마우스|로지텍 M185|M185",
+              brand_aliases="Logitech|로지텍". For query "삼성 32인치 모니터": query_variants="Samsung 32 inch
+              monitor|삼성 모니터 32", brand_aliases="삼성|Samsung".
+            - Send "" only when no brand is named, or when you genuinely know no other wording.
           - Whenever you use next="ask", end the question with one short sentence in the user's language
             saying that once the sites are set you will search them one by one and that it usually takes
             about 1-2 minutes (사이트를 순서대로 검색하므로 보통 1~2분 정도 걸립니다). A multi-store search is
@@ -1299,6 +1321,8 @@ flows:
           - discovery_query
           - product_category
           - requested_brand
+          - query_variants
+          - brand_aliases
           - hard_constraints
         next:
           done: build_product_options
@@ -1412,10 +1436,96 @@ flows:
           - identity_brand
           - identity_model
           - product_category
+          - query_variants
+          - brand_aliases
           - locked_hard_constraints
         next:
+          done: screen_offers
+          partial: screen_offers
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      # Relevance in two stages. The deterministic pass decides RECALL — six rows per store that could be
+      # the product — because token rules cannot tell "M185 마우스" from "M185 마우스용 스킨". One model call
+      # then says which of those rows ARE the product, and only the survivors are capped, verified, ranked.
+      screen_offers:
+        kind: action_contract
+        id: shopping_build_offer_screening
+        description: Number every live listing across stores into one bounded list for a relevance judgement.
+        inputSelector:
+          - store_results
+          - identity_brand
+          - identity_model
+          - product_category
+        next:
+          judge: judge_relevance
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      judge_relevance:
+        kind: action_unit
+        description: Decide which listed rows are actually the requested product and drop accessories, parts, bundles, and other products.
+        model:
+          providerID: openrouter
+          modelID: openai/gpt-oss-120b
+          providerOptions:
+            openrouter:
+              provider: { sort: latency, allow_fallbacks: true }
+              reasoning: { effort: low }
+        inputSelector:
+          - screening_text
+          - screening_count
+          - product_category
+          - identity_brand
+          - identity_model
+          - locked_hard_constraints
+          - quantity
+        allowedTools: [screen_store_offers]
+        prompt: |-
+          You are the relevance gate of a price comparison. Call screen_store_offers exactly once.
+
+          screening_text is a numbered list of live listings read from the selected stores. Decide, per row,
+          whether that listing IS the product the user is comparing, and answer with the numbers to KEEP.
+
+          KEEP a row when it is the product itself, even if:
+          - it is titled in another language or spelling (a Korean store writes "로지텍 M185 무선마우스" for
+            "Logitech M185" — the same product, so keep it),
+          - the title adds colour, packaging, seller wording, or "정품"/"공식"/"Brand New",
+          - the title is shorter or longer than the request.
+
+          DROP a row when it is not that product:
+          - an accessory, part, or consumable FOR it (case, skin, cover, pad, wrist rest, cable, receiver,
+            battery, stand, cleaning kit, protective film),
+          - a different model, generation, capacity, size, or a variant that contradicts
+            locked_hard_constraints,
+          - a bundle whose main item is something else, a multi-pack when one unit was requested, or a
+            listing for a different product category entirely,
+          - a listing whose title shows it is not a product at all (a service, a coupon, an empty box).
+
+          Rules:
+          - keep is a string of row numbers, e.g. "1, 3, 7". Use only numbers that appear in
+            screening_text; never renumber, never invent a row, never describe a row that is not listed.
+          - When every row is the product, keep them all. When none is, keep is "".
+          - Judge identity ONLY. Price, shipping, store, rating, and condition are compared later and are
+            never a reason to drop a row.
+          - Do not explain the decision to the user; note is one short internal phrase or omitted.
+        next:
+          done: apply_screening
+          error: apply_screening
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
+
+      apply_screening:
+        kind: action_contract
+        id: shopping_apply_offer_screening
+        description: Keep only the judged-relevant listings, apply the per-store comparison cap, and count what was removed.
+        inputSelector:
+          - store_results
+          - screening_ids
+          - screening_keep
+        next:
           done: verify_offers
-          partial: verify_offers
           empty: no_results
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
@@ -1448,6 +1558,7 @@ flows:
           - failures
           - identity_id
           - quantity
+          - screened_out
         next:
           done: choose_offer
           partial: choose_offer
@@ -1676,10 +1787,12 @@ flows:
 
       no_results:
         kind: terminal
-        inputSelector: [failures, ambiguous_offers, excluded_offers, store_status]
+        inputSelector: [failures, ambiguous_offers, excluded_offers, store_status, screened_out]
         respond: |-
           Reply in the user's language using only Flow state. No live offer was verified as the same locked
           product identity. Summarize failures, ambiguous_offers, and excluded_offers without inventing facts.
+          When screened_out is above zero, say that listings were found but none of them was the requested
+          product itself (they were accessories or other models), and give that count.
           When a failure names security_verification_required, captcha_required, or login_required, say that the
           site asked the user to verify or sign in, and that the user must complete it in the browser before that
           store can be searched again; list the stores that did return offers separately.
@@ -1696,6 +1809,8 @@ flows:
       store_result: null
       collected: null
       page: 1
+      query: null
+      tried_queries: null
       page_stop_reason: null
     nodes:
       open:
@@ -1722,6 +1837,7 @@ flows:
           - key
           - context
           - page
+          - query
         next:
           navigating: search_after_navigation
           done: normalize
@@ -1736,6 +1852,7 @@ flows:
           - key
           - context
           - page
+          - query
         next:
           navigating: search_after_navigation_retry
           done: normalize
@@ -1750,6 +1867,7 @@ flows:
           - key
           - context
           - page
+          - query
         next:
           navigating: normalize
           done: normalize
@@ -1777,8 +1895,11 @@ flows:
           - store_result
           - collected
           - page
+          - query
+          - tried_queries
         next:
           more: search_next_page
+          retry_query: search_other_wording
           done: complete
         fallback: { invalidNext: done, exhaustedNext: done }
 
@@ -1792,6 +1913,7 @@ flows:
           - key
           - context
           - page
+          - query
         next:
           navigating: search_next_page_after_navigation
           done: normalize
@@ -1806,6 +1928,38 @@ flows:
           - key
           - context
           - page
+          - query
+        next:
+          navigating: normalize
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+
+      search_other_wording:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Search this store again in the wording its own listings use, after the previous wording found nothing.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+          - page
+          - query
+        next:
+          navigating: search_other_wording_after_navigation
+          done: normalize
+        fallback: { invalidNext: done, exhaustedNext: done }
+      search_other_wording_after_navigation:
+        kind: action_contract
+        id: shopping_search_one_store
+        description: Read the retried search once its navigation has landed.
+        inputSelector:
+          - item
+          - index
+          - key
+          - context
+          - page
+          - query
         next:
           navigating: normalize
           done: normalize
@@ -1930,6 +2084,8 @@ flowTools:
         product_category: { type: string }
         requested_brand: { type: [string, "null"] }
         requested_model: { type: [string, "null"] }
+        query_variants: { type: [string, "null"] }
+        brand_aliases: { type: [string, "null"] }
         hard_constraints: { type: [object, "null"], additionalProperties: true }
         soft_preferences: { type: [object, "null"], additionalProperties: true }
         quantity: { type: [integer, number] }
@@ -2057,9 +2213,9 @@ flowTools:
             candidates: { type: array, items: { type: object, additionalProperties: true } }
             error: { type: [string, "null"] }
         budget:
-          maxNodes: 16
+          maxNodes: 20
           maxModelCalls: 0
-          maxRemoteCalls: 10
+          maxRemoteCalls: 13
           timeoutMs: 120000
     output:
       next: result.next
@@ -2084,6 +2240,8 @@ flowTools:
         discovery_query: { type: [string, "null"] }
         product_category: { type: [string, "null"] }
         requested_brand: { type: [string, "null"] }
+        query_variants: { type: [string, "null"] }
+        brand_aliases: { type: [string, "null"] }
         hard_constraints: { type: [object, "null"], additionalProperties: true }
 
   shopping_build_product_options:
@@ -2207,9 +2365,9 @@ flowTools:
             candidates: { type: array, items: { type: object, additionalProperties: true } }
             error: { type: [string, "null"] }
         budget:
-          maxNodes: 16
+          maxNodes: 20
           maxModelCalls: 0
-          maxRemoteCalls: 10
+          maxRemoteCalls: 13
           timeoutMs: 120000
     output:
       next: result.next
@@ -2236,6 +2394,8 @@ flowTools:
         identity_brand: { type: [string, "null"] }
         identity_model: { type: [string, "null"] }
         product_category: { type: [string, "null"] }
+        query_variants: { type: [string, "null"] }
+        brand_aliases: { type: [string, "null"] }
         locked_hard_constraints: { type: [object, "null"], additionalProperties: true }
 
   shopping_open_mapped_store:
@@ -2265,7 +2425,8 @@ flowTools:
     execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
     input:
       site: tool.args.item.site
-      query: tool.args.context.query
+      # The collector may hand back the wording this store's own listings use; until then the shared query stands.
+      query: { if: [{ var: tool.args.query }, { var: tool.args.query }, { var: tool.args.context.query }] }
       quantity: tool.args.context.quantity
       purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
       requested_brand: tool.args.context.requested_brand
@@ -2306,10 +2467,16 @@ flowTools:
       result: tool.args.store_result
       collected: tool.args.collected
       page: tool.args.page
+      site: tool.args.item.site
+      query: tool.args.query
+      tried_queries: tool.args.tried_queries
+      context: tool.args.context
       purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
     output:
       next: result.next
       page: result.page
+      query: result.query
+      tried_queries: result.tried_queries
       collected: result.collected
       page_stop_reason: result.stop_reason
       store_result: result.store_result
@@ -2347,6 +2514,7 @@ flowTools:
       identity_brand: tool.args.context.identity_brand
       identity_model: tool.args.context.identity_model
       product_category: tool.args.context.product_category
+      brand_aliases: tool.args.context.brand_aliases
       hard_constraints: tool.args.context.locked_hard_constraints
       result: tool.args.store_result
     output:
@@ -2371,6 +2539,68 @@ flowTools:
             query: { type: string }
             quantity: { type: [integer, number] }
         store_result: { type: object, additionalProperties: true }
+
+  shopping_build_offer_screening:
+    description: Number every live listing across the searched stores into one bounded, id-backed list for a relevance judgement.
+    execute: { kind: remote, tool: AX_build_offer_screening, timeoutMs: 30000 }
+    input:
+      store_results: tool.args.store_results
+      identity_brand: tool.args.identity_brand
+      identity_model: tool.args.identity_model
+      product_category: tool.args.product_category
+    output:
+      next: result.next
+      screening_text: result.screening_text
+      screening_ids: result.screening_ids
+      screening_count: result.screening_count
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [store_results]
+      properties:
+        store_results: { type: array, items: { type: object, additionalProperties: true } }
+        identity_brand: { type: [string, "null"] }
+        identity_model: { type: [string, "null"] }
+        product_category: { type: [string, "null"] }
+
+  screen_store_offers:
+    description: Keep the numbered listings that are the requested product itself and drop accessories, parts, bundles, and other models.
+    execute: { kind: runtime, implementation: passthrough }
+    # The verdict must land on the key the apply step reads. Passing tool.args straight through wrote
+    # `keep`, apply read `screening_keep`, found nothing, and fell open — a live turn kept every row and
+    # reported none removed while the model had correctly rejected two bundles.
+    output:
+      next: tool.args.next
+      screening_keep: tool.args.keep
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [next, keep]
+      properties:
+        next: { type: string, enum: [done] }
+        keep: { type: string }
+        note: { type: string }
+
+  shopping_apply_offer_screening:
+    description: Keep only the judged-relevant listings, apply the per-store comparison cap, and report how many rows were removed.
+    execute: { kind: remote, tool: AX_apply_offer_screening, timeoutMs: 30000 }
+    input:
+      store_results: tool.args.store_results
+      screening_ids: tool.args.screening_ids
+      keep: tool.args.screening_keep
+    output:
+      next: result.next
+      store_results: result.store_results
+      screened_out: result.screened_out
+      screening_skipped: result.screening_skipped
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [store_results]
+      properties:
+        store_results: { type: array, items: { type: object, additionalProperties: true } }
+        screening_ids: { type: [string, "null"] }
+        screening_keep: { type: [string, "null"] }
 
   shopping_verify_product_offers:
     description: Classify live offers against the locked model and hard variants before ranking.
@@ -2410,6 +2640,7 @@ flowTools:
       failures: tool.args.failures
       identity_id: tool.args.identity_id
       quantity: tool.args.quantity
+      screened_out: tool.args.screened_out
     output:
       next: result.next
       offers: result.offers
@@ -2434,6 +2665,7 @@ flowTools:
         failures: { type: [array, "null"], items: { type: object, additionalProperties: true } }
         identity_id: { type: string, minLength: 1 }
         quantity: { type: [integer, number] }
+        screened_out: { type: [integer, number, "null"] }
 
   present_store_offers:
     description: Retrieve the exact current comparison and force a separate approval turn before selection.

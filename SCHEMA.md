@@ -978,6 +978,9 @@
         "product_category": {
           "type": "string"
         },
+        "brand_aliases": {
+          "type": "string"
+        },
         "hard_constraints": {
           "type": "object"
         },
@@ -989,7 +992,7 @@
   },
   {
     "name": "AX_collect_store_page",
-    "description": "Merge one normalized result page into a store's accumulated candidates, re-apply the per-store cap, and report whether another result page is worth a navigation.",
+    "description": "Merge one normalized result page into a store's accumulated candidates, re-apply the per-store cap, and report whether another result page — or another wording of the same search — is worth a navigation.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -1009,6 +1012,18 @@
         "page": {
           "type": "integer",
           "minimum": 1
+        },
+        "site": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "query_variants": {
+          "type": "string"
+        },
+        "tried_queries": {
+          "type": "string"
         },
         "target": {
           "type": "integer",
@@ -1032,6 +1047,59 @@
         "remote_budget": {
           "type": "integer",
           "minimum": 0
+        }
+      }
+    }
+  },
+  {
+    "name": "AX_build_offer_screening",
+    "description": "Number every live listing across the searched stores into one bounded, id-backed list so a relevance judgement can name rows without seeing the offer payload.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_results"
+      ],
+      "properties": {
+        "store_results": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "identity_brand": {
+          "type": "string"
+        },
+        "identity_model": {
+          "type": "string"
+        },
+        "product_category": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "AX_apply_offer_screening",
+    "description": "Keep only the listings a relevance judgement named, apply the per-store comparison cap to what survives, and report how many rows were removed; an absent verdict keeps every row.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_results"
+      ],
+      "properties": {
+        "store_results": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "screening_ids": {
+          "type": "string"
+        },
+        "keep": {
+          "type": "string"
         }
       }
     }

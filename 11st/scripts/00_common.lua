@@ -12,6 +12,10 @@ local CONFIG = {
   search_input_selector = 'input[type="search"]',
   result_selector = 'li.c-search-list__item, li:has(> .c-card-item)',
   result_url_selector = 'a.c-card-item__anchor[href*="/products/"]',
+  -- 11st routes every result card through its ad server, so the anchor href carries no product id; the
+  -- card's own log payload is where the id survives. Measured live: 156 cards on the page, 1 read.
+  result_id_selector = 'a.c-card-item__anchor[data-log-body]',
+  result_id_attr = 'data-log-body',
   result_title_selector = '.c-card-item__name dd, img[alt]',
   result_image_selector = 'img[alt]',
   result_price_selector = '.c-card-item__price .value, .c-card-item__lowest .value',
@@ -23,7 +27,7 @@ local CONFIG = {
   result_ready_selector = 'li.c-search-list__item, li:has(> .c-card-item)',
   search_timeout = 5000,
   default_currency = "KRW",
-  product_id_patterns = { "/products/(%d+)" },
+  product_id_patterns = { "/products/(%d+)", '"content_no"%s*:%s*"(%d+)"' },
   product_url_prefix = "https://www.11st.co.kr/products/",
   product_title_selectors = { 'h1.title' },
   product_price_selectors = { '#finalDscPrcArea .value' },

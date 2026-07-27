@@ -300,3 +300,10 @@ test('a refinement that did not apply says so in the window itself', () => {
   assert.equal(unparsed.refine_error, 'unparsed');
   assert.match(unparsed.question, /이해하지 못했|알 수 없/);
 });
+
+test('an unreadable price tells the user what actually happened', () => {
+  const status = lua.call('AX_COMMERCE.store_status', [{ site: 'walmart', error: 'price_unavailable' }], []);
+  assert.match(status.text, /월마트/);
+  assert.match(status.text, /가격/);
+  assert.doesNotMatch(status.text, /price_unavailable/, 'the raw code is not an explanation');
+});

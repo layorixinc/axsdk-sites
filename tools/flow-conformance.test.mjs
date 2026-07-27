@@ -117,7 +117,39 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(nodes.resolve_product.next.lock, 'search_stores');
   assert.equal(nodes.choose_product.messagePolicy?.currentUserText, 'active_node_only');
   assert.equal(nodes.choose_offer.messagePolicy?.currentUserText, 'active_node_only');
-  assert.equal(nodes.search_stores.next.done, 'verify_offers');
+  // Search feeds a two-stage relevance decision before anything is verified or ranked: the deterministic
+  // recall list, one model verdict on it, then the cap. Every hop is enforced because a missing one would
+  // silently restore token-only filtering (accessories in the comparison) or drop the fail-open path.
+  assert.equal(nodes.search_stores.next.done, 'screen_offers');
+  assert.equal(nodes.search_stores.next.partial, 'screen_offers');
+  assert.equal(nodes.screen_offers.id, 'shopping_build_offer_screening');
+  assert.equal(nodes.screen_offers.next.judge, 'judge_relevance');
+  assert.equal(nodes.screen_offers.next.empty, 'no_results');
+  assert.deepEqual(nodes.judge_relevance.allowedTools, ['screen_store_offers']);
+  assert.equal(nodes.judge_relevance.next.done, 'apply_screening');
+  assert.equal(nodes.apply_screening.id, 'shopping_apply_offer_screening');
+  assert.equal(nodes.apply_screening.next.done, 'verify_offers');
+  assert.equal(nodes.apply_screening.next.empty, 'no_results');
+  // Precision is worth one model call; it is never worth the whole turn. Every way the judgement can go
+  // wrong (stall, invalid answer, tool error) lands on apply_screening, which keeps every row.
+  for (const exit of ['stalledNext', 'invalidNext', 'exhaustedNext']) {
+    assert.equal(nodes.judge_relevance.fallback[exit], 'error', `${exit} must take the error branch`);
+  }
+  assert.equal(nodes.judge_relevance.next.error, 'apply_screening', 'the error branch keeps every row');
+  assert.ok(!nodes.judge_relevance.inputSelector.includes('store_results'), 'only the rendered list may enter the prompt');
+  assert.ok(nodes.judge_relevance.inputSelector.includes('screening_text'));
+  assert.match(nodes.judge_relevance.prompt, /accessory/i);
+  assert.match(nodes.judge_relevance.prompt, /never invent a row/i);
+  // The verdict must land on the key apply reads: a passthrough that wrote `keep` made every row survive
+  // while the model had rejected two of them, and the fail-open path made it look intentional.
+  assert.equal(common.flowTools.screen_store_offers.output.screening_keep, 'tool.args.keep');
+  assert.equal(common.flowTools.shopping_apply_offer_screening.input.keep, 'tool.args.screening_keep');
+  assert.equal(common.flowTools.shopping_apply_offer_screening.output.screened_out, 'result.screened_out');
+  assert.ok(nodes.normalize_rank.inputSelector.includes('screened_out'), 'the window must be able to say what was removed');
+  // Selecting a key is not passing it: every one of these tools declares additionalProperties:false, so a
+  // key missing from properties is dropped silently at the boundary and the window loses the sentence.
+  assert.ok(common.flowTools.shopping_rank_store_offers.parameters.properties.screened_out);
+  assert.equal(common.flowTools.shopping_rank_store_offers.input.screened_out, 'tool.args.screened_out');
   assert.equal(nodes.verify_offers.id, 'shopping_verify_product_offers');
   assert.equal(nodes.verify_offers.next.done, 'normalize_rank');
   assert.equal(common.flows.shopping_search_one_store.nodes.search.next.navigating, 'search_after_navigation');
@@ -181,6 +213,39 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.done, 'normalize');
   assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page_after_navigation.next.navigating, 'normalize');
   assert.equal(common.flowTools.shopping_collect_store_page.execute.tool, 'AX_collect_store_page');
+  // A store searched in the wrong language answers nothing. Before the worker gives up on it, the
+  // collector hands back another wording and the search runs again from page one. Only a store that
+  // found NOTHING pays for this, and the attempted wordings are remembered.
+  assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.retry_query, 'search_other_wording');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.navigating, 'search_other_wording_after_navigation');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.done, 'normalize');
+  assert.equal(common.flowTools.shopping_collect_store_page.output.query, 'result.query');
+  assert.equal(common.flowTools.shopping_collect_store_page.output.tried_queries, 'result.tried_queries');
+  assert.equal(common.flowTools.shopping_search_one_store.input.query.if[0].var, 'tool.args.query');
+  for (const key of ['query', 'tried_queries']) {
+    assert.ok(Object.hasOwn(common.flows.shopping_search_one_store.state, key), `worker state must include ${key}`);
+  }
+
+  // Which words mean the same product is language knowledge, so the MODEL writes them: no equivalence
+  // table exists in the Lua any more. The wordings reach every store worker through the map context, and
+  // the brand spellings reach the matcher that decides whether a listing is the requested product.
+  const collectTool = common.flowTools.collect_total_cost_request.parameters.properties;
+  assert.ok(collectTool.query_variants, 'the request must be able to carry other wordings');
+  assert.ok(collectTool.brand_aliases, 'the request must be able to carry the brand spellings');
+  const shopping = common.flows.shopping_multi_store_total_cost;
+  const collectPrompt = shopping.nodes.collect_request.prompt;
+  assert.match(collectPrompt, /query_variants/);
+  assert.match(collectPrompt, /brand_aliases/);
+  assert.match(collectPrompt, /SAME product/, 'a variant must not be allowed to name another product');
+  for (const key of ['query_variants', 'brand_aliases']) {
+    assert.ok(Object.hasOwn(shopping.state, key), `shopping state must include ${key}`);
+    assert.ok(shopping.nodes.collect_request.inputSelector.includes(key), `collect_request must see ${key}`);
+    assert.ok(shopping.nodes.search_stores.inputSelector.includes(key), `search_stores must pass ${key}`);
+    assert.ok(shopping.nodes.discover_products.inputSelector.includes(key), `discover_products must pass ${key}`);
+    assert.ok(common.flowTools.shopping_search_stores.parameters.properties[key], `search map must accept ${key}`);
+    assert.ok(common.flowTools.shopping_discover_products.parameters.properties[key], `discovery map must accept ${key}`);
+  }
+  assert.equal(common.flowTools.shopping_normalize_store_result.input.brand_aliases, 'tool.args.context.brand_aliases');
   assert.equal(common.flowTools.shopping_collect_store_page.output.collected, 'result.collected');
   assert.equal(common.flowTools.shopping_collect_store_page.output.page, 'result.page');
   assert.equal(common.flowTools.shopping_collect_store_page.output.store_result, 'result.store_result');

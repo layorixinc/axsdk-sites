@@ -27,7 +27,8 @@
 import { createInterface } from 'node:readline/promises';
 import {
   DEFAULTS, SITE_HOME, resolveOptions, ensureChrome, attachActive, listTargets,
-  openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl, syncStore, sendMessage, reloadExtension,
+  openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl, syncSitesIndex,
+  syncStore, sendMessage, reloadExtension,
 } from './harness/cdp.mjs';
 
 const USAGE = `ax — daily driver for the AXSDK live harness
@@ -170,7 +171,15 @@ async function cmdSync(options, positionals) {
   const { cdpUrl } = await ensureChrome(options, { launch: options.launch !== false });
   if (positionals[0]) await openSite(cdpUrl, options, resolveTarget(positionals[0]));
   const siteArg = (positionals[0] && !/^https?:\/\//.test(positionals[0])) ? positionals[0] : options.site;
-  return withSession(options, async session => out(await syncStore(session, { site: siteArg, build: options.build !== false })));
+  // Publish the local sites index first: an unpublished site layer has no assistant on its host, so
+  // syncStore could not attach there at all.
+  const index = await syncSitesIndex(cdpUrl, options, {
+    destination: positionals[0] ? resolveTarget(positionals[0]) : undefined,
+  });
+  return withSession(options, async session => out({
+    sitesIndex: index,
+    ...(await syncStore(session, { site: siteArg, build: options.build !== false })),
+  }));
 }
 
 async function cmdPage(session) {

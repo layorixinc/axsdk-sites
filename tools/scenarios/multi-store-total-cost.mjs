@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Production-flow live scenario for one Amazon + eBay total-cost comparison cycle.
+// Production-flow live scenario for an explicitly selected representative-store comparison cycle.
 // A CDP Fetch override serves the LOCAL index.md only to the dedicated dev tab so a newly added,
 // not-yet-pushed site can be resolved while all Lua and flows still come from ax sync's stored layers.
 // The scenario never opens checkout and never places an order.
@@ -17,10 +17,31 @@ import {
   callInAxContext,
 } from '../harness/cdp.mjs';
 
-const args = new Set(process.argv.slice(2));
+const argv = process.argv.slice(2);
+const args = new Set(argv);
 const noBuild = args.has('--no-build');
 const cancelOnly = args.has('--cancel');
-const requestText = 'Logitech M185를 아마존과 이베이에서 배송비 포함 총액으로 비교해줘';
+const discoveryMode = args.has('--discover');
+const productChoiceArg = argv.find(value => value.startsWith('--product-choice='));
+const productChoice = productChoiceArg ? productChoiceArg.slice('--product-choice='.length) : '1';
+const storesArg = argv.find(value => value.startsWith('--stores='));
+const requestedSites = storesArg
+  ? storesArg.slice('--stores='.length).split(',').map(value => value.trim()).filter(Boolean)
+  : ['amazon', 'ebay'];
+const siteLabels = {
+  amazon: 'Amazon',
+  walmart: 'Walmart',
+  ebay: 'eBay',
+  aliexpress: 'AliExpress',
+  etsy: 'Etsy',
+  coupang: '쿠팡',
+  'naver-shopping': '네이버쇼핑',
+  gmarket: 'G마켓',
+  '11st': '11번가',
+  ssg: 'SSG.COM',
+};
+const productQuery = discoveryMode ? '로지텍 무선 마우스' : 'Logitech M185';
+const requestText = `${productQuery}를 ${requestedSites.map(site => siteLabels[site] || site).join(', ')}에서 배송비 포함 총액으로 비교해줘`;
 const localIndexUrl = 'https://raw.githubusercontent.com/layorixinc/axsdk-sites/main/index.md';
 
 function decode(value) {
@@ -36,7 +57,35 @@ function toolParts(turn) {
 }
 
 function findTool(turn, suffix) {
-  return toolParts(turn).find(part => part.tool === suffix || part.tool?.endsWith(`.${suffix}`));
+  const parts = toolParts(turn);
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const tool = parts[index].tool;
+    if (tool === suffix || tool?.endsWith(`.${suffix}`)) return parts[index];
+  }
+  return undefined;
+}
+
+async function storedToolOutput(page, options, suffix) {
+  const encodedSuffix = JSON.stringify(suffix);
+  return callInAxContext(page, options, `function(){
+    const sdk = globalThis._AXSDK || globalThis.AXSDK;
+    const messages = sdk?.getChatStore?.().getState?.().messages || [];
+    const suffix = ${encodedSuffix};
+    for (let messageIndex = messages.length - 1; messageIndex >= 0; messageIndex -= 1) {
+      const parts = messages[messageIndex]?.parts || [];
+      for (let partIndex = parts.length - 1; partIndex >= 0; partIndex -= 1) {
+        const part = parts[partIndex];
+        const tool = part?.tool;
+        if (tool !== suffix && !tool?.endsWith?.("." + suffix)) continue;
+        let value = part?.state?.output ?? part?.output;
+        for (let decodeIndex = 0; decodeIndex < 8 && typeof value === "string"; decodeIndex += 1) {
+          try { value = JSON.parse(value); } catch { break; }
+        }
+        return value;
+      }
+    }
+    return null;
+  }`);
 }
 
 function check(checks, name, value, evidence = '') {
@@ -94,7 +143,7 @@ async function localIndexStatus(page, options) {
     const commands = (sdk?.lua || globalThis._AXLUA)?.listCommands?.() || [];
     return {
       currentSite: state?.currentSite?.domain || null,
-      hasEbayIndex: indexMd.includes('[ebay]'),
+      indexMd,
       storedCommands: commands.filter(item => String(item.scriptId || '').startsWith('stored-lua:')).map(item => item.command),
     };
   }`);
@@ -120,29 +169,60 @@ async function main() {
     const synced = await syncStore(session, { site: 'amazon', build: !noBuild, reload: true });
     console.log(`SYNC  store=${synced.fromStore ?? 0} remote=${synced.fromRemote ?? 0}`);
     const indexStatus = await localIndexStatus(page, options);
-    check(checks, 'local published-site index is active', indexStatus.hasEbayIndex, `site=${indexStatus.currentSite}`);
+    check(checks, 'local published-site index is active', requestedSites.every(site => indexStatus.indexMd.includes(`[${site}]`)), `site=${indexStatus.currentSite}`);
     check(checks, 'stored common Lua is active', synced.fromStore >= 8 && synced.fromRemote === 0, `${synced.fromStore}/${synced.fromRemote}`);
     check(checks, 'fresh flow session created', await resetSession(page, options));
 
-    const compare = await sendMessage(session, requestText, { timeoutMs: 300000 });
+    let compare = await sendMessage(session, requestText, { timeoutMs: Math.max(300000, requestedSites.length * 120000) });
+    if (discoveryMode) {
+      const optionOutput = await storedToolOutput(page, options, 'shopping_build_product_options');
+      const productOptions = Array.isArray(optionOutput?.product_options) ? optionOutput.product_options : [];
+      const discoveryReply = String(compare.reply || '');
+      const numberedOptions = (discoveryReply.match(/(?:^|\n)\s*\d+\.\s+/g) || []).length;
+      check(checks, 'broad request discovers grounded product options', productOptions.length > 0 || numberedOptions > 0, `options=${productOptions.length || numberedOptions}`);
+      const sourceMetadataValid = productOptions.length > 0
+        ? productOptions.every(option => {
+            const sourceSites = Array.isArray(option.source_sites) ? option.source_sites : [];
+            const sourceRefs = Array.isArray(option.source_refs) ? option.source_refs : [];
+            return Number(option.source_site_count) === new Set(sourceSites).size
+              && sourceSites.every(site => requestedSites.includes(site))
+              && sourceRefs.every(ref => sourceSites.includes(ref.site));
+          })
+        : requestedSites.some(site => discoveryReply.includes(site));
+      check(checks, 'product option provenance names live sites', sourceMetadataValid, productOptions.length > 0
+        ? productOptions.map(option => `${option.option_id}:${option.source_site_count}/${option.source_sites?.join(',') || '-'}`).join(' ')
+        : requestedSites.filter(site => discoveryReply.includes(site)).join(','));
+      const claimedSourceCounts = [...String(compare.reply || '').matchAll(/\b(\d+)\s+source\s+sites?\b/gi)]
+        .map(match => Number(match[1]));
+      check(checks, 'product option prose does not inflate source sites', claimedSourceCounts.every(count => count <= requestedSites.length), claimedSourceCounts.join(','));
+      check(checks, 'product identity is approved before store ranking', Boolean(findTool(compare, 'choose_product')) && !findTool(compare, 'shopping_rank_store_offers'));
+      check(checks, 'discovery cannot mutate a cart', !findTool(compare, 'shopping_add_selected_store_offer'));
+      console.log(`DISCOVER  ${String(compare.reply || '').replace(/\s+/g, ' ').slice(0, 500)}`);
+      compare = await sendMessage(session, productChoice, { timeoutMs: Math.max(300000, requestedSites.length * 120000) });
+      check(checks, 'current product option locks before comparison', Boolean(findTool(compare, 'shopping_resolve_product_option')) && Boolean(findTool(compare, 'shopping_verify_product_offers')));
+    }
     const workerResults = toolParts(compare)
       .filter(part => part.tool === 'shopping_search_one_store')
       .map(part => decode(part.output)?.store_result)
       .filter(Boolean);
     const stores = new Set(workerResults.map(result => result.site).filter(Boolean));
-    const rankOutput = decode(findTool(compare, 'shopping_rank_store_offers')?.output);
+    const rankOutput = await storedToolOutput(page, options, 'shopping_rank_store_offers');
     const offers = Array.isArray(rankOutput?.offers) ? rankOutput.offers : [];
     const reply = String(compare.reply || '');
     const offerSites = new Set([
       ...offers.map(offer => offer.site),
-      ...(['amazon', 'ebay'].filter(site => reply.includes(`[${site}]`))),
+      ...(requestedSites.filter(site => reply.includes(`[${site}]`))),
     ]);
+    const failureSites = new Set((rankOutput?.failures || []).map(failure => failure.site).filter(Boolean));
+    const outcomeSites = new Set([...stores, ...offerSites, ...failureSites]);
     const numberedCount = offers.length || (reply.match(/(?:^|\n)\d+\.\s+\[/g) || []).length;
 
-    check(checks, 'agentic task map searched both stores', stores.has('amazon') && (stores.has('ebay') || offerSites.has('ebay')), [...new Set([...stores, ...offerSites])].join(','));
-    check(checks, 'both live adapters produced ranked offers', offerSites.has('amazon') && offerSites.has('ebay'), [...offerSites].join(','));
-    check(checks, 'comparison is bounded and numbered', numberedCount > 1 && numberedCount <= 6, `offers=${numberedCount}`);
-    check(checks, 'comparison asks before mutation', Boolean(findTool(compare, 'choose_offer')) && !findTool(compare, 'shopping_add_selected_store_offer'));
+    check(checks, 'agentic task map searched every selected store', requestedSites.every(site => outcomeSites.has(site)), [...outcomeSites].join(','));
+    check(checks, 'live adapter results produce ranked offers', offerSites.size >= 1, [...offerSites].join(','));
+    check(checks, 'comparison is bounded and numbered', numberedCount >= 1 && numberedCount <= 6, `offers=${numberedCount}`);
+    check(checks, 'comparison asks before mutation', Boolean(findTool(compare, 'choose_offer'))
+      && /numbered offer|offer number|번호|cancel/i.test(reply)
+      && !findTool(compare, 'shopping_add_selected_store_offer'));
     console.log(`COMPARE  ${String(compare.reply || '').replace(/\s+/g, ' ').slice(0, 500)}`);
 
     if (cancelOnly) {

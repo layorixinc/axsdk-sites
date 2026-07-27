@@ -31,16 +31,33 @@ export const DEFAULTS = {
 
 // host substring -> published site slug (a top-level dir with scripts/). Mirrors index.md.
 const SITE_HOSTS = [
+  ['search.11st.co.kr', '11st'],
+  ['11st.co.kr', '11st'],
+  ['aliexpress.com', 'aliexpress'],
   ['thumbtack.com', 'thumbtack'],
   ['amazon.', 'amazon'],
+  ['coupang.com', 'coupang'],
   ['ebay.com', 'ebay'],
+  ['etsy.com', 'etsy'],
+  ['gmarket.co.kr', 'gmarket'],
+  ['shopping.naver.com', 'naver-shopping'],
+  ['ssg.com', 'ssg'],
+  ['walmart.com', 'walmart'],
   ['bluemoonsoft.com', 'bluemoonsoft'],
 ];
 
 export const SITE_HOME = {
+  '11st': 'https://www.11st.co.kr/',
+  aliexpress: 'https://www.aliexpress.com/',
   thumbtack: 'https://www.thumbtack.com/',
   amazon: 'https://www.amazon.com/',
+  coupang: 'https://www.coupang.com/',
   ebay: 'https://www.ebay.com/',
+  etsy: 'https://www.etsy.com/',
+  gmarket: 'https://www.gmarket.co.kr/',
+  'naver-shopping': 'https://search.shopping.naver.com/search/all?query=%EC%87%BC%ED%95%91',
+  ssg: 'https://www.ssg.com/',
+  walmart: 'https://www.walmart.com/',
   bluemoonsoft: 'http://bluemoonsoft.com/',
 };
 
@@ -120,17 +137,44 @@ export function pickPageTarget(targets, match) {
 }
 
 // ── CDP client (one WebSocket per tab) ────────────────────────────────────────
+// A target that Chrome destroyed (an extension page after chrome.runtime.reload(), a discarded tab)
+// still appears in /json/list, and its WebSocket may never open, error, or close. Without the
+// deadline below `ready` never settles and every later send() waits forever, which is how a CLI
+// recovery path turns into a silent hang. Requests themselves are deliberately NOT timed out: a
+// durable lua.run legitimately keeps one Runtime.evaluate open for minutes; a dropped socket is
+// detected instead, and fails every in-flight request at once.
+export const CDP_CONNECT_TIMEOUT_MS = 10000;
+
 export class CdpClient {
-  constructor(webSocketDebuggerUrl) {
+  constructor(webSocketDebuggerUrl, {
+    connectTimeoutMs = CDP_CONNECT_TIMEOUT_MS,
+    createSocket = (url) => new WebSocket(url),
+  } = {}) {
     this.nextId = 1;
     this.pending = new Map();
     this.listeners = new Map();
-    this.socket = new WebSocket(webSocketDebuggerUrl);
-    this.ready = new Promise((res, rej) => {
-      this.socket.addEventListener('open', res, { once: true });
-      this.socket.addEventListener('error', rej, { once: true });
+    this.failure = null;
+    this.socket = createSocket(webSocketDebuggerUrl);
+    this.ready = new Promise((resolve, reject) => {
+      const timer = setTimeout(
+        () => reject(this.fail(new Error(`Timed out attaching to ${webSocketDebuggerUrl} after ${connectTimeoutMs}ms`))),
+        connectTimeoutMs,
+      );
+      const settle = (handler) => (event) => { clearTimeout(timer); handler(event); };
+      this.socket.addEventListener('open', settle(resolve), { once: true });
+      this.socket.addEventListener('error', settle(() => reject(this.fail(new Error(`Failed to attach to ${webSocketDebuggerUrl}`)))), { once: true });
+      this.socket.addEventListener('close', settle(() => reject(this.fail(new Error(`CDP socket closed before attach: ${webSocketDebuggerUrl}`)))), { once: true });
     });
+    this.ready.catch(() => { /* surfaced to whoever awaits ready or send() */ });
     this.socket.addEventListener('message', event => this.onMessage(event));
+    this.socket.addEventListener('close', () => this.fail(new Error('CDP socket closed')), { once: true });
+  }
+  /** Records the terminal failure and rejects every in-flight request with it. */
+  fail(error) {
+    this.failure = this.failure || error;
+    for (const callback of this.pending.values()) callback.reject(this.failure);
+    this.pending.clear();
+    return this.failure;
   }
   onMessage(event) {
     const message = JSON.parse(String(event.data));
@@ -153,6 +197,7 @@ export class CdpClient {
   }
   async send(method, params = {}) {
     await this.ready;
+    if (this.failure) throw this.failure;
     const id = this.nextId++;
     const promise = new Promise((res, rej) => this.pending.set(id, { resolve: res, reject: rej }));
     this.socket.send(JSON.stringify({ id, method, params }));
@@ -172,6 +217,33 @@ export class CdpClient {
   close() {
     this.socket.close();
   }
+}
+
+/** Keeps a newly attached page from pinning the Node event loop after setup/reload failure. */
+export async function closePageOnFailure(page, operation) {
+  try {
+    return await operation();
+  } catch (error) {
+    try { page?.close(); } catch { /* best-effort WebSocket cleanup */ }
+    throw error;
+  }
+}
+
+/** Navigates a newly attached page after an extension reload, closing it if preparation fails. */
+export async function prepareReloadedPage(page, {
+  destination,
+  target,
+  extensionId,
+  options,
+  waitForRuntime = true,
+  navigatePage = navigate,
+  waitForRuntimeFn = waitForLuaRuntime,
+} = {}) {
+  return closePageOnFailure(page, async () => {
+    await navigatePage(page, destination);
+    if (waitForRuntime) await waitForRuntimeFn(page, options, 20000);
+    return { page, target, reloaded: true, extensionId, url: destination };
+  });
 }
 
 async function attachClient(webSocketDebuggerUrl) {
@@ -466,11 +538,29 @@ export async function loadLocal(session, { site } = {}) {
   return { site: slug, loaded, failed };
 }
 
+// chrome.runtime.reload() destroys every extension page, and the leftover chrome-extension:// target
+// can linger in /json/list without ever accepting a WebSocket. Reattach to a live http(s) tab when
+// one exists and open a fresh tab otherwise, so a reload never strands the caller on a dead target.
+export async function attachAfterExtensionReload(cdpUrl, options, destination, {
+  listTargetsFn = listTargets,
+  attachActiveFn = attachActive,
+  openPageFn = openPage,
+} = {}) {
+  try {
+    const targets = await listTargetsFn(cdpUrl);
+    if (pickPageTarget(targets, options.match)) {
+      return await attachActiveFn(cdpUrl, options, { match: options.match });
+    }
+  } catch { /* fall through to a fresh tab */ }
+  return { page: await openPageFn(cdpUrl, destination), target: null };
+}
+
 // Reload the unpacked extension via chrome.runtime.reload() (fired from its options page), then
-// re-attach and land on `url` with the Lua runtime ready. The runtime applies site scripts by
-// scriptId, so same-name edits are sticky (a store re-sync or `ax load` may not re-run them); an
-// extension reload re-reads the persisted stores (axsdk:lua/flows) fresh. Returns a fresh session page.
-export async function reloadExtension(cdpUrl, options, { url } = {}) {
+// re-attach and land on `url`. It waits for Lua by default; callers that intentionally remove runtime
+// credentials may pass waitForRuntime:false to return to the extension setup prompt without a timeout.
+// The runtime applies site scripts by scriptId, so same-name edits are sticky (a store re-sync or
+// `ax load` may not re-run them); an extension reload re-reads persisted stores fresh.
+export async function reloadExtension(cdpUrl, options, { url, waitForRuntime = true } = {}) {
   const extId = options.extensionId;
   const first = await attachActive(cdpUrl, options, { match: options.match, allowBlank: true });
   let dest = url;
@@ -483,10 +573,14 @@ export async function reloadExtension(cdpUrl, options, { url } = {}) {
   try { await evaluatePage(first.page, 'setTimeout(function(){ try { chrome.runtime.reload(); } catch (e) {} }, 50); true'); } catch { /* context dies on reload */ }
   try { first.page.close(); } catch { /* ws may already be gone */ }
   await sleep(2800);
-  const { page, target } = await attachActive(cdpUrl, options, { match: options.match, allowBlank: true });
-  await navigate(page, dest);
-  await waitForLuaRuntime(page, options, 20000);
-  return { page, target, reloaded: true, extensionId: extId, url: dest };
+  const { page, target } = await attachAfterExtensionReload(cdpUrl, options, dest);
+  return prepareReloadedPage(page, {
+    destination: dest,
+    target,
+    extensionId: extId,
+    options,
+    waitForRuntime,
+  });
 }
 
 // ── store-based local Lua + flows (build/read -> stores -> remote off) ────────
@@ -498,9 +592,62 @@ export async function reloadExtension(cdpUrl, options, { url } = {}) {
 //            `stored-lua:` / `stored-lua:<domain>` (not remote `<site>/scripts/*`).
 //   - Flows: read raw `_common/flows.yaml` (":") + `<site>/flows.yaml` (":"+domain) -> `axsdk:flows`;
 //            "Use remote sites flows" OFF + "Use saved flows" ON (clientFlows {remoteSites:false, stored:true}).
+export const SITES_STATE_KEY = 'axsdk:sites';
 export const LUA_STATE_KEY = 'axsdk:lua';
 export const FLOWS_STATE_KEY = 'axsdk:flows';
 export const EXTENSION_CONFIG_KEY = 'axsdk:extension:config';
+
+// The extension only activates its assistant on hosts listed in the sites index, and by default that
+// index is fetched from GitHub. A site layer that exists only in the working copy therefore never
+// activates: no AXSDK Assistant context, no AX_* command, and syncStore cannot even attach. Publishing
+// the LOCAL index.md into `axsdk:sites` (and pinning remote sites off) makes the working copy
+// authoritative for the dev profile — the same rule the stored Lua/flows path already applies. Written
+// from the extension's own options page because the site tab has no runtime yet.
+export async function syncSitesIndex(cdpUrl, options, { indexMd, destination, reload = true } = {}) {
+  const markdown = indexMd ?? await readFile(join(repoRoot, 'index.md'), 'utf8');
+  const envelope = {
+    state: {
+      index: {
+        source: 'local',
+        indexUrl: '',
+        indexMd: markdown,
+        loadedAt: new Date().toISOString(),
+        commonFlowsYaml: '',
+        commonScripts: [],
+        commonWidgets: [],
+      },
+      sites: {},
+    },
+    version: 0,
+  };
+
+  const { page } = await attachActive(cdpUrl, options, { match: options.match, allowBlank: true });
+  let dest = destination;
+  try {
+    if (!dest) {
+      dest = await evaluatePage(page, 'location.href').catch(() => null);
+      if (!dest || !/^https?:/.test(dest)) dest = SITE_HOME[options.site] || SITE_HOME.amazon;
+    }
+    await navigate(page, `chrome-extension://${options.extensionId}/options.html`);
+    await evaluatePage(page, `(async () => {
+      const sitesKey = ${JSON.stringify(SITES_STATE_KEY)};
+      const configKey = ${JSON.stringify(EXTENSION_CONFIG_KEY)};
+      await chrome.storage.local.set({ [sitesKey]: ${JSON.stringify(JSON.stringify(envelope))} });
+      const stored = (await chrome.storage.local.get(configKey))[configKey];
+      const base = stored && typeof stored === 'object' && !Array.isArray(stored) ? stored : {};
+      await chrome.storage.local.set({ [configKey]: { ...base, remote_sites: false } });
+      return true;
+    })()`);
+  } finally {
+    try { page.close(); } catch { /* ws may already be gone */ }
+  }
+
+  if (reload) {
+    const reloaded = await reloadExtension(cdpUrl, options, { url: dest, waitForRuntime: false });
+    try { reloaded.page.close(); } catch { /* ws may already be gone */ }
+  }
+  return { indexBytes: Buffer.byteLength(markdown, 'utf8'), remoteSitesDisabled: true, destination: dest };
+}
 
 // Build dist/_common.lua + dist/<site>.lua via tools/merge-lua.mjs (= npm run build:lua).
 export function buildLua({ selfContained = false } = {}) {
@@ -543,6 +690,106 @@ export function classifyCommandSources(commands) {
 
 // Build/read local layers -> write flows store + lua store -> disable remote flows & lua -> reload ->
 // verify. Flows are injected just before Lua (same store pattern), as raw YAML (no build step).
+/**
+ * Whether the extension's storage is close enough to its quota that a durable call could fail to
+ * persist. Reclaiming at the ceiling is too late: the failure lands mid-flow, after a store was searched.
+ */
+export function shouldPruneDebugStorage(usedBytes, quotaBytes, threshold = 0.8) {
+  if (!Number.isFinite(usedBytes) || !Number.isFinite(quotaBytes) || quotaBytes <= 0) return false;
+  return usedBytes / quotaBytes >= threshold;
+}
+
+/**
+ * What a reclaim should do at this pressure. Telemetry first because it is pure debug data; finished
+ * chats only when telemetry did not bring usage back under the mark (they were 4.7 MB of a 10.4 MB fill).
+ */
+export function reclaimPlan(usedBytes, quotaBytes, usedAfterTelemetry, threshold = 0.8) {
+  if (!shouldPruneDebugStorage(usedBytes, quotaBytes, threshold)) return 'none';
+  if (usedAfterTelemetry === undefined) return 'telemetry';
+  return shouldPruneDebugStorage(usedAfterTelemetry, quotaBytes, threshold) ? 'chats' : 'telemetry';
+}
+
+async function storageUsage(session) {
+  return callInAxContext(session.page, session.options, `async function(){
+    if (typeof chrome === 'undefined' || !chrome.storage?.local) return null;
+    return { used: await chrome.storage.local.getBytesInUse(null), quota: chrome.storage.local.QUOTA_BYTES ?? null };
+  }`).catch(() => null);
+}
+
+/** Reads storage pressure and reclaims what it must; returns null when nothing was needed. */
+export async function reclaimDebugStorageIfNeeded(session, { threshold = 0.8 } = {}) {
+  const usage = await storageUsage(session);
+  if (reclaimPlan(usage?.used, usage?.quota, undefined, threshold) === 'none') return null;
+
+  const telemetry = await pruneDebugStorage(session);
+  if (reclaimPlan(usage.used, usage.quota, telemetry.usedAfter, threshold) !== 'chats') {
+    return { ...telemetry, usedBefore: usage.used, quota: usage.quota, reclaimed: 'telemetry' };
+  }
+  const chats = await reclaimChatStorage(session);
+  return {
+    reclaimed: 'telemetry+chats',
+    usedBefore: usage.used,
+    quota: usage.quota,
+    freedBytes: telemetry.freedBytes + chats.freedBytes,
+    removed: telemetry.removed + chats.removed,
+    keptChats: chats.kept,
+    usedAfter: chats.usedAfter,
+  };
+}
+
+/**
+ * Chat histories that belong to finished sessions. The active chat is never disposable, and without a
+ * known active chat nothing is dropped — a wrong guess here deletes what the user is reading.
+ */
+export function disposableChatKeys(keys, activeKeys) {
+  const active = new Set(activeKeys || []);
+  if (active.size === 0) return [];
+  return (keys || []).filter(key => /:chat$/.test(String(key)) && !active.has(key));
+}
+
+/** Frees finished-session chat history; explicit only, never part of an automatic reclaim. */
+export async function reclaimChatStorage(session) {
+  return callInAxContext(session.page, session.options, `async function() {
+    const all = await chrome.storage.local.get(null);
+    const chatKeys = Object.keys(all).filter(key => /:chat$/.test(key));
+    const state = (globalThis._AXSDK || globalThis.AXSDK);
+    const active = [];
+    for (const key of chatKeys) {
+      const binding = state?.getSession?.()?.id ?? state?.session?.id ?? null;
+      if (binding && key.includes(binding)) active.push(key);
+    }
+    // Keep the largest chat when the active one cannot be identified: it is almost certainly the live one.
+    if (active.length === 0 && chatKeys.length > 0) {
+      const biggest = chatKeys.map(k => [k, JSON.stringify(all[k] ?? null).length]).sort((a, b) => b[1] - a[1])[0];
+      active.push(biggest[0]);
+    }
+    const doomed = chatKeys.filter(key => !active.includes(key));
+    const freedBytes = doomed.reduce((total, key) => total + JSON.stringify(all[key] ?? null).length, 0);
+    if (doomed.length > 0) await chrome.storage.local.remove(doomed);
+    return { removed: doomed.length, kept: active, freedBytes, usedAfter: await chrome.storage.local.getBytesInUse(null) };
+  }`);
+}
+
+/** chrome.storage keys that only hold debug telemetry, safe to drop to make room for a store sync. */
+export function prunableDebugKeys(keys) {
+  return (keys || []).filter(key => /:(sse-events|debug-events)$/.test(String(key)));
+}
+
+export function isQuotaError(error) {
+  return /quota\s*exceeded|kQuotaBytes|QUOTA_BYTES/i.test(String(error?.message || error || ''));
+}
+
+/** Drops the disposable telemetry keys from the extension's storage and reports what it freed. */
+export async function pruneDebugStorage(session) {
+  return callInAxContext(session.page, session.options, `async function(pattern) {
+    const all = await chrome.storage.local.get(null);
+    const doomed = Object.keys(all).filter(key => new RegExp(pattern).test(key));
+    const freedBytes = doomed.reduce((total, key) => total + JSON.stringify(all[key] ?? null).length, 0);
+    if (doomed.length > 0) await chrome.storage.local.remove(doomed);
+    return { removed: doomed.length, freedBytes, usedAfter: await chrome.storage.local.getBytesInUse(null) };
+  }`, [':(sse-events|debug-events)$']);
+}
+
 export async function syncStore(session, { site, build = true, reload = true } = {}) {
   if (build) await buildLua();
   const url = await currentUrl(session);
@@ -570,7 +817,7 @@ export async function syncStore(session, { site, build = true, reload = true } =
   await waitForLuaRuntime(session.page, session.options);
   const domain = (await siteDomain(session)) || slug;
   // Write flows + lua stores (ALL sites) and pin remote OFF / stored ON — from the content-script context.
-  const written = await callInAxContext(session.page, session.options, `async function(lua, flows, luaKey, flowsKey, cfgKey) {
+  const writeStores = () => callInAxContext(session.page, session.options, `async function(lua, flows, luaKey, flowsKey, cfgKey) {
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
       throw new Error('chrome.storage.local unavailable in this context');
     }
@@ -581,6 +828,18 @@ export async function syncStore(session, { site, build = true, reload = true } =
     await chrome.storage.local.set({ [cfgKey]: { ...cfg, remoteLuaEnabled: false, remoteSiteFlowsEnabled: false, storedFlowsEnabled: true } });
     return { luaKeys: Object.keys(lua), flowsKeys: Object.keys(flows), hadConfig: Boolean(got && got[cfgKey]) };
   }`, [lua, flows, LUA_STATE_KEY, FLOWS_STATE_KEY, EXTENSION_CONFIG_KEY]);
+
+  let written;
+  let reclaimed = null;
+  try {
+    written = await writeStores();
+  } catch (error) {
+    // A long-lived dev profile fills chrome.storage.local with per-session chat + SSE telemetry until no
+    // sync fits. The telemetry is disposable; chat history and every axsdk:* store are left alone.
+    if (!isQuotaError(error)) throw error;
+    reclaimed = await pruneDebugStorage(session);
+    written = await writeStores();
+  }
   let verify = null;
   let flowsCfg = null;
   if (reload) {
@@ -608,6 +867,7 @@ export async function syncStore(session, { site, build = true, reload = true } =
     remoteFlowsDisabled: true,
     storedFlowsEnabled: true,
     hadExistingConfig: written.hadConfig,
+    ...(reclaimed ? { reclaimedDebugStorage: reclaimed } : {}),
     ...(verify ? { fromStore: verify.store.length, fromRemote: verify.remote.length, sources: verify } : {}),
     ...(flowsCfg ? { appliedClientFlows: flowsCfg.clientFlows, appliedFlowsStoreKeys: flowsCfg.flowsStoreKeys } : {}),
   };
@@ -638,6 +898,9 @@ export async function readChat(session) {
 // context each read so it survives the flow's navigations) until the assistant turn settles. Returns
 // the assistant reply text + the last message's tool/text parts.
 export async function sendMessage(session, text, { timeoutMs = 180000 } = {}) {
+  // A turn writes chat + SSE telemetry as it runs; starting one with storage already near the quota
+  // makes a durable call fail to persist mid-navigation and silently costs the flow a whole store.
+  await reclaimDebugStorageIfNeeded(session).catch(() => null);
   const before = (await readChat(session).catch(() => null))?.messageCount ?? 0;
   await callInAxContext(session.page, session.options, `async function(text) {
     const s = globalThis._AXSDK || globalThis.AXSDK;

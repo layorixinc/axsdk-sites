@@ -102,6 +102,12 @@ async function call(runtime, command, args) {
 }
 
 const tests = [];
+const lockedApproval = {
+  identity_id: 'identity-m185',
+  comparison_id: 'cmp-current',
+  identity_approval: 'locked_product_identity',
+  comparison_approval: 'current_comparison',
+};
 
 tests.push(['deterministic ranking includes shipping and FX', async () => {
   const runtime = await loadRuntime();
@@ -120,6 +126,11 @@ tests.push(['deterministic ranking includes shipping and FX', async () => {
   assert(value.offers.length === 2, 'two offers retained', value);
   assert(value.offers[0].site === 'ebay' && value.offers[0].total_base === 11, 'landed cost should rank eBay first', value.offers);
   assert(value.offers[0].rank === 1 && value.offers[1].rank === 2, 'stable ranks assigned', value.offers);
+  assert(value.comparison_text.includes('Reply with a numbered offer to add, or type cancel.'), 'ranked comparison must carry its deterministic approval question', value.comparison_text);
+  const presentation = await call(runtime, 'AX_present_store_offers', { comparison_id: value.comparison_id });
+  assert(presentation.question === value.comparison_text, 'presentation must read the exact cached comparison instead of model-generated prose', presentation);
+  const stalePresentation = await call(runtime, 'AX_present_store_offers', { comparison_id: 'cmp-stale' });
+  assert(stalePresentation.error === 'stale_comparison', 'presentation must fail closed for an unknown comparison snapshot', stalePresentation);
 }]);
 
 tests.push(['complete cost ranks before lower incomplete estimate', async () => {
@@ -143,12 +154,17 @@ tests.push(['complete cost ranks before lower incomplete estimate', async () => 
 tests.push(['approval resolver accepts only a current integer rank', async () => {
   const runtime = await loadRuntime();
   const offers = [
-    { rank: 1, site: 'amazon', product_id: 'A1', name: 'Mouse', price: 20, currency: 'USD', total_base: 20 },
+    { rank: 1, site: 'amazon', product_id: 'A1', name: 'Mouse', price: 20, currency: 'USD', total_base: 20, identity_id: lockedApproval.identity_id, comparison_id: lockedApproval.comparison_id },
   ];
-  const valid = await call(runtime, 'AX_resolve_store_offer', { offers, choice_index: 1 });
+  const unpresented = await call(runtime, 'AX_resolve_store_offer', { offers, choice_index: 1, choice_comparison_id: lockedApproval.comparison_id, ...lockedApproval });
+  assert(unpresented.next === 'invalid' && unpresented.error === 'approval_turn_required', 'same-turn product choice cannot approve a cart offer', unpresented);
+  const unversioned = await call(runtime, 'AX_resolve_store_offer', { offers, choice_index: 1, choice_stage: 'asked', ...lockedApproval });
+  assert(unversioned.next === 'invalid' && unversioned.error === 'comparison_version_required', 'unversioned offer choice must fail closed', unversioned);
+
+  const valid = await call(runtime, 'AX_resolve_store_offer', { offers, choice_index: 1, choice_stage: 'asked', choice_comparison_id: lockedApproval.comparison_id, ...lockedApproval });
   assert(valid.next === 'add' && valid.site === 'amazon' && valid.product_id === 'A1', 'valid rank resolves', valid);
   assert(valid.cart_approval === 'user_selected_compared_offer', 'scoped approval marker emitted', valid);
-  const invalid = await call(runtime, 'AX_resolve_store_offer', { offers, choice_index: 2 });
+  const invalid = await call(runtime, 'AX_resolve_store_offer', { offers, choice_index: 2, choice_stage: 'asked', choice_comparison_id: lockedApproval.comparison_id, ...lockedApproval });
   assert(invalid.next === 'invalid', 'out-of-range choice rejected', invalid);
   assert(!invalid.product_id && !invalid.cart_approval, 'invalid choice cannot leak mutation fields', invalid);
 }]);
@@ -201,6 +217,7 @@ tests.push(['Amazon existing cart must identify the requested ASIN', async () =>
   const value = await call(runtime, 'AX_add_store_product_to_cart', {
     site: 'amazon',
     product_id: 'B004YAVF8I',
+    ...lockedApproval,
     cart_approval: 'user_selected_compared_offer',
   });
   assert(value.added !== true, 'an unrelated Amazon cart must not confirm the requested ASIN', value);
@@ -273,6 +290,7 @@ tests.push(['eBay cart confirmation must identify the requested item', async () 
   const value = await call(runtime, 'AX_add_store_product_to_cart', {
     site: 'ebay',
     product_id: '327230547162',
+    ...lockedApproval,
     cart_approval: 'user_selected_compared_offer',
   });
   assert(value.added !== true, 'an unrelated existing cart must not confirm the requested product', value);
@@ -298,6 +316,7 @@ tests.push(['eBay localized alternate price can satisfy strict revalidation', as
     quantity: 1,
     expected_unit_price: 10000,
     expected_currency: 'KRW',
+    ...lockedApproval,
     cart_approval: 'user_selected_compared_offer',
   });
   assert(value.added === true && value.error == null, 'matching localized alternate price should permit the guarded click', value);
@@ -322,6 +341,292 @@ tests.push(['eBay stale price precondition blocks cart click', async () => {
   });
   assert(value.error === 'price_changed' && value.added === false, 'stale price rejected', value);
   assert(state.clicked.length === 0, 'stale price must not click', state.clicked);
+}]);
+
+tests.push(['identity preparation discovers broad products and locks explicit models', async () => {
+  const runtime = await loadRuntime();
+  const broad = await call(runtime, 'AX_prepare_product_identity', {
+    product_category: 'wireless mouse',
+    requested_brand: 'Logitech',
+    stores: [
+      { site: 'walmart' },
+      { site: '11st' },
+      { site: 'amazon' },
+      { site: 'coupang' },
+    ],
+  });
+  assert(broad.next === 'discover' && broad.identity_status === 'family', 'brand plus category should enter discovery', broad);
+  assert(broad.discovery_query === 'Logitech wireless mouse', 'discovery query should preserve grounded product scope', broad);
+  assert(broad.discovery_sites?.map(item => item.site).join(',') === 'walmart,11st,amazon', 'discovery should use a deterministic three-store frontier', broad);
+
+  const exact = await call(runtime, 'AX_prepare_product_identity', {
+    product_category: 'wireless mouse',
+    requested_brand: 'Logitech',
+    requested_model: 'M185',
+  });
+  assert(exact.next === 'lock' && exact.identity_status === 'exact', 'explicit model should skip discovery', exact);
+
+  const missing = await call(runtime, 'AX_prepare_product_identity', {});
+  assert(missing.next === 'ask_scope' && missing.identity_status === 'missing', 'missing category should ask before searching', missing);
+}]);
+
+tests.push(['identity fingerprints are canonical for nested and localized constraints', async () => {
+  const runtime = await loadRuntime();
+  const first = await call(runtime, 'AX_lock_product_identity', {
+    identity_kind: 'standardized_model',
+    identity_brand: '로지텍',
+    identity_model: 'G304',
+    product_category: '무선 마우스',
+    hard_constraints: {
+      color: 'black',
+      connectivity: { receiver: 'USB', wireless: true },
+    },
+  });
+  const second = await call(runtime, 'AX_lock_product_identity', {
+    identity_kind: 'standardized_model',
+    identity_brand: '로지텍',
+    identity_model: 'G304',
+    product_category: '무선 마우스',
+    hard_constraints: {
+      connectivity: { wireless: true, receiver: 'USB' },
+      color: 'black',
+    },
+  });
+  assert(first.identity_id === second.identity_id, 'nested constraint key order must not change identity', { first, second });
+  assert(first.identity_fingerprint.includes('brand=로지텍'), 'localized identity text must remain part of the fingerprint', first);
+}]);
+
+tests.push(['common dispatcher waits for the target site adapter without reloading the same host', async () => {
+  const { globals, state } = makeGlobals({ href: 'https://www.11st.co.kr/' });
+  const runtime = await loadRuntime({ globals });
+  const value = await call(runtime, 'AX_search_store_product', {
+    site: '11st',
+    query: 'Logitech M185',
+  });
+  assert(value.pending === true && value.status === 'loading_adapter', 'site-script registration race must be retryable', value);
+  assert(state.href === 'https://www.11st.co.kr/', 'adapter loading on the target host must not reload the page', state);
+}]);
+
+tests.push(['site search results are normalized after adapter-ready dispatch', async () => {
+  const { globals } = makeGlobals();
+  const runtime = await loadRuntime({ globals });
+  const value = await call(runtime, 'AX_normalize_store_product_result', {
+    site: '11st',
+    query: '로지텍 무선 마우스',
+    purpose: 'discovery',
+    requested_brand: '로지텍',
+    result: {
+      candidates: [
+        { product_id: 'm185', name: '로지텍 M185 무선 마우스', price: 19000, currency: 'KRW', shipping_cost: 0, shipping_currency: 'KRW', url: 'https://www.11st.co.kr/products/m185' },
+        { product_id: 'k123', name: 'Generic K123 Keyboard', price: 10000, currency: 'KRW', shipping_cost: 0, shipping_currency: 'KRW', url: 'https://www.11st.co.kr/products/k123' },
+      ],
+    },
+  });
+  assert(value.candidates?.length === 1 && value.candidates[0].product_id === 'm185', 'post-dispatch normalization must retain relevance filtering', value);
+  assert(value.candidates[0].brand === '로지텍' && value.candidates[0].brand_source === 'title', 'post-dispatch normalization must preserve observed provenance', value.candidates[0]);
+  assert(value.candidates[0].cost_complete === true && value.candidates[0].total_base === 19, 'post-dispatch normalization must compute landed base cost', value.candidates[0]);
+  const navigation = await call(runtime, 'AX_normalize_store_product_result', {
+    site: '11st',
+    query: '로지텍 무선 마우스',
+    result: { ok: true, fired: true, arrived: true, kind: 'document', navigated: true, url: 'https://search.11st.co.kr/' },
+  });
+  assert(navigation.pending === true && navigation.status === 'navigating', 'a durable navigation envelope must be retried before normalization', navigation);
+}]);
+
+tests.push(['localized discovery rejects unrelated listings and preserves observed provenance', async () => {
+  const { globals } = makeGlobals({ href: 'https://review.example/' });
+  const runtime = await loadRuntime({ globals });
+  const loaded = await runtime.loadSource(`
+    AX_COMMERCE.register_adapter("review-store", {
+      host_matches = function() return true end,
+      search = function()
+        return { candidates = {
+          { product_id = "bad", name = "Generic K123 Keyboard", price = 10, currency = "USD", shipping_cost = 0, shipping_currency = "USD", url = "https://review.example/bad" },
+          { product_id = "good", name = "로지텍 G304 무선 마우스", price = 20, currency = "USD", shipping_cost = 0, shipping_currency = "USD", url = "https://review.example/good" }
+        } }
+      end
+    })
+  `, { id: 'test-localized-discovery' });
+  if (!loaded.ok) throw new Error(`failed to load localized discovery probe: ${loaded.error}`);
+
+  const result = await call(runtime, 'AX_search_store_product', {
+    site: 'review-store',
+    query: '로지텍 무선 마우스',
+    requested_brand: '로지텍',
+    purpose: 'discovery',
+  });
+  assert(result.candidates.length === 1 && result.candidates[0].product_id === 'good', 'Korean discovery must reject unrelated product categories', result);
+  assert(result.candidates[0].brand === '로지텍' && result.candidates[0].brand_source === 'title', 'requested brand may become observed only when the title proves it', result.candidates[0]);
+
+  const options = await call(runtime, 'AX_build_product_options', {
+    query: '로지텍 무선 마우스',
+    requested_brand: '로지텍',
+    results: [{ key: 'review-store', status: 'completed', value: { site: 'review-store', candidates: [
+      result.candidates[0],
+      { ...result.candidates[0], product_id: 'good-2', url: 'https://review.example/good-2' },
+    ] } }],
+  });
+  assert(options.options[0].source_site_count === 1, 'duplicate listings from one storefront count as one independent site', options.options[0]);
+  assert(options.options[0].identity_confidence === 'medium', 'same-site duplicate listings cannot create high identity confidence', options.options[0]);
+}]);
+
+tests.push(['discovery options group grounded model evidence without merging variants', async () => {
+  const runtime = await loadRuntime();
+  const value = await call(runtime, 'AX_build_product_options', {
+    query: 'Logitech wireless mouse',
+    max_options: 5,
+    results: [
+      { key: 'walmart', status: 'completed', value: { site: 'walmart', candidates: [
+        { product_id: 'W185', name: 'Logitech M185 Wireless Mouse', url: 'https://www.walmart.com/ip/W185', brand: 'Logitech', manufacturer_model: 'M185', price: 13, currency: 'USD' },
+        { product_id: 'W650', name: 'Logitech M650 Silent Mouse', url: 'https://www.walmart.com/ip/W650', brand: 'Logitech', manufacturer_model: 'M650', price: 30, currency: 'USD' },
+      ] } },
+      { key: '11st', status: 'completed', value: { site: '11st', candidates: [
+        { product_id: 'K185', name: '로지텍 M185 무선 마우스', url: 'https://www.11st.co.kr/products/K185', brand: 'Logitech', manufacturer_model: 'M185', price: 16740, currency: 'KRW' },
+      ] } },
+    ],
+  });
+  assert(value.next === 'choose' && value.options.length === 2, 'two model families should remain', value);
+  const m185 = value.options.find(option => option.model === 'M185');
+  assert(m185?.source_refs?.length === 2, 'M185 option should retain both live source references', m185);
+  assert(m185.source_refs.every(source => source.site && source.product_id && source.url), 'every option source must be grounded', m185.source_refs);
+  assert(typeof value.options_version === 'string' && value.options_version.length > 4, 'discovery snapshot must be versioned', value);
+}]);
+
+tests.push(['product option versions bind source listings and displayed prices', async () => {
+  const runtime = await loadRuntime();
+  const build = (productId, price) => call(runtime, 'AX_build_product_options', {
+    query: 'Logitech M185 wireless mouse',
+    requested_brand: 'Logitech',
+    hard_constraints: { color: 'black' },
+    results: [{ key: 'walmart', status: 'completed', value: { site: 'walmart', candidates: [{
+      product_id: productId,
+      name: 'Logitech M185 Wireless Mouse',
+      url: `https://www.walmart.com/ip/${productId}`,
+      brand: 'Logitech',
+      brand_source: 'metadata',
+      manufacturer_model: 'M185',
+      price,
+      currency: 'USD',
+    }] } }],
+  });
+  const before = await build('old-product', 10);
+  const after = await build('new-product', 99);
+  assert(before.options_version !== after.options_version, 'source product or displayed price changes must invalidate the option snapshot', { before, after });
+}]);
+
+tests.push(['product option resolver rejects stale snapshots and locks only current evidence', async () => {
+  const runtime = await loadRuntime();
+  const options = [{
+    option_id: 'D1',
+    identity_kind: 'standardized_model',
+    display_name: 'Logitech M185',
+    brand: 'Logitech',
+    model: 'M185',
+    identity_confidence: 'high',
+    source_refs: [{ site: 'walmart', product_id: 'W185', url: 'https://www.walmart.com/ip/W185' }],
+  }];
+  const stale = await call(runtime, 'AX_resolve_product_option', {
+    options,
+    options_version: 'disc-current',
+    choice_options_version: 'disc-old',
+    choice_index: 1,
+  });
+  assert(stale.next === 'invalid' && stale.error === 'stale_product_options', 'stale model choice must fail closed', stale);
+  const unversioned = await call(runtime, 'AX_resolve_product_option', {
+    options,
+    options_version: 'disc-current',
+    choice_index: 1,
+  });
+  assert(unversioned.next === 'invalid' && unversioned.error === 'product_options_version_required', 'unversioned model choice must fail closed', unversioned);
+
+  const current = await call(runtime, 'AX_resolve_product_option', {
+    options,
+    options_version: 'disc-current',
+    choice_options_version: 'disc-current',
+    choice_index: 1,
+  });
+  assert(current.next === 'lock' && current.identity_status === 'locked', 'current grounded option should lock', current);
+  assert(current.identity_id && current.identity_fingerprint, 'locked option should emit stable identity evidence', current);
+}]);
+
+tests.push(['offer identity verification excludes mismatches and preserves ambiguity', async () => {
+  const runtime = await loadRuntime();
+  const value = await call(runtime, 'AX_verify_product_offers', {
+    identity_id: 'identity-m185',
+    identity_kind: 'standardized_model',
+    identity_brand: 'Logitech',
+    identity_model: 'M185',
+    results: [{
+      key: 'walmart',
+      status: 'completed',
+      value: {
+        site: 'walmart',
+        candidates: [
+          { product_id: 'W185', name: 'Logitech M185 Wireless Mouse', price: 13, currency: 'USD', brand: 'Logitech', manufacturer_model: 'M185' },
+          { product_id: 'W650', name: 'Logitech M650 Silent Mouse', price: 30, currency: 'USD', brand: 'Logitech', manufacturer_model: 'M650' },
+          { product_id: 'WU', name: 'Logitech Wireless Mouse', price: 9, currency: 'USD', brand: 'Logitech' },
+        ],
+      },
+    }],
+  });
+  assert(value.verified_offers.length === 1 && value.verified_offers[0].product_id === 'W185', 'only exact model should be rankable', value);
+  assert(value.excluded_offers.length === 1 && value.excluded_offers[0].reason === 'model_mismatch', 'different model should be excluded with evidence', value);
+  assert(value.ambiguous_offers.length === 1 && value.ambiguous_offers[0].reason === 'manufacturer_model_missing', 'missing model should remain visible but unranked', value);
+}]);
+
+tests.push(['locked model relevance survives localized category labels', async () => {
+  const runtime = await loadRuntime();
+  const loaded = await runtime.loadSource(`
+    function AX_test_normalize_identity(args)
+      local candidates = AX_COMMERCE.normalize_candidates("11st", args.candidates, 1, args.query, args)
+      return { candidates = candidates }
+    end
+  `, { id: 'test-normalize-identity' });
+  if (!loaded.ok) throw new Error(`failed to load identity normalization probe: ${loaded.error}`);
+  const value = await call(runtime, 'AX_test_normalize_identity', {
+    query: 'Logitech G304 mouse',
+    identity_brand: 'Logitech',
+    identity_model: 'G304',
+    product_category: 'mouse',
+    candidates: [{
+      product_id: 'K304',
+      name: '로지텍 G304 LIGHTSPEED 무선마우스',
+      price: 50000,
+      currency: 'KRW',
+      shipping_cost: 0,
+      shipping_currency: 'KRW',
+    }],
+  });
+  assert(value.candidates.length === 1, 'exact manufacturer model should outrank untranslated category tokens', value);
+}]);
+
+tests.push(['comparison versions and identity approval bind cart mutations to current evidence', async () => {
+  const { globals, state } = makeGlobals({ href: 'https://www.ebay.com/itm/327230547159', tokens: ['x-item-title__mainTitle', 'atcBtn_btn_1'] });
+  const runtime = await loadRuntime({ globals, files: ['00_common.lua', 'add_to_cart.lua'] });
+  const ranked = await call(runtime, 'AX_rank_store_offers', {
+    identity_id: 'identity-m185',
+    verified_offers: [{ site: 'ebay', product_id: '327230547159', name: 'Logitech M185', price: 20, currency: 'USD', total_base: 20, cost_complete: true, identity_id: 'identity-m185', identity_match: 'exact' }],
+  });
+  assert(ranked.comparison_id && ranked.offers[0].comparison_id === ranked.comparison_id, 'ranked snapshot should carry one comparison version', ranked);
+
+  const stale = await call(runtime, 'AX_resolve_store_offer', {
+    offers: ranked.offers,
+    comparison_id: ranked.comparison_id,
+    choice_comparison_id: 'cmp-old',
+    identity_id: 'identity-m185',
+    choice_index: 1,
+    choice_stage: 'asked',
+  });
+  assert(stale.next === 'invalid' && stale.error === 'stale_comparison', 'stale offer number must fail closed', stale);
+
+  const missingIdentity = await call(runtime, 'AX_add_store_product_to_cart', {
+    site: 'ebay',
+    product_id: '327230547159',
+    comparison_id: ranked.comparison_id,
+    cart_approval: 'user_selected_compared_offer',
+  });
+  assert(missingIdentity.error === 'identity_approval_required', 'cart mutation must require locked identity evidence', missingIdentity);
+  assert(state.clicked.length === 0, 'identity approval failure must precede navigation and clicks', state.clicked);
 }]);
 
 let failed = 0;

@@ -154,6 +154,10 @@ Broad multi-store requests discover live listings on a deterministic frontier of
 user-selected stores, group only grounded manufacturer models, and pause for an explicit model choice.
 Exact model requests skip discovery. Final comparison ranks only identity-verified candidates; ambiguous
 and mismatched listings stay visible but unranked. Product-option and comparison snapshots are versioned.
+Relevance is decided in two stages: the deterministic pass keeps up to six rows per store that COULD be
+the product, then one model call names the rows that ARE it (`AX_build_offer_screening` →
+`screen_store_offers` → `AX_apply_offer_screening`), and the three-per-store comparison cap is applied to
+the survivors. Removed rows are counted in the window.
 Cart mutation requires a separate offer-approval turn plus matching identity/comparison approval markers,
 and the storefront re-reads both model identity and price before clicking.
 
@@ -347,6 +351,13 @@ console (cache-sticky `raw.githubusercontent.com` → **test from the store with
   hash), so an edited same-name file can keep serving the old source even after a cache bust →
   **reload the extension** (chrome://extensions → reload) to force a clean re-fetch. **Easiest:
   `ax load` / `ax run --local`** to inject the working copy directly (§6).
+- **A flow GRAPH change needs `ax reload-ext`, not just `ax sync`.** Measured: after `ax sync` wrote
+  flows containing new nodes (`chrome.storage.local["axsdk:flows"]` verified to contain them,
+  `clientFlows {remoteSites:false, stored:true}`), a live turn still ran the OLD path — search straight
+  to verify, the new nodes absent from the trace. `ax reload-ext` + a warmup send, and the same message
+  ran the new nodes. Prompt/parameter edits inside existing nodes DID take effect from `ax sync` alone.
+  Always read the tool trace (`ax send` output) to confirm which graph ran before concluding anything
+  about a flow change.
 - **`run` vs `call`:** prefer durable `run`; `call` is one turn and returns a pending marker for any
   navigating/fetching step.
 - **`ax run` / `ax call` nest the command result under `.value`.** The CLI prints the durable envelope
@@ -502,9 +513,9 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   flow-exec) — don't redesign unasked; revert any instrumentation you add there, leaving only the
   user's changes.
 - **Result pagination is opt-in per site and capped at 2 pages** (`44_pagination.lua`). A site declares
-  `pagination = { mode, param, start, step, max_pages }`; a site without it reads one page. Verified live
-  today: `page` on **ssg / walmart / aliexpress / amazon**, `_pgn` on eBay (code path only — its live
-  search returned no rows to confirm with). **Coupang and Naver Shopping stay single-page on purpose**:
+  `pagination = { mode, param, start, step, max_pages }`; a site without it reads one page. Verified live:
+  `page` on **ssg / walmart / aliexpress / amazon**, `_pgn` on **eBay** (22 rows on page 1 and 22 entirely
+  different rows on page 2 once its card selector was fixed). **Coupang and Naver Shopping stay single-page on purpose**:
   every deep-linked coupang `?page=2` renders an empty grid and its on-page control is a hashed-class
   button (§10 bans those), and Naver's bot wall prevented observing a second page. Don't add a paging
   parameter you have not seen work.
@@ -524,9 +535,64 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **Relevance anchors on the model code, descriptors only score.** A storefront titles the same product
   without the English brand or the category word, and a search for one model returns its neighbours. So
   `C.relevance_match` REQUIRES the model code (token-boundary aware: `M185` matches `M-185`, never
-  `M185R`) plus the brand (alias-aware, `logitech` ↔ `로지텍`), and treats the remaining words as the
-  exact/partial signal. Partial rows are labelled `(유사)` in the window. Measured before the change:
-  `Logitech M185 mouse` matched 0 of 3 real SSG listings, `Logitech M185` matched 3.
+  `M185R`) plus the brand, and treats the remaining words as the exact/partial signal. Partial rows are
+  labelled `(유사)` in the window. Measured before the change: `Logitech M185 mouse` matched 0 of 3 real
+  SSG listings, `Logitech M185` matched 3.
+- **Equivalent words come from the MODEL, never from a table in the Lua.** `collect_request` emits two
+  `"|"`-separated strings with the request: `query_variants` (other phrasings of the SAME product, tried
+  by `AX_collect_store_page` only when a store found NOTHING, capped at 3 because each costs a
+  navigation) and `brand_aliases` (every spelling of the one requested brand, used by `token_matches`).
+  A curated table was built first and rejected: it can only ever cover the brands someone thought of,
+  while the model already knows the language. Two rules the mechanics enforce regardless: an alias
+  substitutes ONLY for the token it spells — letting the brand alias answer for every token reported a
+  listing that never says "ergonomic" as an exact match for it — and a blocked store is never retried,
+  since no wall opens for a synonym. Measured live on a `Logitech M185` search: 11st kept **3 of 9** rows
+  with the model's spellings and **0** without; coupang **3 vs 1**; SSG **3 either way** (its payload
+  carries the English brand, so the aliases are a safety net there, not the load-bearing part).
+- **Token rules decide RECALL, the model decides RELEVANCE.** No selector or token rule can tell
+  "로지텍 M185 마우스" from "로지텍 M185 마우스용 스킨" or "M185 + K270 세트": the accessory and the bundle
+  contain every query word and pass every anchor. So the deterministic pass now keeps up to
+  `C.SCREEN_LIMIT_PER_SITE` (6) plausible rows per store, `AX_build_offer_screening` renders them as ONE
+  numbered, id-backed list (round-robin across stores so a long store cannot starve the others, capped at
+  `C.SCREEN_MAX_ROWS` 30), `judge_relevance` answers with the numbers to keep, and
+  `AX_apply_offer_screening` applies `MAX_OFFERS_PER_SITE` (3) to the survivors. Three rules the mechanics
+  own, not the model: only the rendered list enters the prompt (never the offer payload); a number that
+  names no row is ignored rather than shifting the verdict; and an ABSENT verdict keeps every row —
+  precision is worth one model call, never the whole turn, so stall/invalid/error all route to
+  `apply_screening`. The paging goal stays at 3, so carrying six rows costs no extra navigation. Live:
+  12 rows on coupang+11st for "로지텍 M185 마우스" → the two K270 keyboard bundles dropped; an 에어팟 프로 2
+  search → the "오른쪽 낱개" single earbud dropped. Cost is one model call (~10-15s of a ~65s turn).
+- **A verdict that never lands looks exactly like a verdict of "keep everything".** The screening tool
+  first wrote `keep` while the apply step read `screening_keep`; the fail-open path then kept all 12 rows
+  and reported `screened_out: 0` — a clean-looking turn in which the model's correct rejections were
+  silently discarded. A second instance: `screened_out` was selected by the rank node but missing from
+  that tool's `properties` (`additionalProperties: false`), so the "관련 없는 N건" line vanished. Both are
+  now conformance-asserted. Neither is visible to a unit test: verify a flow change by reading the live
+  tool trace and the state each node actually received.
+- **A storefront can keep its result cards and still hide the product id.** 11st routes every search card
+  through its ad server (`action.adoffice.11st.co.kr/act/click/…?clickData=…`), so no card has a
+  `/products/<id>` href any more; the id survives only in the anchor's `data-log-body`
+  (`{"content_type":"PRODUCT","content_no":"9170626560"}`). Two defects stacked: the reader had no way to
+  take an id from a child element's attribute, and `parse_product_id`'s fallback mined the FIRST token of
+  whatever it got — every card answered `content_type`, the dedupe collapsed them into one, and a page of
+  156 cards read as **1 candidate**, which relevance then emptied into `no_results`. Now
+  `result_id_selector` + `result_id_attr` read the attribute, `S.product_id_from` runs
+  `product_id_patterns` against the attribute as well as the href, and a structured value no pattern
+  understands yields NOTHING rather than a shared junk id. Measured after: 17-18 rows per query, distinct
+  ids, canonical `https://www.11st.co.kr/products/<id>` URLs. **A store returning exactly one row is the
+  signature of this failure — check the card count on the page before believing a thin result.**
+- **11st search cards state a dispatch promise, never a shipping fee** ("배송정보 오늘출발(15시까지 주문시)").
+  So its rows carry `배송비 미확인` and fold out of the default window whenever another store has complete
+  totals. That is the honest read — inventing 0 would be a wrong number in a total-cost comparison — and
+  the fee would cost one product-page navigation per candidate to obtain. A missing amount renders as
+  `미확인`, not `unknown`: a live window showed "총 unknown" in an otherwise Korean row.
+- **`tools/scenarios/commerce-all-sites.mjs` publishes the index; it no longer intercepts it.** It used to
+  `clearIndex()` and serve `raw.githubusercontent.com/.../index.md` back through page-level CDP Fetch. The
+  extension no longer fetches the index from the page, so the interception never fired: all ten adapters
+  reported `loading_adapter`, and the run LEFT THE DEV PROFILE WITHOUT AN INDEX for whatever came next
+  (`ax sync <site>` repairs it). It now calls `syncSitesIndex` — the same path `ax sync` uses — and
+  asserts the publication. 35/35, 286s → 64s. `price_unavailable` counts as a classified answer there
+  (Walmart), alongside the access-wall codes.
 - **Every model node has a stall guard.** `fallback.maxStalledSteps` + `stalledNext` on each
   `action_unit`, because a repeating tool error used to burn the step budget in silence (one live turn
   spent 176s repeating `choose_offer → browse_offers` seven times and said nothing). A lost listing now
@@ -577,3 +643,21 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   already shows — Thumbtack's card summary is the whole card text.
 - **`ax` reclaims storage in two steps.** Telemetry first; finished-session `:chat` keys only when
   usage is still over the mark (they were 4.7 MB of a 10.4 MB fill). The ACTIVE chat is never dropped.
+- **eBay search cards are `li.s-card[data-listingid]`.** The `.su-item-card[data-view]` markup it used
+  before is gone (live: 0 matches against 62 `li.s-card`), which is why eBay silently returned nothing.
+  Title `.s-card__title`, price `.s-card__price`; the first card is eBay's own "Shop on eBay"
+  placeholder and carries no price, so the price check drops it.
+- **Walmart result tiles mostly cannot be priced, and that is the site, not the reader.** Of 24 tiles
+  measured live: 1 carried an exact "current price", 9 advertised only "Options from $X" (a variant
+  range), and 14 rendered no price at all — scrolling changes none of it, and `__NEXT_DATA__` ships the
+  price fields EMPTY. Walmart also A/B tests which automation id holds the price
+  (`product-price` vs `unified-global-product-price`/`ugpp-main-price`), so both are configured and the
+  old hashed class is gone.
+- **A price written twice in one string is refused unless the site says which is current.** Walmart
+  glues the screen-reader form to the human one ("Now$4999current price Now $49.99"); reading the first
+  amount turned $49.99 into **4999**. The `decimal_preferred` strategy anchors on the site's own
+  "current price" marker, accepts a lone amount, and returns nothing when several amounts compete —
+  a wrong number in a price comparison is worse than a missing row.
+- **Cards found but none priced is `price_unavailable`, not `no_results`.** They are different facts:
+  one means the reader could not price the grid, the other means the store had nothing. Reporting the
+  first as the second made a working store look like it does not sell the product.

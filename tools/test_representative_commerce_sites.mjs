@@ -12,7 +12,11 @@ if (!existsSync(runtimePath)) {
 
 const { AXLuaRuntime } = await import(`file://${runtimePath}`);
 const commonFiles = [
+  // Filename order, exactly as the extension injects `_common/scripts/*`. Loading only the endpoints left
+  // 60_storefront without 44_pagination, and every adapter test died on that guard instead of running.
   '_common/scripts/00_base.lua',
+  '_common/scripts/44_pagination.lua',
+  '_common/scripts/45_offer_view.lua',
   '_common/scripts/50_commerce.lua',
   '_common/scripts/60_storefront.lua',
 ];
@@ -320,7 +324,7 @@ try {
 
 try {
   const ssg = siteCases.find(item => item.site === 'ssg');
-  const embedded = '{"itemId":"1000623630874","itemName":"로지텍 무선마우스(M185 레드 Logitech)","brandName":"Logitech","itemUrl":"https:\\/\\/www.ssg.com\\/item\\/itemView.ssg?itemId=1000623630874","itemImgUrl":"https:\\/\\/example.com\\/m185.jpg","finalPrice":"19,900","reviewCount":"42","shippingCostInfo":[{"type":"배송비","text":"무료배송"}]}';
+  const embedded = '{"itemId":"1000623630874","itemName":"로지텍 무선마우스(M185 레드 Logitech)","brandName":"Logitech","itemUrl":"https:\\/\\/www.ssg.com\\/item\\/itemView.ssg?itemId=1000623630874","itemImgUrl":"https:\\/\\/example.com\\/m185.jpg","rawPrimaryPrice":"19,900","reviewCount":"42","shippingCostInfo":[{"type":"배송비","text":"무료배송"}]}';
   const { runtime } = await loadSite(ssg, {
     rows: [],
     text: { 'script#__NEXT_DATA__': embedded },

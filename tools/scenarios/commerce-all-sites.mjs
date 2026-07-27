@@ -1,16 +1,20 @@
 #!/usr/bin/env node
 // Read-only extension scenario for every representative commerce adapter named in
-// AXSDK_CHROME_EXTENSION_AGENTIC_TASKS.md. Stored Lua/flows are authoritative; the local index
-// override only makes not-yet-pushed site directories discoverable across domain navigations.
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+// AXSDK_CHROME_EXTENSION_AGENTIC_TASKS.md. Stored Lua/flows are authoritative; the local index makes
+// not-yet-pushed site directories discoverable across domain navigations.
+//
+// The index is PUBLISHED into the extension's sites store (the same path `ax sync` uses), not served by
+// intercepting the GitHub URL from this tab. The interception stopped being seen — the extension no
+// longer fetches the index from the page — so every run cleared the index, served nothing in its place,
+// and reported all ten adapters as `loading_adapter`; it also left the dev profile without an index for
+// whatever ran next.
 import {
-  repoRoot,
   SITE_HOME,
   resolveOptions,
   ensureChrome,
   attachActive,
   navigate,
+  syncSitesIndex,
   syncStore,
   run,
   currentUrl,
@@ -23,7 +27,6 @@ const siteFilterArg = process.argv.find(argument => argument.startsWith('--sites
 const requestedSites = siteFilterArg
   ? new Set(siteFilterArg.slice('--sites='.length).split(',').map(value => value.trim()).filter(Boolean))
   : null;
-const localIndexUrl = 'https://raw.githubusercontent.com/layorixinc/axsdk-sites/main/index.md';
 const allSites = [
   { site: 'amazon', region: 'global', query: 'Logitech M185' },
   { site: 'walmart', region: 'global', query: 'Logitech M185' },
@@ -40,11 +43,16 @@ const sites = requestedSites ? allSites.filter(item => requestedSites.has(item.s
 if (sites.length === 0 || requestedSites && sites.length !== requestedSites.size) {
   throw new Error(`--sites must contain known slugs: ${allSites.map(item => item.site).join(',')}`);
 }
+// Outcomes that mean the adapter ANSWERED. A wall the user must clear is one kind; a grid whose cards
+// carry no price is another (Walmart renders 'Options from $X' with no current price and ships empty
+// price fields in its payload). Both are facts the flow can report; only an unclassified empty result is
+// a reader defect.
 const recognizedAccessOutcomes = new Set([
   'access_denied',
   'captcha_required',
   'login_required',
   'security_verification_required',
+  'price_unavailable',
 ]);
 
 function decode(value) {
@@ -65,41 +73,6 @@ function check(checks, name, condition, evidence = '') {
   checks.push({ name, ok, evidence });
   console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${evidence ? ` — ${evidence}` : ''}`);
   return ok;
-}
-
-async function installLocalIndexOverride(page, indexMd) {
-  const body = Buffer.from(indexMd, 'utf8').toString('base64');
-  await page.send('Network.enable');
-  await page.send('Network.setCacheDisabled', { cacheDisabled: true });
-  await page.send('Fetch.enable', { patterns: [{ urlPattern: localIndexUrl, requestStage: 'Request' }] });
-  const off = page.on('Fetch.requestPaused', event => {
-    const response = event.request?.url === localIndexUrl
-      ? page.send('Fetch.fulfillRequest', {
-          requestId: event.requestId,
-          responseCode: 200,
-          responseHeaders: [
-            { name: 'content-type', value: 'text/markdown; charset=utf-8' },
-            { name: 'access-control-allow-origin', value: '*' },
-            { name: 'cache-control', value: 'no-store' },
-          ],
-          body,
-        })
-      : page.send('Fetch.continueRequest', { requestId: event.requestId });
-    response.catch(() => null);
-  });
-  return async () => {
-    off();
-    await page.send('Fetch.disable').catch(() => null);
-    await page.send('Network.setCacheDisabled', { cacheDisabled: false }).catch(() => null);
-  };
-}
-
-async function clearSiteIndex(page, options) {
-  return callInAxContext(page, options, `function(){
-    const sdk = globalThis._AXSDK || globalThis.AXSDK;
-    sdk?.getSitesStore?.().getState?.().clearIndex?.();
-    return true;
-  }`);
 }
 
 async function loadedSiteStatus(page, options) {
@@ -141,15 +114,18 @@ async function main() {
   const reports = [];
   const options = resolveOptions({ site: 'amazon' });
   const { cdpUrl } = await ensureChrome(options, { launch: false });
-  const { page } = await attachActive(cdpUrl, options, {});
+
+  // Publish the local index the way `ax sync` does, before attaching: an unpublished site layer has no
+  // assistant on its host, so every adapter would answer `loading_adapter`. This reloads the extension,
+  // so the page handle must be taken afterwards.
+  const published = await syncSitesIndex(cdpUrl, options, { destination: SITE_HOME.amazon });
+  const { page } = await attachActive(cdpUrl, options, { allowBlank: true });
   const session = { page, options, cdpUrl };
-  const localIndex = await readFile(join(repoRoot, 'index.md'), 'utf8');
-  const removeOverride = await installLocalIndexOverride(page, localIndex);
 
   try {
     await navigate(page, SITE_HOME.amazon);
     await waitForLuaRuntime(page, options);
-    await clearSiteIndex(page, options).catch(() => null);
+    check(checks, 'the local sites index is published to the extension', published.indexBytes > 0 && published.remoteSitesDisabled, `${published.indexBytes} bytes`);
     const synced = await syncStore(session, { site: 'amazon', build: !noBuild, reload: true });
     check(checks, 'all Lua comes from the stored working copy', synced.fromStore > 0 && synced.fromRemote === 0, `${synced.fromStore}/${synced.fromRemote}`);
     check(checks, 'all ten commerce bundles are stored', allSites.every(item => synced.luaStoreKeys.includes(`:${item.site}`)), synced.luaStoreKeys.join(','));
@@ -190,7 +166,6 @@ async function main() {
       check(checks, 'at least one Korean storefront returned live candidates', reports.some(item => item.region === 'korean' && item.candidates > 0), reports.filter(item => item.region === 'korean').map(item => `${item.site}:${item.outcome}`).join(','));
     }
   } finally {
-    await removeOverride();
     page.close();
   }
 

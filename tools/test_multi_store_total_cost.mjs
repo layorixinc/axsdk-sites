@@ -11,10 +11,14 @@ if (!existsSync(runtimePath)) {
 }
 
 const { AXLuaRuntime } = await import(`file://${runtimePath}`);
-const baseSource = readFileSync(join(repoRoot, '_common', 'scripts', '00_base.lua'), 'utf8');
-const commercePath = join(repoRoot, '_common', 'scripts', '50_commerce.lua');
+const commonScripts = ['00_base.lua', '44_pagination.lua', '45_offer_view.lua', '50_commerce.lua']
+  .map((file) => [`_common/scripts/${file}`, readFileSync(join(repoRoot, '_common', 'scripts', file), 'utf8')]);
 const ebayDir = join(repoRoot, 'ebay', 'scripts');
 const amazonDir = join(repoRoot, 'amazon', 'scripts');
+
+const ebayCommonSource = readFileSync(join(ebayDir, '00_common.lua'), 'utf8');
+const ebayResultSelector = ebayCommonSource.match(/M\.RESULT_SELECTOR\s*=\s*"([^"]+)"/)?.[1];
+if (!ebayResultSelector) throw new Error('ebay/scripts/00_common.lua no longer declares M.RESULT_SELECTOR');
 
 let assertions = 0;
 function assert(condition, message, context) {
@@ -26,8 +30,7 @@ async function loadRuntime({ globals = {}, files = [], site = 'ebay' } = {}) {
   const runtime = new AXLuaRuntime({ globals, logger: { log() {}, warn() {}, error() {} } });
   const siteDir = site === 'amazon' ? amazonDir : ebayDir;
   const sources = [
-    ['_common/scripts/00_base.lua', baseSource],
-    ['_common/scripts/50_commerce.lua', readFileSync(commercePath, 'utf8')],
+    ...commonScripts,
     ...files.map((file) => [`${site}/scripts/${file}`, readFileSync(join(siteDir, file), 'utf8')]),
   ];
   for (const [id, source] of sources) {
@@ -126,7 +129,8 @@ tests.push(['deterministic ranking includes shipping and FX', async () => {
   assert(value.offers.length === 2, 'two offers retained', value);
   assert(value.offers[0].site === 'ebay' && value.offers[0].total_base === 11, 'landed cost should rank eBay first', value.offers);
   assert(value.offers[0].rank === 1 && value.offers[1].rank === 2, 'stable ranks assigned', value.offers);
-  assert(value.comparison_text.includes('Reply with a numbered offer to add, or type cancel.'), 'ranked comparison must carry its deterministic approval question', value.comparison_text);
+  assert(value.comparison_text.includes('번호로 선택') && value.comparison_text.includes("'취소'"),
+    'the rendered window must tell the user how to choose and how to refuse', value.comparison_text);
   const presentation = await call(runtime, 'AX_present_store_offers', { comparison_id: value.comparison_id });
   assert(presentation.question === value.comparison_text, 'presentation must read the exact cached comparison instead of model-generated prose', presentation);
   const stalePresentation = await call(runtime, 'AX_present_store_offers', { comparison_id: 'cmp-stale' });
@@ -184,9 +188,11 @@ tests.push(['rank cap and all tie-breaks are stable', async () => {
   const value = await call(runtime, 'AX_rank_store_offers', {
     results: [{ key: 'amazon', status: 'completed', value: { site: 'amazon', candidates } }],
   });
-  assert(value.offers.length === 6, 'approval list must be capped at six', value.offers);
-  assert(value.offers[0].product_id === 'A1' && value.offers[1].product_id === 'A2', 'rating, reviews, and lexical id break equal-cost ties', value.offers);
-  assert(value.offers.every((offer, index) => offer.rank === index + 1), 'bounded list must be renumbered contiguously', value.offers);
+  assert(value.all_offers.length === 8, 'every ranked offer is retained for browsing', value.all_offers);
+  assert(value.comparison_text.includes('총 8개 중 1-5번 (1/2 페이지)'), 'one window shows five of the eight and says so', value.comparison_text);
+  assert(value.view_total === 8 && value.view_pages === 2, 'the window states where it sits in the list', value);
+  assert(value.all_offers[0].product_id === 'A1' && value.all_offers[1].product_id === 'A2', 'rating, reviews, and lexical id break equal-cost ties', value.all_offers);
+  assert(value.all_offers.every((offer, index) => offer.rank === index + 1), 'the ranked list must be numbered contiguously', value.all_offers);
 }]);
 
 tests.push(['cart dispatcher rejects missing scoped approval before navigation', async () => {
@@ -225,7 +231,7 @@ tests.push(['Amazon existing cart must identify the requested ASIN', async () =>
 }]);
 
 tests.push(['eBay parser excludes placeholders and normalizes paid shipping', async () => {
-  const rowSelector = '.su-item-card[data-view], .s-item-card[data-view]';
+  const rowSelector = ebayResultSelector;
   const { globals, state } = makeGlobals({
     tokens: ['su-item-card', 'srp-river-results'],
     rows: {
@@ -249,7 +255,7 @@ tests.push(['eBay parser excludes placeholders and normalizes paid shipping', as
 }]);
 
 tests.push(['eBay free shipping stays complete after FX normalization', async () => {
-  const rowSelector = '.su-item-card[data-view], .s-item-card[data-view]';
+  const rowSelector = ebayResultSelector;
   const { globals } = makeGlobals({
     tokens: ['su-item-card', 'srp-river-results'],
     rows: {
@@ -265,7 +271,7 @@ tests.push(['eBay free shipping stays complete after FX normalization', async ()
 }]);
 
 tests.push(['FX failure preserves an explicitly incomplete candidate', async () => {
-  const rowSelector = '.su-item-card[data-view], .s-item-card[data-view]';
+  const rowSelector = ebayResultSelector;
   const { globals } = makeGlobals({
     tokens: ['su-item-card', 'srp-river-results'],
     fxResponse: null,
@@ -587,6 +593,7 @@ tests.push(['locked model relevance survives localized category labels', async (
     query: 'Logitech G304 mouse',
     identity_brand: 'Logitech',
     identity_model: 'G304',
+    brand_aliases: 'Logitech|로지텍',
     product_category: 'mouse',
     candidates: [{
       product_id: 'K304',

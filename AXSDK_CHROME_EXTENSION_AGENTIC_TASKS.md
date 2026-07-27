@@ -64,9 +64,16 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 ## 5. 카테고리별 Agentic Task
 
+아래 사이트는 각 task를 구현·시연할 수 있는 대표 후보이다. 목록 포함은 제휴, 공개 API 제공, 자동화 허용 또는 DOM 안정성을 의미하지 않으며 실제 구현 전에 사이트별 약관, 권한, 로그인, CAPTCHA, adapter 가능성을 별도로 검증해야 한다.
+
 ### 5.1 이커머스·가격 비교
 
 **우선순위: P0 · 가치 5 / 홍보성 5 / 구현성 4**
+
+#### 대표 사이트와 주소
+
+- 글로벌: [Amazon](https://www.amazon.com/), [Walmart](https://www.walmart.com/), [eBay](https://www.ebay.com/), [AliExpress](https://www.aliexpress.com/), [Etsy](https://www.etsy.com/)
+- 한국: [쿠팡](https://www.coupang.com/), [네이버쇼핑](https://shopping.naver.com/), [G마켓](https://www.gmarket.co.kr/), [11번가](https://www.11st.co.kr/), [SSG.COM](https://www.ssg.com/)
 
 #### 추천 Agentic Task 5가지
 
@@ -90,6 +97,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P0 · 가치 5 / 홍보성 5 / 구현성 3**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Booking.com](https://www.booking.com/), [Trip.com](https://www.trip.com/), [Airbnb](https://www.airbnb.com/), [Agoda](https://www.agoda.com/), [Expedia](https://www.expedia.com/)
+- 한국: [코레일](https://www.letskorail.com/), [NOL](https://nol.yanolja.com/), [여기어때](https://www.goodchoice.kr/), [하나투어](https://www.hanatour.com/), [모두투어](https://www.modetour.com/)
+
 #### 추천 Agentic Task 5가지
 
 1. **유연한 날짜의 항공·숙박 총액 최적화** — 출발지, 목적지, 인원, 예산, 날짜 허용 범위를 수집하고 날짜 조합별 항공권과 숙소를 검색한다. 수하물, 세금, 수수료, 취소 조건을 포함한 총액으로 정규화해 상위 조합을 제시한다. 선택 후 예약 폼을 채우고 결제 단계에서 사용자에게 제어권을 반환한다.
@@ -111,6 +123,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 ### 5.3 채용·구직·커리어
 
 **우선순위: P0 · 가치 5 / 홍보성 5 / 구현성 4**
+
+#### 대표 사이트와 주소
+
+- 글로벌: [LinkedIn Jobs](https://www.linkedin.com/jobs/), [Indeed](https://www.indeed.com/), [Glassdoor](https://www.glassdoor.com/), [ZipRecruiter](https://www.ziprecruiter.com/), [Wellfound](https://wellfound.com/jobs)
+- 한국: [잡코리아](https://www.jobkorea.co.kr/), [사람인](https://www.saramin.co.kr/), [원티드](https://www.wanted.co.kr/), [고용24](https://www.work24.go.kr/), [인크루트](https://www.incruit.com/)
 
 #### 추천 Agentic Task 5가지
 
@@ -135,6 +152,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P1 · 가치 5 / 홍보성 5 / 구현성 3**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Zillow](https://www.zillow.com/), [Realtor.com](https://www.realtor.com/), [Redfin](https://www.redfin.com/), [Rightmove](https://www.rightmove.co.uk/), [Apartments.com](https://www.apartments.com/)
+- 한국: [네이버 부동산](https://land.naver.com/), [직방](https://www.zigbang.com/), [다방](https://www.dabangapp.com/), [호갱노노](https://hogangnono.com/), [KB부동산](https://kbland.kr/)
+
 #### 추천 Agentic Task 5가지
 
 1. **다중 사이트 실거주비 기반 매물 Shortlist** — 보증금, 월세, 관리비, 면적, 층, 준공연도, 중개비를 정규화하고 중복 매물을 병합한다. 보증금 환산 기준과 월 예상 비용을 명시해 상위 매물을 선택한다. 선택 결과와 원본 매물 링크를 저장한다.
@@ -157,6 +179,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P1 · 가치 5 / 홍보성 4 / 구현성 3**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Gmail](https://mail.google.com/), [Google Calendar](https://calendar.google.com/), [Microsoft 365](https://www.microsoft365.com/), [Notion](https://www.notion.so/), [GitHub](https://github.com/)
+- 한국: [네이버 메일](https://mail.naver.com/), [네이버 MYBOX](https://mybox.naver.com/), [네이버웍스](https://naver.worksmobile.com/), [하이웍스](https://www.hiworks.com/), [Dooray!](https://dooray.com/)
+
 #### 추천 Agentic Task 5가지
 
 1. **Inbox에서 Task·Calendar·답장 초안까지** — 이메일에서 실행 항목, 마감일, 담당자를 추출하고 중복을 병합한다. 캘린더 충돌을 확인해 작업 시간과 답장 초안을 제안한다. 업무 도구 생성과 메일 전송은 각각 미리보기 후 승인받는다.
@@ -177,6 +204,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 ### 5.6 배송·물류·반품
 
 **우선순위: P0 · 가치 5 / 홍보성 4 / 구현성 3**
+
+#### 대표 사이트와 주소
+
+- 글로벌: [USPS](https://www.usps.com/), [UPS](https://www.ups.com/), [FedEx](https://www.fedex.com/), [DHL](https://www.dhl.com/), [17TRACK](https://www.17track.net/)
+- 한국: [우체국](https://www.epost.go.kr/), [CJ대한통운](https://www.cjlogistics.com/ko/main), [한진택배](https://www.hanjin.com/kor/Main.do), [롯데글로벌로지스](https://www.lotteglogis.com/), [로젠택배](https://www.ilogen.com/)
 
 #### 추천 Agentic Task 5가지
 
@@ -200,6 +232,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P1 · 가치 4 / 홍보성 5 / 구현성 3**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Google Maps](https://maps.google.com/), [Apple Maps](https://maps.apple.com/), [Bing Maps](https://www.bing.com/maps), [OpenStreetMap](https://www.openstreetmap.org/), [Yelp](https://www.yelp.com/)
+- 한국: [네이버 지도](https://map.naver.com/), [카카오맵](https://map.kakao.com/), [T map](https://www.tmap.co.kr/), [식신](https://www.siksinhot.com/), [숨고](https://soomgo.com/)
+
 #### 추천 Agentic Task 5가지
 
 1. **시간 제약이 있는 다중 장소 동선 계획** — 방문할 장소, 체류시간, 영업시간, 출발·종료 위치를 수집해 현실적인 방문 순서를 계산한다. 이동시간과 예약 시간을 확인하고 불가능한 후보를 제거한다. 확정 동선을 지도 목록과 캘린더 초안으로 만든다.
@@ -220,6 +257,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 ### 5.8 음식·레시피·주문
 
 **우선순위: P0 · 가치 5 / 홍보성 5 / 구현성 4**
+
+#### 대표 사이트와 주소
+
+- 글로벌: [Allrecipes](https://www.allrecipes.com/), [Cookpad](https://cookpad.com/), [Tabelog](https://tabelog.com/), [DoorDash](https://www.doordash.com/), [Uber Eats](https://www.ubereats.com/)
+- 한국: [만개의레시피](https://www.10000recipe.com/), [82cook](https://www.82cook.com/), [다이닝코드](https://www.diningcode.com/), [요기요](https://www.yogiyo.co.kr/), [배달의민족](https://www.baemin.com/)
 
 #### 추천 Agentic Task 5가지
 
@@ -243,6 +285,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P1 · 가치 4 / 홍보성 4 / 구현성 4**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Coursera](https://www.coursera.org/), [Udemy](https://www.udemy.com/), [Khan Academy](https://www.khanacademy.org/), [edX](https://www.edx.org/), [Canvas](https://www.instructure.com/canvas)
+- 한국: [EBS](https://www.ebs.co.kr/), [K-MOOC](https://www.kmooc.kr/), [메가스터디](https://www.megastudy.net/), [해커스](https://www.hackers.com/), [나이스](https://www.neis.go.kr/)
+
 #### 추천 Agentic Task 5가지
 
 1. **다중 LMS 과제·시험 마감 통합** — 여러 과목 페이지에서 과제, 시험, 읽을 자료, 마감일을 추출하고 중복 공지를 병합한다. 시간대와 변경 이력을 정리해 우선순위 목록을 만든다. 사용자의 캘린더 빈 시간에 학습 블록을 제안한다.
@@ -265,6 +312,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P1 · 가치 5 / 홍보성 4 / 구현성 3**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Apple Support](https://support.apple.com/), [Microsoft Support](https://support.microsoft.com/), [Samsung Support](https://www.samsung.com/us/support/), [Dell Support](https://www.dell.com/support/), [HP Support](https://support.hp.com/)
+- 한국: [삼성전자서비스](https://www.samsungsvc.co.kr/), [T world](https://www.tworld.co.kr/), [KT](https://www.kt.com/), [LG U+](https://www.lguplus.com/), [LG전자 고객지원](https://www.lge.co.kr/support)
+
 #### 추천 Agentic Task 5가지
 
 1. **현재 오류에서 공식 해결 절차까지** — 현재 페이지의 오류 코드와 사용자가 제공한 제품 모델·환경을 읽는다. 제조사의 공식 지식베이스에서 해당 조건에 맞는 해결법을 찾고 위험이 낮은 단계부터 실행 가능한 체크리스트로 만든다. 해결 여부를 확인하며 다음 단계 또는 지원 접수로 전환한다.
@@ -286,6 +338,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P2 · 가치 5 / 홍보성 4 / 구현성 2**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [USA.gov](https://www.usa.gov/), [GOV.UK](https://www.gov.uk/), [Government of Canada](https://www.canada.ca/), [gov.br](https://www.gov.br/), [Your Europe](https://europa.eu/youreurope/)
+- 한국: [정부24](https://www.gov.kr/), [홈택스](https://www.hometax.go.kr/), [고용24](https://www.work24.go.kr/), [서울특별시](https://www.seoul.go.kr/), [대한민국 법원](https://www.scourt.go.kr/)
+
 #### 추천 Agentic Task 5가지
 
 1. **지원사업·복지 자격 사전 점검과 신청서 초안** — 공식 공고의 자격, 제외 조건, 신청 기간을 구조화하고 사용자 정보와 대조한다. 충족, 미충족, 추가 확인 항목을 근거 조항과 함께 표시한다. 필요한 정보를 수집해 신청 폼을 채우되 법적 제출 전 사용자에게 인계한다.
@@ -306,6 +363,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 ### 5.12 건강·병원·약국
 
 **우선순위: P3 · 가치 5 / 홍보성 4 / 구현성 2**
+
+#### 대표 사이트와 주소
+
+- 글로벌: [Mayo Clinic](https://www.mayoclinic.org/), [Cleveland Clinic](https://my.clevelandclinic.org/), [CVS](https://www.cvs.com/), [Walgreens](https://www.walgreens.com/), [Zocdoc](https://www.zocdoc.com/)
+- 한국: [닥터나우](https://doctornow.co.kr/), [서울아산병원](https://www.amc.seoul.kr/), [서울대학교병원](https://www.snuh.org/), [삼성서울병원](https://www.samsunghospital.com/), [건강보험심사평가원](https://www.hira.or.kr/)
 
 #### 추천 Agentic Task 5가지
 
@@ -329,6 +391,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P3 · 가치 5 / 홍보성 4 / 구현성 1**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [PayPal](https://www.paypal.com/), [Wise](https://wise.com/), [Chase](https://www.chase.com/), [Capital One](https://www.capitalone.com/), [TradingView](https://www.tradingview.com/)
+- 한국: [토스](https://toss.im/), [네이버페이](https://pay.naver.com/), [카카오페이](https://www.kakaopay.com/), [KB국민은행](https://www.kbstar.com/), [신한은행](https://bank.shinhan.com/)
+
 #### 추천 Agentic Task 5가지
 
 1. **읽기 전용 반복 결제·구독 감사** — 최근 거래에서 반복 결제, 가격 인상, 중복 서비스, 사용하지 않는 구독 후보를 분류한다. 갱신일과 취소 조건을 공식 계정 페이지에서 확인하고 월·연간 절감 가능액을 계산한다. 취소 경로만 준비하고 실제 변경은 별도 승인한다.
@@ -350,6 +417,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 ### 5.14 콘텐츠·커뮤니티·스트리밍
 
 **우선순위: P2 · 가치 3 / 홍보성 3 / 구현성 4**
+
+#### 대표 사이트와 주소
+
+- 글로벌: [YouTube](https://www.youtube.com/), [Reddit](https://www.reddit.com/), [X](https://x.com/), [Instagram](https://www.instagram.com/), [Netflix](https://www.netflix.com/)
+- 한국: [네이버 카페](https://section.cafe.naver.com/), [네이버 블로그](https://section.blog.naver.com/), [DCInside](https://www.dcinside.com/), [나무위키](https://namu.wiki/), [TVING](https://www.tving.com/)
 
 #### 추천 Agentic Task 5가지
 
@@ -373,6 +445,11 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 **우선순위: P1 · 가치 4 / 홍보성 3 / 구현성 4**
 
+#### 대표 사이트와 주소
+
+- 글로벌: [Google](https://www.google.com/), [Bing](https://www.bing.com/), [Yahoo](https://www.yahoo.com/), [DuckDuckGo](https://duckduckgo.com/), [Perplexity](https://www.perplexity.ai/)
+- 한국: [네이버](https://www.naver.com/), [다음](https://www.daum.net/), [ZUM](https://zum.com/), [NATE](https://www.nate.com/), [Google Korea](https://www.google.co.kr/)
+
 #### 추천 Agentic Task 5가지
 
 1. **출처가 추적되는 다중 소스 조사 Concierge** — 주제를 하위 질문으로 나누고 공식 자료, 최신 기사, 반대 근거를 각각 검색한다. 중복을 제거하고 주장별 근거표, 출처 링크, 확인 날짜를 만든다. 근거가 충돌하는 부분을 숨기지 않고 결론과 함께 표시한다.
@@ -392,6 +469,8 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 - 검색 결과의 페이지 콘텐츠를 에이전트 명령으로 취급하지 않는다.
 
 ## 6. 추천 MVP·홍보 포트폴리오
+
+이 절은 각 데모가 사용자에게 무엇을 보여주는지를 정의한다. 같은 데모의 flow 그래프, adapter, 승인·mutation 계약은 §8에 있다.
 
 ### 6.1 Demo 1: Multi-site Best Buy
 
@@ -465,180 +544,407 @@ OpenAI CUA가 공개한 소규모 시험에서는 반복적인 단순 UI 작업�
 
 > AXSDK는 구매 전환뿐 아니라 구매 이후 고객 경험도 자동화한다.
 
-## 7. AXSDK Flow 계약
+## 7. 데모 구현 설계 계약
 
-카테고리와 관계없이 다음 공통 구조를 권장한다.
+§5·§6이 "무엇을 만들까"라면 이 장부터는 "flow document contract v1으로 어떻게 만드는가"다. 기준은 다음 세 가지이고, 이 문서가 임의로 확장하지 않는다.
+
+| 기준 | 파일 | 역할 |
+|---|---|---|
+| 엔진 규격 | [`FLOWS.md`](./FLOWS.md) | 노드 kind, flowTool, 예산, pause/resume, `flow.map`의 정의 |
+| 준수 계약 | [`FLOW_CONFORMANCE.md`](./FLOW_CONFORMANCE.md) + `tools/flow-conformance.test.mjs` | 실행 가능한 게이트. 여기서 강제하는 규칙이 최종 판정이다 |
+| 참조 구현 | `_common/flows.yaml`의 `shopping_multi_store_total_cost` | 이미 통과 중인 실제 그래프 |
+
+SDK 쪽 참조 문서는 `../axsdk-sdk-js/packages/axsdk-react/apps/browser-extension/flows.yaml`이다. 이는 전체 `version: 1` app document이며 production site flow가 아니다. production 계층은 `extends: app` overlay(`_common/flows.yaml` + 활성 `<site>/flows.yaml`)이고 `defaults.mapping: legacy`를 고정한다. 두 계층을 서로 대체해서 인용하지 않는다.
+
+### 7.1 결정성 우선 — LLM은 네 곳에만
+
+데모에서 LLM이 담당하는 지점은 넷뿐이다.
+
+1. 라우팅: planner의 `decide`
+2. 자연어 제약 추출: `collect_*` 노드 1콜
+3. 선택·승인 해석: `choose_*` 노드 1콜
+4. 최종 문장 다듬기: `app.terminal`
+
+반복, 누적, 중복 제거, 스키마 검증, 단위 환산, 산술, 랭킹, 승인 토큰 발급, mutation 실행, 실행 후 확인은 전부 결정적 경로(`action_contract` + `lua`/`remote`/`flow.map`)에 둔다.
+
+이유는 두 가지다. 첫째, `action_unit` 한 스텝은 모델 호출 한 번이고 턴 지연을 지배한다. 둘째, 승인 토큰이나 가격 같은 값을 LLM이 만들어낼 수 있으면 승인·mutation 계약이 형식만 남는다.
+
+### 7.2 공통 skeleton
+
+이전 판의 선형 pseudo-pipeline을 실제 노드 kind로 다시 쓴 것이다.
+
+| 단계 | 노드 kind | 실행 | 실패 처리 |
+|---|---|---|---|
+| 요청 수집 | `action_unit` (self-loop `ask`) | LLM 1콜 + passthrough | `ask`로 pause |
+| 대상 확정 | `action_contract` | remote 또는 `lua` | `next.error` |
+| 다중 대상 읽기 | `action_contract` + `flow.map` task mode | worker subflow × N, 모델 호출 0 | `next.partial` |
+| 대상 재검증 | `action_contract` | remote | `next.error` |
+| 정규화·랭킹 | `action_contract` | sandboxed `lua` | `next.error` |
+| 결과 제시 | `action_contract` | `question` 방출 | `next.error` |
+| 승인 | `action_unit` (self-loop `ask`) | LLM 1콜 | `ask`로 pause |
+| 승인 해석·토큰 발급 | `action_contract` | `lua` | `next.error` |
+| 대상 열기 | `action_contract` | remote, 재진입 | `navigating` |
+| mutation | `action_contract` + mutation 계약 | remote | `navigating` / `error` |
+| 완료 증빙 | `terminal` | 상태 기반 | 별도 error terminal |
+
+이 순서는 새로 만든 것이 아니라 `_common/flows.yaml`의 `shopping_multi_store_total_cost`가 이미 강제받고 있는 그래프다.
 
 ```text
-intent
-→ collect_constraints
-→ resolve_allowed_origins
-→ map_read_sites
-→ normalize_results
-→ rank_or_decide
-→ preview
-→ explicit_consent
-→ mutation
-→ verify_result
-→ terminal_evidence
+collect_request
+→ prepare_identity ─┬─ discover_products → build_product_options → choose_product → resolve_product ─┐
+                    └─ lock_requested_identity ───────────────────────────────────────────────────────┤
+→ search_stores → verify_offers → normalize_rank → choose_offer → resolve_offer → open_selected_store ─┘
+→ add_selected_offer → add_selected_offer_after_navigation → confirm_selected_offer_after_navigation
+→ report_cart
 ```
 
-모든 사이트별 결과는 최소한 다음 필드를 반환해야 한다.
+새 데모는 이 skeleton의 단계 이름을 바꿔 재사용한다. 단계를 빼는 것은 허용되지만(예: 읽기 전용 데모는 mutation 이후 단계 없음), 순서를 바꾸거나 승인 단계를 건너뛰는 변형은 허용하지 않는다.
 
-- `sourceUrl`
-- `sourceSite`
-- `capturedAt`
-- 사이트 내부의 안정적인 객체 ID
-- 사용자가 입력한 원래 조건
-- 비교에 사용된 정규화 값
-- 누락되거나 확인할 수 없었던 값
-- 실제 행동 직전 재검증 결과
-- 완료 후 주문번호, 예약번호, 접수번호 등의 증빙
+### 7.3 질문과 승인 (pause / resume)
 
-## 8. 현재 AXSDK 구현과의 연결
+- 질문에 `terminal`을 쓰지 않는다. terminal은 flow를 끝내므로 다음 메시지는 route entry부터 다시 시작하고 누적 상태를 잃는다. 질문 노드는 자기 자신을 가리키는 `next` 전이를 갖는 self-loop이어야 한다.
+- 화면에 뜨는 필드는 `question`이다. `message`만 낸 노드는 pause 화면에 아무것도 띄우지 않는다.
+- 재개는 planner가 `continue_current`를 반환할 때만 일어난다. planner 프롬프트가 항상 새 intent로 라우팅하면 진행 중 flow가 폐기된다.
+- 승인·선택 노드에는 `messagePolicy: { currentUserText: active_node_only }`를 둔다. 같은 턴에 자동 전이로 들어왔을 때 원래 요청문을 승인으로 오독하는 것을 막는다. conformance test가 `choose_product`와 `choose_offer`에 대해 이 값을 강제한다.
+- 승인 노드의 `inputSelector`에 비교 결과 전체를 넣지 않는다. 현재 강제되는 금지 목록은 `offers`, `comparison_text`, `ambiguous_offers`, `excluded_offers`다. 사용자에게 보여줄 표는 결정적 제시 도구가 `question`으로 렌더하고, 승인 노드는 선택 번호만 해석한다.
+- self-loop은 사용자 질문 전용이다. 내부 다단계 반복에 self-loop을 쓰면 매 도구 호출마다 pause한다. 여러 도구를 한 턴에 실행하려면 순차 노드로 분리한다.
+- 멈춘 self-loop 방어는 `fallback.maxStalledSteps` + `stalledNext`로 한다. 하드 캡에 부딪혀 예외로 끝내지 않는다.
 
-### 8.1 source of truth
+### 7.4 mutation 계약
 
-**[production]** 이 저장소의 `_common/flows.yaml`이 Chrome Extension production client overlay의
-기준이다. 실제 실행 문서는 이 파일과 현재 host의 `<site>/flows.yaml`을 base app flow 위에
-deep-merge해 만든다.
+`effect: mutation`을 선언한 flowTool은 다음 네 가지를 전부 선언해야 한다. 이는 문서 권고가 아니라 `npm run check:flows`가 실패시키는 조건이다.
 
-**[SDK playground reference]**
-`../axsdk-sdk-js/packages/axsdk-react/apps/browser-extension/flows.yaml`은
-`packages/axsdk-react/src/App.tsx`가 로드하는 독립적인 full app document다. SDK 통합과 예제 UI를
-검증하는 reference이며 production site flow가 아니다.
+```yaml
+effect: mutation
+consent: required
+idempotent: true
+require: { <state_gate>: <expected> }   # 비어 있으면 실패
+```
 
-두 문서의 역할, compiler gate, 호환성은 `FLOW_CONFORMANCE.md`와
-`tools/fixtures/flow-conformance-v1.json`에 고정한다.
+장바구니형 mutation은 단일 boolean이 아니라 3중 승인 게이트를 쓴다. 현재 `shopping_add_selected_store_offer`에 대해 정확히 이 세 키가 강제된다.
 
-### 8.2 재사용 가능한 계약과 legacy 예제
+```yaml
+require:
+  cart_approval: user_selected_compared_offer
+  identity_approval: locked_product_identity
+  comparison_approval: current_comparison
+```
 
-SDK playground의 `add_to_cart`와 `checkout_start`는 현재 mutation 계약을 사용한다.
+운영 규칙:
 
-- `effect: mutation`
-- `consent: required`
-- `idempotent: true`
-- 상태 기반의 non-empty `require`
+1. 승인 토큰은 결정적 도구만 발급한다. LLM 결정 도구의 `parameters`에는 승인 토큰도 가격도 넣지 않는다. 허용 출력은 `next`, `question`, 선택 인덱스, 대상 비교 id 정도다.
+2. mutation adapter는 실행 직전 대상 페이지를 다시 읽고, 불일치면 클릭하지 않고 구조화된 코드로 멈춘다. 현재 쓰이는 코드: `identity_changed`, `identity_revalidation_failed`, `stale_comparison`, `price_changed`, `currency_changed`, `quantity_unavailable`, `login_required`, `captcha_required`, `unavailable`.
+3. 성공 판정은 사이트가 보여준 확인 값이다. 네비게이션이나 클릭 성공은 성공이 아니다.
+4. 새 mutation 도구를 추가하는 변경은 `tools/flow-conformance.test.mjs`에 해당 도구의 mutation 단언을 추가하는 변경과 같은 커밋이어야 한다.
 
-이 계약은 지원서 제출, 예약, 반품 신청, 이메일 전송 같은 future mutation에도 적용해야 한다.
+### 7.5 다중 대상 fan-out 계약
 
-SDK playground shopping flow의 사이트 순회와 결과 누적은 현재도 LLM-managed sequential loop다.
-해당 node는 **LEGACY PLAYGROUND LOOP**로 명시했으며 새 production 구현의 template가 아니다.
-새로운 다중 item·다중 site 작업은 `flow.map`과 deterministic normalization/reduction을 사용한다.
-V1 `flow.map`은 순차 실행이므로 병렬 조회로 홍보하지 않고 item별 진행 상태와 부분 성공을 보존한다.
+다중 사이트·다중 항목 읽기는 `flow.map` task mode로만 만든다. LLM이 순차 루프를 관리하는 노드는 legacy 경계이며 새 작업에 복제하지 않는다.
 
-### 8.3 production에 복제하면 안 되는 데모 패턴
+```yaml
+execute:
+  kind: runtime
+  implementation: flow.map
+  flow: <worker_flow>
+  itemsArg: <array_arg>
+  resultFrom: <worker_state_path>
+  maxItems: <= 32
+  concurrency: 1
+  onItemError: collect        # task mode 필수
+  task:
+    keyFrom: <item 고유 키>
+    resultSchema: { ... }     # 완료 항목 검증
+    budget:                   # 네 필드 전부 필수
+      maxNodes: 8
+      maxModelCalls: 0
+      maxRemoteCalls: 5
+      timeoutMs: 120000
+```
 
-누락 필드를 채운 직후 `set_form → submit_form`으로 자동 진행하던 SDK `test_form` route, flow,
-adapter는 reference document에서 제거했다. 제출형 task는 다음을 모두 갖추기 전 production
-flow에 추가하지 않는다.
+- caller 노드는 `next.done`, `next.empty`, `next.partial`을 모두 선언한다.
+- worker는 `maxModelCalls: 0`으로 둔다. 항목마다 모델을 부르면 지연과 비용이 항목 수에 비례한다.
+- **V1은 순차 실행이다.** 동시 조회로 홍보하지 않는다. 대신 항목별 진행 상태를 노출하고 부분 성공을 보존한다.
+- `next: done`은 "모든 worker가 완료"라는 뜻이지 "도메인 결과가 있다"는 뜻이 아니다. 후보 0건 판정은 fan-in 쪽에서 값을 보고 내린다.
+- 키는 항목 스키마의 required 속성이어야 하고 중복이 없어야 한다. 결과 총량 상한은 256 KiB다.
 
-1. 제출 내용 전체 미리보기
-2. 별도 confirmation node
-3. `effect: mutation`
-4. `consent: required`
-5. idempotency 또는 중복 제출 방지 키
-6. 완료 결과 검증
+### 7.6 네비게이션 재진입 계약
 
-### 8.4 실행 예산과 compiler gate
+사이트 이동은 호출 안에서 기다리지 않는다. 도구는 이동을 fire하고 즉시 반환하며, flow는 `navigating` 전이로 다음 노드에서 재개한다. 재시도 홉 수는 유한해야 한다. 현재 참조 구현은 `search → search_after_navigation → search_after_navigation_retry → normalize`이며 mutation 쪽도 `add_selected_offer → add_selected_offer_after_navigation → confirm_selected_offer_after_navigation → report_cart`로 같은 형태를 쓴다. 상세 계약은 [`NAVIGATION.md`](./NAVIGATION.md)에 있다.
 
-Production overlay는 `_common/flows.yaml`의 `defaults.maxSteps: 64`를 사용한다. 복합 task는 한 턴에
-모든 단계를 넣지 않고 읽기, 비교, 사용자 선택, mutation을 pause·resume 경계로 분리한다.
+### 7.7 selector와 증빙
 
-추적하는 flow는 모두 flow document contract `version: 1` 기준이다. Local conformance check는 YAML,
-문서 역할, mutation contract, legacy 표시를 검증한다. 최종 compile authority는 session 생성 시
-동일한 merged document를 검증하는 config-runtime compiler다.
+- 모든 planner/노드는 정확한 leaf 경로만 선택한다. `$`, `global`, `flow`, `active`, `contexts` 같은 전체 스코프 선택은 컴파일 오류다. 절차는 [`FLOWS_YAML_SELECTOR_MIGRATION.md`](./FLOWS_YAML_SELECTOR_MIGRATION.md)를 따른다.
+- terminal은 `respond`가 참조하는 경로를 전부 선택한다. 상태를 읽지 않는 terminal은 `inputSelector: []`를 명시한다.
+- 현재 production flow가 실제로 남기는 증빙은 다음과 같다.
 
-## 9. Chrome Extension 설계 원칙
+| 종류 | 필드 |
+|---|---|
+| 대상 동일성 | `identity_id`, `identity_fingerprint`, `identity_source_refs`, `canonical_query`, `locked_hard_constraints` |
+| 비교 스냅샷 | `comparison_id`, `options_version`, `complete_count`, `incomplete_count` |
+| 후보 | `site`, `product_id`, `url`, `price`/`currency`, `shipping_cost`, `total_base`, `cost_complete`, `rating`, `review_count` |
+| 승인 | `identity_approval`, `comparison_approval`, `cart_approval` |
+| 결과 | `cart_status`, `cart_confirmation`, `cart_url`, 실패 코드 |
 
-### 9.1 Side Panel을 기본 UX로 사용
+- **관측 시각 필드는 현재 존재하지 않는다.** 이전 판의 `capturedAt` 요구는 어떤 flow나 `SCHEMA.md` 항목에도 구현되어 있지 않다. 데모에서 "언제 읽은 값"을 보여주려면 adapter 결과 스키마에 필드를 추가하는 신규 작업으로 잡아야 한다(§9).
 
-Chrome Side Panel은 현재 페이지를 유지한 채 다음 정보를 표시하기에 적합하다.
+### 7.8 예산
 
-- task 진행 상태
-- 사이트별 검색 상태
-- 비교표와 추천 근거
-- 누락 정보 질문
-- mutation 승인
-- 완료 증빙
+| 예산 | 범위 | 기본 / 상한 |
+|---|---|---|
+| `defaults.maxSteps` | 턴당 노드 실행 | 24 / 256 |
+| `maxSelfSteps` | 노드 하나의 self-loop | 미설정 / 256 |
+| `llm.maxCalls` | `action_unit` 한 노드 | `max(1, turns) + 1` |
+| `execute.timeoutMs` | remote 호출 1회 | 문서 기본 / 120000 ms |
+| `flow.map` 집계 | map 1회 | 노드 1024 · 모델 256 · remote 512 · 120000 ms |
+| `task.budget` | map 항목 1개 | 네 필드 필수, 위 집계의 자식 |
 
-### 9.2 현재 탭은 `activeTab`, 추가 사이트는 선택적 권한
+데모 설계 규칙: 한 턴에 읽기·비교·승인·mutation을 모두 넣지 않는다. 사용자 질문(pause)을 자연스러운 경계로 삼아 각 턴의 노드 수를 24 아래로 유지한다.
 
-Chrome 공식 문서상 `activeTab`은 사용자가 확장 프로그램을 호출한 현재 탭에 일시적인 접근을 제공하며 탭 이동 또는 종료 시 해제된다.
+### 7.9 오류 계약
 
-권장 방식:
+현재 tracked overlay는 노드마다 `next.error`와 `fallback: { invalidNext, exhaustedNext }`를 명시하는 방식만 쓴다. v1에는 `__error` 자동 unwind와 `flow.onError`, 그리고 상태에서 값을 그대로 읽는 데이터 terminal(`respond: { from, fallback }`)도 있지만 production overlay에서는 아직 사용하지 않는다. 새 데모는 둘 중 하나를 고르고 한 flow 안에서 섞지 않는다. 섞으면 실패 경로가 두 갈래가 되어 증빙이 갈라진다.
 
-- 현재 페이지 읽기: `activeTab`
-- 다중 사이트 task: 실행 시 필요한 도메인만 `optional_host_permissions` 요청
-- 모든 사이트에 대한 영구 권한 요청 지양
-- task마다 허용 origin 집합 생성
+---
 
-현재 `app.json`의 `domainWhitelist: ["https://*"]`는 AXSDK 앱 계약 계층의 설정이며 Chrome host permission이나 안전한 origin 제한을 대신하지 않는다.
+## 8. 데모별 flow 설계
 
-### 9.3 Service Worker 메모리에 장기 상태를 두지 않기
+다섯 데모 모두 §7.2 skeleton의 인스턴스다. 각 절은 라우팅, 노드 그래프, 필요한 adapter, mutation 경계, 증빙을 정의한다. adapter 이름은 `SCHEMA.md`의 규칙(`AX_` + snake_case, 동사 우선, 다중 사이트 디스패처는 `_store_` 중위)을 따른다.
 
-Manifest V3 service worker는 장기 실행되는 background page가 아니라 event-driven이다. 다중 턴 작업 상태는 config-runtime session 또는 backend에 저장하고 service worker는 메시지 전달과 브라우저 API 호출에 집중해야 한다.
+### 8.1 Demo 1 — Multi-store Best Buy (구현 완료)
 
-### 9.4 사이트별 Content Script와 Adapter 사용
+유일하게 이미 production overlay에 존재하는 데모다. 나머지 데모의 기준선이므로 새로 설계하지 않고 계약만 고정한다.
 
-범용 CSS selector를 LLM이 임의로 생성하는 방식보다 다음 구조가 안전하다.
+| 단계 | 노드 | 도구 | 게이트 |
+|---|---|---|---|
+| 수집 | `collect_request` | `collect_total_cost_request` | self-loop `ask` |
+| 동일성 | `prepare_identity` → `discover_products` → `build_product_options` → `choose_product` → `resolve_product` | `shopping_prepare_product_identity`, `shopping_discover_products`, `shopping_build_product_options`, `choose_product_identity`, `shopping_resolve_product_option` | `choose_product`는 `active_node_only` + 단일 도구 |
+| 조회 | `search_stores` | `shopping_search_stores` (`flow.map` task mode → `shopping_search_one_store`) | worker 모델 0콜 |
+| 검증 | `verify_offers` | `shopping_verify_product_offers` | 랭킹 이전 |
+| 랭킹 | `normalize_rank` | `AX_rank_store_offers` | 결정적 |
+| 승인 | `choose_offer` | `present_store_offers` + `choose_store_offer` | self-loop `ask`, payload 미주입 |
+| 확정 | `resolve_offer` | `AX_resolve_store_offer` | 3개 승인 토큰 발급 |
+| mutation | `open_selected_store` → `add_selected_offer` → `*_after_navigation` → `confirm_*` | `shopping_add_selected_store_offer` | 3중 `require` |
+| 증빙 | `report_cart` | — | 상태 기반 terminal |
 
-- 사이트별 읽기 adapter
-- 사이트별 mutation adapter
-- 구조화된 객체 ID와 결과
-- 허용된 행동만 노출
-- 페이지 구조 변경 감지
-- 행동 직전 결과 재검증
+이미 실행 가능한 게이트가 강제하는 것: 동일성 확정이 조회보다 먼저, 검증이 랭킹보다 먼저, 승인 self-loop 존재, 승인 노드의 payload 차단, mutation 3중 게이트, worker `maxRemoteCalls >= 5`, 네비게이션 재시도 홉.
 
-### 9.5 웹 콘텐츠를 신뢰하지 않기
+남은 작업은 §9의 gap 항목(관측 시각, FX 출처 노출)뿐이며 그래프 변경은 필요 없다.
 
-Google은 브라우저 에이전트의 핵심 위험으로 간접 prompt injection을 지적한다. 리뷰, 광고, iframe, 사용자 게시물의 문구가 에이전트를 탈선시킬 수 있다.
+### 8.2 Demo 2 — Recipe to Cart
 
-필수 방어:
+Demo 1의 조회·랭킹·mutation 구간을 그대로 재사용하고 앞단만 교체한다.
 
-- 페이지 텍스트를 명령이 아닌 데이터로 취급
+라우팅: 새 intent `recipe_to_cart`, entry `recipe_to_cart.read_recipe`. `shopping_multi_store_total_cost`와 겹치지 않도록 route `description`에 "현재 레시피 페이지"를 명시하고 `priority`를 쇼핑 intent보다 높게 둔다.
+
+| 단계 | 노드 | kind | 도구 |
+|---|---|---|---|
+| 레시피 읽기 | `read_recipe` | `action_contract` | 신규 `AX_read_recipe` (현재 탭, 읽기 전용) |
+| 인분·보유 재료 수집 | `collect_plan` | `action_unit` self-loop | 신규 passthrough `collect_recipe_plan` |
+| 재료→구매 단위 환산 | `build_shopping_list` | `action_contract` | 신규 `lua` 도구 (수량 합산, 중복 병합, 보유 재료 제외) |
+| 품목별 조회 | `search_items` | `action_contract` | 신규 caller `recipe_search_items` (`flow.map` task mode, `keyFrom: ingredient_id`). worker flow는 기존 `shopping_search_one_store` 재사용 |
+| 정규화·후보 선택 | `normalize_rank` | `action_contract` | 기존 `AX_rank_store_offers` |
+| 대체품 승인 | `confirm_substitutions` | `action_unit` self-loop | 신규 결정적 제시 도구 + 선택 해석 도구 |
+| 장바구니 담기 | `add_items` | `action_contract` | 기존 `shopping_add_selected_store_offer`를 품목 수만큼 순차 호출 |
+| 품목 진행 | `next_item` | `action_contract` | 남은 품목 pop, 완료 시 증빙으로 전이 |
+| 증빙 | `report_cart` | `terminal` | 품목별 성공/실패 |
+
+worker 재사용 시 주의: 기존 worker의 map은 `keyFrom: site`이고 결과 스키마가 `site`와 `candidates`를 요구한다. 품목 축으로 돌리려면 caller 쪽 item 스키마에 `ingredient_id`를 required·고유 값으로 선언하고, `context`에 `{ query, site }`를 실어 보내며, `resultSchema`에 `ingredient_id`를 추가해야 한다. worker 그래프 자체는 바뀌지 않는다.
+
+mutation 경계: 품목마다 개별 승인을 받지 않는다. 확정된 장바구니 목록 전체를 한 번 승인받되, `shopping_add_selected_store_offer`가 요구하는 세 토큰(`identity_approval`, `comparison_approval`, `cart_approval`)은 품목마다 결정적 resolver가 발급한다. 하나의 승인이 여러 품목의 게이트를 통과시키는 형태로 만들지 않는다. 품목 단위 실패는 부분 성공으로 보고한다.
+
+주의: `flow.map` 안에서 mutation을 돌리지 않는다. map은 부작용 권한을 주지 않으며 롤백도 없다. 담기는 map 밖 순차 노드에서 수행한다.
+
+### 8.3 Demo 3 — Job Application Copilot
+
+가장 위험한 데모다. 제출은 되돌릴 수 없고 내용이 사용자 명의로 남는다.
+
+라우팅: intent `job_application`, entry `job_application.read_posting`.
+
+| 단계 | 노드 | kind | 비고 |
+|---|---|---|---|
+| 공고 읽기 | `read_posting` | `action_contract` | 신규 `AX_read_job_posting` |
+| 근거 대조 | `match_profile` | `action_contract` | 결정적 대조. 조건별 `충족`/`부분 충족`/`근거 없음`과 근거 문장 id |
+| 부족 정보 질문 | `collect_answers` | `action_unit` self-loop | 서술형 답변은 사용자 입력만 사용 |
+| 문서 초안 | `draft_documents` | `action_unit` | 근거 없는 문장 생성 금지를 프롬프트가 아니라 `match_profile` 결과 범위로 제약 |
+| 폼 채우기 | `fill_form` | `action_contract` | 기존 `AX_get_form`/`AX_set_form` 계열 |
+| 전체 미리보기 | `preview_application` | `action_contract` | 제출될 전 필드를 `question`으로 렌더 |
+| 제출 승인 | `confirm_submit` | `action_unit` self-loop | `active_node_only` |
+| 제출 | `submit_application` | `action_contract` | 신규 mutation adapter |
+| 증빙 | `report_submission` | `terminal` | 접수번호/확인 문구 |
+
+제출 adapter의 게이트:
+
+```yaml
+effect: mutation
+consent: required
+idempotent: true
+require:
+  submit_approval: user_reviewed_full_application
+  posting_approval: locked_job_posting
+```
+
+`posting_approval`은 `read_posting`이 발급하고, 공고 id가 바뀌면 무효가 된다. 같은 공고에 대한 재제출은 접수번호가 있으면 차단한다. 대량 자동 지원은 라우팅 단계에서 금지한다(한 턴에 하나의 공고).
+
+금지: 기존 데모용 자동 폼 제출 경로를 복제하지 않는다. 그 경로에는 mutation·consent 선언이 없고, 미리보기와 승인 노드도 없다.
+
+### 8.4 Demo 4 — Flexible Trip Optimizer
+
+fan-out 축이 사이트가 아니라 **날짜 조합**이라는 점만 다르다.
+
+| 단계 | 노드 | 비고 |
+|---|---|---|
+| 조건 수집 | `collect_trip` | 출발·도착·인원·예산·날짜 허용 범위 |
+| 조합 생성 | `build_date_options` | 결정적 `lua`. `maxItems`(≤32) 안으로 조합 수를 잘라내고 자른 사실을 상태에 남긴다 |
+| 조합별 조회 | `search_options` | `flow.map` task mode, `keyFrom: option_id` |
+| 총액 정규화 | `normalize_total` | 수하물·세금·수수료·취소 조건 포함. 미확인 항목은 `null`로 두고 `cost_complete: false` |
+| 제시·선택 | `choose_option` | self-loop, 상위 조합만 렌더 |
+| 예약 폼 준비 | `prepare_booking` | 폼 채우기까지만 |
+| 인계 | `handoff` | terminal. 결제 단계 진입 직전에 사용자에게 제어권 반환 |
+
+이 데모에는 mutation adapter를 두지 않는다. 예약 확정·결제는 사용자 직접 조작이고, flow는 폼 준비까지만 한다. 따라서 `effect: mutation` 선언이 없어야 하며, 있으면 계약 위반이다.
+
+`cost_complete`가 false인 조합을 완전한 조합보다 위에 올리지 않는다. 랭킹 순서는 Demo 1과 동일한 결정적 규칙(완전 비용 우선 → 총액 → 평점 → 리뷰 수 → 사이트 슬러그 → id)을 재사용한다.
+
+### 8.5 Demo 5 — Post-purchase Concierge
+
+읽기 fan-out과 준비 작업 위주이며, mutation은 반품 신청 한 곳뿐이다.
+
+| 단계 | 노드 | 비고 |
+|---|---|---|
+| 주문 수집 | `collect_orders` | 사용자가 지정한 쇼핑몰/기간 |
+| 주문·배송 조회 | `track_orders` | `flow.map` task mode, `keyFrom: order_id` |
+| 상태 정규화 | `normalize_status` | 배송사 상태 문구를 공통 상태로 매핑, 원문과 출처 URL 보존 |
+| 지연·기한 판정 | `assess_orders` | 결정적. 반품 기한, 예정일 초과, 중복 배송 |
+| 조치 선택 | `choose_action` | self-loop. 반품/교환/문의 중 하나 |
+| 신청서 준비 | `prepare_return` | 회수 주소·환불 금액·수수료 재확인 |
+| 승인 | `confirm_return` | self-loop, `active_node_only` |
+| 신청 | `submit_return` | mutation adapter, `require: { return_approval: user_reviewed_return_terms, order_approval: locked_order }` |
+| 증빙 | `report_return` | 접수번호 |
+
+반품 사유는 사용자가 고른 값만 전송한다. 모델이 사유를 추정해 채우지 않는다.
+
+---
+
+## 9. 신규 구현 필요 목록
+
+데모별 설계가 요구하지만 현재 저장소에 없는 것들이다. "설계됨"과 "구현됨"을 섞지 않기 위해 분리한다.
+
+| 항목 | 현재 상태 | 필요한 작업 |
+|---|---|---|
+| 관측 시각(`captured_at`) | 어떤 flow·adapter에도 없음 | 후보 결과 스키마에 필드 추가, 정규화 도구가 보존, terminal이 노출 |
+| `AX_open_site` | flow에서 쓰이지만 `SCHEMA.md`에 항목 없음 | 스키마 항목 추가 |
+| 레시피/공고/주문 reader | 없음 | `AX_read_recipe`, `AX_read_job_posting`, 주문·배송 reader adapter |
+| 지원서 제출 mutation | 없음 | mutation 4키 + 접수번호 확인까지 포함한 adapter |
+| 반품 신청 mutation | 없음 | 위와 동일 |
+| 날짜 조합 fan-out | 없음 | 조합 생성 `lua` + task map worker flow |
+| 플랫폼 도구(`AX_platform_*`) | 제안 상태, 미구현 | 탭·권한·다운로드가 필요한 데모의 선행 작업 |
+| `kind: approval` 노드 | 제안 상태, v1 미검증 | 도입 전까지 승인은 self-loop + 결정적 토큰으로 구현 |
+
+`AGENTIC_TASKS_IMPLEMENTATION_DESIGN.md`에 **Proposed**로 표시된 문법(scoped receipt, target tabRef, resumable map 등)은 v1 컴파일 대상이 아니다. 데모 설계에서 실행 가능한 것처럼 인용하지 않는다.
+
+---
+
+## 10. Chrome Extension 설계 원칙
+
+### 10.1 Side Panel을 기본 UX로 사용
+
+현재 페이지를 유지한 채 task 진행 상태, 사이트별 조회 상태, 비교표, 부족 정보 질문, mutation 승인, 완료 증빙을 표시한다. §7.5의 순차 실행 특성상 항목별 진행 표시가 특히 중요하다.
+
+### 10.2 현재 탭은 `activeTab`, 추가 사이트는 선택적 권한
+
+`activeTab`은 사용자가 확장 프로그램을 호출한 탭에 일시적 접근을 준다. 다중 사이트 task는 실행 시점에 필요한 도메인만 `optional_host_permissions`로 요청하고, task마다 허용 origin 집합을 만든다. 모든 사이트에 대한 영구 권한은 요청하지 않는다.
+
+`app.json`의 `domainWhitelist`는 AXSDK 앱 계약 계층 설정이며 Chrome host permission을 대신하지 않는다.
+
+### 10.3 Service Worker 메모리에 장기 상태를 두지 않기
+
+Manifest V3 service worker는 event-driven이다. 다중 턴 상태는 config-runtime session이 갖고, service worker는 메시지 전달과 브라우저 API 호출만 한다. flow 상태를 service worker 전역에 캐시하면 pause/resume이 깨진다.
+
+### 10.4 사이트별 adapter만 mutation에 사용
+
+LLM이 즉석에서 만든 selector로 mutation하지 않는다. 사이트별 읽기·mutation adapter, 구조화된 객체 id, 허용된 행동만 노출, 행동 직전 재검증이 기본이다. selector 작성 규칙은 `AGENTS.md` §10을 따른다(빌드 해시 클래스 금지, `data-*`·의미 태그 우선).
+
+### 10.5 웹 콘텐츠를 신뢰하지 않기
+
+페이지 텍스트는 데이터이지 명령이 아니다. 리뷰·광고·iframe·게시물의 문구가 도구 선택이나 승인 상태를 바꿀 수 없어야 한다. 방어선:
+
 - task와 무관한 origin 접근 차단
 - 허용 도구 fail-closed
+- 승인 노드에 원문 payload 미주입(§7.3)
 - 외부 전송 대상과 전송 데이터를 사용자에게 표시
-- 금융·건강 페이지 진입 전 승인
 - 구매·예약·제출·전송 전 승인
 - CAPTCHA, 비밀번호, MFA는 사용자 직접 처리
 
-## 10. 구현 순서 권고
+---
 
-1. 기존 shopping flow를 실제 다중 사이트 총비용 비교 수준으로 완성
-2. 같은 도구를 재사용해 레시피→장바구니 데모 추가
-3. `get_form/set_form`을 안전한 제출 계약으로 강화
-4. 채용공고→지원서 초안·입력 구현
-5. 여행 비교→예약 직전 인계 구현
-6. 배송 조회→반품 준비 구현
-7. 이후 부동산, 지도, 생산성, 교육, 고객 지원으로 확장
-8. 공공서비스는 form safety가 검증된 이후 도입
-9. 금융과 건강은 초기에는 읽기 전용·준비 task로 제한
+## 11. 구현 순서
 
-## 11. 검증 계획
+각 단계는 앞 단계의 게이트가 통과한 뒤에만 시작한다.
 
-각 Hero task는 다음 증거를 남겨야 한다.
+1. Demo 1의 잔여 gap(관측 시각, FX 출처 노출)을 채운다. 그래프는 건드리지 않는다.
+2. `flow.map` worker와 랭킹 도구를 품목 축으로 일반화한다. Demo 2의 조회 구간이 여기서 나온다.
+3. Demo 2를 완성한다. 신규 mutation 없이 기존 장바구니 adapter만 재사용한다.
+4. 폼 제출 mutation 계약을 만든다. 미리보기 노드, 승인 노드, 접수번호 확인, 중복 제출 차단을 한 묶음으로 구현하고 conformance 단언을 함께 추가한다.
+5. Demo 3을 완성한다. 한 턴에 한 공고만 처리한다.
+6. Demo 4를 완성한다. mutation 없음. 날짜 조합 fan-out과 인계 terminal이 산출물이다.
+7. Demo 5를 완성한다. 반품 mutation은 4번에서 만든 계약을 재사용한다.
+8. 이후 부동산·지도·생산성·교육·고객지원으로 확장한다.
+9. 공공 서비스는 폼 제출 계약이 실전 검증된 뒤 도입한다.
+10. 금융·건강은 읽기와 초안 작성으로 제한한다.
 
-1. 사용자의 원래 요청과 구조화된 제약 조건
+---
+
+## 12. 검증 계획
+
+### 12.1 게이트
+
+| 순서 | 명령 | 확인 |
+|---|---|---|
+| 1 | `npm run check:flows` | v1 오버레이 형태, mutation 4키, 강제된 노드 그래프 |
+| 2 | `node tools/ax.mjs sync <site>` | 저장 소스 적용, `fromRemote: 0` |
+| 3 | 실제 사용자 턴 1회 | 서버 컴파일 통과. 로컬 검사만으로는 불충분 |
+| 4 | `node tools/playground.mjs sync --root=playground` + 읽기 전용 시나리오 | 격리 프로필에서의 다중 사이트 동작 |
+
+### 12.2 데모별 증빙
+
+각 데모 실행은 다음을 남겨야 한다. assistant의 최종 문장은 증빙이 아니다.
+
+1. 원 요청과 구조화된 제약
 2. 접근한 origin과 허용 근거
-3. 사이트별 remote call과 결과
-4. 정규화된 비교 데이터
-5. 추천 또는 선택 근거
-6. 사용자 승인 메시지
-7. mutation payload
-8. 완료 후 사이트가 반환한 주문번호·예약번호·접수번호
+3. 사이트별 remote call과 결과(부분 실패 포함)
+4. 정규화된 비교 데이터와 제외 사유
+5. 사용자에게 실제로 보여준 선택지
+6. 승인 메시지와 발급된 승인 토큰
+7. mutation payload와 실행 직전 재검증 결과
+8. 사이트가 반환한 확인 값(주문번호·접수번호·장바구니 확인)
 9. 실패하거나 확인할 수 없었던 항목
 
-검증은 assistant 최종 응답이 아니라 live scenario의 다음 artifact를 기준으로 한다.
+판정 대상 artifact: `summary.json`, `remote-calls.ndjson`, `tool-log.txt`, transcript, runtime/debug 상태.
 
-- `summary.json`
-- `remote-calls.ndjson`
-- `tool-log.txt`
-- transcript
-- runtime/debug state
+### 12.3 이 문서 자체의 제약
 
-## 12. 주요 출처
+`tools/flow-conformance.test.mjs`는 이 문서의 내용도 검사한다. 다음을 위반하면 `npm run check:flows`가 실패한다.
+
+- `_common/flows.yaml`을 언급할 것
+- `axsdk-sdk-js/packages/axsdk-react/apps/browser-extension/flows.yaml`을 언급할 것
+- `legacy` 경계를 언급할 것
+- 폐기된 browser-extension 경로를 언급하지 말 것
+
+---
+
+## 13. 주요 출처
+
+### 저장소 내부 계약
+
+- [`FLOWS.md`](./FLOWS.md) — flow document contract v1
+- [`FLOW_CONFORMANCE.md`](./FLOW_CONFORMANCE.md) — 준수 계약과 게이트
+- [`FLOWS_YAML_SELECTOR_MIGRATION.md`](./FLOWS_YAML_SELECTOR_MIGRATION.md) — selector 계약
+- [`NAVIGATION.md`](./NAVIGATION.md) — 네비게이션 계약
+- [`SCHEMA.md`](./SCHEMA.md) — `AX_*` 도구 스키마
+- [`MULTI_STORE_TOTAL_COST_DESIGN.md`](./MULTI_STORE_TOTAL_COST_DESIGN.md) — 정규화·랭킹 규칙
+- [`AGENTIC_TASKS_IMPLEMENTATION_DESIGN.md`](./AGENTIC_TASKS_IMPLEMENTATION_DESIGN.md) — 상위 목표 설계(Proposed 항목 포함)
+
+### 외부 자료
 
 - [Google: Chrome Gemini 3 Auto Browse](https://blog.google/products-and-platforms/products/chrome/gemini-3-auto-browse/)
 - [Google: Architecting Security for Agentic Capabilities in Chrome](https://security.googleblog.com/2025/12/architecting-security-for-agentic.html)

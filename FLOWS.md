@@ -84,11 +84,10 @@ planner:
   prompt: |-
     Call decide exactly once. Classify the latest message into a configured intent.
   allowedTools: [decide]          # default ["decide"]; MUST include decide
-  inputSelector: [active, queue, lastIntent, conversationSummary, latestMessageInterpretation]
+  inputSelector: [active.status, queue, lastIntent.intent, conversationSummary, latestMessageInterpretation, contexts.sites]
   outputMap:
     conversationSummary: conversationSummary
     latestMessageInterpretation: latestMessageInterpretation
-  contexts: [sites]               # names injected into the planner system prompt
   state: { cart: { items: [] } }  # GLOBAL initial state — seeded into stepOutputs root once at session start
   model: { providerID: openrouter, modelID: openai/gpt-oss-120b }
   llm: { temperature: 0, maxOutputTokens: 2048, maxRetries: 1, timeoutMs: 30000 }
@@ -101,7 +100,8 @@ planner:
   contract). The framework's route classification + `defaultIntent` drive routing — a "force one
   intent" prompt line does **not** override route descriptions/examples. Control routing with
   `defaultIntent` and route `description`/`examples`.
-- `contexts` values come from `contexts:` defaults + client session contexts (see §7, §11).
+- `inputSelector` is the planner's complete state allowlist. Select context values with paths such as
+  `contexts.sites`; values come from `contexts:` defaults plus client session overrides (§6, §11).
 - `state` (object) — **global initial state** seeded into the `stepOutputs` root **once** on a fresh session (or a state reset); shared across flows, read via `global.*`. Not re-seeded on later turns. See §7.6.
 
 ### 4.1 Planner clarifications and active-node prompts
@@ -196,8 +196,8 @@ contexts:
   (object / array), which is injected as pretty-printed JSON. **Empty values are allowed.**
 - These are **defaults**; client session contexts (the request `contexts` field, string values only)
   override / add by name.
-- Declaring a value here does not inject it — injection requires referencing the name in
-  `planner.contexts` or a flow / node `contexts:` list, or projecting a field via `contextSelector` (§11).
+- Declaring a value here does not expose it. The planner or node must select a leaf such as
+  `contexts.sites` in its own `inputSelector` (§10, §11).
 
 ---
 
@@ -207,8 +207,6 @@ contexts:
 flows:
   shopping:
     goal: Search and buy products.
-    contexts: [sites]             # injected into this flow's action-node prompts
-    inputSelector: [requestText]  # state projected into the flow
     outputMap: { shopping.lastQuery: query }
     state: { searchCount: 0 }     # FLOW-LOCAL initial state — seeded on each fresh entry
     messagePolicy: { userText: segment }
@@ -217,7 +215,8 @@ flows:
       done:   { kind: terminal, respond: ... }
 ```
 
-Flow fields: `goal?`, `state?` (object), `contexts: [name]`, `inputSelector?`, `outputMap?`, `messagePolicy?`, `nodes` (required).
+Flow fields: `goal?`, `state?` (object), `outputMap?`, `messagePolicy?`, `nodes` (required). Flow-level
+`inputSelector`, `contexts`, and `contextSelector` are invalid; each node owns its exact inputs.
 
 ### 7.1 `action_unit` (LLM calls a tool)
 
@@ -233,9 +232,8 @@ search:
   fallback: { invalidNext: error, exhaustedNext: error }   # optional
   model: { ... }                  # optional; default = session model
   llm: { maxCalls: 2, temperature: 0 }     # optional
-  inputSelector: [requestText]    # optional
-  outputMap: { shopping.query: query }     # optional
-  contexts: [sites]               # optional (adds to flow contexts)
+  inputSelector: [requestText, contexts.sites]   # omitted / [] means no state; whole roots are invalid
+  outputMap: { shopping.query: query }           # optional; omitted means publish nothing
   messagePolicy: { currentUserText: active_node_only }   # optional
   historyPolicy: { scope: session, maxTurns: 2 }         # optional
 ```
@@ -323,7 +321,7 @@ Seed starting state declaratively (both must be **objects**; arrays/scalars are 
 
 Precedence for flow-local (low → high): `flows.<id>.state` → accumulated state → `inputSelector` projection →
 planned-intent state (same key, later wins). Do not put secrets here — state can be surfaced via `x-axsdk-debug`
-part snapshots. Verify via the `<state>` block or the debug `begin.globalState` / `begin.localState` / `begin.selectedState` (the node-projected state the action actually sees).
+part snapshots. Verify via the `<state>` block or the matching `step-start.debug.globalState` / `localState` / `selectedState` (the node-projected pre-action state). The correlated `tool.debug.end` contains post-action state.
 
 ### 7.7 Reserved prompt fields (`question` / `response`) are ephemeral
 
@@ -400,6 +398,7 @@ flowTool fields:
 - `input` (alias `adapterInput`) — input projection for remote tools.
 - `pagination` — pagination config.
 - `execute.timeoutMs` (remote only) — per-tool remote-call timeout in **ms** (positive integer, clamped ≤ 120000). Overrides the document default; see §9.1.
+- `execute.poll` (remote only) — bounded declarative polling of the same remote tool/input (§9.1.1).
 - **Mutation side-effects**: `effect: mutation` requires `consent: required`, a non-empty `require`,
   and `idempotent: true` (see §12).
 
@@ -444,6 +443,52 @@ flowTools:
   `2 × resolved timeout`.
 - For `extends: app` overlays, both `defaults` and per-tool `execute.timeoutMs` are merged into the
   effective document (§14.2).
+
+### 9.1.1 Declarative remote polling
+
+A remote adapter may repeat the same idempotent tool call until a JsonLogic condition over the normalized
+remote result becomes false. Polling is an adapter concern: the planner and action-unit model make one
+tool decision, and only the final non-retrying result reaches the adapter's normal `output` projection.
+
+```yaml
+flowTools:
+  read_job_status:
+    description: Read the current job status.
+    execute:
+      kind: remote
+      tool: AX_read_job_status
+      timeoutMs: 5000               # timeout for each remote invocation, not the whole polling loop
+      poll:
+        retryWhile: { "===": [{ var: pending }, true] }
+        intervalMs: 500             # optional; default 500
+        maxAttempts: 60             # optional; default 60
+    input:
+      job_id: ${tool.args.job_id}
+    output:
+      next: done
+      status: ${result.status}
+    idempotent: true
+    parameters:
+      type: object
+      required: [job_id]
+      properties:
+        job_id: { type: string }
+```
+
+- `retryWhile` is required and must be a non-empty JsonLogic object. It is evaluated against each
+  normalized remote result at the root scope; for example, `{ var: pending }` reads `result.pending`.
+- `intervalMs` is a fixed delay between attempts: integer `1..30000`, default `500`.
+- `maxAttempts` bounds total remote invocations: integer `2..256`, default `60`.
+- Polling requires `kind: remote` and `idempotent: true`. It cannot be combined with `pagination`.
+- Every retry reuses the exact mapped `input`. A non-retrying result returns immediately; if the condition
+  remains true on the final attempt, the adapter throws `remote poll exhausted` and normal node recovery applies.
+- Abort cancels both an in-flight remote invocation and the inter-attempt sleep. `execute.timeoutMs` applies
+  independently to each remote invocation; it is not a total polling deadline.
+- Runtime debug logs emit one `remote_poll` entry per attempt with `tool`, `attempt`, `maxAttempts`,
+  `status` (`retrying`, `completed`, or `exhausted`), and `elapsedMs`.
+- The same contract and validation apply to app `flows.yaml`, integrated session `clientFlowDocument`,
+  inline flowTool adapters, and standalone client adapter maps. Omitted defaults are materialized only by
+  the runtime adapter normalizer.
 
 
 ### 9.2 Lua adapter (`implementation: lua`)
@@ -1468,29 +1513,44 @@ never compacted or silently omitted. `flow.map` never truncates completed values
 
 ## 10. Selectors — `inputSelector` / `outputMap`
 
-- **`inputSelector: [path, ...]`** — projects state into the planner/flow/node scope. Paths may use
-  scoped roots; unrooted paths resolve against the default scope. Recognized roots:
-  `global`, `flows`, `flow`, `active`, `queue`, `lastIntent`, `status`, `activeFlow`, `activeNode`,
-  `conversationSummary`, `latestMessageInterpretation`, `contexts`. JSONPath (`$. … [*]`) is supported.
-  (Note: `inputSelector` does not read the `contexts` map into node state — grounding is injected as XML
-  blocks via `contexts:` (whole) or `contextSelector:` (projected fields), never merged into state; §11.)
-- **`outputMap: { destination: source }`** — copies `source` (a selector over the action result/state)
-  to `destination` (a **dot path**, not JSONPath), e.g. `shopping.lastQuery: query`.
+- **`inputSelector: [path, ...]`** is the complete state allowlist for a planner or node. Omitted
+  planner selectors and omitted / empty node selectors expose no state. Unrooted planner paths read
+  the global `stepOutputs` root; unrooted node paths read the active flow state.
+- Explicit roots are `global`, `flows`, `flow`, `active`, `queue`, `lastIntent`, `status`,
+  `activeFlow`, `activeNode`, `conversationSummary`, `latestMessageInterpretation`, and `contexts`.
+  JSONPath (`$. … [*]`) is supported. Whole-scope selectors such as `global`, `flow`, `contexts`,
+  `active`, `lastIntent`, or `$` are compile errors; select the exact leaf paths instead.
+- The current user message is a separate message channel governed by `messagePolicy`; it does not
+  require selecting the whole flow state.
+- **`outputMap: { destination: source }`** copies only named outputs from post-action flow state.
+  Omission means publish nothing. A destination is a dot path, not JSONPath, for example
+  `shopping.lastQuery: query`.
 
 ---
 
-## 11. Contexts injection (lenient)
+## 11. Context selection (lenient)
 
-- `planner.contexts: [name]` → injected into the planner system prompt as `<name>…</name>`.
-- flow-level or node-level `contexts: [name]` → injected into that action node's prompt.
-- flow-level or node-level `contextSelector: [path]` → projects **fields** out of the `contexts` map
-  (e.g. `catalog.limits`) and injects each as a block named by the path's last segment. Combines with
-  `contexts:` (whole blocks) and is deduped by block name; structured slices render as JSON. Requires a
-  **structured** context value (§6) to select sub-fields.
-- **Values**: `contexts:` defaults + client session contexts.
-- **Missing/empty declared context → rendered as an empty block `<name></name>` (not an error)**, and
-  a warning is logged (`context "<name>" not provided; rendering empty block`). Provide a default or
-  send the value when grounding matters.
+- Select a whole named context with `contexts.<name>` in planner or node `inputSelector`.
+- A selected context remains under the `contexts` root in selected state and is rendered in the
+  action's `<state>` block. It is not copied into accumulated flow state.
+- **Values**: `contexts:` defaults plus client session context overrides.
+- A missing selected context is omitted rather than treated as a compile/runtime error. Empty context
+  values remain valid.
+- `planner.contexts`, flow/node `contexts`, and flow/node `contextSelector` are invalid. `inputSelector`
+  is the single context-selection mechanism.
+
+### 11.1 Breaking selector migration
+
+전체 절차, before/after 예제, live artifact 검증은
+[`FLOWS_YAML_SELECTOR_MIGRATION.md`](./FLOWS_YAML_SELECTOR_MIGRATION.md)를 따른다.
+
+1. Move `planner.contexts: [x]` to `planner.inputSelector: [contexts.x]`.
+2. Delete flow-level `inputSelector`, `contexts`, and `contextSelector`.
+3. Give every flow node an exact `inputSelector`; use `[]` when the node needs no state.
+4. Replace node `contexts: [x]` / `contextSelector: [x.y]` with
+   `inputSelector: [contexts.x]` / `inputSelector: [contexts.x.y]`.
+5. Split broad roots (`flow`, `global`, `contexts`, `active`, `lastIntent`, `$`) into leaf paths.
+6. Keep only deliberate publication in node/flow `outputMap`; omission publishes nothing.
 
 ---
 
@@ -1526,7 +1586,7 @@ adapters:
 
 1. Planner runs (unless fixed single-route) → picks a route (`decide`).
 2. Runtime enters the route's `entry` node.
-3. `action_unit`: builds the system prompt (node prompt + injected contexts + selected state), the LLM
+3. `action_unit`: builds the system prompt from the node prompt and exact node-selected state; the LLM
    calls one `allowedTools` tool, and the transition (`result.next` if present, else the LLM's `args.next`, §9.10)
    selects `node.next[next]`.
 4. `action_contract`: projects args from state, runs the tool once, uses the result `next`.
@@ -1589,7 +1649,7 @@ A client can send a flow document at runtime as **`clientFlows`** (a YAML string
 | `flows` | flow id | same id → overlay replaces the whole flow; new → added; others kept |
 | `flowTools` | tool name | overlay replaces / adds by name |
 | `contexts` | name | overlay replaces / adds by name |
-| `planner` | field | field-wise overlay (`prompt`/`allowedTools`/`inputSelector`/`outputMap`/`model`/`llm`/`contexts`); omitted fields kept from base |
+| `planner` | field | field-wise overlay (`prompt`/`allowedTools`/`inputSelector`/`outputMap`/`model`/`llm`); omitted fields kept from base |
 | `defaults` | field | field-wise overlay (`remoteToolTimeoutMs`, `maxSteps`, `mapping`, `model`, `llm`); omitted fields kept from base. `maxSteps` ≤ 256 (§9.4); `mapping` (§9.7) and `model`/`llm` (§9.8) apply to both |
 | `hooks` | field | field-wise overlay (`beforeIntent` / `afterIntent` arrays); the overlay's list replaces that field, the other kept from base |
 | `app` | field | field-wise overlay (e.g. `terminal`, `complete`); omitted fields kept from base. **`app.id` is forced to the base** — the overlay cannot change the app identity (any `app.id` it includes is ignored) |
@@ -1639,11 +1699,10 @@ router:
       examples: [열쇠공 견적줘, 청소 견적]
 flows:
   request_service_quote:
-    contexts: [memory]
     nodes:
       request_service_quote:
         kind: action_unit
-        inputSelector: [requestText]
+        inputSelector: [requestText, contexts.memory]
         prompt: |-
           Answer the user question with provided contexts.
           Call respond exactly once: next=done, message=<your reply in the user's language>.
@@ -1651,6 +1710,7 @@ flows:
         next: { done: done }
         outputMap: { request_service_quote.message: message }
       done:
+        inputSelector: [message]
         kind: terminal
         respond: Use Flow state JSON's message.
 flowTools:
@@ -1920,8 +1980,8 @@ flows:
 | `actions.<a>.tools.<t>.schema.properties.next.enum references a next not declared in node.next: <v>` | a hand-written `action_unit` tool `next` enum drifted from `node.next` (§9.10) |
 
 Compile errors throw at turn setup — **before** any LLM call — so a broken document leaves an empty
-debug log and no response. Missing **contexts** are no longer errors (rendered empty, §11). The last
-row is a **runtime** validation (after the tool call), not a compile error — it routes via `fallback`.
+debug log and no response. A missing selected context is simply absent (§11). The last row is a
+**runtime** validation (after the tool call), not a compile error — it routes via `fallback`.
 
 **Observability — per-step trace.** Each `action_unit` step appends a compact `{ type: "action_step", flow,
 node, callID, tool, eligibleTools, next, status, stage, llmCalls }` entry to the runtime debug log (exposed via
@@ -1965,11 +2025,11 @@ One rule set for **where each mechanism reads and writes**. "Global" = the `step
 
 | Mechanism | Reads | Writes | When |
 |---|---|---|---|
-| `app.state` / `planner.state` | — | global root | once, on a fresh session (§4, §7.6) |
+| `planner.state` | — | global root | once, on a fresh config-runtime state or planner `set` reset (§4, §7.6) |
+| planner `inputSelector` | global/session/context scope | planner scope | before the planner runs |
 | flow `state` | — | flow state | each fresh flow entry (§7) |
-| flow `inputSelector` | global / session scope | flow state | on entry **and** re-applied before every node |
-| node `inputSelector` | flow state | node scope (what the action sees) | before the action runs |
-| `contexts` / `contextSelector` | the `contexts` map | **prompt only** (XML blocks) — never state | before the action runs (§11) |
+| node `inputSelector` | flow/session/context scope | node scope (what the action sees) | before the node runs |
+| selected `contexts.<name>` | `contexts` map | planner/node selected state only | before planner/node execution (§11) |
 | tool `output` | tool result | the action's returned object | after the tool call (§9.7) |
 | `state.include` / `exclude` | action result | flow state (filtered) | after the action (`statePatch`) |
 | `state.clear` | — | unsets flow-state paths | after the merge |
@@ -1981,14 +2041,13 @@ One rule set for **where each mechanism reads and writes**. "Global" = the `step
 
 **What is in state at node N** (interpreter order):
 
-1. **Session start** — `app.state` / `planner.state` seeded into the global root once.
-2. **Route entry** — flow state = flow `state` (fresh entry) + any reused prior flow state + flow
-   `inputSelector` projection + the planner's `intent.state`.
-3. **Per node**, in order: re-apply flow `inputSelector` → node `inputSelector` projects flow state into
-   the node scope → `contexts` / `contextSelector` inject grounding blocks (not state) → action runs →
-   clear `question` / `response` / `__error` → merge `statePatch` (result minus `next`, filtered by
-   `include` / `exclude`) into flow state → `state.clear` → node then flow `outputMap` copy flow state to
-   global.
+1. **Session start/reset** — `planner.state` is seeded into the global root on a fresh config-runtime state or planner `set` reset.
+2. **Route entry** — flow state = flow `state` (fresh entry) + any reused prior flow state + the
+   planner's `intent.state`.
+3. **Per node**, in order: node `inputSelector` projects exact flow/session/context leaves into node
+   scope → action runs → clear `question` / `response` / `__error` → merge `statePatch` (result minus
+   `next`, filtered by `include` / `exclude`) into flow state → `state.clear` → node then flow
+   `outputMap` copy named flow-state outputs to global.
 4. **Terminal** — flow `outputMap` applied; `respond` resolved (string = LLM / verbatim; object = read
    from flow state, §9.11).
 

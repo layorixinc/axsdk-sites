@@ -1,6 +1,6 @@
 # DevTools Testing Cheat Sheet
 
-Manually drive the site Lua commands (Amazon, Thumbtack) from the Chrome DevTools console.
+Manually drive site Lua commands for every published adapter from the Chrome DevTools console.
 See `SCHEMA.md` for the full parameter schema of every command.
 
 ## Daily driver: the `ax` CLI (recommended)
@@ -34,12 +34,33 @@ Two ways to run your LOCAL Lua (and flows) against the live extension:
 `node tools/ax.mjs help` lists all commands/flags. The console workflow below remains valid for
 ad-hoc poking inside DevTools.
 
+## Isolated extension playground
+
+Use the playground when a local workspace must run against a dedicated, persistent Chrome profile
+without touching the daily `ax` profile on port `9224`.
+
+```bash
+# First-time manual development-extension setup. Creates only the dedicated profile directory,
+# opens headed Chrome at chrome://extensions, and waits for you to install/configure the extension.
+node tools/playground.mjs setup --root=playground
+
+# After enabling Debug logging in the extension settings, store the local workspace and verify it.
+node tools/playground.mjs sync --root=playground
+node tools/playground.mjs repl --root=playground --no-sync
+```
+
+`setup` intentionally starts Chrome **without** `--load-extension`; install the unpacked extension
+from the displayed directory yourself, then enter development credentials and enable Debug logging.
+It never reads, prints, or writes credentials. `sync` uses port `9235` and
+`%LOCALAPPDATA%/AXSDKPlaygroundChromeProfile`, writes the workspace's local index/Lua/flows to that
+profile only, forces `remote_sites:false`, and verifies stored—not remote or in-memory—Lua sources.
+
 ## 1. Select the right execution context
 
 `window._AXSDK` exists only when the extension runs in **debug mode**, and only in the
 **content-script** context — not the page's default JS world.
 
-1. Open the target site (`amazon.com` / `thumbtack.com`) in the dev Chrome with the extension loaded.
+1. Open the target published site in the dev Chrome with the extension loaded.
 2. DevTools → **Console** → context dropdown (top-left) → select **`AXSDK Assistant`**
    (`chrome-extension://dldlgmekahifbogjphgglkhibclglmpf`).
 3. Verify:
@@ -51,7 +72,7 @@ lua.status();         // enabled + loaded scripts
 ```
 
 Scripts are fetched from `raw.githubusercontent.com/layorixinc/axsdk-sites/main/<site>/scripts/*`,
-so only the current site's commands are present (Amazon on amazon.com, Thumbtack on thumbtack.com).
+so common commands load everywhere and the active site's local commands load on its registered hosts.
 
 ## 2. Console helpers
 
@@ -90,6 +111,52 @@ async function axcall(cmd, args = {}) {
 - Next page: pass the previous result's `cursor` back into `AX_search_product`.
 - `AX_checkout` stops at the checkout screen (`place_order_available`) and never places an order;
   the warranty / protection-plan upsell is auto-declined.
+
+### Representative multi-store commerce commands
+
+The common dispatcher supports `amazon`, `walmart`, `ebay`, `aliexpress`, `etsy`, `coupang`,
+`naver-shopping`, `gmarket`, `11st`, and `ssg`.
+
+```js
+await axrun("AX_search_store_product", {
+  site: "walmart",
+  query: "Logitech M185",
+  quantity: 1
+});
+```
+
+Broad queries use the identity pipeline before exact comparison:
+
+```js
+await axrun("AX_prepare_product_identity", {
+  product_category: "wireless mouse",
+  requested_brand: "Logitech",
+  stores: [{ site: "11st" }, { site: "walmart" }]
+});
+```
+
+The flow searches at most three requested stores for grounded model options, pauses for a model
+selection, verifies every final offer against the locked identity, and ranks only exact matches.
+Ambiguous/mismatched listings are reported separately. `AX_resolve_product_option` rejects stale
+option versions; `AX_resolve_store_offer` rejects stale comparison versions and any selection made
+before a separate offer-presentation turn.
+
+`AX_add_store_product_to_cart` is mutation-capable and rejects calls unless all three scoped approvals
+are current: `cart_approval:"user_selected_compared_offer"`,
+`identity_approval:"locked_product_identity"`, and
+`comparison_approval:"current_comparison"`, with matching non-empty `identity_id` and `comparison_id`.
+It revalidates the expected manufacturer model and price before clicking, and never checks out or places
+an order. Naver Shopping returns `add_to_cart_unsupported`; CAPTCHA, login, security-verification, and
+access-denied pages are reported as classified errors.
+
+Verification:
+
+```bash
+npm run test:commerce
+npm run test:commerce:live:all
+npm run test:commerce:live:expanded
+npm run test:commerce:live:discovery
+```
 
 ## 4. Thumbtack commands (on thumbtack.com)
 

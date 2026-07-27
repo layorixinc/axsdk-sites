@@ -140,7 +140,44 @@ S.PRICE_CUTOFF_MARKERS = {
   "shipping", "delivery", "postage", "coupon", "cashback", "reward"
 }
 
+-- Some storefronts print the screen-reader form of the price glued to the human one
+-- ("Now$4999current price Now $49.99"), and the same tile may also advertise a variant price
+-- ("Options from $9.88"). Reading the first amount turned $49.99 into 4999 — a 100x error. The site's
+-- own "current price" marker decides; when several amounts appear with nothing to distinguish them the
+-- price is REFUSED, because a wrong number in a price comparison is worse than a missing row.
+function S.amounts_in(value)
+  local text = clean(value)
+  local found = {}
+  local cursor = 1
+  while true do
+    local start_at, end_at, amount = text:find("([%d][%d,]*%.?%d*)", cursor)
+    if not start_at then break end
+    local previous = start_at > 1 and text:sub(start_at - 1, start_at - 1) or ""
+    if not previous:match("[%a%d]") then found[#found + 1] = normalize_number(amount) end
+    cursor = end_at + 1
+  end
+  return found
+end
+
 function S.parse_candidate_price(value, fallback_currency, strategy)
+  if strategy == "decimal_preferred" then
+    local text = clean(value)
+    local _, currency = S.parse_money(text, fallback_currency)
+    local marker = nil
+    local cursor = 1
+    while true do
+      local position = lower(text):find("current price", cursor, true)
+      if not position then break end
+      marker = position
+      cursor = position + 1
+    end
+    if marker then
+      return S.parse_money(text:sub(marker), fallback_currency)
+    end
+    local amounts = S.amounts_in(text)
+    if #amounts == 1 then return amounts[1], currency or non_empty(fallback_currency) end
+    return nil, currency or non_empty(fallback_currency)
+  end
   if strategy ~= "last_before_shipping" then return S.parse_money(value, fallback_currency) end
   local text = clean(value)
   local cutoff = #text + 1
@@ -280,19 +317,37 @@ local function navigate_search(config, query, page)
   return true
 end
 
-local function parse_product_id(config, value, fallback)
-  local direct = non_empty(fallback)
+--- The id a result card carries, from its link or from the attribute the site hides it in.
+--- `attr_value` is whatever `result_id_selector`/`result_id_attr` read; it may be a bare id or a JSON
+--- blob. Patterns are tried against BOTH sources, and a structured value no pattern understands yields
+--- nothing: mining a first token out of `{"content_type":"PRODUCT","content_no":"917…"}` gave every card
+--- on the page the id "content_type", the dedupe then collapsed the grid to a single row, and a store
+--- full of listings reported no_results.
+function S.product_id_from(config, url, attr_value)
+  local function by_pattern(text)
+    for index = 1, #((config and config.product_id_patterns) or {}) do
+      local product_id = text:match(config.product_id_patterns[index])
+      if product_id then return product_id end
+    end
+    return nil
+  end
+
+  local direct = non_empty(attr_value)
   if direct then
-    direct = direct:match("([%w_-]+)")
-    if direct then return direct end
+    local matched = by_pattern(direct)
+    if matched then return matched end
+    if not direct:find("[{}\"]") then
+      local token = direct:match("([%w_-]+)")
+      if token then return token end
+    end
   end
-  local text = non_empty(value)
-  if not text then return nil end
-  for index = 1, #(config.product_id_patterns or {}) do
-    local product_id = text:match(config.product_id_patterns[index])
-    if product_id then return product_id end
-  end
-  return nil
+
+  local text = non_empty(url)
+  return text and by_pattern(text) or nil
+end
+
+local function parse_product_id(config, value, fallback)
+  return S.product_id_from(config, value, fallback)
 end
 
 local function product_url(config, product_id, href)
@@ -364,7 +419,12 @@ local function result_fields(config)
   add("condition", config.result_condition_selector)
   add("delivery_text", config.result_delivery_selector)
   add("return_terms", config.result_return_selector)
-  if config.result_id_attr then fields.root_id = { attr = config.result_id_attr } end
+  -- The id attribute may sit on the row itself or on an element inside it (11st keeps it on the card's
+  -- anchor, whose href is an ad-server redirect), so a selector is optional next to the attribute name.
+  if config.result_id_attr or config.result_id_selector then
+    fields.root_id = { attr = config.result_id_attr or "id" }
+    if config.result_id_selector then fields.root_id.selector = config.result_id_selector end
+  end
   if config.result_url_from_root then fields.url = { attr = "href" } end
   return fields
 end
@@ -491,13 +551,21 @@ local function read_embedded_candidates(config)
 end
 
 
+--- Why a read produced nothing: a grid full of cards nobody could price is a different fact from an
+--- empty grid, and reporting it as "no results" made the store look like it does not sell the product.
+function S.read_outcome(cards_seen, kept)
+  if (tonumber(kept) or 0) > 0 then return nil end
+  if (tonumber(cards_seen) or 0) > 0 then return "price_unavailable" end
+  return "no_results"
+end
+
 local function read_candidates(config)
   -- A hydration payload carries one clean record per product; the rendered grid repeats wrappers per
   -- card and mixes ad chrome into the row text, so a site that exposes the payload reads it first and
   -- keeps the DOM pass as the fallback.
   if config.prefer_embedded and config.embedded_json_selector then
     local embedded = read_embedded_candidates(config)
-    if #embedded > 0 then return embedded end
+    if #embedded > 0 then return embedded, #embedded end
   end
   local rows = dom.query_all(config.result_selector, result_fields(config), config.result_limit or 24)
   local candidates = array()
@@ -509,8 +577,11 @@ local function read_candidates(config)
       candidates[#candidates + 1] = candidate
     end
   end
-  if #candidates == 0 and config.embedded_json_selector then return read_embedded_candidates(config) end
-  return candidates
+  if #candidates == 0 and config.embedded_json_selector then
+    local embedded = read_embedded_candidates(config)
+    return embedded, math.max(#rows, #embedded)
+  end
+  return candidates, #rows
 end
 
 local function search(config, args)
@@ -537,14 +608,15 @@ local function search(config, args)
   blocked = blocked_error(config)
   if blocked then return { site = config.site, page = page, error = blocked, blocked = true, candidates = array(), url = current_url() } end
 
-  local candidates = read_candidates(config)
-  local has_more = S.has_more_from(#candidates, S.page_plan(config, page + 1).supported, S.next_control_present(config))
-  if #candidates == 0 then
+  local candidates, cards_seen = read_candidates(config)
+  local outcome = S.read_outcome(cards_seen, #candidates)
+  if outcome then
     return {
-      site = config.site, query = query, page = page, error = "no_results",
-      candidates = candidates, has_more = false, url = current_url()
+      site = config.site, query = query, page = page, error = outcome,
+      cards_seen = cards_seen, candidates = candidates, has_more = false, url = current_url()
     }
   end
+  local has_more = S.has_more_from(#candidates, S.page_plan(config, page + 1).supported, S.next_control_present(config))
   return {
     site = config.site,
     query = query,

@@ -8,8 +8,11 @@ end
 M.HOME_URL = "https://www.ebay.com/"
 M.SEARCH_URL = "https://www.ebay.com/sch/i.html"
 M.ITEM_URL_PREFIX = "https://www.ebay.com/itm/"
-M.RESULT_SELECTOR = ".su-item-card[data-view], .s-item-card[data-view]"
-M.RESULT_READY_SELECTOR = ".srp-river-results, .srp-results, .su-item-card, .srp-save-null-search, #signin-main, #captcha_form"
+-- eBay's search cards are `li.s-card` with the listing id on the element itself; the older
+-- `.su-item-card[data-view]` markup is gone (live: 0 matches, 62 `li.s-card`). The first card is eBay's
+-- own "Shop on eBay" placeholder, which carries no price and is dropped by the price check below.
+M.RESULT_SELECTOR = "li.s-card[data-listingid], .su-item-card[data-view], .s-item-card[data-view]"
+M.RESULT_READY_SELECTOR = "li.s-card, .srp-river-results, .srp-results, .su-item-card, .srp-save-null-search, #signin-main, #captcha_form"
 M.LOGIN_SELECTOR = "form#signin-form, #signin-main, input#userid, input#pass"
 M.CAPTCHA_SELECTOR = "#captcha_form, #captcha-box, form[action*='captcha'], input[name='captcha']"
 M.PRODUCT_READY_SELECTOR = "h1.x-item-title__mainTitle, h1[data-testid='x-item-title'], #signin-main, #captcha_form"
@@ -166,14 +169,14 @@ end
 
 function M.result_fields()
   return {
-    url = { selector = ".su-link.su-item-card__title, .su-item-card__title, a[href*='/itm/']", attr = "href" },
-    title = { selector = ".su-item-card__title .su-styled-text, .su-item-card__title, a[href*='/itm/']" },
+    url = { selector = "a[href*='/itm/'], .su-link.su-item-card__title, .su-item-card__title", attr = "href" },
+    title = { selector = ".s-card__title, .su-item-card__title .su-styled-text, .su-item-card__title, a[href*='/itm/']" },
     image_alt = { selector = "img", attr = "alt" },
-    price_text = { selector = ".su-item-card__price, .s-item__price" },
-    image_url = { selector = "img.s-item__image-img, .su-card-container__media img, img", attr = "src" },
-    condition = { selector = ".su-item-card__subtitle .secondary, .su-item-card__header .secondary, .SECONDARY_INFO" },
-    attributes_text = { selector = ".su-card-container__attributes__primary, .s-item__details" },
-    seller_text = { selector = ".su-card-container__attributes__secondary, .s-item__seller-info-text" },
+    price_text = { selector = ".s-card__price, .su-item-card__price, .s-item__price" },
+    image_url = { selector = ".s-card__image, img.s-item__image-img, .su-card-container__media img, img", attr = "src" },
+    condition = { selector = ".s-card__subtitle, .su-item-card__subtitle .secondary, .su-item-card__header .secondary, .SECONDARY_INFO" },
+    attributes_text = { selector = ".s-card__attribute-row, .su-card-container__attributes__primary, .s-item__details" },
+    seller_text = { selector = ".s-card__caption, .su-card-container__attributes__secondary, .s-item__seller-info-text" },
     text = true
   }
 end

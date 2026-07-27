@@ -14,7 +14,11 @@ local CONFIG = {
   result_url_selector = 'a[link-identifier][href*="/ip/"]',
   result_title_selector = '[data-automation-id="product-title"]',
   result_image_selector = 'img[data-testid="productTileImage"], img[alt]',
-  result_price_selector = '[data-automation-id="product-price"] .ld_Ec',
+  -- Walmart A/B tests its result tile: one load carries the price under product-price, another under
+  -- unified-global-product-price/ugpp-main-price, and a third renders no price at all. Both stable
+  -- automation ids are covered; the old hashed class (.ld_Ec) is exactly what AGENTS.md 10 bans.
+  result_price_selector = '[data-automation-id="ugpp-main-price"], [data-automation-id="unified-global-product-price"], [data-automation-id="product-price"]',
+  price_text_strategy = "decimal_preferred",
   result_shipping_selector = '[data-automation-id="fulfillment-badge"], [data-testid="fulfillment-speed"]',
   result_rating_selector = '[data-testid="product-ratings"]',
   result_reviews_selector = 'a[href*="#reviews"], [data-testid="product-reviews"]',

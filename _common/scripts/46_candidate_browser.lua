@@ -157,38 +157,3 @@ function AX_browse_service_candidates(args)
 
   return window({ refine_error = refine_error })
 end
-
--- A refusal has to end the request cleanly even when the router restarts the flow instead of resuming it
--- (observed live: "아니요, 견적 요청은 취소할게요" re-entered at the first node and asked which service the
--- user wanted). The test is deliberately narrow — a message that ASKS for something while mentioning
--- cancellation is a request, not a refusal.
-local CANCELLATION_PHRASES = {
-  "취소", "그만", "됐어", "됐습니다", "안 할래", "안할래", "관두", "cancel", "never mind", "nevermind",
-  "no thanks", "stop"
-}
-
-local REQUEST_MARKERS = {
-  "찾아", "알아봐", "해줘", "요청해", "받아", "보여", "검색", "물어", "문의", "가능한", "업체", "정책",
-  "find", "search", "show", "book", "policy"
-}
-
---- `cancel` when the message is a standalone refusal, `continue` when it still asks for something.
-function AX_detect_cancellation(args)
-  local text = trim(args and args.text)
-  if text == "" then return { next = "continue" } end
-  local lowered = text:lower()
-
-  local cancelling = false
-  for index = 1, #CANCELLATION_PHRASES do
-    if lowered:find(CANCELLATION_PHRASES[index], 1, true) then
-      cancelling = true
-      break
-    end
-  end
-  if not cancelling then return { next = "continue" } end
-
-  for index = 1, #REQUEST_MARKERS do
-    if lowered:find(REQUEST_MARKERS[index], 1, true) then return { next = "continue" } end
-  end
-  return { next = "cancel", cancelled_text = text }
-end

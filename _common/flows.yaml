@@ -143,7 +143,7 @@ router:
         - 아이팟 사줘
         - buy me some shoes
     - intent: bluemoonsoft
-      entry: bluemoonsoft.enter
+      entry: bluemoonsoft.start
       description: Explore BlueMoonSoft (company info, DOCURAY/products, security modules, news, customers) by navigating its website to the page that matches the request.
       examples:
         - 블루문소프트 회사 정보 보여줘
@@ -161,7 +161,7 @@ router:
         - 고마워요
         - 종료
     - intent: checkout
-      entry: checkout.open
+      entry: checkout.start
       description: Proceed to the checkout page for whatever is already in the shopping cart (payment/checkout). Never places an order.
       examples:
         - 체크아웃 해줘
@@ -1084,6 +1084,15 @@ flows:
       checkout_view: null
       checkout_error: null
     nodes:
+      start:
+        kind: action_contract
+        id: checkout_entry
+        description: In-engine entry hop so the flow's first step is not a remote call.
+        inputSelector: []
+        next:
+          open: open
+          error: report
+        fallback: { invalidNext: error, exhaustedNext: error }
       open:
         kind: action
         run: open_site
@@ -1976,6 +1985,15 @@ flows:
       requestText: null
       sitemap_hits: null
     nodes:
+      start:
+        kind: action_contract
+        id: site_entry
+        description: In-engine entry hop so the flow's first step is not a remote call.
+        inputSelector: []
+        next:
+          open: enter
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
       enter:
         kind: action
         run: open_site
@@ -3964,13 +3982,53 @@ flowTools:
       properties:
         reason: { type: [string, "null"] }
 
+  checkout_entry:
+    description: Route a fresh checkout entry into the site handoff without a remote round trip.
+    # In-engine hop, deliberately not a remote command: a router entry's FIRST call cannot be a remote
+    # one — the extension executes it and PUTs its result, the engine never consumes it, and the turn dies
+    # on the tool deadline (measured at both 15s and 60s). See AGENTS.md §9.
+    execute: { kind: runtime, implementation: lua, lua: 'return { next = "open" }' }
+    parameters: { type: object, additionalProperties: true, properties: {} }
+
+  site_entry:
+    description: Route a fresh site-assistant entry into the site handoff without a remote round trip.
+    # In-engine hop, deliberately not a remote command: a router entry's FIRST call cannot be a remote
+    # one — the extension executes it and PUTs its result, the engine never consumes it, and the turn dies
+    # on the tool deadline (measured at both 15s and 60s). See AGENTS.md §9.
+    execute: { kind: runtime, implementation: lua, lua: 'return { next = "open" }' }
+    parameters: { type: object, additionalProperties: true, properties: {} }
+
   detect_cancellation:
     description: Decide whether the latest message is a standalone refusal rather than a request.
-    execute: { kind: remote, tool: AX_detect_cancellation, timeoutMs: 15000 }
-    input:
-      text: tool.args.requestText
-    output:
-      next: result.next
+    # In-engine hop, deliberately not a remote command: a router entry's FIRST call cannot be a remote
+    # one — the extension executes it and PUTs its result, the engine never consumes it, and the turn dies
+    # on the tool deadline (measured at both 15s and 60s). See AGENTS.md §9.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |-
+        local text = type(args.requestText) == "string" and args.requestText or ""
+        text = text:gsub("^%s+", ""):gsub("%s+$", "")
+        if text == "" then return { next = "continue" } end
+        local lowered = text:lower()
+        local refusals = {
+          "취소", "그만", "됐어", "됐습니다", "안 할래", "안할래", "관두",
+          "cancel", "never mind", "nevermind", "no thanks", "stop"
+        }
+        local requests = {
+          "찾아", "알아봐", "해줘", "요청해", "받아", "보여", "검색", "물어", "문의", "가능한", "업체",
+          "정책", "find", "search", "show", "book", "policy"
+        }
+        local refusing = false
+        for index = 1, #refusals do
+          if lowered:find(refusals[index], 1, true) then refusing = true break end
+        end
+        if not refusing then return { next = "continue" } end
+        -- A message that still ASKS for something is a request mentioning cancellation, not a refusal.
+        for index = 1, #requests do
+          if lowered:find(requests[index], 1, true) then return { next = "continue" } end
+        end
+        return { next = "cancel", cancelled_text = text }
     parameters:
       type: object
       additionalProperties: false

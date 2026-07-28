@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
+import { readFileSync } from 'node:fs';
+
+import { parse as parseYaml } from 'yaml';
+
 import { loadLuaModules } from './harness.mjs';
 
 const lua = loadLuaModules([
@@ -293,23 +297,36 @@ test('the window answer states the criterion it applied', () => {
 // A refusal must end the request cleanly even when the planner restarts the route instead of resuming
 // it: live, "아니요, 견적 요청은 취소할게요" re-entered the flow at its first node and asked the user which
 // service they wanted — as if they had just arrived.
+//
+// The guard is the quote flow's ENTRY, so it cannot be a remote command: an entry's remote call is
+// executed by the extension and never consumed by the engine. It therefore runs as in-engine Lua inside
+// the flow definition, and the source under test is read from there — which also proves that embedded
+// Lua parses, something no live run reports until the node is reached.
+const entryGuardSource = parseYaml(readFileSync('_common/flows.yaml', 'utf8'))
+  .flowTools.detect_cancellation.execute.lua;
+const guardLua = loadLuaModules([]);
+guardLua.define(`function AX_TEST_detect_cancellation(args) ${entryGuardSource} end`);
+after(() => guardLua.close());
+
+const guard = (args) => guardLua.call('AX_TEST_detect_cancellation', args);
+
 test('a standalone cancellation is detected at the flow entry', () => {
-  for (const text of ['아니요, 견적 요청은 취소할게요', '취소', '그만할게요', '됐어요', 'cancel', 'never mind']) {
-    assert.equal(lua.call('AX_detect_cancellation', { text }).next, 'cancel', text);
+  for (const requestText of ['아니요, 견적 요청은 취소할게요', '취소', '그만할게요', '됐어요', 'cancel', 'never mind']) {
+    assert.equal(guard({ requestText }).next, 'cancel', requestText);
   }
 });
 
 test('a real request that merely mentions cancelling is not a cancellation', () => {
-  for (const text of [
+  for (const requestText of [
     '취소 정책이 어떻게 되는지 물어봐줘',
     '샌프란시스코 하우스클리닝 견적 받아줘',
     '예약 취소 가능한 청소 업체 찾아줘',
   ]) {
-    assert.equal(lua.call('AX_detect_cancellation', { text }).next, 'continue', text);
+    assert.equal(guard({ requestText }).next, 'continue', requestText);
   }
 });
 
 test('an empty message is not a cancellation', () => {
-  assert.equal(lua.call('AX_detect_cancellation', {}).next, 'continue');
-  assert.equal(lua.call('AX_detect_cancellation', { text: '   ' }).next, 'continue');
+  assert.equal(guard({}).next, 'continue');
+  assert.equal(guard({ requestText: '   ' }).next, 'continue');
 });

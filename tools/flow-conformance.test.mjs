@@ -386,7 +386,7 @@ test('the user can decline at the quote approval gate', () => {
   const collectTools = quote.nodes.collect_request.allowedTools.map((entry) => (typeof entry === 'string' ? entry : entry.tool));
   assert.ok(collectTools.includes('cancel_quote_request'));
   assert.equal(common.flowTools.cancel_quote_request.output.next, 'cancel');
-  assert.equal(common.flowTools.detect_cancellation.execute.tool, 'AX_detect_cancellation');
+  assert.equal(common.flowTools.detect_cancellation.execute.implementation, 'lua');
   assert.deepEqual(common.flowTools.confirm_quote_decision.parameters.properties.next.enum,
     ['ask', 'proceed', 'refine', 'cancel']);
   assert.match(quote.nodes.confirm_quote.prompt, /cancel/);
@@ -395,6 +395,48 @@ test('the user can decline at the quote approval gate', () => {
   assert.match(terminal.respond, /견적|quote/);
   // The planner must keep a refusal inside the flow rather than treating it as a new topic.
   assert.match(common.planner.prompt, /취소|declin|cancel/);
+});
+
+test('every branch names a node that exists', () => {
+  // A dangling target does not fail one flow, it fails the whole document: the engine refuses to compile
+  // and every intent answers "플로우 설정을 불러오지 못했습니다". Live is a slow place to learn that.
+  for (const file of ['_common/flows.yaml', 'playground/_common/flows.yaml']) {
+    const doc = parseFlow(file);
+    for (const [flowName, flow] of Object.entries(doc.flows || {})) {
+      const names = new Set(Object.keys(flow.nodes || {}));
+      for (const [nodeName, node] of Object.entries(flow.nodes || {})) {
+        for (const [branch, target] of Object.entries(node.next || {})) {
+          if (typeof target !== 'string') continue;
+          assert.ok(names.has(target),
+            `${file}: ${flowName}.${nodeName}.next.${branch} -> missing node ${target}`);
+        }
+      }
+    }
+    for (const route of doc.router?.routes || []) {
+      const [flowName, nodeName] = String(route.entry || '').split('.');
+      assert.ok(doc.flows?.[flowName]?.nodes?.[nodeName], `${file}: entry ${route.entry} names no node`);
+    }
+  }
+});
+
+test('no route enters a flow through a remote call', () => {
+  // A router entry's FIRST step cannot be a remote command. The extension receives it, runs it, and PUTs
+  // the result with HTTP 200 in about a second; the engine never consumes that result, retries roughly
+  // every 30s, and fails the node on its deadline — measured identically at timeoutMs 15000 and 60000, on
+  // both the production and Playground profiles. It killed the whole Thumbtack quote flow, checkout,
+  // bluemoonsoft, and both Playground diagnostics. An entry must be a model node or an in-engine
+  // (`kind: runtime`) tool; the first remote call belongs one hop later.
+  for (const file of ['_common/flows.yaml', 'playground/_common/flows.yaml']) {
+    const doc = parseFlow(file);
+    for (const route of doc.router?.routes || []) {
+      const [flowName, nodeName] = String(route.entry || '').split('.');
+      const node = doc.flows?.[flowName]?.nodes?.[nodeName];
+      assert.ok(node, `${file}: ${route.entry} names no node`);
+      const tool = doc.flowTools?.[node.id || node.run];
+      assert.notEqual(tool?.execute?.kind, 'remote',
+        `${file}: ${route.entry} enters through remote tool ${node.id || node.run}`);
+    }
+  }
 });
 
 test('a shortlist reply reaches the deterministic browser verbatim', () => {

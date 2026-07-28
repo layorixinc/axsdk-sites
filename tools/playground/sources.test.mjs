@@ -186,10 +186,14 @@ test('loads the checked-in isolated playground fixture', async () => {
   }
   assert.match(amazonLua, /\bAX_PLAYGROUND_DURABLE\b/);
   const commonFlow = YAML.parse(workspace.flows[':']);
+  // The entry is an in-engine hop; the remote fixture runs one node later, because a router entry's
+  // remote call is executed by the extension and never consumed by the engine.
   assert.equal(
     commonFlow.router.routes.find((route) => route.intent === 'playground_amazon_search')?.entry,
-    'playground_amazon_search.run',
+    'playground_amazon_search.start',
   );
+  assert.equal(commonFlow.flows.playground_amazon_search.nodes.start.next.run, 'run');
+  assert.equal(commonFlow.flowTools.playground_amazon_entry.execute.kind, 'runtime');
   assert.equal(
     commonFlow.router.routes.find((route) => route.intent === 'playground_multi_site_search')?.entry,
     'playground_multi_site_search.collect',

@@ -32,7 +32,18 @@ export function loadLuaModules(relativePaths, { globals = {} } = {}) {
     }
   }
 
+  /** Loads one extra chunk under the same file scoping. Lua embedded in a flow definition has no file of
+   *  its own, and it is exactly the code no live run reports on until its node is reached. */
+  function define(source, label = 'inline chunk') {
+    const chunk = `local __chunk = function(...)\n${source}\nend\n__chunk()`;
+    if (lauxlib.luaL_dostring(L, to_luastring(chunk)) !== lua.LUA_OK) {
+      const message = lua.lua_tojsstring(L, -1);
+      throw new Error(`${label} failed to load: ${message}`);
+    }
+  }
+
   return {
+    define,
     /** Calls `<global>.<method>(...args)` and returns the first result as a plain JS value. */
     call(path, ...args) {
       const segments = path.split('.');

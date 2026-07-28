@@ -6,13 +6,13 @@ router:
   defaultIntent: playground_durable_checkpoint
   routes:
     - intent: playground_durable_checkpoint
-      entry: playground_durable_checkpoint.run
+      entry: playground_durable_checkpoint.start
       description: Run the isolated durable-operation checkpoint diagnostic.
       examples:
         - run playground durable checkpoint test
         - durable checkpoint test
     - intent: playground_amazon_search
-      entry: playground_amazon_search.run
+      entry: playground_amazon_search.start
       description: Run the stored Amazon durable-search fixture while the Amazon site layer is active.
       examples:
         - run playground Amazon durable search test
@@ -41,6 +41,15 @@ flows:
     state:
       label: flow-checkpoint
     nodes:
+      start:
+        kind: action_contract
+        id: playground_checkpoint_entry
+        description: In-engine entry hop so the flow's first step is not a remote call.
+        inputSelector: []
+        next:
+          run: run
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
       run:
         kind: action_contract
         id: playground_durable_checkpoint
@@ -72,6 +81,15 @@ flows:
       cursor: null
       search_error: null
     nodes:
+      start:
+        kind: action_contract
+        id: playground_amazon_entry
+        description: In-engine entry hop so the flow's first step is not a remote call.
+        inputSelector: []
+        next:
+          run: run
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
       run:
         kind: action_contract
         id: playground_amazon_search
@@ -290,6 +308,20 @@ flowTools:
       required: [query]
       properties:
         query: { type: string, minLength: 1 }
+
+  # One inline action backs exactly one node — the engine refuses to compile a document that registers
+  # the same inline action twice ("inline action duplicates existing action"), so each entry has its own.
+  # A router entry's FIRST call cannot be a remote one: the extension executes it and PUTs its result,
+  # the engine never consumes it, and the turn dies on the tool deadline. See AGENTS.md §9.
+  playground_checkpoint_entry:
+    description: Route a fresh checkpoint-diagnostic entry into its first real step without a remote round trip.
+    execute: { kind: runtime, implementation: lua, lua: 'return { next = "run" }' }
+    parameters: { type: object, additionalProperties: true, properties: {} }
+
+  playground_amazon_entry:
+    description: Route a fresh Amazon-fixture entry into its first real step without a remote round trip.
+    execute: { kind: runtime, implementation: lua, lua: 'return { next = "run" }' }
+    parameters: { type: object, additionalProperties: true, properties: {} }
 
   playground_query_from_request:
     description: Convert a non-empty shopping request into the Amazon search query without a model call.

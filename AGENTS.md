@@ -358,6 +358,32 @@ console (cache-sticky `raw.githubusercontent.com` → **test from the store with
   ran the new nodes. Prompt/parameter edits inside existing nodes DID take effect from `ax sync` alone.
   Always read the tool trace (`ax send` output) to confirm which graph ran before concluding anything
   about a flow change.
+- **A router `entry` MUST NOT be a remote call.** The extension receives it, runs it, and PUTs the result
+  with HTTP 200 in about a second (`call received → claim:acquired → execution:start → completed` in the
+  debug events); the engine never consumes that result, re-dispatches roughly every 30s, and fails the
+  node on its deadline — identical at `timeoutMs` 15000 and 60000, on both profiles. Symptom: every
+  request on that intent answers "요청을 처리하는 중 문제가 발생했습니다" with one tool part
+  `status:"error", output:"timeout"`. It had killed the whole Thumbtack quote flow, `checkout`,
+  `bluemoonsoft`, and both Playground diagnostics. An entry must be a model node or an in-engine
+  (`kind: runtime`) tool; put the first remote call one hop later. Enforced by `check:flows`.
+- **A command that DEFERS cannot complete inside a flow — it is re-executed, never resumed.** Live
+  timeline for `AX_resolve_zip` in the quote flow: `execution:start → deferred` (+4ms), redelivered at
+  +18.7s → `execution:start → deferred` again, and so on until the tool deadline. The same `ax run
+  AX_resolve_zip '{"address":"San Francisco, CA"}'` answers `94102` in **0.5s** (the harness drives the
+  durable loop itself). `AX_open_site` behaves the same across a domain change (deferred at +6ms, first
+  completion at +63s). So any flow step that awaits `net`/`nav` inside one call is currently dead:
+  the quote flow's ZIP step, `checkout`, and `bluemoonsoft`. Re-entrant fire-and-return tools (every
+  storefront search, `AX_search_service`) are unaffected — one more reason the doctrine in §3 exists.
+  **This one is SDK/backend side (`../axsdk-sdk-js`, `axsdk-backend`), not fixable from this repo.**
+- **One inline action backs exactly one node.** Reusing a `kind: runtime, implementation: lua` tool id
+  for two nodes fails the whole document with `inline action duplicates existing action: <id>`.
+- **A dangling `next` target fails the WHOLE document**, not one flow: every intent then answers
+  "플로우 설정을 불러오지 못했습니다 (flow document failed to compile)". `check:flows` now verifies every
+  branch target and every router entry names a real node.
+- **`tools/playground.mjs --root` defaults to the CURRENT directory.** Run from the repo root it loads
+  the PRODUCTION index/_common/site layers into the Playground profile, so the Playground answers with
+  production intents and a production bug reproduces there. Use `--root=playground` to exercise the
+  Playground's own workspace.
 - **`run` vs `call`:** prefer durable `run`; `call` is one turn and returns a pending marker for any
   navigating/fetching step.
 - **`ax run` / `ax call` nest the command result under `.value`.** The CLI prints the durable envelope

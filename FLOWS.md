@@ -425,9 +425,11 @@ remote tool must be given enough time or it routes to `error`.
 
 Resolution order (first defined wins):
 
-1. **per-tool** — flowTool / adapter `execute.timeoutMs` (ms).
-2. **document default** — top-level `defaults.remoteToolTimeoutMs` (ms).
-3. **runtime fallback** — `5000` (env `AXSDK_REMOTE_TOOL_TIMEOUT_MS` overrides this constant).
+1. **per-node** — the action node's `remoteToolTimeoutMs` (ms). Use it when one node needs a longer
+   budget than the tool's default (a page load, a human-in-the-loop step).
+2. **per-tool** — flowTool / adapter `execute.timeoutMs` (ms).
+3. **document default** — top-level `defaults.remoteToolTimeoutMs` (ms).
+4. **runtime fallback** — `5000` (env `AXSDK_REMOTE_TOOL_TIMEOUT_MS` overrides this constant).
 
 ```yaml
 defaults:
@@ -437,12 +439,13 @@ flowTools:
     execute: { kind: remote, tool: AX_search_service, timeoutMs: 25000 }   # this tool overrides the default
 ```
 
-- Both knobs are positive integers in ms, validated and clamped to ≤ 120000; invalid values are ignored
+- Every knob is a positive integer in ms, validated and clamped to ≤ 120000; invalid values are ignored
   (fall through to the next level).
-- Retries: a timed-out remote call is retried once (`maxAttempts=2`), so total wall-clock ≈
-  `2 × resolved timeout`.
-- For `extends: app` overlays, both `defaults` and per-tool `execute.timeoutMs` are merged into the
-  effective document (§14.2).
+- Retries are **delivery-only**: an unverified delivery failure (the call never provably reached a client)
+  is retried once (`maxAttempts=2`). A deadline on a call the store confirms is still `pending`, and any
+  result-level failure the client reported, are **not** retried — they become a node error.
+- For `extends: app` overlays, `defaults`, per-node `remoteToolTimeoutMs`, and per-tool
+  `execute.timeoutMs` are all merged into the effective document (§14.2).
 
 ### 9.1.1 Declarative remote polling
 
@@ -489,7 +492,6 @@ flowTools:
 - The same contract and validation apply to app `flows.yaml`, integrated session `clientFlowDocument`,
   inline flowTool adapters, and standalone client adapter maps. Omitted defaults are materialized only by
   the runtime adapter normalizer.
-
 
 ### 9.2 Lua adapter (`implementation: lua`)
 
@@ -557,6 +559,213 @@ Execution model and limits:
   stdlib, instruction-bounded, deep-copy isolation) is the security boundary. The client gate (§14.4)
   requires `execute.lua` to be present; the synchronous instruction cap (≤ 10,000,000) bounds event-loop
   blocking. `state.transform` remains app-only.
+
+### 9.2.1 Browser RPC from Lua (`execute.rpc`) — control flow inside the script
+
+A remote tool is one dispatch: the client executes a named command and answers. When a page task is really
+a **sequence** ("navigate, wait for the form, fill three fields, submit, read the confirmation"), that
+shape forces one node per step and the runtime has to carry the continuation between them.
+
+Adding `rpc` to a Lua adapter inverts it: the script calls the browser directly and **the script owns the
+control flow**. The Lua coroutine suspends on each call and resumes with the client's answer, so `if`,
+loops, and locals work across browser operations. One node, one tool call, N browser operations.
+
+```yaml
+flowTools:
+  fill_checkout:
+    description: Fill the checkout form and submit it.
+    execute:
+      kind: runtime
+      implementation: lua
+      rpc:
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.set_value, dom.click, dom.get_text]
+        deadlineMs: 30000     # optional; 1..120000, default 60000 — total wall clock for the whole script
+                              # maxCalls is deliberately unset: the waits below poll (see below)
+      state: session          # optional; "call" (default) or "session" — see below
+      entry: run              # required when state: session
+      lua: |
+        function run(args)
+          local from = dom.get_location_href()
+          nav.navigate(args.url)
+          if not nav.wait_for_navigation(from, { timeout = 5000 }) then
+            return { next = "error", error = "never_left" }
+          end
+          if not dom.wait_for_selector("#address", { timeout = 3000 }) then
+            return { next = "error", error = "form_never_appeared" }
+          end
+          dom.set_value("#address", args.address)
+          dom.set_value("#zip", args.zip)
+          dom.click("#submit")
+          return { next = "ok", zip = dom.get_text("#zip") }
+        end
+    parameters:
+      type: object
+      properties:
+        url:     { type: string }
+        address: { type: string }
+        zip:     { type: string }
+      required: [url]
+```
+
+**Op vocabulary — the same names the SDK's client-side Lua already uses.** The host exposes one primitive,
+`rpc(op, params)`; the prelude names the ops after the SDK's existing capability tables so one script reads
+the same whether it runs in the runtime (this section) or in the browser (`AX_run_lua`):
+
+| namespace | wire ops (a client must implement) |
+|---|---|
+| `nav` | `navigate(url, params?)`, `reload()` |
+| `dom` | `get_location_href()`, `exists(sel)`, `get_text(sel)`, `get_attr(sel, attr)`, `get_innerHTML(sel)`, `get_outerHTML(sel)`, `query_all(sel, fields?, limit?)`, `click(sel, opts?)`, `set_value(sel, value)`, `get_form_field_names(form)`, `get_form_field_value(form, field)`, `set_form_field_value(form, field, value)`, `submit_form(form)` |
+| `page` | `eval(script)` |
+
+Every wire op used must be listed in `rpc.allow`; an unlisted op raises a Lua error naming it. `page.eval`
+runs arbitrary JS in the client's own page — allowed, because the client already runs there, but list it
+explicitly. `rpc("<op>", params)` reaches an op the prelude does not name, for a client that ships more.
+
+An `action_contract` node builds the tool arguments from **flow state**, not from an LLM call, so a
+required parameter with nothing in `inputSelector` to fill it fails validation before the script runs.
+Give such a tool optional parameters and default them inside the script.
+
+**Host primitives (no round trip, no `allow` entry, no `maxCalls` charge).**
+
+| | |
+|---|---|
+| `rpc.now()` | runtime wall clock in ms. The sandbox has no `os`, so this is the only clock. |
+| `rpc.sleep(ms)` | pauses the script on a host timer. Burns the deadline, costs no call. |
+| `rpc.delivered_to()` | fanout of the last wire op. |
+
+**Waiting is composed in the runtime, not asked of the client.** `dom.wait_for_selector(sel, opts?)` and
+`nav.wait_for_navigation(fromHref, opts?)` are prelude functions that poll `dom.exists` /
+`dom.get_location_href` with `rpc.sleep` between attempts (`opts = { timeout = 3000, interval = 150 }`).
+They are **not** wire ops: `rpc.allow` must list the op they poll, not the helper.
+
+A client-side wait cannot work here. It is issued to the document a navigation is about to unload, so it
+never answers and the script stalls to its deadline. Polling survives because each attempt is independent
+and the navigation gap answers `no_client` immediately — the helpers absorb that failure with `pcall` and
+keep polling. The cost is real: a 3 s wait at the default interval is up to 20 calls, all charged to
+`maxCalls`. **Leave `maxCalls` unset when a script waits.**
+
+**Ops that may unload the document are fire-only.** `nav.navigate`, `nav.reload` and `dom.submit_form`
+return as soon as the client accepts the request — not when the result is ready, which the client cannot
+report because it is unloading. `dom.click` joins them whenever the click navigates. Confirm the outcome
+from the script:
+
+```lua
+local from = dom.get_location_href()
+nav.navigate(args.url)
+if not nav.wait_for_navigation(from, { timeout = 5000 }) then return { next = "error" } end
+if not dom.wait_for_selector("#address", { timeout = 3000 }) then return { next = "error" } end
+```
+
+Checking only `dom.exists` after `navigate` is a **false-positive trap**: the old document may still be
+alive and answer from the old page. Wait for the href to change first.
+
+The same rule runs backwards for `dom.submit_form`: **read what you need before submitting.** A read
+issued after it lands in the unload gap or on the next page.
+
+**Failures are values, not crashes.** A reported op failure raises a Lua error the script may catch with
+`pcall`; uncaught, it becomes a node error (§9.13). The wait helpers already return `false` rather than
+raising, so a missing element stays an ordinary branch.
+
+| Situation | Script sees |
+|---|---|
+| op reported a failure | error `rpc <op> failed: <code>: <detail>` |
+| client rejected the arguments | error `… failed: bad_params: <field>` — raised before the page is touched |
+| no document connected | error `… failed: no_client` — **immediate**, the deadline is not burned |
+| every recipient declined | error `… failed: no_client` — same, as soon as the last decline lands |
+| one op unanswered | error `… failed: rpc_timeout` after `execute.rpc.opTimeoutMs` (default 10 s) |
+| whole script over budget | node error `lua rpc execution deadline exceeded …` |
+| session closed mid-call | error `… failed: session_closed` |
+
+**Two clocks.** `deadlineMs` bounds the whole script; `opTimeoutMs` bounds **one** op. Without the second,
+a single connected-but-hung document would spend the entire script budget on one call — fatal inside a
+poll loop, whose own `timeout` would never get a turn.
+
+**Declining is not answering.** A client that is connected but is not the document that should act answers
+`{ ok: false, error: "not_eligible" }`. The runtime **does not settle on it**: a silent bystander must not
+beat the document that can act. It counts declines instead, and when every recipient has declined the call
+fails `no_client` immediately — the same fast failure as an empty session, which is what lets a poll loop
+keep its own timing during a navigation.
+
+**Broadcast, first answer wins.** The request goes to **every** connected document and the first terminal
+answer is taken; later answers are dropped. For reads that is harmless. For a mutation — `dom.click`,
+`dom.set_value`, `dom.submit_form`, `page.eval`, and especially `nav.navigate` / `nav.reload`, which move
+**every** eligible document — the side effect happens everywhere even though one result is returned. A
+first-arriving *failure* also beats a slower success.
+
+`rpc.delivered_to()` reports the dispatch fanout minus the recipients that refused as ineligible. It is an
+**upper bound, not a count**: a recipient that never answered is counted as an executor, which is the safe
+direction for a write guard but means `2` can mean "two documents ran it" *or* "one ran it and the other's
+refusal was late". A winner can outrun the refusals it raced, so when the fanout is above one the runtime
+waits for the remaining recipients — at most 500 ms, and not at all in a session with one document.
+
+**`rpc.fanout()` separates the two.** It returns `{ executed, declined, silent }`, where `silent` counts the
+recipients that never answered. `silent == 0` makes `executed` certain; `silent > 0` says the true number is
+somewhere in `[executed - silent, executed]`, and the script decides what to do about not knowing.
+
+```lua
+dom.click("#submit")
+local f = rpc.fanout()
+if f.silent > 0 then return { next = "unsure", atMost = f.executed } end
+if f.executed > 1 then return { next = "ambiguous", documents = f.executed } end
+```
+
+Late refusals are not a lab artifact. On a plaintext origin the per-origin connection limit is spent on
+SSE, one per tab, and the refusal POST is the first thing to queue — the more tabs, the later the refusal,
+the more `delivered_to()` overcounts.
+
+**`state: call` vs `state: session`.** By default each invocation gets a fresh Lua state, so a tool stays a
+pure function (existing `lua` tools are unaffected). With `state: session` the state is kept per
+`(session, tool name)` and **the chunk is not re-executed**, so chunk-level locals accumulate across calls
+— which is why `entry` is then required (without it a reused chunk would run nothing). Invocations on one
+key are **serialized**: a second call waits for the first to finish, because interleaving coroutines would
+corrupt those locals. Live state is process-memory only — a runtime restart resets it.
+
+**Budgets** (§19): `deadlineMs` bounds the whole script including every round trip; `maxCalls` bounds the
+number of ops; `maxInstructions` (§9.2) still bounds pure computation. `maxCalls` defaults to unlimited
+because the deadline is the honest bound — an infinite RPC loop is stopped by wall clock, not by the
+instruction hook (each round trip resets nothing but consumes time).
+
+**Coroutines.** `rpc` yields to the driver, so it cannot be called from a coroutine the *script* created —
+that yield would return to the script's own resumer, not the driver, and deadlock. Calling `rpc` inside
+`coroutine.wrap`/`create` raises `rpc is not available inside a script coroutine` instead.
+
+**`execute.rpc` accepts only `allow`, `maxCalls`, `deadlineMs`.** `state`, `entry`, and `lua` are siblings of
+`rpc` under `execute`; an unknown key inside `rpc` is a compile error, because silently dropping a
+misplaced `state: session` would leave the tool pure with no diagnostic.
+
+**Client-injected modules.** The same driver serves modules a client injects at runtime
+(`POST /axsdk/v2/lua`, invoked per function by `POST /axsdk/v2/lua/:name/:fn`) — see
+§9.2.2. `clientFlows` documents may declare `execute.rpc` too: the sandbox plus `allow` is the boundary,
+and the browser being driven is the client's own.
+
+### 9.2.2 Client-injected Lua modules
+
+A client may inject a named Lua module into its own session and invoke its functions individually. This is
+the same engine as §9.2.1 with a different entry point: no flow node, no LLM, no tool call.
+
+```
+POST   /axsdk/v2/lua                { name, source, allow? }  → { name, exports, injectedAt }
+GET    /axsdk/v2/lua                                          → { data: [ { name, exports, injectedAt } ] }
+DELETE /axsdk/v2/lua/:name                                    → { ok, removed }
+POST   /axsdk/v2/lua/:name/:fn      { args?, timeoutMs? }      → { status: "completed", value }
+                                                              | { status: "error", error }
+```
+
+- Injection **compiles** the source (syntax only; it is not executed) and reports the exported function
+  names found by a static scan. The authoritative check is at invoke time: calling a name the module does
+  not define fails with `lua entry '<fn>' is not a function`.
+- Module state persists across invocations (`state: session` semantics, keyed by session + module name).
+  **Re-injecting a name resets its state**, so editing a module never leaves the old chunk running.
+- Everything after the transport is shared with §9.2.1: same ops, same `allow`, same broadcast rule, same
+  failure codes.
+- Script failures are an **outcome**, not an HTTP failure: `200` with `status: "error"`. Only an unknown
+  session is `404`, and only a malformed payload is `400`.
+
+**The RPC channel is ephemeral.** RPC requests reach the client as their own SSE event
+(`axsdk.rpc.request`) with no cursor, and are never written to the durable replay log or the call store.
+A document that dies mid-call simply loses the invocation; nothing reconciles it on reconnect. This keeps
+the SDK's step engine from claiming an RPC frame as a pending tool call, and is why an RPC has no
+document pinning, no continuation handshake, and no outbox.
 
 
 ### 9.3 Delay (`implementation: delay`) and the `__self__` self-loop
@@ -1154,6 +1363,28 @@ app:
   clears the prior `__error` before merging its result and yields a normal `completed` outcome; a decision- or
   terminal-only handler leaves it unrecovered. Terminal node **names** stay domain-neutral: outcome status never
   comes from a terminal called `failed`/`error`.
+- **Client failure codes (`__error.code`).** A remote call the client executed and rejected reports a code
+  from a **closed set**, surfaced as `__error.code` with free text in `__error.detail`. A node may declare a
+  transition **named after a code** to recover from just that one; anything it does not declare stays on the
+  generic `error` path, so **abort is the default**:
+```yaml
+search:
+  kind: action_contract
+  id: search_product
+  next:
+    ok: collect
+    error: failed              # every code not named below
+    runtime_not_ready: search  # transient: retry this node
+```
+| `__error.code` | Meaning | Usual handling |
+|---|---|---|
+| `domain_mismatch` | the pinned document left the expected site and did not return | abort (§9.2.1 rule 4) |
+| `runtime_not_ready` | the site runtime was not ready within the budget | transient — worth retrying |
+| `script_unavailable` | the pinned script sha could not be fetched | transient — worth retrying |
+| `command_unresolved` | the script is ready but has no such command | permanent here — alternate branch |
+| `step_timeout` | the command ran but did not finish in the budget | flow policy |
+| `step_too_large` | the reported blob exceeded the limit | flow defect — shrink the state |
+| `command_failed` | the command threw | read `__error.detail` |
 
 ### 9.14 Deterministic branch — `next: { when, then, else }` and `kind: decision`
 
@@ -2065,10 +2296,15 @@ Every bound the runtime enforces, with the loop it guards.
 | `maxSteps` | node executions per turn | 24 | 256 | `defaults.maxSteps` (§9.4) |
 | `maxSelfSteps` | one action node's self-loops | unset (self-loops count toward `maxSteps`) | 256 | node `maxSelfSteps` (§9.5) |
 | action_unit LLM calls | one action node | `max(1, turns) + 1` (one validation retry) | — | `llm.maxCalls` (§9.6) |
-| remote attempts | one remote tool call | 2 (retries **timeout only** — under review) | — | — (§9.1, hardening §3) |
-| remote timeout | one remote tool call | see §9.1 | 120000 ms | `defaults.remoteToolTimeoutMs` (§9.1) |
+| remote attempts | one remote tool call | 2 (retries **unverified delivery only**) | — | — (§9.1) |
+| remote timeout | one remote tool call | see §9.1 | 120000 ms | node `remoteToolTimeoutMs`, `execute.timeoutMs`, `defaults.remoteToolTimeoutMs` (§9.1) |
+| remote poll attempts | one remote tool call | 60 | 256 | `execute.poll.maxAttempts` (§9.1.1) |
 | Lua instructions | one Lua run | 2,000,000 | 10,000,000 | `execute.maxInstructions` (§9.2) |
 | Lua script size | compile | — | 64 KB | — (§9.2) |
+| rpc ops | one Lua run | unlimited | 512 | `execute.rpc.maxCalls` (§9.2.1) — **wait helpers poll, so each attempt is charged** |
+| rpc wall clock | one Lua run, round trips **and** `rpc.sleep` | 60,000 ms | 120,000 ms | `execute.rpc.deadlineMs` (§9.2.1) |
+| rpc invocations in flight | one `(session, module)` | 8 | 8 | — (§9.2.1, serialized) |
+| injected lua modules | one session | 16 | 16 | — (§9.2.2) |
 | delay | one delay tool | — | bounded | `execute.delayMs` (§9.3) |
 | subflow depth | any nested subflow (`execute: flow` or `flow.map`) | — | 4 | `SUBFLOW_MAX_DEPTH` (§9.17) |
 | flow.map `maxItems` | one flow.map call | 8 | 32 | `execute.maxItems` (§9.17) |

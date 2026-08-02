@@ -7,10 +7,13 @@ import { lauxlib, lua, lualib, to_jsstring, to_luastring } from 'fengari';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
- * Runs repository Lua in-process so deterministic site-agnostic logic can be unit tested without a
- * browser. Only pure modules belong here: anything touching `dom`, `nav`, or `net` needs the live
- * harness instead. Values cross the boundary through an explicit marshaller because Lua tables are
- * ambiguous (a table is both array and map) and silent coercion would hide contract bugs.
+ * Runs repository Lua in-process so deterministic logic can be unit tested without a browser. Values
+ * cross the boundary through an explicit marshaller because Lua tables are ambiguous (a table is both
+ * array and map) and silent coercion would hide contract bugs.
+ *
+ * Two kinds of module belong here. **Pure** ones need nothing but this loader. **RPC** ones drive the
+ * browser through `dom`/`nav`/`rpc`, which `expose()` installs as JS-backed globals — see
+ * `tools/lua/rpc-stub.mjs`, which mirrors the real channel's semantics rather than convenient ones.
  */
 export function loadLuaModules(relativePaths, { globals = {} } = {}) {
   const L = lauxlib.luaL_newstate();
@@ -44,6 +47,32 @@ export function loadLuaModules(relativePaths, { globals = {} } = {}) {
 
   return {
     define,
+    /**
+     * Installs JS functions as Lua globals: `{ dom: { get_text(sel) {...} } }` becomes `dom.get_text`.
+     * A thrown JS error surfaces as a Lua error, which is what a failing op does on the real channel.
+     */
+    expose(spec) {
+      for (const [namespace, members] of Object.entries(spec)) {
+        lua.lua_createtable(L, 0, Object.keys(members).length);
+        for (const [name, fn] of Object.entries(members)) {
+          lua.lua_pushcfunction(L, (state) => {
+            const argc = lua.lua_gettop(state);
+            const args = [];
+            for (let i = 1; i <= argc; i += 1) args.push(readValue(state, i));
+            let result;
+            try {
+              result = fn(...args);
+            } catch (error) {
+              return lauxlib.luaL_error(state, to_luastring(String(error?.message ?? error)));
+            }
+            pushValue(state, result === undefined ? null : result);
+            return 1;
+          });
+          lua.lua_setfield(L, -2, to_luastring(name));
+        }
+        lua.lua_setglobal(L, to_luastring(namespace));
+      }
+    },
     /** Calls `<global>.<method>(...args)` and returns the first result as a plain JS value. */
     call(path, ...args) {
       const segments = path.split('.');

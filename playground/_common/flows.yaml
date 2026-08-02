@@ -18,6 +18,30 @@ router:
         - run playground Amazon durable search test
         - test the Playground Amazon search
 
+    - intent: rpc_probe
+      priority: 200
+      entry: rpc_probe.read
+      description: Read the current page over RPC Lua to prove the runtime-driven browser channel works.
+      examples:
+        - rpc probe
+        - rpc lua 확인
+
+    - intent: rpc_nav_only
+      priority: 220
+      entry: rpc_nav_only.go
+      description: Navigate to one URL over RPC and report how long each stage took. Diagnostic only.
+      examples:
+        - rpc nav only
+        - rpc 이동만
+
+    - intent: rpc_site_search
+      priority: 210
+      entry: rpc_site_search.search
+      description: Search one Playground commerce site through the runtime-side RPC Lua storefront.
+      examples:
+        - rpc 검색 11번가 무선 마우스
+        - rpc search 11st wireless mouse
+
     - intent: playground_multi_site_search
       priority: 140
       entry: playground_multi_site_search.collect
@@ -228,6 +252,88 @@ flows:
         inputSelector: []
         respond: 다중 사이트 durable 검색을 완료하지 못했습니다. 상품명과 두 개 이상의 지원 사이트를 다시 지정하세요. 장바구니·결제·주문은 변경하지 않았습니다.
 
+  rpc_nav_only:
+    goal: Time each stage of an RPC navigation.
+    state:
+      stages: null
+      href: null
+    nodes:
+      go:
+        kind: action_contract
+        id: rpc_navigate_probe
+        description: Navigate and time it.
+        inputSelector: []
+        next: { ok: done, error: done }
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: [stages, href]
+        respond: |-
+          Reply with exactly this and nothing else:
+          NAV {stages} · href={href}
+
+  rpc_site_search:
+    goal: Search one commerce site with a runtime-side RPC Lua script and report what it found.
+    state:
+      site: 11st
+      query: 무선 마우스
+      listing: null
+      found: null
+      cards_seen: null
+      href: null
+    nodes:
+      search:
+        kind: action_contract
+        id: rpc_storefront_search
+        description: Drive the storefront over RPC.
+        inputSelector: [site, query]
+        next:
+          ok: done
+          no_results: empty
+          price_unavailable: empty
+          error: empty
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: [listing, found, cards_seen, href]
+        respond: |-
+          Reply with exactly this and nothing else:
+          RPC SEARCH OK · found={found} · cards={cards_seen}
+          {listing}
+      empty:
+        kind: terminal
+        inputSelector: [cards_seen, href]
+        respond: |-
+          Reply with exactly this and nothing else:
+          RPC SEARCH EMPTY · cards={cards_seen} · href={href}
+
+  rpc_probe:
+    goal: Prove that a runtime-side Lua script can drive the browser over RPC.
+    state:
+      href: null
+      heading: null
+      documents: null
+    nodes:
+      read:
+        kind: action_contract
+        id: rpc_read_page
+        description: Read the page over RPC.
+        inputSelector: []
+        next:
+          ok: done
+          error: failed
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: [href, heading, documents]
+        respond: |-
+          Reply with exactly this line and nothing else:
+          RPC OK · heading={heading} · href={href} · documents={documents}
+      failed:
+        kind: terminal
+        inputSelector: []
+        respond: RPC probe failed.
+
   playground_search_one_site:
     goal: Open one selected commerce site and return its replay-safe search result to the parent task map without asking the user.
     state:
@@ -322,6 +428,98 @@ flowTools:
     description: Route a fresh Amazon-fixture entry into its first real step without a remote round trip.
     execute: { kind: runtime, implementation: lua, lua: 'return { next = "run" }' }
     parameters: { type: object, additionalProperties: true, properties: {} }
+
+  rpc_navigate_probe:
+    description: Navigate and time each stage, to separate a slow script from a slow channel.
+    execute:
+      kind: runtime
+      implementation: lua
+      rpc:
+        allow: [nav.navigate, dom.get_location_href, dom.exists]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          local t0 = rpc.now()
+          local from = dom.get_location_href()
+          local t1 = rpc.now()
+          nav.navigate("https://search.11st.co.kr/pc/total-search?kwd=test&tabId=TOTAL_SEARCH")
+          local t2 = rpc.now()
+          local moved = nav.wait_for_navigation(from, { timeout = 12000, interval = 250 })
+          local t3 = rpc.now()
+          local ready = dom.exists("body")
+          local t4 = rpc.now()
+          return {
+            next = "ok",
+            stages = string.format("href=%dms navigate=%dms wait=%dms(moved=%s) body=%dms total=%dms",
+              t1 - t0, t2 - t1, t3 - t2, tostring(moved), t4 - t3, t4 - t0),
+            href = dom.get_location_href(),
+          }
+        end
+    parameters:
+      type: object
+      properties: {}
+
+  rpc_storefront_search:
+    description: Search one storefront over RPC and return its live candidates.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.16_rpc_storefront", "_common.17_rpc_sites"]
+      rpc:
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all]
+        opTimeoutMs: 2000
+        deadlineMs: 45000
+      entry: run
+      lua: |
+        function run(args)
+          local site = tostring(args.site or "11st")
+          local config = RPC_SITES[site]
+          if not config then return { next = "error", error = "unsupported_site", site = site } end
+          local result = AX_RPC_STOREFRONT.search(config, { query = args.query })
+          -- The window the user sees is built here, not by the model: it relays words and numbers.
+          local lines = {}
+          for index = 1, math.min(#result.candidates, 5) do
+            local c = result.candidates[index]
+            lines[#lines + 1] = string.format("%d. %s · %s %s", index, c.name, c.currency, tostring(c.price))
+          end
+          result.listing = table.concat(lines, "\n")
+          result.found = #result.candidates
+          return result
+        end
+    parameters:
+      type: object
+      properties:
+        site: { type: string }
+        query: { type: string }
+
+  rpc_read_page:
+    description: Read the current page heading and location over the RPC channel.
+    execute:
+      kind: runtime
+      implementation: lua
+      rpc:
+        allow: [dom.get_location_href, dom.exists, dom.get_text, dom.query_all]
+        opTimeoutMs: 5000
+        deadlineMs: 20000
+      entry: run
+      lua: |
+        function run(args)
+          -- RPC 채널 상시 스모크: 읽기 op 3종 + 폴 헬퍼 + fanout 을 한 번에 태운다.
+          local href = dom.get_location_href()
+          local has_h1 = dom.wait_for_selector("h1", { timeout = 2000, interval = 150 })
+          local rows = dom.query_all("a", { text = true, href = { attr = "href" } }, 3)
+          return {
+            next = "ok",
+            href = href,
+            heading = (has_h1 and dom.get_text("h1") or "(no h1)") .. " · links=" .. tostring(#rows),
+            documents = rpc.fanout().executed,
+          }
+        end
+    parameters:
+      type: object
+      properties: {}
 
   playground_query_from_request:
     description: Convert a non-empty shopping request into the Amazon search query without a model call.

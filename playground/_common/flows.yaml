@@ -481,7 +481,7 @@ flowTools:
     execute:
       kind: runtime
       implementation: lua
-      modules: ["_common.16_rpc_storefront", "_common.17_rpc_sites"]
+      modules: ["_common.61_rpc_storefront", "_common.17_rpc_sites"]
       rpc:
         # `dom.get_text` is for the body scan that tells a bot wall from an empty result page — it runs
         # only for a site that declares a block phrase, and never as part of reading the grid.

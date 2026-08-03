@@ -22,7 +22,7 @@
     "build:rpc": "node tools/build-rpc-flows.mjs playground",
     "package:verify": "node tools/rpc-package.mjs verify",
     "package:push": "node tools/rpc-package.mjs push",
-    "build:rpc:sites": "node tools/build-rpc-sites.mjs"
+    "build:rpc:sites": "node tools/build-rpc-sites.mjs && node tools/build-rpc-sites.mjs playground/_common/rpc/17_rpc_sites.lua"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

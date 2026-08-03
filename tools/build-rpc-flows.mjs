@@ -14,24 +14,34 @@ import { parse, parseDocument } from 'yaml';
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** `<dir>/scripts/<file>.lua` → `<dir>.<file>` — the naming the runtime accepts (no `/`, separator `.`). */
+/**
+ * `<dir>/scripts/<file>.lua` or `<dir>/rpc/<file>.lua` → `<dir>.<file>` — the naming the runtime accepts
+ * (no `/`, separator `.`).
+ *
+ * Two directories, one namespace: `scripts/` is the browser layer the extension injects, `rpc/` is the
+ * runtime layer this migration produces. A module's name should not depend on which side of the move it
+ * has reached, but its LOCATION decides whether the browser has to parse it — and the browser must
+ * never parse a runtime module.
+ */
 export function moduleName(relPath) {
-  const match = relPath.replace(/\\/g, '/').match(/^(.+)\/scripts\/(.+)\.lua$/);
+  const match = relPath.replace(/\\/g, '/').match(/^(.+)\/(?:scripts|rpc)\/(.+)\.lua$/);
   if (!match) return null;
   return `${match[1]}.${match[2]}`;
 }
 
-/** Every Lua file under a workspace site directory, keyed by module name. */
+/** Every Lua file under a workspace layer's `scripts/` or `rpc/`, keyed by module name. */
 export function discoverModules(root) {
   const found = {};
   for (const entry of readdirSync(root, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const scripts = join(root, entry.name, 'scripts');
-    if (!existsSync(scripts)) continue;
-    for (const file of readdirSync(scripts)) {
-      if (!file.endsWith('.lua')) continue;
-      const rel = `${entry.name}/scripts/${file}`;
-      found[moduleName(rel)] = rel;
+    for (const kind of ['scripts', 'rpc']) {
+      const dir = join(root, entry.name, kind);
+      if (!existsSync(dir)) continue;
+      for (const file of readdirSync(dir)) {
+        if (!file.endsWith('.lua')) continue;
+        const rel = `${entry.name}/${kind}/${file}`;
+        found[moduleName(rel)] = rel;
+      }
     }
   }
   return found;

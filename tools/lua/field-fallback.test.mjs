@@ -16,7 +16,7 @@ import { installRpcStub, makePage } from './rpc-stub.mjs';
 
 const lua = loadLuaModules([
   '_common/scripts/00_base.lua',
-  'playground/_common/scripts/16_rpc_storefront.lua',
+  '_common/rpc/61_rpc_storefront.lua',
 ]);
 after(() => lua.close());
 

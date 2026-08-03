@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { parse } from 'yaml';
 
-import { buildRpcFlows, emitWorkspace } from './build-rpc-flows.mjs';
+import { buildRpcFlows, discoverModules, emitWorkspace, moduleName } from './build-rpc-flows.mjs';
 
 // Lua is authored as files — reviewed, unit tested, diffed. The runtime wants it inside the flow
 // document (until the module registry ships), and hand-inlining thousands of lines into YAML would end
@@ -200,4 +200,25 @@ test('an emitted workspace can keep the module names instead of the sources', ()
   assert.ok(!emitted.includes('helper-source'), 'the source must not travel in the emitted document');
   assert.match(emitted, /modules:/);
   assert.equal(report.moduleSources['_common.helpers'], 'HELPERS = { tag = "helper-source" }\n');
+});
+
+// `scripts/` is the browser layer and `rpc/` is the runtime layer, and they must not be the same pile.
+// Putting the RPC reader beside the durable one added 41 KB to a bundle every page load parses and can
+// never execute — and after the cutover the browser layer disappears while the runtime layer is all
+// that is left. The directory says which is which, so nobody has to remember a filter.
+
+test('a module under rpc/ is named like one under scripts/', () => {
+  assert.equal(moduleName('_common/rpc/61_rpc_storefront.lua'), '_common.61_rpc_storefront');
+  assert.equal(moduleName('_common/scripts/44_pagination.lua'), '_common.44_pagination');
+});
+
+test('discovery finds runtime modules in rpc/ as well as scripts/', () => {
+  const root = workspace({
+    '_common/scripts/00_base.lua': 'B = {}\n',
+    '_common/rpc/61_reader.lua': 'READER = {}\n',
+    '_common/flows.yaml': 'flowTools: {}\n',
+  });
+  const found = discoverModules(root);
+  assert.equal(found['_common.61_reader'], '_common/rpc/61_reader.lua');
+  assert.equal(found['_common.00_base'], '_common/scripts/00_base.lua');
 });

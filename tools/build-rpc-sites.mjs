@@ -23,6 +23,20 @@ export const STOREFRONT_SITES = Object.freeze([
 ]);
 
 /**
+ * The reader lives in the production layer; the Playground exercises a copy so a pilot run proves
+ * something about what ships. Two hand-maintained copies would agree only until the first fix landed in
+ * one of them, and the pilot would keep passing while production drifted.
+ */
+export const PRODUCTION_READER = '_common/rpc/61_rpc_storefront.lua';
+export const PLAYGROUND_READER = 'playground/_common/rpc/61_rpc_storefront.lua';
+
+export function mirrorReader({ root = repoRoot } = {}) {
+  const source = readFileSync(join(root, PRODUCTION_READER), 'utf8');
+  writeFileSync(join(root, PLAYGROUND_READER), source);
+  return { bytes: Buffer.byteLength(source, 'utf8') };
+}
+
+/**
  * Loads the real common layer plus each site adapter and returns the config table each one registered.
  * Reading the registered table rather than parsing the file means the data is exactly what the runtime
  * would see, including defaults the adapter fills in itself.
@@ -89,8 +103,9 @@ export function serializeSites(configs) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
-  const target = process.argv[2] ?? '_common/scripts/62_rpc_sites.lua';
+  const target = process.argv[2] ?? '_common/rpc/62_rpc_sites.lua';
   const source = serializeSites(readSiteConfigs());
+  mirrorReader();
   writeFileSync(join(repoRoot, target), source);
   const bytes = Buffer.byteLength(source, 'utf8');
   console.log(`wrote ${target} — ${STOREFRONT_SITES.length} sites, ${(bytes / 1024).toFixed(1)} KiB`);

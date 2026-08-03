@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
 import { loadLuaModules } from './lua/harness.mjs';
-import { readSiteConfigs, serializeSites, STOREFRONT_SITES } from './build-rpc-sites.mjs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { readSiteConfigs, serializeSites, mirrorReader, repoRoot, PRODUCTION_READER, PLAYGROUND_READER, STOREFRONT_SITES } from './build-rpc-sites.mjs';
 
 // Three slices in a row failed the same way: the site adapters already declared what the reader needed
 // — blocked markers, then paging, then the hydration payload — and the RPC site data had never received
@@ -54,4 +57,26 @@ test('strings that contain quotes and newlines survive', () => {
   lua.define('function __dump() return RPC_SITES end');
   assert.deepEqual(lua.call('__dump'), tricky);
   lua.close();
+});
+
+// The reader lives in the production layer. The Playground exercises the SAME file so that a pilot run
+// proves something about what ships — two hand-maintained copies would agree only until the first fix
+// landed in one of them.
+
+test('the playground reader is a copy of the production one', () => {
+  const production = readFileSync(join(repoRoot, PRODUCTION_READER), 'utf8');
+  const mirror = readFileSync(join(repoRoot, PLAYGROUND_READER), 'utf8');
+  assert.equal(mirror, production,
+    `run \`npm run build:rpc:sites\` — ${PLAYGROUND_READER} has drifted from ${PRODUCTION_READER}`);
+});
+
+test('mirroring is what makes them equal, not luck', () => {
+  const production = readFileSync(join(repoRoot, PRODUCTION_READER), 'utf8');
+  writeFileSync(join(repoRoot, PLAYGROUND_READER), '-- drifted\n');
+  try {
+    mirrorReader();
+    assert.equal(readFileSync(join(repoRoot, PLAYGROUND_READER), 'utf8'), production);
+  } finally {
+    writeFileSync(join(repoRoot, PLAYGROUND_READER), production);
+  }
 });

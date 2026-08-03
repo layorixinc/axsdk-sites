@@ -11,7 +11,7 @@ import { installRpcStub, makePage } from './rpc-stub.mjs';
 // prices", and "already here" are different facts and the flow branches on them.
 
 const lua = loadLuaModules([
-  'playground/_common/scripts/16_rpc_storefront.lua',
+  '_common/rpc/61_rpc_storefront.lua',
 ]);
 after(() => lua.close());
 

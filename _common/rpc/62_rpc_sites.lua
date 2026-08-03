@@ -258,6 +258,51 @@ RPC_SITES["coupang"] = {
   }
 }
 
+RPC_SITES["ebay"] = {
+  site = "ebay",
+  home_url = "https://www.ebay.com/",
+  hosts = {
+    "www.ebay.com",
+    "ebay.com"
+  },
+  search_url = "https://www.ebay.com/sch/i.html",
+  search_param = "_nkw",
+  search_path_marker = "/sch/",
+  result_selector = "li.s-card[data-listingid], .su-item-card[data-view], .s-item-card[data-view]",
+  result_ready_selector = "li.s-card, .srp-river-results, .srp-results, .su-item-card, .srp-save-null-search, #signin-main, #captcha_form",
+  result_url_selector = "a[href*='/itm/'], .su-link.su-item-card__title, .su-item-card__title",
+  result_title_selector = ".s-card__title, .su-item-card__title .su-styled-text, .su-item-card__title, a[href*='/itm/']",
+  result_image_selector = ".s-card__image, img.s-item__image-img, .su-card-container__media img, img",
+  result_price_selector = ".s-card__price, .su-item-card__price, .s-item__price",
+  result_shipping_selector = ".s-card__attribute-row, .su-card-container__attributes__primary, .s-item__details",
+  result_condition_selector = ".s-card__subtitle, .su-item-card__subtitle .secondary, .su-item-card__header .secondary, .SECONDARY_INFO",
+  result_seller_selector = ".s-card__caption, .su-card-container__attributes__secondary, .s-item__seller-info-text",
+  result_limit = 24,
+  default_currency = "USD",
+  product_id_patterns = {
+    "/itm/(%d+)"
+  },
+  product_url_prefix = "https://www.ebay.com/itm/",
+  blocked_selectors = {
+    {
+      selector = "#captcha_form, #captcha-box, form[action*='captcha'], input[name='captcha']",
+      error = "captcha_required"
+    }
+  },
+  login_selector = "form#signin-form, #signin-main, input#userid, input#pass",
+  login_urls = {
+    "/signin"
+  },
+  pagination = {
+    mode = "query",
+    param = "_pgn",
+    start = 1,
+    step = 1,
+    max_pages = 2,
+    next_selector = "a[type=\"next\"], a.pagination__next"
+  }
+}
+
 RPC_SITES["etsy"] = {
   site = "etsy",
   home_url = "https://www.etsy.com/",

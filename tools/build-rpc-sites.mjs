@@ -17,9 +17,9 @@ import { loadLuaModules } from './lua/harness.mjs';
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Storefronts served by the shared adapter. amazon and ebay carry bespoke layers and are not here. */
+/** Storefronts served by the shared adapter. amazon still carries a bespoke layer and is not here. */
 export const STOREFRONT_SITES = Object.freeze([
-  '11st', 'aliexpress', 'coupang', 'etsy', 'gmarket', 'naver-shopping', 'ssg', 'walmart',
+  '11st', 'aliexpress', 'coupang', 'ebay', 'etsy', 'gmarket', 'naver-shopping', 'ssg', 'walmart',
 ]);
 
 /**
@@ -45,7 +45,11 @@ export function readSiteConfigs({ root = repoRoot, sites = STOREFRONT_SITES } = 
   const common = readdirSync(join(root, '_common', 'scripts'))
     .filter((file) => file.endsWith('.lua')).sort()
     .map((file) => `_common/scripts/${file}`);
-  const adapters = sites.map((site) => `${site}/scripts/00_common.lua`);
+  // Filename order over the whole directory, the way the extension injects a site layer. Loading only
+  // `00_common` missed a config declared in a later file and the adapter registered nothing.
+  const adapters = sites.flatMap((site) => readdirSync(join(root, site, 'scripts'))
+    .filter((file) => file.endsWith('.lua')).sort()
+    .map((file) => `${site}/scripts/${file}`));
 
   const lua = loadLuaModules([...common, ...adapters]);
   try {

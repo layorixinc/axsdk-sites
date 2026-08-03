@@ -859,3 +859,32 @@ test('a store that declares no search shape is reported, not crashed', () => {
   assert.equal(value.next, 'error');
   assert.equal(value.error, 'search_url_unavailable');
 });
+
+// ebay's search is the generic shape — navigate, wait, classify, read cards — with one field the shared
+// reader did not carry: the seller's positive-feedback percentage, which the comparison ranks on. Adding
+// it to the config is what lets ebay stop being a bespoke layer.
+
+const SELLER_SITE = {
+  ...CONFIG,
+  result_seller_selector: '.seller',
+  result_condition_selector: '.cond',
+};
+
+test('a seller signal is read when the site declares where it lives', () => {
+  const row = {
+    text: 'x', url: 'https://www.11st.co.kr/products/9', title: 'M185', price_text: '9,900원',
+    seller_text: '99.2% positive feedback (1,470)', condition: 'Brand New',
+  };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
+  const candidate = search(page, {}, SELLER_SITE).value.candidates[0];
+
+  assert.equal(candidate.seller_rating_percent, 99.2);
+  assert.equal(candidate.review_count, 1470);
+  assert.equal(candidate.condition, 'Brand New');
+});
+
+test('a seller line without a percentage yields no rating rather than a wrong one', () => {
+  const row = { text: 'x', url: 'https://www.11st.co.kr/products/9', title: 'M185', price_text: '9,900원', seller_text: 'Top Rated Seller' };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
+  assert.equal(search(page, {}, SELLER_SITE).value.candidates[0].seller_rating_percent, undefined);
+});

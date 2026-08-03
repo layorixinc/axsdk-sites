@@ -102,6 +102,9 @@ local function fields_for(config)
   add("condition", config.result_condition_selector)
   add("delivery_text", config.result_delivery_selector)
   add("return_terms", config.result_return_selector)
+  -- ebay states the seller's positive-feedback share and its count in one line; the comparison ranks on
+  -- the share, so a site that has one says where it lives.
+  add("seller_text", config.result_seller_selector)
   -- The id attribute may sit on the row itself or on an element inside it: 11st keeps it on the card's
   -- anchor, whose href is an ad-server redirect carrying no product id at all.
   if config.result_id_attr or config.result_id_selector then
@@ -311,6 +314,19 @@ local function product_id(config, href, attr_value)
   return text and by_pattern(text) or nil
 end
 
+--- The share of buyers who rated this seller positively, and how many did. A line with no percentage
+--- yields nothing rather than a number pulled from whatever digits were nearby.
+local function seller_percent(text)
+  local value = non_empty(text)
+  return value and tonumber(value:match("(%d+%.?%d*)%%")) or nil
+end
+
+local function seller_reviews(text)
+  local value = non_empty(text)
+  local inside = value and value:match("%(([%d,]+)%)")
+  return inside and tonumber((inside:gsub(",", ""))) or nil
+end
+
 --- Turns one read row into a candidate, or nil when it cannot be compared. A row without an id or a
 --- price is dropped rather than guessed: a wrong number in a price comparison is worse than a missing row.
 local function candidate_from(config, row)
@@ -354,6 +370,8 @@ local function candidate_from(config, row)
     condition = non_empty(row.condition),
     delivery_text = non_empty(row.delivery_text),
     return_terms = non_empty(row.return_terms),
+    seller_rating_percent = seller_percent(row.seller_text),
+    review_count = seller_reviews(row.seller_text),
   }
 end
 

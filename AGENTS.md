@@ -820,3 +820,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   — so it declares `cart_approval: user_picked_searched_product`. Requiring comparison markers there would
   break a flow that never had a comparison; accepting a call with no marker would leave the guard off for
   half the callers.
+- **The checkout REVIEW is its own module so the cart stays provably order-free.** `68_rpc_checkout.lua`
+  reaches the review page and reads the total, address and payment method; the place-order selectors are
+  READ, to tell the user whether the button is there, and never handed to a click. `check:flows` asserts
+  that the cart module's code contains no checkout or order words at all — which only holds while the
+  checkout lives elsewhere — and that neither checkout tool is granted `dom.submit_form` or `page.eval`.
+  The never-order assertion was mutation-checked: making `review` click the button fails the suite.
+- **A value nobody read is nil, and that includes a panel still loading.** Live, amazon's payment panel
+  answered `"Payment method Setting your payment method... Payment method"` — its own label plus a loading
+  sentence — and an empty `order_summary` table read downstream as "a summary exists". Both now come back
+  absent, so the terminal says the total is unknown instead of printing noise as an answer.
+- **Amazon's current checkout pipeline has no `#subtotals`.** Measured live: the review page loads
+  (`status: "checkout"`, address and recipient read) while the summary selectors match nothing and the
+  place-order button is not present either. That is a reader gap on the newer pipeline, not a failure — and
+  it is reported as unknown rather than guessed. Re-survey before claiming the totals are readable.

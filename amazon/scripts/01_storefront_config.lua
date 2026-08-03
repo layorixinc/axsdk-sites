@@ -80,6 +80,25 @@ local CONFIG = {
   cart_url = "https://www.amazon.com/gp/cart/view.html",
   cart_url_markers = { "/gp/cart/view.html", "/cart/view.html", "/cart?" },
   cart_count_selectors = { "#nav-cart-count", "#sc-subtotal-label-activecart" },
+  -- Checkout REVIEW only. `place_order_selectors` is read to tell the user whether the button is there;
+  -- nothing clicks it. The cart-page keys are here too because reaching the review starts from the cart.
+  cart_ready_selector = '#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart',
+  cart_empty_selector = "#sc-empty-cart",
+  cart_item_selector = '.sc-list-item[data-asin]',
+  cart_subtotal_selectors = { "#sc-subtotal-amount-activecart", "#sc-subtotal-label-activecart" },
+  checkout_button_selectors = {
+    'input[name="proceedToRetailCheckout"]',
+    "#sc-buy-box-ptc-button input",
+    '[data-feature-id="proceed-to-checkout-action"] input',
+    "#hlb-ptc-btn-native",
+  },
+  checkout_ready_selector = M.CHECKOUT_READY_SELECTOR,
+  checkout_url_markers = { "/gp/buy/", "/checkout/" },
+  checkout_summary_selector = "#subtotals",
+  checkout_delivering_to_selector = "#deliver-to-customer-text",
+  checkout_address_selector = "#deliver-to-address-text",
+  checkout_payment_selectors = { "#checkout-payment-option-panel", "#checkout-paymentOptionPanel" },
+  place_order_selectors = { "#submitOrderButtonId", 'input[name="placeYourOrder1"]', "#bottomSubmitOrderButtonId" },
   product_timeout = 8000,
   pagination = {
     mode = "query", param = "page", start = 1, step = 1, max_pages = 2,

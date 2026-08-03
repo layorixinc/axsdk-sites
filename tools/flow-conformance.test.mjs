@@ -793,3 +793,35 @@ test('a tool shared ACROSS flows is referenced, not inlined', () => {
     .map(([id, flows]) => `${id}: ${[...flows].join(', ')}`);
   assert.deepEqual(shared, [], `these must use run: instead of id: ${shared.join(' | ')}`);
 });
+
+test('the checkout reviews and cannot order', () => {
+  // The checkout exists so a person can read the total, the address and the payment method and then decide.
+  // Its grant carries no form submit, and the place-order selectors appear only as something to READ.
+  const common = parseFlow('_common/flows.yaml');
+  for (const name of ['checkout', 'run_checkout']) {
+    const tool = common.flowTools?.[name] ?? {};
+    assert.equal(tool.execute?.implementation, 'lua', `${name} runs in the runtime`);
+    assert.ok(tool.execute?.modules?.includes('_common.68_rpc_checkout'));
+    const allow = tool.execute?.rpc?.allow ?? [];
+    assert.ok(!allow.includes('dom.submit_form'), `${name} must not be able to submit a form`);
+    assert.ok(!allow.includes('page.eval'), `${name} must not be able to run arbitrary script`);
+  }
+
+  const source = read('_common/rpc/68_rpc_checkout.lua');
+  const code = source.replace(/^\s*--.*$/gm, '');
+  // The place-order selectors may be read (`first_existing`), and must never be handed to a click.
+  assert.match(code, /place_order_selectors/);
+  assert.ok(
+    !/click\([^)]*place_order/.test(code),
+    'the place-order selectors must never reach a click',
+  );
+});
+
+test('the cart module stays free of any way to order', () => {
+  // This is why the checkout is a separate module. If the two ever merge, this assertion is what notices.
+  const code = read('_common/rpc/67_rpc_cart.lua').replace(/^\s*--.*$/gm, '');
+  assert.ok(
+    !/checkout|place_?order|buy_?now|proceed_?to/i.test(code),
+    'the cart script must not know how to order',
+  );
+});

@@ -3569,10 +3569,26 @@ flowTools:
         message: { type: string }
 
   checkout:
-    description: Navigate to the Amazon cart and proceed to the checkout page for review. Never places an order.
-    execute: { kind: remote, tool: AX_checkout, timeoutMs: 90000 }
+    description: Navigate to the cart and open the checkout REVIEW page so the user can read the order total, address and payment method. Never places an order.
+    execute:
+      kind: runtime
+      implementation: lua
+      # Its own module, so the cart's stays provably order-free: `check:flows` asserts the cart code
+      # contains no checkout or order words, which only holds while the checkout lives elsewhere.
+      modules: ["_common.61_rpc_storefront", "_common.62_rpc_sites", "_common.68_rpc_checkout"]
+      rpc:
+        # No form submit and nothing that could place an order — the place-order button is READ, to report
+        # whether it is there, and never clicked.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.click]
+        opTimeoutMs: 2000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_CHECKOUT.review(args)
+        end
     output:
-      next: { if: [{ var: result.error }, "error", "done"] }
+      next: result.next
       checkout_status: result.status
       checkout_view: result.checkout
       checkout_error: result.error
@@ -3580,12 +3596,27 @@ flowTools:
       type: object
       additionalProperties: true
       properties: {}
-
   run_checkout:
-    description: Navigate to the Amazon cart and proceed to the checkout page for review (standalone checkout flow). Never places an order.
-    execute: { kind: remote, tool: AX_checkout, timeoutMs: 90000 }
+    description: Open the checkout REVIEW page for the standalone checkout flow so the user can read the order total, address and payment method. Never places an order.
+    execute:
+      kind: runtime
+      implementation: lua
+      # Its own module, so the cart's stays provably order-free: `check:flows` asserts the cart code
+      # contains no checkout or order words, which only holds while the checkout lives elsewhere.
+      modules: ["_common.61_rpc_storefront", "_common.62_rpc_sites", "_common.68_rpc_checkout"]
+      rpc:
+        # No form submit and nothing that could place an order — the place-order button is READ, to report
+        # whether it is there, and never clicked.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.click]
+        opTimeoutMs: 2000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_CHECKOUT.review(args)
+        end
     output:
-      next: { if: [{ var: result.error }, "error", "done"] }
+      next: result.next
       checkout_status: result.status
       checkout_view: result.checkout
       checkout_error: result.error
@@ -3593,7 +3624,6 @@ flowTools:
       type: object
       additionalProperties: true
       properties: {}
-
   verify_request:
     description: Check that service_query, user_requirements, a five-digit zip_code, and all four contact fields are present before search. Pure check; no navigation or side effects.
     execute:

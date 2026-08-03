@@ -254,6 +254,36 @@ RPC_SITES["amazon"] = {
     "#nav-cart-count",
     "#sc-subtotal-label-activecart"
   },
+  cart_ready_selector = "#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart",
+  cart_empty_selector = "#sc-empty-cart",
+  cart_item_selector = ".sc-list-item[data-asin]",
+  cart_subtotal_selectors = {
+    "#sc-subtotal-amount-activecart",
+    "#sc-subtotal-label-activecart"
+  },
+  checkout_button_selectors = {
+    "input[name=\"proceedToRetailCheckout\"]",
+    "#sc-buy-box-ptc-button input",
+    "[data-feature-id=\"proceed-to-checkout-action\"] input",
+    "#hlb-ptc-btn-native"
+  },
+  checkout_ready_selector = "#authportal-main-section, #ap_email, #ap_password, #submitOrderButtonId, #placeYourOrder, input[name=\"placeYourOrder1\"], #spc-orders, #subtotals, #deliver-to-customer-text, #checkout-payment-option-panel, form[action*=\"validateCaptcha\"]",
+  checkout_url_markers = {
+    "/gp/buy/",
+    "/checkout/"
+  },
+  checkout_summary_selector = "#subtotals",
+  checkout_delivering_to_selector = "#deliver-to-customer-text",
+  checkout_address_selector = "#deliver-to-address-text",
+  checkout_payment_selectors = {
+    "#checkout-payment-option-panel",
+    "#checkout-paymentOptionPanel"
+  },
+  place_order_selectors = {
+    "#submitOrderButtonId",
+    "input[name=\"placeYourOrder1\"]",
+    "#bottomSubmitOrderButtonId"
+  },
   product_timeout = 8000,
   pagination = {
     mode = "query",

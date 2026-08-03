@@ -132,20 +132,28 @@ local function wait_for(selector, timeout)
   end, 2) == true
 end
 
---- Optional ops: the platform ships one before the client implements it, and a call to an op the client
---- does not know does NOT fail fast — it burns the full `opTimeoutMs`. So support is decided ONCE per tool
---- invocation and remembered; retrying per step spent the whole deadline on ops that would never answer.
+--- Optional ops: the platform can ship one before the client implements it, so support is a live fact.
 ---
---- "Not implemented" and "refused this once" are different facts. Only the first is remembered: marking an
---- op unavailable because a flaky channel dropped one call would disable an op the client does support,
---- for the rest of the run.
+--- The client answers an unregistered op immediately (`command_unresolved`) — it does NOT hang — but the
+--- attempt is still a round trip, and re-attempting per step is what spent the deadline. So support is
+--- decided ONCE per invocation and remembered.
+---
+--- "Never implemented" and "refused this once" are different facts, and only the first is remembered:
+--- marking an op dead because a flaky channel dropped one call would disable an op the client does
+--- support, for the rest of the run.
 Q.unavailable = {}
 
+--- The codes that mean "this client will never answer this op", as opposed to "not this time".
+---
+--- `command_unresolved` is the one that matters and the one we first got wrong: axsdk-core's
+--- `executeRpcOp` answers it for an op it has no handler for, while `op_not_permitted` is reserved for
+--- `page.eval` without its opt-in. Keying only on the latter meant an op the extension will never
+--- implement was re-attempted on every step, and those round trips are what spent the deadline.
 local function permanent_refusal(message)
   local text = tostring(message or ""):lower()
-  return text:find("op_not_permitted", 1, true) ~= nil
+  return text:find("command_unresolved", 1, true) ~= nil
+    or text:find("op_not_permitted", 1, true) ~= nil
     or text:find("not allowed", 1, true) ~= nil
-    or text:find("unknown", 1, true) ~= nil
     or text:find("nil value", 1, true) ~= nil
 end
 

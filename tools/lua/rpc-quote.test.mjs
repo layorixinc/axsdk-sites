@@ -622,3 +622,25 @@ test('a form longer than the budget is reported, not killed', () => {
   assert.ok(result.quote_steps >= 4, `it must report the steps it drove, said ${result.quote_steps}`);
   assert.ok(page.ops.length <= 120, `and stop before the ceiling, spent ${page.ops.length}`);
 });
+
+test('an op the client never registered is recognised as permanent', () => {
+  // The client answers an unregistered op with `command_unresolved` (axsdk-core `executeRpcOp`), NOT
+  // `op_not_permitted` — that one is reserved for `page.eval` without its opt-in. Our detection keyed on
+  // the wrong strings, so an op the extension will never answer was retried on every step, which is what
+  // actually spent the deadline. The stub answers what the client answers.
+  const page = quotePage({
+    steps: [
+      step('What do you need?', { choices: ['Shelf installation', 'Painting'] }),
+      step('How much help?', { choices: ['A full day'] }),
+      finalStep(),
+    ],
+  });
+  page.unresolvedOps = ['dom.read_many', 'dom.click_text'];
+  const result = drive(page);
+
+  assert.equal(result.next, 'submit');
+  for (const op of ['dom.read_many', 'dom.click_text']) {
+    const tries = page.ops.filter((entry) => entry.op === op).length;
+    assert.ok(tries <= 1, `${op} must be attempted at most once, saw ${tries}`);
+  }
+});

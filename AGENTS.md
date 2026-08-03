@@ -775,12 +775,14 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `requestSubmit()`, which runs the form's real handler (the SDK says so at `findLuaForm`). With that
   fallback the wizard walks the form for real — measured 5 steps advanced live. It never runs on a
   submit-like step, because `reached_submit_step` returns before the stall branch.
-- **Adopting a new op is never a bet: an unimplemented op burns the whole `opTimeoutMs`.** The platform
-  shipped `dom.click_text` and `dom.read_many` before the SDK implemented either, and calling one does not
-  fail fast — retrying per step spent the entire deadline on ops that would never answer. So support is
-  detected ONCE per invocation and remembered, and "not implemented" (`op_not_permitted`, unknown, nil
-  value) is distinguished from "refused this once" — marking an op dead because a flaky channel dropped one
-  call would disable an op the client does support for the rest of the run.
+- **An unregistered op answers `command_unresolved`, and that is the string detection must key on.**
+  (Corrects an earlier claim of ours that such a call "burns the whole `opTimeoutMs`" — it does not:
+  `axsdk-core`'s `executeRpcOp` returns immediately when its table has no handler, and `op_not_permitted`
+  is reserved for `page.eval` without its opt-in.) The cost was ordinary round trips: our detection did not
+  recognise `command_unresolved`, so `dom.click_text` and `dom.read_many` — shipped by the platform before
+  the SDK implemented them — were re-attempted on EVERY step. Support is now decided once per invocation
+  and remembered, and "never implemented" is distinguished from "refused this once", because marking an op
+  dead on one flaky drop would disable an op the client does support for the rest of the run.
 - **Op count is the feature budget, and the tool must stop before the platform kills it.** `deadlineMs`
   is capped at 120000 and an op costs ~1s on the current client (the platform measured the second as the
   CLIENT noticing the frame, not transport). A form longer than ~6 steps therefore cannot finish, and being

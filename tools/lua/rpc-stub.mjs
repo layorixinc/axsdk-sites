@@ -44,9 +44,12 @@ export function makePage(spec) {
     // one raise reports a page fact it never established — measured live twice, on two different ops.
     flakyEvery: spec.flakyEvery ?? 0,
     opCount: 0,
-    // Ops the CLIENT has not implemented. The platform can ship an op the extension does not know yet, and
-    // a script that bets on one loses the whole tool — so adoption is always tested against refusal too.
+    // Ops the CLIENT refuses outright — `page.eval` without its opt-in answers `op_not_permitted`.
     refuseOps: spec.refuseOps ?? [],
+    // Ops the client never REGISTERED. The platform can ship an op before the extension implements it, and
+    // `executeRpcOp` answers `command_unresolved` for one it has no handler for. That is a different string
+    // from `op_not_permitted`, and a script that only knows the latter retries the op forever.
+    unresolvedOps: spec.unresolvedOps ?? [],
     sequence: spec.sequence ?? null,
     sequenceAt: {},
     // A click's EFFECT belongs to the page, not to the op: the runtime answers whether it found
@@ -226,6 +229,7 @@ export function installRpcStub(lua, page, { allow } = {}) {
     page.record(op, describe(op, args));
     page.opCount += 1;
     if (page.refuseOps.includes(op)) throw new Error(`rpc ${op} failed: op_not_permitted: ${op}`);
+    if (page.unresolvedOps.includes(op)) throw new Error(`rpc ${op} failed: command_unresolved: ${op}`);
     if (page.flakyEvery > 0 && page.opCount % page.flakyEvery === 0) {
       throw new Error(`rpc ${op} failed: rpc_timeout`);
     }

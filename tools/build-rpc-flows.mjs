@@ -37,14 +37,24 @@ export function discoverModules(root) {
   return found;
 }
 
+/** The registry rejects a module over this; finding out mid-upload leaves a session half-loaded. */
+export const MODULE_CEILING = 64 * 1024;
+/** Our own discipline (D14): past this a module stops being reviewable well before the limit bites. */
+export const MODULE_DISCIPLINE = 48 * 1024;
+
 /**
- * Reads every `flows.yaml` under `root`, inlines declared modules, and returns the emitted documents
- * keyed by their relative path, plus a `__report` of what the result costs.
+ * Reads every `flows.yaml` under `root` and resolves the declared modules, returning the emitted
+ * documents keyed by their relative path plus a `__report` of what the result costs.
+ *
+ * `delivery: 'inline'` folds each module source into `execute.lua` — the stopgap for a runtime without a
+ * module registry. `delivery: 'registry'` leaves the names in place and hands the sources back to be
+ * uploaded, which is what keeps the document's 256 KiB budget independent of how much Lua we own.
+ * Both modes read the same declaration, so switching is a flag rather than an edit.
  */
-export function buildRpcFlows({ root, modulePaths }) {
+export function buildRpcFlows({ root, modulePaths, delivery = 'inline' }) {
   const paths = modulePaths ?? discoverModules(root);
   const out = {};
-  const report = { bytes: 0, tools: 0, modules: new Set(), documents: [] };
+  const report = { bytes: 0, tools: 0, modules: new Set(), moduleSources: {}, oversized: [], documents: [] };
 
   for (const rel of flowDocuments(root)) {
     const source = readFileSync(join(root, rel), 'utf8');
@@ -55,28 +65,42 @@ export function buildRpcFlows({ root, modulePaths }) {
       const declared = tool?.execute?.modules;
       if (!Array.isArray(declared) || declared.length === 0) continue;
 
-      const chunks = declared.map((name) => {
+      const inline = delivery !== 'registry';
+      const chunks = [];
+      for (const name of declared) {
         const path = paths[name];
         if (!path) {
           throw new Error(`${rel}: flowTool '${toolName}' declares module '${name}', which no file provides`);
         }
         report.modules.add(name);
+        const body = readFileSync(join(root, path), 'utf8');
+        report.moduleSources[name] = body;
         // Each module keeps its own chunk boundary in a comment so a runtime stack trace is traceable
-        // back to a file. The runtime compiles them separately once the registry lands; until then they
+        // back to a file. The runtime compiles them separately under registry delivery; inlined they
         // share one chunk, which is why every module must stay under the 200-locals ceiling on its own.
-        return `-- >>> module ${name} (${path})\n${readFileSync(join(root, path), 'utf8').trimEnd()}\n-- <<< module ${name}`;
-      });
+        if (inline) chunks.push(`-- >>> module ${name} (${path})\n${body.trimEnd()}\n-- <<< module ${name}`);
+      }
 
-      const script = tool.execute.lua ?? '';
-      doc.setIn(['flowTools', toolName, 'execute', 'lua'], `${chunks.join('\n\n')}\n\n${script}`);
-      doc.deleteIn(['flowTools', toolName, 'execute', 'modules']);
       report.tools += 1;
+      if (!inline) continue;
+      doc.setIn(['flowTools', toolName, 'execute', 'lua'], `${chunks.join('\n\n')}\n\n${tool.execute.lua ?? ''}`);
+      doc.deleteIn(['flowTools', toolName, 'execute', 'modules']);
     }
 
     const emitted = doc.toString({ lineWidth: 0 });
     out[rel] = emitted;
     report.bytes += Buffer.byteLength(emitted, 'utf8');
     report.documents.push({ path: rel, bytes: Buffer.byteLength(emitted, 'utf8') });
+  }
+
+  if (delivery === 'registry') {
+    for (const [name, body] of Object.entries(report.moduleSources)) {
+      const bytes = Buffer.byteLength(body, 'utf8');
+      if (bytes > MODULE_CEILING) {
+        throw new Error(`module '${name}' is ${bytes} bytes; the registry rejects anything over ${MODULE_CEILING}`);
+      }
+      if (bytes > MODULE_DISCIPLINE) report.oversized.push({ name, bytes });
+    }
   }
 
   out.__report = { ...report, modules: [...report.modules] };

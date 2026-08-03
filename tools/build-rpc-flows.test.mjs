@@ -115,3 +115,68 @@ test('the emitted document reports what it cost', () => {
   assert.equal(built.__report.tools, 1);
   assert.deepEqual(built.__report.modules.sort(), ['_common.helpers', '_common.reader']);
 });
+
+// Inlining was always the stopgap: it spends the document's 256 KiB budget on Lua that the runtime can
+// now hold separately. Registry delivery sends the NAMES and uploads the sources, so the document costs
+// one line per module regardless of how big the layer grows. Both modes read the same `modules:`
+// declaration, which is the whole reason the declaration was written that way.
+
+test('registry delivery leaves the declaration in place and never inlines a source', () => {
+  const root = workspace({
+    '_common/flows.yaml': FLOWS,
+    '_common/scripts/helpers.lua': 'HELPERS = { tag = "helper-source" }\n',
+    '_common/scripts/reader.lua': 'READER = { read = function() return HELPERS.tag end }\n',
+  });
+  const paths = { '_common.helpers': '_common/scripts/helpers.lua', '_common.reader': '_common/scripts/reader.lua' };
+  const built = buildRpcFlows({ root, modulePaths: paths, delivery: 'registry' });
+  const tool = parse(built['_common/flows.yaml']).flowTools.read_page;
+
+  assert.deepEqual(tool.execute.modules, ['_common.helpers', '_common.reader']);
+  assert.ok(!tool.execute.lua.includes('helper-source'), 'the module source must not travel in the document');
+  assert.match(tool.execute.lua, /function run\(args\)/, 'the tool script itself still travels');
+});
+
+test('registry delivery hands back the sources to upload, keyed by module name', () => {
+  const root = workspace({
+    '_common/flows.yaml': FLOWS,
+    '_common/scripts/helpers.lua': 'HELPERS = { tag = "helper-source" }\n',
+    '_common/scripts/reader.lua': 'READER = {}\n',
+  });
+  const paths = { '_common.helpers': '_common/scripts/helpers.lua', '_common.reader': '_common/scripts/reader.lua' };
+  const built = buildRpcFlows({ root, modulePaths: paths, delivery: 'registry' });
+
+  // A document that names modules nobody uploaded fails at the first turn, in the runtime, with no file
+  // to point at. The build therefore produces both halves or neither.
+  assert.deepEqual(Object.keys(built.__report.moduleSources).sort(), ['_common.helpers', '_common.reader']);
+  assert.match(built.__report.moduleSources['_common.helpers'], /helper-source/);
+});
+
+test('registry delivery costs the document almost nothing', () => {
+  const bulk = `BULK = "${'x'.repeat(20_000)}"\n`;
+  const files = { '_common/flows.yaml': FLOWS, '_common/scripts/helpers.lua': bulk, '_common/scripts/reader.lua': 'READER = {}\n' };
+  const paths = { '_common.helpers': '_common/scripts/helpers.lua', '_common.reader': '_common/scripts/reader.lua' };
+  const inlined = buildRpcFlows({ root: workspace(files), modulePaths: paths });
+  const registry = buildRpcFlows({ root: workspace(files), modulePaths: paths, delivery: 'registry' });
+
+  assert.ok(inlined.__report.bytes > 20_000, 'inlining pays for the source');
+  assert.ok(registry.__report.bytes < 1_000, `registry delivery should not, got ${registry.__report.bytes}`);
+});
+
+test('a module the registry would reject fails the build instead of the upload', () => {
+  const root = workspace({
+    '_common/flows.yaml': FLOWS,
+    '_common/scripts/helpers.lua': `HELPERS = "${'x'.repeat(70 * 1024)}"\n`,
+    '_common/scripts/reader.lua': 'READER = {}\n',
+  });
+  const paths = { '_common.helpers': '_common/scripts/helpers.lua', '_common.reader': '_common/scripts/reader.lua' };
+
+  // Live: `400 lua module probe.size70 exceeds 65536 bytes`. Discovering that mid-upload leaves a session
+  // holding some modules and not others, which reads as a missing function rather than a size problem.
+  assert.throws(() => buildRpcFlows({ root, modulePaths: paths, delivery: 'registry' }), /_common\.helpers.*65536|65536.*_common\.helpers/);
+});
+
+test('an unresolvable module fails the build in either delivery mode', () => {
+  const root = workspace({ '_common/flows.yaml': FLOWS, '_common/scripts/helpers.lua': 'HELPERS = {}\n' });
+  const paths = { '_common.helpers': '_common/scripts/helpers.lua' };
+  assert.throws(() => buildRpcFlows({ root, modulePaths: paths, delivery: 'registry' }), /_common\.reader/);
+});

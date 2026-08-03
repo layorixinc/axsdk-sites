@@ -593,10 +593,14 @@ flows:
         inputSelector: [service_query, zip_code]
         id: search_service
         maxSelfSteps: 8
-        description: Search Thumbtack for the collected service in the resolved ZIP. Single durable call — start_search fires the search and the command suspends across the results navigation, then resumes on the loaded page to read candidates (robust cross-nav durable; no LLM loop, no separate read phase).
+        description: Search Thumbtack for the collected service in the resolved ZIP. One runtime call — it opens the category results page, settles on a stable pro count, and reads the candidates; nothing suspends across the navigation, so there is no read phase and no LLM loop.
         next:
           done: prepare_results_table
-          read: search
+          # A bad postcode is a postcode problem: go back and ask for one, rather than reporting the
+          # service missing. The `read: search` self-loop is gone — nothing suspends across the results
+          # navigation any more, so a loop would only re-run a search that already finished.
+          invalid_zip: collect_request
+          no_results: no_results
           error: no_results
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -3660,12 +3664,27 @@ flowTools:
 
   search_service:
     description: Search Thumbtack for local pros matching the service query in the resolved ZIP.
-    execute: { kind: remote, tool: AX_search_service, timeoutMs: 90000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.64_rpc_thumbtack"]
+      rpc:
+        # Read-only: the shortlist is built from what the results page already shows.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all]
+        opTimeoutMs: 2000
+        deadlineMs: 90000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_THUMBTACK.search_service(args)
+        end
     input:
       query: tool.args.service_query
       zip_code: tool.args.zip_code
     output:
-      next: { if: [{ "==": [{ var: result.status }, "completed"] }, "done", { var: result.error }, "error", "read"] }
+      # The script picks its own branch. Deriving one from `result.status` here overrode it and sent a
+      # finished search back into the node that had just run it.
+      next: result.next
       query: result.query
       search_status: result.status
       candidates: result.candidates

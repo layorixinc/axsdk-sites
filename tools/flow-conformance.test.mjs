@@ -544,3 +544,42 @@ test('single-site shopping reads every store in the runtime', () => {
   assert.ok(!common.flowTools.shopping_search_product_durable);
   assert.equal(common.flowTools.shopping_search_product.execute.implementation, 'lua');
 });
+
+test('the service search reads in the runtime and stops re-invoking itself', () => {
+  // The `read: search` self-loop was the durable pattern: the call died on the results navigation and the
+  // flow called it again. A runtime script keeps its stack, so a loop back into the same node would only
+  // re-run a search that already finished.
+  const common = parseFlow('_common/flows.yaml');
+  const search = common.flows?.request_service_quote?.nodes?.search ?? {};
+  const tool = common.flowTools?.search_service?.execute ?? {};
+
+  assert.equal(tool.implementation, 'lua');
+  assert.ok(Array.isArray(tool.modules) && tool.modules.includes('_common.64_rpc_thumbtack'));
+  assert.ok(Array.isArray(tool.rpc?.allow) && tool.rpc.allow.length > 0);
+  assert.ok(!search.next.read, 'a finished search must not loop back into itself');
+  assert.equal(search.next.done, 'prepare_results_table');
+});
+
+test('a rejected postcode is answered as a postcode problem', () => {
+  // Thumbtack answers a bad ZIP with a banner and an empty list. Folding that into `no_results` sends the
+  // user looking for another service when the ZIP is what was disliked.
+  const common = parseFlow('_common/flows.yaml');
+  const search = common.flows?.request_service_quote?.nodes?.search ?? {};
+  assert.equal(search.next.invalid_zip, 'collect_request');
+  assert.equal(common.flowTools.search_service.output.next, 'result.next');
+});
+
+test('every branch the search script can answer is a branch the node routes', () => {
+  // Live, the script answered `next: "ok"` while the node enumerated `done`. The word fell through
+  // `invalidNext`, so ten real pros were read and the user was told the request had failed — a passing
+  // suite on both sides of a vocabulary that never matched. The keys are enumerable, so pin them.
+  const common = parseFlow('_common/flows.yaml');
+  const routed = Object.keys(common.flows?.request_service_quote?.nodes?.search?.next ?? {});
+  const source = read('_common/rpc/64_rpc_thumbtack.lua');
+  const answered = [...source.matchAll(/next = "([a-z_]+)"/g)].map((match) => match[1]);
+
+  assert.ok(answered.length >= 4, 'the script must answer more than one branch');
+  for (const branch of new Set(answered)) {
+    assert.ok(routed.includes(branch), `the script answers "${branch}" but the node routes ${routed.join(', ')}`);
+  }
+});

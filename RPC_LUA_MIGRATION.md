@@ -441,6 +441,14 @@ ebay 6, aliexpress 6, gmarket 2, etsy 1, walmart `price_unavailable`, naver `acc
 
 **게이트**: 라이브 E2E — 검색 → 후보 브라우징 → 견적 다이얼로그 → **제출 직전 정지**. 실제 제출 금지.
 
+**진행 상태 — 검색 완료(라이브 검증).** `search_service`가 `kind: remote` → `implementation: lua`
+(`_common/rpc/64_rpc_thumbtack.lua`)로 전환됐다. durable 시절의 `read: search` 자기 루프는 제거됐다 —
+런타임 스크립트는 결과 내비게이션을 넘어 스택을 유지하므로 재진입할 이유가 없다. 잘못된 ZIP은
+`invalid_zip`으로 `collect_request`로 되돌아간다(`no_results`로 접으면 사용자가 멀쩡한 서비스를 포기한다).
+라이브 측정: `house cleaning` / `94101` → 후보 10건, 평점·리뷰·의뢰수·가격 전부 채워진 표와 정렬된
+숏리스트 창까지 완주. 남은 것은 `detect_page` · `view_service` · `update_search` ·
+`open/answer/submit_quote`로, `confirm:true` 게이트는 노드 분리로 유지한다(D9). `kind: remote` 25 → 24.
+
 ### Phase 6 — 정리 (1일)
 `kind: remote` 툴 38개 제거 확인, `axsdk:lua` 스토어/`ax sync`의 Lua 경로 정리, `SCHEMA.md`(40개 엔트리)를
 RPC 툴 계약으로 교체, `AGENTS.md` §3/§4/§6/§8 갱신, `dist/` 산출물 규칙 추가.

@@ -725,3 +725,21 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **Cards found but none priced is `price_unavailable`, not `no_results`.** They are different facts:
   one means the reader could not price the grid, the other means the store had nothing. Reporting the
   first as the second made a working store look like it does not sell the product.
+- **A `next` the node does not route fails silently.** The Thumbtack search answered `next: "ok"` while
+  the node enumerated `done`; the word fell through `invalidNext`, so ten real pros were read and the
+  user was told the request had failed. Both suites were green — the Lua asserted its own vocabulary and
+  the flow asserted its own map, and nothing compared them. `check:flows` now pins every `next = "..."`
+  literal in `64_rpc_thumbtack.lua` against the keys of the `search` node.
+- **Thumbtack results live at `/k/<slug>/near-me/`, and the card is the WRAPPER div.** The slug is the
+  query lowercased with each run of non-alphanumerics collapsed to one hyphen. `/instant-results/?query=`
+  answered zero pros, and `[data-test="pro-list-result"]` matches a marker that holds no service link —
+  querying it returns rows with no id, and every row is dropped. Query
+  `div:has(> [data-test="pro-list-result"])` (and the `data-testid` A/B variant).
+- **A fixture must carry the shape that was MEASURED.** The ported reader passed its unit tests against
+  invented cards (a flat `title`, a `/p/` URL) while reading nothing at all live. Fixtures now hold real
+  card text — doubled name, badges, avatar markup — so a reader that stops matching the site fails in
+  `test:lua` before a live run.
+- **A ported reader owes its predecessor's FIELDS, not just its rows.** The runtime search returned
+  name/rating/URL and the results widget printed reviews, price and hires as `-` for all ten pros. Card
+  numbers are parsed off the FULL text and only the stored `summary` is cut at 360 — parsing the cut copy
+  drops the hire count of any card whose review quote runs long.

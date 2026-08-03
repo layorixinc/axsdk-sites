@@ -561,3 +561,64 @@ test('a dedicated shipping field may state a bare number', () => {
   });
   assert.equal(search(page, {}, COSTED).value.candidates[0].shipping_cost, 2500);
 });
+
+// The production pipeline is three steps and only the first touches the browser: search the store, then
+// normalize (pure), then merge pages (pure). So the cutover replaces exactly one tool, and its result has
+// to look to the normalizer like what the durable adapter returned — `status` and `candidates`, not this
+// reader's branch key.
+
+const runStore = (page, args, sites) => {
+  installRpcStub(lua, page);
+  lua.define(`RPC_SITES = ${sites}`);
+  return lua.call('AX_RPC_STOREFRONT.run_store_search', args);
+};
+const SITES_LUA = `{ ["11st"] = { site = "11st", search_url = "https://search.11st.co.kr/pc/total-search",
+  search_param = "kwd", search_path_marker = "/pc/total-search", result_selector = "li.card",
+  result_url_selector = "a", result_title_selector = ".name", result_price_selector = ".price",
+  default_currency = "KRW", product_id_patterns = { "/products/(%d+)" } } }`;
+
+test('a found store looks to the normalizer like the durable adapter did', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', '무선 마우스', '9,900원')] } });
+  const value = runStore(page, { site: '11st', query: '마우스' }, SITES_LUA);
+
+  assert.equal(value.next, 'done');
+  assert.equal(value.store_result.status, 'candidates');
+  assert.equal(value.store_result.site, '11st');
+  assert.equal(value.store_result.candidates.length, 1);
+});
+
+test('an empty store reports no_results as its status', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
+  const value = runStore(page, { site: '11st', query: '마우스' }, SITES_LUA);
+  assert.equal(value.next, 'done');
+  assert.equal(value.store_result.status, 'no_results');
+});
+
+test('a wall keeps the store-specific reason the user is shown', () => {
+  // `C.store_status` renders one line naming the store and what the user must do; a generic
+  // "access_denied" would erase the sentence it builds.
+  const walled = SITES_LUA.replace('product_id_patterns = { "/products/(%d+)" }',
+    'product_id_patterns = { "/products/(%d+)" }, blocked_selectors = { { selector = "#wall", error = "security_verification_required" } }');
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { '#wall': [{}] } });
+  const value = runStore(page, { site: '11st', query: '마우스' }, walled);
+  assert.equal(value.store_result.status, 'security_verification_required');
+  assert.equal(value.store_result.error, 'security_verification_required');
+});
+
+test('a site with no RPC config is refused, not silently empty', () => {
+  // amazon and ebay carry bespoke layers and are not part of this cutover. Returning an empty result for
+  // them would read as "that store had nothing".
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
+  const value = runStore(page, { site: 'amazon', query: '마우스' }, SITES_LUA);
+  assert.equal(value.next, 'unsupported_site');
+  assert.ok(!value.store_result);
+});
+
+test('the result never asks the caller to come back mid-navigation', () => {
+  // The durable adapter answered `navigating` and the flow looped back into it. An RPC script keeps its
+  // own stack across the navigation, so that branch has nothing left to mean.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const value = runStore(page, { site: '11st', query: '마우스' }, SITES_LUA);
+  assert.notEqual(value.next, 'navigating');
+  assert.ok(!value.store_result.pending);
+});

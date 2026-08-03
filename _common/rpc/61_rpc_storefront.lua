@@ -454,3 +454,43 @@ function S.search(config, args)
     error = (next_value ~= "ok") and next_value or nil,
   }
 end
+
+--- The production entry point: one store, one page, in the shape the rest of the pipeline already reads.
+---
+--- The normalizer that runs next was written against the durable adapter, so it looks for `status` and
+--- `candidates` — not this reader's branch key. It also renders the store-specific reason to the user
+--- ("네이버쇼핑: 보안 확인 필요 …"), so a wall keeps the wording its site config chose instead of being
+--- flattened to `access_denied`.
+---
+--- There is no `navigating` answer. The durable adapter had one because a navigation destroyed its
+--- context and the flow had to call it again; this script keeps its own stack across the reload.
+function S.run_store_search(args)
+  args = type(args) == "table" and args or {}
+  local site = non_empty(args.site)
+  local config = site and RPC_SITES and RPC_SITES[site]
+  if not config then
+    -- amazon and ebay carry bespoke layers and are not part of this cutover. An empty result would read
+    -- as "that store had nothing", which is a claim about listings nobody looked at.
+    return { next = "unsupported_site", site = site }
+  end
+
+  local result = S.search(config, args)
+  local branch = result.next
+  local status = (branch == "ok") and "candidates" or (result.error or branch)
+
+  return {
+    next = "done",
+    store_result = {
+      site = result.site,
+      status = status,
+      error = (branch ~= "ok") and (result.error or branch) or nil,
+      login_required = (branch == "login_required") or nil,
+      candidates = result.candidates,
+      url = result.href,
+      page = tonumber(args.page) or 1,
+      cards_seen = result.cards_seen,
+      has_more = result.has_more,
+      pagination_supported = result.pagination_supported,
+    },
+  }
+end

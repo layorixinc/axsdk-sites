@@ -93,7 +93,10 @@ test('thumbtack shortlisting ranks from site data, never from the model', () => 
   assert.ok(!(nodes.confirm_quote.inputSelector || []).includes('candidates'),
     'the approval gate must not receive the searched pro list');
   assert.equal(nodes.select_pros.next.pick, 'pick_quote');
-  assert.equal(common.flowTools.browse_service_candidates.execute.tool, 'AX_browse_service_candidates');
+  // The shortlist ranks in the runtime now; what matters is still that it ranks deterministically and
+  // that no model node sits inside the loop.
+  assert.equal(common.flowTools.browse_service_candidates.execute.implementation, 'lua');
+  assert.ok(!common.flowTools.browse_service_candidates.execute.rpc, 'ranking needs no browser op');
   assert.equal(common.flowTools.browse_service_candidates.output.refine_selected, 'result.refine_selected');
   assert.equal(common.flowTools.browse_service_candidates.output.shortlist_text, 'result.shortlist_text');
   for (const key of ['shortlist_text', 'view_page', 'view_pages', 'view_total', 'choice_numbers']) {

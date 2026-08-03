@@ -72,3 +72,77 @@ function P.collect_store_page(args)
     store_result = result.store_result,
   }
 end
+
+--- The `input:` renames of every ported pure command, in one table.
+---
+--- A runtime lua tool never sees the tool's `input:` block, so each rename has to be restated. Nine
+--- hand-written entries would be nine chances to mistype a key the runtime then passes as nil — the
+--- failure that already made every store refuse with an empty site. Keeping them here means a rename is
+--- one line and a review reads them side by side.
+---
+--- `<key>` maps a node-state key; a table `{ value = x }` is a constant that belongs to the contract
+--- rather than to the state.
+local ARGUMENT_MAPS = {
+  AX_prepare_product_identity = {
+    product_category = "product_category", requested_brand = "requested_brand",
+    requested_model = "requested_model", hard_constraints = "hard_constraints",
+    soft_preferences = "soft_preferences", stores = "stores",
+  },
+  AX_lock_product_identity = {
+    identity_kind = "identity_kind", identity_name = "identity_name", identity_brand = "identity_brand",
+    identity_model = "identity_model", product_category = "product_category",
+    canonical_query = "canonical_query", hard_constraints = "hard_constraints",
+    soft_preferences = "soft_preferences", source_refs = "identity_source_refs",
+  },
+  AX_build_product_options = {
+    results = "discovery_results", query = "discovery_query", product_category = "product_category",
+    requested_brand = "requested_brand", hard_constraints = "hard_constraints",
+    soft_preferences = "soft_preferences", max_options = { value = 6 },
+  },
+  AX_resolve_product_option = {
+    options = "product_options", options_version = "options_version",
+    choice_index = "product_choice_index", choice_id = "product_choice_id",
+    choice_options_version = "choice_options_version", hard_constraints = "hard_constraints",
+    soft_preferences = "soft_preferences",
+  },
+  AX_verify_product_offers = {
+    results = "store_results", identity_id = "identity_id", identity_kind = "identity_kind",
+    identity_brand = "identity_brand", identity_model = "identity_model",
+    product_category = "product_category", hard_constraints = "locked_hard_constraints",
+  },
+  AX_build_offer_screening = {
+    store_results = "store_results", identity_brand = "identity_brand",
+    identity_model = "identity_model", product_category = "product_category",
+  },
+  AX_apply_offer_screening = {
+    store_results = "store_results", screening_ids = "screening_ids", keep = "screening_keep",
+  },
+  AX_resolve_store_offer = {
+    offers = "offers", choice_index = "choice_index", choice_comparison_id = "choice_comparison_id",
+    comparison_id = "comparison_id", identity_id = "identity_id", choice_stage = "choice_stage",
+    quantity = "quantity",
+  },
+  AX_browse_service_candidates = {
+    request_text = "requestText", candidates = "candidates", refine_request = "refine_request",
+    page_command = "page_command", page_number = "page_number", choice_numbers = "choice_numbers",
+    page = "view_page",
+  },
+}
+
+--- Calls a ported pure command with the node state mapped onto its arguments.
+function P.run(command, args)
+  local map = ARGUMENT_MAPS[command]
+  local fn = _ENV[command]
+  -- Calling an unmapped command would pass it the raw node state, where almost every key has a
+  -- different name: it would answer as if the user had asked for nothing.
+  if not map or type(fn) ~= "function" then
+    return { next = "error", error = "unmapped_command", command = command }
+  end
+
+  local state = table_of(args)
+  local mapped = {}
+  for target, source in pairs(map) do
+    if type(source) == "table" then mapped[target] = source.value else mapped[target] = state[source] end
+  end
+  return fn(mapped)
+end

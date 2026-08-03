@@ -70,3 +70,43 @@ test('collect carries the wording it tried, so a retry does not repeat it', () =
   });
   assert.match(String(value.tried_queries ?? ''), /로지텍 M185 마우스/);
 });
+
+// Nine more commands cross the line and every one of their `input:` blocks is a flat rename of node
+// state. Writing nine hand-rolled entries would be nine chances to mistype a key that the runtime then
+// silently passes as nil — the failure that already made every store refuse with an empty site. So the
+// renames live in ONE table beside the commands, and the entry is generic.
+
+test('a ported command receives the keys its input block named', () => {
+  const value = lua.call('AX_RPC_PURE.run', 'AX_verify_product_offers', {
+    store_results: [{ key: '11st', status: 'completed', value: { store_result: STORE_RESULT } }],
+    identity_id: 'identity-1', identity_kind: 'standardized_model',
+    identity_brand: '로지텍', identity_model: 'M185', product_category: '마우스',
+  });
+  // `results` <- `store_results` and `hard_constraints` <- `locked_hard_constraints` are the renames
+  // this command needs; getting either wrong verifies nothing and the comparison has no offers to rank.
+  assert.notEqual(value.next, 'error');
+  assert.ok(Object.values(value.verified_offers ?? {}).length >= 1,
+    'the offer must survive the rename into the verifier');
+});
+
+test('a constant in the mapping is passed through', () => {
+  // `max_options: 6` is part of the contract, not of the state.
+  const value = lua.call('AX_RPC_PURE.run', 'AX_build_product_options', {
+    discovery_results: [], discovery_query: '마우스', product_category: '마우스',
+  });
+  assert.ok(value.next);
+});
+
+test('a command nobody mapped is refused, not called blind', () => {
+  const value = lua.call('AX_RPC_PURE.run', 'AX_not_a_command', {});
+  assert.equal(value.next, 'error');
+  assert.equal(value.error, 'unmapped_command');
+});
+
+test('the identity chain keeps its own keys', () => {
+  const prepared = lua.call('AX_RPC_PURE.run', 'AX_prepare_product_identity', {
+    product_category: '마우스', requested_brand: '로지텍', requested_model: 'M185',
+  });
+  assert.equal(prepared.identity_status, 'exact');
+  assert.equal(prepared.identity_model, 'M185');
+});

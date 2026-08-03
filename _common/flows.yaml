@@ -2095,7 +2095,16 @@ flowTools:
 
   shopping_prepare_product_identity:
     description: Classify product scope and deterministically select at most three stores for grounded model discovery.
-    execute: { kind: remote, tool: AX_prepare_product_identity, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_prepare_product_identity", args)
+        end
     input:
       product_category: tool.args.product_category
       requested_brand: tool.args.requested_brand
@@ -2139,7 +2148,16 @@ flowTools:
 
   shopping_lock_product_identity:
     description: Lock one exact manufacturer model or grounded identity into a stable comparison snapshot.
-    execute: { kind: remote, tool: AX_lock_product_identity, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_lock_product_identity", args)
+        end
     input:
       identity_kind: tool.args.identity_kind
       identity_name: tool.args.identity_name
@@ -2238,7 +2256,16 @@ flowTools:
 
   shopping_build_product_options:
     description: Group live discovery evidence into versioned manufacturer-model choices.
-    execute: { kind: remote, tool: AX_build_product_options, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_build_product_options", args)
+        end
     input:
       results: tool.args.discovery_results
       query: tool.args.discovery_query
@@ -2292,7 +2319,16 @@ flowTools:
 
   shopping_resolve_product_option:
     description: Resolve one current discovery option and create a locked identity only from its grounded evidence.
-    execute: { kind: remote, tool: AX_resolve_product_option, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_resolve_product_option", args)
+        end
     input:
       options: tool.args.product_options
       options_version: tool.args.options_version
@@ -2611,7 +2647,16 @@ flowTools:
 
   shopping_build_offer_screening:
     description: Number every live listing across the searched stores into one bounded, id-backed list for a relevance judgement.
-    execute: { kind: remote, tool: AX_build_offer_screening, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_build_offer_screening", args)
+        end
     input:
       store_results: tool.args.store_results
       identity_brand: tool.args.identity_brand
@@ -2652,7 +2697,16 @@ flowTools:
 
   shopping_apply_offer_screening:
     description: Keep only the judged-relevant listings, apply the per-store comparison cap, and report how many rows were removed.
-    execute: { kind: remote, tool: AX_apply_offer_screening, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_apply_offer_screening", args)
+        end
     input:
       store_results: tool.args.store_results
       screening_ids: tool.args.screening_ids
@@ -2673,7 +2727,16 @@ flowTools:
 
   shopping_verify_product_offers:
     description: Classify live offers against the locked model and hard variants before ranking.
-    execute: { kind: remote, tool: AX_verify_product_offers, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_verify_product_offers", args)
+        end
     input:
       results: tool.args.store_results
       identity_id: tool.args.identity_id
@@ -2828,7 +2891,16 @@ flowTools:
 
   shopping_resolve_store_offer:
     description: Validate a ranked offer and current comparison snapshot, then emit scoped mutation approvals.
-    execute: { kind: remote, tool: AX_resolve_store_offer, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_resolve_store_offer", args)
+        end
     input:
       offers: tool.args.offers
       choice_index: tool.args.choice_index
@@ -4088,7 +4160,16 @@ flowTools:
 
   browse_service_candidates:
     description: Rank, filter, window, and select searched Thumbtack pros deterministically from the site data.
-    execute: { kind: remote, tool: AX_browse_service_candidates, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.run("AX_browse_service_candidates", args)
+        end
     input:
       request_text: tool.args.requestText
       candidates: tool.args.candidates

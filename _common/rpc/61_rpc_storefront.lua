@@ -288,6 +288,15 @@ local function json_field(chunk, keys)
   return nil
 end
 
+--- The nested object or array a payload keeps its delivery information in, cut from ONE record's chunk.
+--- `%b` matches balanced delimiters, so a block containing further objects comes back whole.
+local function shipping_block(config, chunk)
+  local key = config.embedded_shipping_block or "shippingCostInfo"
+  return chunk:match('"' .. key .. '"%s*:%s*(%b[])')
+    or chunk:match('"' .. key .. '"%s*:%s*(%b{})')
+    or ""
+end
+
 --- Rows from a hydration payload. Some storefronts render the grid from one and leave the DOM with
 --- build-generated class names only; the payload carries one clean record per product.
 ---
@@ -310,16 +319,23 @@ local function read_embedded(config)
   local cursor, seen = 1, {}
 
   while #candidates < limit do
-    local item_start, item_end = payload:find(pattern, cursor)
+    -- The item-key match CAPTURES the id. Discarding it left the row hunting for an id in `itemUrl`,
+    -- which ssg does not put one in: a payload naming every product produced an empty store.
+    local item_start, item_end, item_id = payload:find(pattern, cursor)
     if not item_start then break end
     local next_start = payload:find('"' .. item_key .. '"%s*:%s*"', item_end + 1) or (#payload + 1)
     local chunk = payload:sub(item_start, next_start - 1)
     local candidate = candidate_from(config, {
+      root_id = item_id,
       url = json_field(chunk, fields.url),
       title = json_field(chunk, fields.title),
       image_alt = json_field(chunk, fields.image_alt),
       price_text = json_field(chunk, fields.price_text),
-      shipping_text = json_field(chunk, fields.shipping_text),
+      -- A payload states shipping either as a scalar on the record ("dlvryFee":"0") or as a nested
+      -- block ("shippingCostInfo":[{"text":"무료배송"}]). A configured field name always wins; the
+      -- block is cut from THIS record's chunk, so a record without one cannot borrow its neighbour's.
+      shipping_text = json_field(chunk, fields.shipping_text)
+        or json_field(shipping_block(config, chunk), config.embedded_shipping_fields or { "text" }),
       rating_text = json_field(chunk, fields.rating_text),
     })
     if candidate and not seen[candidate.product_id] then

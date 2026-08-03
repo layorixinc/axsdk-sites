@@ -687,3 +687,74 @@ test('an explicit query still wins over the shared one', () => {
   assert.ok(/%EC%9D%B4%20%EC%8A%A4|%EC%9D%B4\+%EC%8A%A4/.test(nav.params.url) || decodeURIComponent(nav.params.url).includes('이 스토어 표현'),
     `the store's own wording must be used: ${nav.params.url}`);
 });
+
+// A payload states shipping either as a scalar on the record ("dlvryFee":"0") or as a nested block
+// ("shippingCostInfo":[{"text":"무료배송"}]). ssg uses the block, and not mining it made every ssg row
+// fold as an unconfirmed total in production where the durable reader had priced it.
+
+const SHIPPED = {
+  ...EMBEDDED,
+  embedded_fields: { url: ['itemUrl'], title: ['itemName'], price_text: ['finalPrice'] },
+};
+
+test('shipping stated in a nested block is read', () => {
+  const json = '{"items":[{"itemId":"111","itemName":"마우스","finalPrice":"10000","itemUrl":"/p/111",' +
+    '"shippingCostInfo":[{"text":"배송비 2,500원"}]}]}';
+  assert.equal(search(payloadPage(json), {}, SHIPPED).value.candidates[0].shipping_cost, 2500);
+});
+
+test('free shipping in the block is zero', () => {
+  const json = '{"items":[{"itemId":"111","itemName":"마우스","finalPrice":"10000","itemUrl":"/p/111",' +
+    '"shippingCostInfo":[{"text":"무료배송"}]}]}';
+  assert.equal(search(payloadPage(json), {}, SHIPPED).value.candidates[0].shipping_cost, 0);
+});
+
+test('a configured shipping field wins over the block', () => {
+  const withField = { ...SHIPPED, embedded_fields: { ...SHIPPED.embedded_fields, shipping_text: ['dlvryFee'] } };
+  const json = '{"items":[{"itemId":"111","itemName":"마우스","finalPrice":"10000","itemUrl":"/p/111",' +
+    '"dlvryFee":"배송비 3,000원","shippingCostInfo":[{"text":"무료배송"}]}]}';
+  assert.equal(search(payloadPage(json), {}, withField).value.candidates[0].shipping_cost, 3000);
+});
+
+test('a neighbour block is not borrowed', () => {
+  // The same chunk boundary that protects the price protects the fee: a record with no shipping block
+  // must not inherit the next record's.
+  const json = '{"items":[' +
+    '{"itemId":"111","itemName":"배송 미표기","finalPrice":"10000","itemUrl":"/p/111"},' +
+    '{"itemId":"222","itemName":"이웃","finalPrice":"20000","itemUrl":"/p/222","shippingCostInfo":[{"text":"배송비 2,500원"}]}]}';
+  const rows = search(payloadPage(json), {}, SHIPPED).value.candidates;
+  assert.equal(rows.find((c) => c.product_id === '111').shipping_cost, undefined);
+  assert.equal(rows.find((c) => c.product_id === '222').shipping_cost, 2500);
+});
+
+test('the payload item key IS the id', () => {
+  // Reproduced against ssg's real 221 KB payload: zero candidates. The item key match captures the id and
+  // this reader threw the capture away, leaving the row to find an id in `itemUrl` — which for ssg does
+  // not carry one. A payload that names every product still produced an empty store.
+  const json = '{"dataList":[{"itemId":"1000070929636","itemName":"로지텍 M185",' +
+    '"itemUrl":"https://www.ssg.com/item/itemView.ssg?itemId=1000070929636&siteNo=6004",' +
+    '"rawPrimaryPrice":"16900","shippingCostInfo":[{"type":"배송비","text":"무료배송"}]}]}';
+  const ssgish = {
+    ...CONFIG,
+    prefer_embedded: true,
+    embedded_json_selector: PAYLOAD_SELECTOR,
+    embedded_item_key: 'itemId',
+    embedded_fields: { url: ['itemUrl'], title: ['itemName'], price_text: ['rawPrimaryPrice'] },
+    product_id_patterns: ['/itemView%.ssg%?itemId=(%d+)'],
+  };
+  const candidate = search(payloadPage(json), {}, ssgish).value.candidates[0];
+
+  assert.equal(candidate.product_id, '1000070929636');
+  assert.equal(candidate.price, 16900);
+  assert.equal(candidate.shipping_cost, 0);
+});
+
+test('a payload id survives even when no url pattern matches', () => {
+  const json = '{"dataList":[{"itemId":"777","itemName":"마우스","itemUrl":"https://www.ssg.com/opaque","rawPrimaryPrice":"1000"}]}';
+  const noUrlId = {
+    ...CONFIG, prefer_embedded: true, embedded_json_selector: PAYLOAD_SELECTOR, embedded_item_key: 'itemId',
+    embedded_fields: { url: ['itemUrl'], title: ['itemName'], price_text: ['rawPrimaryPrice'] },
+    product_id_patterns: ['/never/(%d+)'],
+  };
+  assert.equal(search(payloadPage(json), {}, noUrlId).value.candidates[0]?.product_id, '777');
+});

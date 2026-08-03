@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
+
+import { buildRpcFlows } from './build-rpc-flows.mjs';
+import { auditRpcAllow } from './rpc-allow.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -462,4 +466,15 @@ test('browsing a live comparison resumes it instead of starting a new search', (
   assert.match(prompt, /다음|이전/, 'the planner must recognise paging phrasing');
   assert.ok(common.planner.inputSelector.includes('active.activeNode'));
   assert.ok(common.planner.inputSelector.includes('active.intent'));
+});
+
+test('every RPC tool is granted exactly the ops its code calls', () => {
+  // The runtime refuses a disallowed op mid-run, on a live page, one op at a time — the most expensive
+  // place to discover a typo. Both mistakes the platform guide warns about are mechanical: a wait helper
+  // is not a wire op (`dom.wait_for_selector` polls `dom.exists`), and a grant nobody calls is a
+  // capability nobody asked for — on a storefront, the difference between reading and buying.
+  const built = buildRpcFlows({ root: fileURLToPath(new URL('playground/', root)), delivery: 'registry' });
+  const issues = auditRpcAllow(parseFlow('playground/_common/flows.yaml'), { moduleSources: built.__report.moduleSources });
+
+  assert.deepEqual(issues, [], issues.map((issue) => `${issue.tool}: ${issue.code} ${issue.op}`).join('\n'));
 });

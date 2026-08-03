@@ -119,7 +119,13 @@ Design rules:
 | `44_pagination.lua` | `AX_PAGINATION` (no command) | pure result-page planning: `plan_page` (query/offset/click config → params or an explicit refusal), `merge_pages` (dedupe + `source_page`), `should_continue` (target / no-more / page-cap / budget / repeat). Default cap **2 pages** |
 | `45_offer_view.lua` | `AX_OFFER_VIEW` (no command) | pure view layer: refine-sentence parser (offers + service pros), filter/sort, page bounds, windowed rendering with a character budget, snapshot signature |
 | `46_candidate_browser.lua` | `AX_browse_service_candidates` | deterministic ranking/window/selection over searched service pros (Thumbtack) — the model relays words and numbers, never the list |
-| `50_commerce.lua` | `AX_COMMERCE`, identity/discovery commands, `AX_search_store_product`, `AX_collect_store_page`, `AX_verify_product_offers`, `AX_rank_store_offers`, `AX_present_store_offers`, `AX_refine_store_offers`, `AX_resolve_store_offer`, `AX_add_store_product_to_cart` | cross-site product identity, FX-backed total-cost normalization, deterministic equivalence/ranking, versioned comparison, per-store page collection, windowed browsing (page/filter/sort), guarded cart approval |
+| `50_commerce_core.lua` | `AX_COMMERCE` (no command) | adapter registry, `ensure_adapter`, FX fetch/convert, and the helpers the other six take in their headers. The **commerce layer** below is seven files building one `AX_COMMERCE` in filename order — each exports what the later ones alias, so a file loaded out of order raises instead of silently missing a function |
+| `51_relevance.lua` | — | query variants, relevance anchors (model code + brand), `normalize_candidates` |
+| `52_identity.lua` | `AX_prepare_product_identity`, `AX_lock_product_identity`, `AX_build_product_options`, `AX_resolve_product_option` | cross-site product identity and versioned option snapshots |
+| `53_verify.lua` | `AX_verify_product_offers` | re-reads identity and price on the product page before anything is clicked |
+| `54_comparison.lua` | `AX_build_offer_screening`, `AX_apply_offer_screening` | comparison window (page/budget/persistence), store-outcome lines, LLM relevance screening |
+| `55_offers.lua` | `AX_rank_store_offers`, `AX_present_store_offers`, `AX_refine_store_offers`, `AX_resolve_store_offer` | deterministic ranking and the numbered surface the user chooses from |
+| `56_store_io.lua` | `AX_search_store_product`, `AX_collect_store_page`, `AX_normalize_store_product_result`, `AX_add_store_product_to_cart` | per-store page collection and the guarded cart add |
 | `60_storefront.lua` | `AX_STOREFRONT` (no command) | selector-configured product/search/cart adapter core shared by representative commerce sites; preserves optional brand/model metadata and normalizes price, shipping, ratings, access challenges, identity revalidation, stale-price guards, and `page`/`has_more` result paging |
 
 The extension also ships **default form tools** present on every site: `AX_get_form`, `AX_set_form`,
@@ -308,10 +314,11 @@ Other tools:
   harness `tools/lua/harness.mjs` loads real repository Lua files into an in-process Lua state (each file
   wrapped like `tools/merge-lua.mjs` does, so file scope matches the runtime) and marshals arguments and
   results explicitly. Only site-agnostic, capability-free modules belong here (`44_pagination`,
-  `45_offer_view`, `46_candidate_browser`, and the pure commands in `50_commerce`); anything touching
-  `dom`/`nav`/`net` needs the live harness. **A fixture that stands in for a capability MUST enforce the
-  runtime's constraints** — `tools/lua/fixtures/session_state_stub.lua` rejects non-string values because
-  the real `session_state` does; a permissive stub hid exactly that bug until a live run failed.
+  `45_offer_view`, `46_candidate_browser`, and the pure commands in the commerce layer `50`–`56`);
+  anything touching `dom`/`nav`/`net` needs the live harness. **A fixture that stands in for a capability
+  MUST enforce the runtime's constraints** — `tools/lua/fixtures/session_state_stub.lua` rejects
+  non-string values because the real `session_state` does; a permissive stub hid exactly that bug until
+  a live run failed.
   When a test asserts on a Lua→JS conversion, mirror the SDK's real converter (sequence detection + the
   array-type marker); `lualib.luaL_openlibs(L)` is needed for `tostring`/string lib. A custom reader
   that ignores the marker gives false confidence.

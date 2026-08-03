@@ -68,7 +68,7 @@ flow state · `action_unit`(LLM 노드) · `flow.map` · 순수 `implementation:
 | `44_pagination.lua` | 116 | 0 | **순수** | 무변경 이식 |
 | `45_offer_view.lua` | 671 | 0 | **순수** | 무변경 이식 |
 | `46_candidate_browser.lua` | 159 | 0 | **순수** | 무변경 이식 |
-| `50_commerce.lua` | 1,937 | 5 (**net/session_state**) | 혼합 | 대부분 순수. FX(net) → §5, `session_state` → flow state |
+| 커머스 레이어 `50`–`56` | 1,937 | 5 (**net/session_state**) | 혼합 | 대부분 순수. FX(net) → §5, `session_state` → flow state. 2026-07-27 7개 파일로 분할 완료(§3.1) |
 | `60_storefront.lua` | 823 | 25 | **RPC** | 핵심 이행 대상 |
 
 **약 4,000줄(81%)이 이미 순수**다. 이 부분은 브라우저에서 런타임으로 자리만 옮기며 로직 변경이 없고,
@@ -89,7 +89,7 @@ flow state · `action_unit`(LLM 노드) · `flow.map` · 순수 `implementation:
 
 | 버킷 | 대상 | 이행 방식 |
 |---|---|---|
-| **A. 순수 계산** | 44/45/46, 10_form_wizard, 50_commerce 대부분 | `implementation: lua` (rpc 블록 **없음**) |
+| **A. 순수 계산** | 44/45/46, 10_form_wizard, 커머스 레이어(50–56) 대부분 | `implementation: lua` (rpc 블록 **없음**) |
 | **B. 페이지 조작** | 60_storefront, amazon, ebay, thumbtack, 00_navigate, 40_read_page | `implementation: lua` + `rpc.allow` |
 | **C. 네트워크** | `resolve_zip`(geocoding), `fetch_fx_rates`(환율) | **§5 — 결정 필요** |
 | **D. durable 전용** | playground `05_durable` `10_durable_operations`, `AX_open_site` | **삭제** |
@@ -140,24 +140,38 @@ flowTools:
 ```
 
 **`_ENV`는 공유로 확정**(2차 회신 R10). 모듈과 툴 스크립트가 하나의 환경을 쓰고, 모듈은 `execute.modules`
-선언 순서로 **state당 1회** 평가된다. 따라서 기존 전역 노출(`AX_BASE = {...}`)과 교차 참조 78건이
-**그대로 동작한다** — `return M` 추가도 불필요하다. 초안에 있던 선행 작업 2건은 소멸했다.
+선언 순서로 **state당 1회** 평가된다. 따라서 기존 전역 노출(`AX_BASE = {...}`)과 교차 참조
+**116건**(40개 파일, 8차 재측정치)이 **그대로 동작한다** — `return M` 추가도 불필요하다. 초안에 있던
+선행 작업 2건은 소멸했다. 8차에서 라이브로 재확인했다: REST 레지스트리 invoke는 모듈마다 격리지만
+`execute.modules`는 툴 하나의 `_ENV`를 공유한다. 우리가 쓰는 것은 후자다.
 
 주의: 모듈 최상위 부수효과는 **세션당 1회**다. 최상위에서 RPC를 부르거나 호출별 캐시를 초기화하지 않는다.
 
-**대신 생긴 작업 — 모듈 분할.** 모듈 상한이 파일당 64 KiB이고 `50_commerce.lua`(75.5 KiB)만 넘는다
-(thumbtack·amazon은 8개 파일로 나뉘어 최대 47.0 / 38.8 KiB). 6개로 자른다 — `_ENV` 공유라 비용이 거의 없다.
+**대신 생긴 작업 — 모듈 분할. 완료했다(2026-07-27).** 모듈 상한이 파일당 64 KiB이고
+`50_commerce.lua`(75.5 KiB)만 넘었다(thumbtack·amazon은 8개 파일로 나뉘어 최대 47.0 / 38.8 KiB).
+**7개로 잘랐다** — 6개 계획이었으나 경계를 책임 단위에 맞추니 하나가 더 나왔고, 대신 최대 파일이
+17.3 KiB로 규율(48 KiB)의 3분의 1에 들어왔다.
 
-이행 후 총 **모듈 32개 / 366.7 KiB**(공유 13 + amazon 8 + thumbtack 8 + ebay 3, CONFIG 9개는 1개로 묶음).
+파일 스코프 로컬 46개 중 **19개가 경계를 넘었다.** 이것이 분할의 유일한 실질 위험이었다 — 자르기 전에
+세어서, 넘는 것만 `C.*`로 내보내고 소비 측 헤더에서 다시 로컬로 받는다. 호출부는 한 줄도 바뀌지 않는다.
+`clean`/`non_empty`는 `B.clean_text`/`B.non_empty`를 한 줄 감싸기만 하던 것이라 래퍼를 지우고 헤더에서
+직접 별칭했다. 의존은 전부 파일 순서를 따르는 단방향이라 순환이 없다.
 
-| 모듈 | 내용 | 크기 |
-|---|---|---:|
-| `50_commerce_core` | 헤더·유틸·FX·관련도 | 22.2 KiB |
-| `51_identity` | prepare/lock/options/resolve | 11.3 KiB |
-| `52_verify` | verify_product_offers | 17.8 KiB |
-| `53_screening` | build/apply_offer_screening | 3.5 KiB |
-| `54_comparison` | rank/present/refine/resolve | 14.1 KiB |
-| `55_store_io` | normalize/collect/search/cart | 6.6 KiB |
+이행 후 총 **모듈 33개 / 366.7 KiB**(공유 14 + amazon 8 + thumbtack 8 + ebay 3, CONFIG 9개는 1개로 묶음).
+
+| 모듈 | 내용 | 크기 | 내보내는 것 |
+|---|---|---:|---|
+| `50_commerce_core` | 어댑터 등록·FX·공용 헬퍼 | 6.5 KiB | `lower` `copy_table` `array` `free_shipping` `collect_currencies` `convert_to_base` |
+| `51_relevance` | 검색어 변형·관련성 앵커·정규화 | 13.1 KiB | `split_list` `matches_query` |
+| `52_identity` | prepare/lock/options/resolve | 14.8 KiB | `worker_value` `identity_text` `stable_hash` `infer_model` `candidate_model` |
+| `53_verify` | verify_product_offers | 4.5 KiB | — |
+| `54_comparison` | 비교 창·스토어 결과 문구·스크리닝 | 17.3 KiB | `compare_offers` `uniform_currency` `persist_comparison` |
+| `55_offers` | rank/present/refine/resolve | 12.0 KiB | — |
+| `56_store_io` | collect/search/cart | 9.1 KiB | — |
+
+**검증**: `test:lua` 197 · `test:commerce` 24/24 + 17/17 · `build:lua:check` 통과 ·
+**라이브 10개 스토어 읽기 전용 스윕 35/35** (86s, walmart 6건 회복). 테스트가 파일명을 나열하던 9곳은
+`COMMERCE_LAYER` 상수와 디렉터리 적재로 바꿨다 — 다음 분할이 테스트를 건드리지 않는다.
 
 **모듈당 48 KiB를 규율로 삼는다.** 그보다 크면 상한 이전에 리뷰가 안 된다.
 
@@ -238,7 +252,7 @@ RPC :  search(스크립트가 이동·대기·페이지·다른 표기까지 소
 | **D9** | 되돌릴 수 없는 조작은 노드를 나눈다 | 사용자 동의가 스크립트 안으로 들어가면 안 된다. 현행 3토큰 게이트 유지 |
 | **D10** | op 어휘는 문서가 아니라 `GET /axsdk/v2/lua/ops`의 `version` 해시로 CI 고정 | 순서 변경에 깨지지 않는다 (R5 확정) |
 | **D11** | 스크립트는 **탭 1개를 몬다**. 대상은 URL이 아니라 **세션 루트 탭**에 고정 | 정적 `urlPattern`이면 첫 op에서 전원 거부 → `no_client`. "첫 응답 탭"은 사용자의 무관한 탭을 이동시킨다 (R8-R/R13) |
-| **D14** | 모듈은 파일당 48 KiB 이하 | 상한 64 KiB보다 리뷰 한계가 먼저 온다. `50_commerce` 6분할 |
+| **D14** | 모듈은 파일당 48 KiB 이하 | 상한 64 KiB보다 리뷰 한계가 먼저 온다. 커머스 7분할 **완료**, 최대 17.3 KiB |
 | **D15** | 프로덕션 = 앱 패키지 push, 개발 = `clientFlows` 오버레이 | 매 턴 교체는 턴마다 전체 검증·재직렬화를 돌린다 |
 | **D12** | 비교 스냅샷은 flow state가 아니라 **`contexts`** | `state: session`은 `(세션, 툴)` 키라 툴 간 공유가 안 된다 (Q4 확정) |
 | **D13** | `net.fetch`는 예외가 아니라 **값**을 반환 — 분기 대상 | HTTP 실패는 정상 운영 중 일어난다. RPC 실패(브라우저 소실)와 다르다 (R1 확정) |
@@ -264,7 +278,7 @@ RPC :  search(스크립트가 이동·대기·페이지·다른 표기까지 소
 | **R8-R** | 스티키 탭 바인딩 | 수용됨. **클라이언트 의무는 `axsdk-sdk-js`** — `bindingId`가 이미 존재하므로 "노출"만 하면 된다 |
 | **R9** | 문서 전달 경로 | **해결 — A안(앱 패키지)**. 190.5 KiB는 지금도 통과하나 여유가 없어 본체는 앱으로 |
 | **R10** | 모듈 `_ENV` | **해결 — 공유 확정.** 우리 선행 작업 소멸 |
-| **R11** | 모듈 상한 64 KiB | **우리 때문에는 불필요.** 초과 파일은 `50_commerce` 하나뿐이고 6분할로 해소 |
+| **R11** | 모듈 상한 64 KiB | **우리 때문에는 불필요.** 초과 파일은 커머스 레이어 하나뿐이었고 7분할로 해소(완료) |
 | **R12** | push 엔드포인트 | **수용, 신설 예정.** HTTP 경로가 존재하지 않았다(기존 CLI는 DB 직접 쓰기) |
 | **R13** | `bind: session_root` 기본값 | **수용.** 서버 구현이 프레임 필드 하나로 줄었고 SDK 의무도 축소됐다 |
 | **R14** | 모듈 합계 상한 | **해결** — 앱 2 MiB / 세션 512 KiB로 분리 |
@@ -362,13 +376,14 @@ dom.get_location_href → received, 응답 없음 (문서가 unload 중)
 상향"이라고 안내하는데, **이동하는 스크립트에서는 반대로 낮추는 것이 맞다.**
 
 **규율**: 이동하는 스크립트는 `opTimeoutMs ≤ 2000`. 대기의 상한은 헬퍼의 `timeout`이 잡는다.
-### Phase 2 — 순수 모듈 이식 + `50_commerce` 6분할 (1~2일) — R2 1단계 필요
-`44_pagination` · `45_offer_view` · `46_candidate_browser` · `10_form_wizard` · `50_commerce`의 순수 부분을
-`implementation: lua`(rpc 없음) 툴로 옮긴다. **로직 변경 0.** `array()`는 런타임 것으로 교체(D6).
+### Phase 2 — 순수 모듈 이식 (1~2일) — R2 1단계 **해결됨**(8차 검증)
+`44_pagination` · `45_offer_view` · `46_candidate_browser` · `10_form_wizard` · 커머스 레이어(50–56)의
+순수 부분을 `implementation: lua`(rpc 없음) 툴로 옮긴다. **로직 변경 0.** `array()`는 런타임 것으로 교체(D6).
+분할은 선행 작업으로 이미 끝났다.
 
-**게이트**: `npm run test:lua` 183개 그대로 통과(파일 위치만 바뀜), `check:flows` 통과.
+**게이트**: `npm run test:lua` 197개 그대로 통과(파일 위치만 바뀜), `check:flows` 통과.
 
-### Phase 3 — 스토어프론트 어댑터 (2~3일) — **R2 · R12 차단**
+### Phase 3 — 스토어프론트 어댑터 (2~3일) — 시험용 `appId` 대기
 `60_storefront.lua`(823) + 8개 CONFIG → RPC 툴 1개. 리더 로직은 §4 호환성에 따라 무변경 이식하고,
 바꾸는 것은 **탐색과 대기**뿐이다.
 

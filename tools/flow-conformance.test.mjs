@@ -218,7 +218,7 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.done, 'complete');
   assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.done, 'normalize');
   assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.unsupported_site, 'search_bespoke');
-  assert.equal(common.flowTools.shopping_collect_store_page.execute.tool, 'AX_collect_store_page');
+  assert.equal(common.flowTools.shopping_collect_store_page.execute.implementation, 'lua');
   // A store searched in the wrong language answers nothing. Before the worker gives up on it, the
   // collector hands back another wording and the search runs again from page one. Only a store that
   // found NOTHING pays for this, and the attempted wordings are remembered.
@@ -263,7 +263,10 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.deepEqual(common.flowTools.shopping_search_one_store.execute.modules,
     ['_common.61_rpc_storefront', '_common.62_rpc_sites']);
   assert.equal(common.flowTools.shopping_search_one_store_durable.execute.tool, 'AX_search_product');
-  assert.equal(common.flowTools.shopping_normalize_store_result.execute.tool, 'AX_normalize_store_product_result');
+  // Pure commands crossed into the runtime: they name modules and grant no ops, because they never
+  // touch the browser.
+  assert.equal(common.flowTools.shopping_normalize_store_result.execute.implementation, 'lua');
+  assert.ok(!common.flowTools.shopping_normalize_store_result.execute.rpc, 'a pure command needs no ops');
   assert.ok(common.flowTools.shopping_discover_products.execute.task.budget.maxRemoteCalls >= 5);
   assert.ok(common.flowTools.shopping_search_stores.execute.task.budget.maxRemoteCalls >= 5);
 

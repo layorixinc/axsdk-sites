@@ -2513,7 +2513,16 @@ flowTools:
 
   shopping_collect_store_page:
     description: Merge one read result page into this store's accumulated candidates and decide whether another page is worth a navigation.
-    execute: { kind: remote, tool: AX_collect_store_page, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: these commands never touch the browser, so they are granted no ops at all.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.collect_store_page(args)
+        end
     input:
       result: tool.args.store_result
       collected: tool.args.collected
@@ -2555,7 +2564,16 @@ flowTools:
 
   shopping_normalize_store_result:
     description: Apply common relevance, provenance, FX, and landed-cost normalization to one ready site adapter result.
-    execute: { kind: remote, tool: AX_normalize_store_product_result, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc block: these commands never touch the browser, so they are granted no ops at all.
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.normalize_store_result(args)
+        end
     input:
       site: tool.args.item.site
       query: tool.args.context.query

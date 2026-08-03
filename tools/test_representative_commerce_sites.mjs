@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dir, '..');
@@ -11,15 +11,12 @@ if (!existsSync(runtimePath)) {
 }
 
 const { AXLuaRuntime } = await import(`file://${runtimePath}`);
-const commonFiles = [
-  // Filename order, exactly as the extension injects `_common/scripts/*`. Loading only the endpoints left
-  // 60_storefront without 44_pagination, and every adapter test died on that guard instead of running.
-  '_common/scripts/00_base.lua',
-  '_common/scripts/44_pagination.lua',
-  '_common/scripts/45_offer_view.lua',
-  '_common/scripts/50_commerce.lua',
-  '_common/scripts/60_storefront.lua',
-];
+// Filename order over the whole directory, exactly as the extension injects `_common/scripts/*`.
+// Loading only the endpoints left 60_storefront without 44_pagination, and every adapter test died on
+// that guard instead of running; naming files individually broke again when commerce was split.
+const commonDir = join(repoRoot, '_common', 'scripts');
+const commonFiles = readdirSync(commonDir).filter((file) => file.endsWith('.lua')).sort()
+  .map((file) => `_common/scripts/${file}`);
 const siteCases = [
   { site: 'walmart', home: 'https://www.walmart.com/', url: 'https://www.walmart.com/ip/Logitech-M185/16207314', id: '16207314', price: '$12.99', shipping: 'Free shipping', total: 12.99, currency: 'USD' },
   { site: 'aliexpress', home: 'https://www.aliexpress.com/', url: 'https://www.aliexpress.com/item/1005012516905651.html', id: '1005012516905651', title: '로지텍 M185 무선 마우스', price: '₩8,730', shipping: '무료 배송', total: 8.73, currency: 'KRW' },

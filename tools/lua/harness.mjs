@@ -7,6 +7,22 @@ import { lauxlib, lua, lualib, to_jsstring, to_luastring } from 'fengari';
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /**
+ * The commerce layer is seven files that only work together: one `AX_COMMERCE` assembled in filename
+ * order, with each file taking what the earlier ones exported. A suite names the LAYER rather than the
+ * split so that re-cutting the files — which the module size limit will keep forcing — never edits a
+ * test that does not care where the cut fell.
+ */
+export const COMMERCE_LAYER = [
+  '_common/scripts/50_commerce_core.lua',
+  '_common/scripts/51_relevance.lua',
+  '_common/scripts/52_identity.lua',
+  '_common/scripts/53_verify.lua',
+  '_common/scripts/54_comparison.lua',
+  '_common/scripts/55_offers.lua',
+  '_common/scripts/56_store_io.lua',
+];
+
+/**
  * Runs repository Lua in-process so deterministic logic can be unit tested without a browser. Values
  * cross the boundary through an explicit marshaller because Lua tables are ambiguous (a table is both
  * array and map) and silent coercion would hide contract bugs.

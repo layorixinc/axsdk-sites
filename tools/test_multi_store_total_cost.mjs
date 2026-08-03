@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 const repoRoot = resolve(import.meta.dir, '..');
@@ -11,8 +11,12 @@ if (!existsSync(runtimePath)) {
 }
 
 const { AXLuaRuntime } = await import(`file://${runtimePath}`);
-const commonScripts = ['00_base.lua', '44_pagination.lua', '45_offer_view.lua', '50_commerce.lua']
-  .map((file) => [`_common/scripts/${file}`, readFileSync(join(repoRoot, '_common', 'scripts', file), 'utf8')]);
+// Filename order over the whole directory, exactly as the extension injects `_common/scripts/*`. Naming
+// individual files went stale the moment the commerce layer was split, and the failure reads as a Lua
+// error deep inside a test rather than a missing file.
+const commonDir = join(repoRoot, '_common', 'scripts');
+const commonScripts = readdirSync(commonDir).filter((file) => file.endsWith('.lua')).sort()
+  .map((file) => [`_common/scripts/${file}`, readFileSync(join(commonDir, file), 'utf8')]);
 const ebayDir = join(repoRoot, 'ebay', 'scripts');
 const amazonDir = join(repoRoot, 'amazon', 'scripts');
 

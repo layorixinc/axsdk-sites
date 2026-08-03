@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
 
-import { loadLuaModules } from './harness.mjs';
+import { COMMERCE_LAYER, loadLuaModules } from './harness.mjs';
 
 const lua = loadLuaModules([
   '_common/scripts/00_base.lua',
   '_common/scripts/44_pagination.lua',
   '_common/scripts/45_offer_view.lua',
-  '_common/scripts/50_commerce.lua',
+  ...COMMERCE_LAYER,
 ]);
 after(() => lua.close());
 

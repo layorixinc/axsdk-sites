@@ -1848,13 +1848,17 @@ flows:
           - page
           - query
         next:
-          navigating: search_after_navigation
           done: normalize
+          unsupported_site: search_bespoke
         fallback: { invalidNext: done, exhaustedNext: done }
-      search_after_navigation:
+
+      # TEMPORARY. amazon and ebay still read through their durable browser layers; every other store
+      # reads in the runtime. This node and its `navigating` hop exist only until those two are ported,
+      # and `check:flows` will refuse the document once no site needs them.
+      search_bespoke:
         kind: action_contract
-        id: shopping_search_one_store
-        description: Re-invoke the page-detecting search once after its first call fired a document navigation.
+        id: shopping_search_one_store_durable
+        description: Search a store whose layer has not been ported to the runtime yet.
         inputSelector:
           - item
           - index
@@ -1863,13 +1867,13 @@ flows:
           - page
           - query
         next:
-          navigating: search_after_navigation_retry
+          navigating: search_bespoke_after_navigation
           done: normalize
         fallback: { invalidNext: done, exhaustedNext: done }
-      search_after_navigation_retry:
+      search_bespoke_after_navigation:
         kind: action_contract
-        id: shopping_search_one_store
-        description: Make one final page-detecting read after a canonicalizing search redirect.
+        id: shopping_search_one_store_durable
+        description: Re-invoke the durable read once its first call fired a document navigation.
         inputSelector:
           - item
           - index
@@ -1915,7 +1919,7 @@ flows:
       search_next_page:
         kind: action_contract
         id: shopping_search_one_store
-        description: Fire the navigation to the next result page of the same store search.
+        description: Read the next result page of the same store search.
         inputSelector:
           - item
           - index
@@ -1924,23 +1928,8 @@ flows:
           - page
           - query
         next:
-          navigating: search_next_page_after_navigation
           done: normalize
-        fallback: { invalidNext: done, exhaustedNext: done }
-      search_next_page_after_navigation:
-        kind: action_contract
-        id: shopping_search_one_store
-        description: Read the next result page once its navigation has landed.
-        inputSelector:
-          - item
-          - index
-          - key
-          - context
-          - page
-          - query
-        next:
-          navigating: normalize
-          done: normalize
+          unsupported_site: search_bespoke
         fallback: { invalidNext: done, exhaustedNext: done }
 
       search_other_wording:
@@ -1955,23 +1944,8 @@ flows:
           - page
           - query
         next:
-          navigating: search_other_wording_after_navigation
           done: normalize
-        fallback: { invalidNext: done, exhaustedNext: done }
-      search_other_wording_after_navigation:
-        kind: action_contract
-        id: shopping_search_one_store
-        description: Read the retried search once its navigation has landed.
-        inputSelector:
-          - item
-          - index
-          - key
-          - context
-          - page
-          - query
-        next:
-          navigating: normalize
-          done: normalize
+          unsupported_site: search_bespoke
         fallback: { invalidNext: done, exhaustedNext: done }
 
       complete:
@@ -2439,11 +2413,70 @@ flowTools:
         context: { type: object, additionalProperties: true }
 
   shopping_search_one_store:
-    description: Search one mapped store through its adapter command so runtime readiness can load the current site layer.
-    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
+    description: Search one mapped store with a runtime-side script that drives the page over RPC.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.61_rpc_storefront", "_common.62_rpc_sites"]
+      rpc:
+        # Read-only. No write op is reachable from this tool, and the audit in `check:flows` fails the
+        # build if the script ever calls one that is not listed here.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all, dom.get_text]
+        # A navigating script must keep this LOW. A document that accepts a poll and then unloads is
+        # indistinguishable from a slow one, so the runtime waits out the whole op timeout: measured
+        # 8000 → over 260s for one search, 2000 → 30s.
+        opTimeoutMs: 2000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_STOREFRONT.run_store_search(args)
+        end
     input:
       site: tool.args.item.site
       # The collector may hand back the wording this store's own listings use; until then the shared query stands.
+      query: { if: [{ var: tool.args.query }, { var: tool.args.query }, { var: tool.args.context.query }] }
+      quantity: tool.args.context.quantity
+      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
+      requested_brand: tool.args.context.requested_brand
+      identity_brand: tool.args.context.identity_brand
+      identity_model: tool.args.context.identity_model
+      product_category: tool.args.context.product_category
+      hard_constraints: tool.args.context.locked_hard_constraints
+      page: tool.args.page
+    output:
+      # No `navigating`: the script keeps its own stack across the reload, so there is nothing to resume.
+      next: result.next
+      store_result: result.store_result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [item, index, key, context]
+      properties:
+        item:
+          type: object
+          additionalProperties: false
+          required: [site]
+          properties:
+            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+        index: { type: number }
+        key: { type: string }
+        context:
+          type: object
+          additionalProperties: true
+          required: [query]
+          properties:
+            query: { type: string }
+            quantity: { type: [integer, number] }
+        page: { type: [integer, number] }
+
+  # TEMPORARY, paired with the `search_bespoke` nodes: amazon and ebay still read through their durable
+  # browser layers. Deleted when those two are ported.
+  shopping_search_one_store_durable:
+    description: Search a store whose browser layer has not been ported to the runtime yet.
+    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
+    input:
+      site: tool.args.item.site
       query: { if: [{ var: tool.args.query }, { var: tool.args.query }, { var: tool.args.context.query }] }
       quantity: tool.args.context.quantity
       purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }

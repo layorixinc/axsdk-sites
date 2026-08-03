@@ -156,7 +156,9 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(common.flowTools.shopping_rank_store_offers.input.screened_out, 'tool.args.screened_out');
   assert.equal(nodes.verify_offers.id, 'shopping_verify_product_offers');
   assert.equal(nodes.verify_offers.next.done, 'normalize_rank');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search.next.navigating, 'search_after_navigation');
+  // The search used to branch `navigating` into a re-invoke node. A runtime script keeps its stack
+  // across the reload, so the only remaining branches are the answer and the not-yet-ported site.
+  assert.equal(common.flows.shopping_search_one_store.nodes.search.next.unsupported_site, 'search_bespoke');
   assert.equal(common.flows.shopping_search_one_store.nodes.search.next.done, 'normalize');
   assert.equal(nodes.normalize_rank.next.done, 'choose_offer');
   assert.deepEqual(nodes.choose_offer.allowedTools, ['present_store_offers', 'choose_store_offer']);
@@ -198,13 +200,14 @@ test('multi-store shopping discovers and locks product identity before ranking',
   for (const key of ['view_page', 'view_pages', 'view_total']) {
     assert.ok(Object.hasOwn(flow.state, key), `flow state must include ${key}`);
   }
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_after_navigation.next.done, 'normalize');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_after_navigation.next.navigating, 'search_after_navigation_retry');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_after_navigation_retry.next.done, 'normalize');
+  // The three-node hop chain per search is gone; the durable pair that remains is the unported one.
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_bespoke.next.navigating, 'search_bespoke_after_navigation');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_bespoke_after_navigation.next.done, 'normalize');
   assert.equal(nodes.add_selected_offer.next.navigating, 'add_selected_offer_after_navigation');
   assert.equal(nodes.add_selected_offer_after_navigation.next.navigating, 'confirm_selected_offer_after_navigation');
   assert.equal(nodes.confirm_selected_offer_after_navigation.next.done, 'report_cart');
-  assert.deepEqual(common.flowTools.shopping_search_one_store.output.next.if.slice(-2), ['navigating', 'done']);
+  assert.equal(common.flowTools.shopping_search_one_store.output.next, 'result.next');
+  assert.deepEqual(common.flowTools.shopping_search_one_store_durable.output.next.if.slice(-2), ['navigating', 'done']);
   assert.equal(common.flows.shopping_search_one_store.nodes.normalize.id, 'shopping_normalize_store_result');
   // A store search reads up to its page budget: normalize hands each page to the collector, which either
   // asks for one more page or completes the worker. Collapsing this back to normalize -> complete would
@@ -213,15 +216,14 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.id, 'shopping_collect_store_page');
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.more, 'search_next_page');
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.done, 'complete');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.navigating, 'search_next_page_after_navigation');
   assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.done, 'normalize');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page_after_navigation.next.navigating, 'normalize');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.unsupported_site, 'search_bespoke');
   assert.equal(common.flowTools.shopping_collect_store_page.execute.tool, 'AX_collect_store_page');
   // A store searched in the wrong language answers nothing. Before the worker gives up on it, the
   // collector hands back another wording and the search runs again from page one. Only a store that
   // found NOTHING pays for this, and the attempted wordings are remembered.
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.retry_query, 'search_other_wording');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.navigating, 'search_other_wording_after_navigation');
+  assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.unsupported_site, 'search_bespoke');
   assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.done, 'normalize');
   assert.equal(common.flowTools.shopping_collect_store_page.output.query, 'result.query');
   assert.equal(common.flowTools.shopping_collect_store_page.output.tried_queries, 'result.tried_queries');
@@ -257,7 +259,10 @@ test('multi-store shopping discovers and locks product identity before ranking',
   for (const key of ['page', 'collected']) {
     assert.ok(Object.hasOwn(common.flows.shopping_search_one_store.state, key), `worker state must include ${key}`);
   }
-  assert.equal(common.flowTools.shopping_search_one_store.execute.tool, 'AX_search_product');
+  // The storefront search no longer names a browser command: it names the modules it runs in the runtime.
+  assert.deepEqual(common.flowTools.shopping_search_one_store.execute.modules,
+    ['_common.61_rpc_storefront', '_common.62_rpc_sites']);
+  assert.equal(common.flowTools.shopping_search_one_store_durable.execute.tool, 'AX_search_product');
   assert.equal(common.flowTools.shopping_normalize_store_result.execute.tool, 'AX_normalize_store_product_result');
   assert.ok(common.flowTools.shopping_discover_products.execute.task.budget.maxRemoteCalls >= 5);
   assert.ok(common.flowTools.shopping_search_stores.execute.task.budget.maxRemoteCalls >= 5);
@@ -489,4 +494,37 @@ test('every shipped flow document declares a contexts section', () => {
     assert.ok(document.contexts && typeof document.contexts === 'object',
       `${path} must declare a contexts section`);
   }
+});
+
+test('the storefront search runs in the runtime, not as a durable browser call', () => {
+  // The whole migration in one assertion: the tool that touches a storefront is a runtime script over
+  // RPC, and it names its modules instead of carrying their source.
+  const common = parseFlow('_common/flows.yaml');
+  const execute = common.flowTools?.shopping_search_one_store?.execute ?? {};
+
+  assert.equal(execute.implementation, 'lua');
+  assert.notEqual(execute.kind, 'remote');
+  assert.ok(Array.isArray(execute.modules) && execute.modules.includes('_common.61_rpc_storefront'),
+    'the reader travels as a module name, not as inlined source');
+  assert.ok(Array.isArray(execute.rpc?.allow) && execute.rpc.allow.length > 0, 'ops must be granted explicitly');
+});
+
+test('the search hops that only existed to survive a navigation are gone', () => {
+  // A durable call died on every page load, so each search needed a re-invoke node behind it: seven
+  // nodes for three searches. An RPC script keeps its stack across the reload, so the hops have nothing
+  // left to do — and a `navigating` branch has nothing left to mean.
+  const common = parseFlow('_common/flows.yaml');
+  const nodes = common.flows?.shopping_search_one_store?.nodes ?? {};
+  const searchNodes = Object.entries(nodes).filter(([, node]) => node?.id === 'shopping_search_one_store');
+
+  assert.ok(searchNodes.length > 0, 'the worker must still search');
+  for (const [name, node] of searchNodes) {
+    assert.ok(!node.next?.navigating, `${name} must not branch on navigating`);
+    assert.ok(node.next?.unsupported_site, `${name} must route a site this cutover does not cover`);
+  }
+  // One durable pair survives on purpose while amazon and ebay are unported; it is named for what it
+  // is, and nothing else may reintroduce a hop.
+  const hops = Object.keys(nodes).filter((name) => name.includes('after_navigation'));
+  assert.deepEqual(hops, ['search_bespoke_after_navigation'],
+    'a node exists only to be called again after a navigation');
 });

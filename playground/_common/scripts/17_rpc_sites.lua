@@ -41,6 +41,19 @@ RPC_SITES["11st"] = {
 }
 
 RPC_SITES["ssg"] = {
+  prefer_embedded = true,
+  embedded_json_selector = 'script#__NEXT_DATA__',
+  embedded_item_key = "itemId",
+  embedded_fields = {
+      url = { "itemUrl" },
+      title = { "itemName" },
+      image_alt = { "itemName" },
+      brand = { "brandName" },
+      image_url = { "itemImgUrl" },
+      price_text = { "rawPrimaryPrice", "primaryPrice" },
+      rating_text = { "reviewScore" },
+      reviews_text = { "reviewCount" }
+    },
   -- Opt-in paging, copied from the site adapter. A store without this block stays on page one:
   -- a guessed parameter either does nothing or silently re-serves page one.
   pagination = { mode = "query", param = "page", start = 1, step = 1, max_pages = 2 },
@@ -311,6 +324,20 @@ RPC_SITES["etsy"] = {
 }
 
 RPC_SITES["naver-shopping"] = {
+  prefer_embedded = true,
+  embedded_json_selector = 'script#__NEXT_DATA__',
+  embedded_item_key = "mallProductId",
+  embedded_fields = {
+      url = { "crUrl" },
+      title = { "productTitle", "productName" },
+      image_alt = { "productTitle", "productName" },
+      brand = { "maker" },
+      image_url = { "imageUrl" },
+      price_text = { "price", "lowPrice" },
+      shipping_text = { "dlvryFee" },
+      rating_text = { "scoreInfo" },
+      reviews_text = { "reviewCount" }
+    },
   site = "naver-shopping",
   origin = "https://search.shopping.naver.com",
   hosts = { "search.shopping.naver.com" },

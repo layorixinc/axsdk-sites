@@ -109,6 +109,93 @@ local function candidate_from(config, row)
   }
 end
 
+local DEFAULT_EMBEDDED_FIELDS = {
+  url = { "itemUrl", "itemDetailLink" },
+  title = { "itemName" },
+  image_alt = { "itemName" },
+  price_text = { "finalPrice" },
+  rating_text = { "reviewScore" },
+}
+
+local function json_text(value)
+  local text = non_empty(value)
+  if not text then return nil end
+  return (text:gsub("\\/", "/"):gsub('\\"', '"'):gsub("\\n", " "):gsub("\\r", " "):gsub("\\t", " "))
+end
+
+--- The raw value of a JSON string field, honouring escapes.
+---
+--- A lazy `"(.-)"` match stops at the first quote it sees, including an escaped one, so a title like
+--- `27\" 모니터` arrives as `27\` — a truncation that looks like a short product name rather than a
+--- parsing bug. Scanning for the first UNESCAPED quote costs a loop and gets the whole value.
+local function json_raw(chunk, name)
+  local _, open = chunk:find('"' .. name .. '"%s*:%s*"')
+  if not open then return nil end
+  local index = open + 1
+  while index <= #chunk do
+    local char = chunk:sub(index, index)
+    if char == "\\" then
+      index = index + 2
+    elseif char == '"' then
+      return chunk:sub(open + 1, index - 1)
+    else
+      index = index + 1
+    end
+  end
+  return nil
+end
+
+local function json_field(chunk, keys)
+  for index = 1, #(keys or {}) do
+    local value = json_text(json_raw(chunk, keys[index]))
+    if value then return value end
+  end
+  return nil
+end
+
+--- Rows from a hydration payload. Some storefronts render the grid from one and leave the DOM with
+--- build-generated class names only; the payload carries one clean record per product.
+---
+--- Each record is cut at the NEXT occurrence of the item key before any field is read. Searching the
+--- whole payload for a field would let a record with no price inherit its neighbour's — a real product
+--- shown at somebody else's number, which is worse than dropping the row. The key and the field names
+--- come from the site config, so a site-side rename empties the result instead of silently mismatching.
+local function read_embedded(config)
+  local selector = config.embedded_json_selector
+  -- Ask whether the payload is there before reading it: a missing element is an op FAILURE on this
+  -- channel, and a store that simply does not ship a payload must fall through to the grid, not raise.
+  local payload = (selector and dom.exists(selector)) and non_empty(dom.get_text(selector)) or nil
+  local candidates = array({})
+  if not payload then return candidates end
+
+  local item_key = config.embedded_item_key or "itemId"
+  local fields = config.embedded_fields or DEFAULT_EMBEDDED_FIELDS
+  local pattern = '"' .. item_key .. '"%s*:%s*"([^"]+)"'
+  local limit = config.result_limit or 24
+  local cursor, seen = 1, {}
+
+  while #candidates < limit do
+    local item_start, item_end = payload:find(pattern, cursor)
+    if not item_start then break end
+    local next_start = payload:find('"' .. item_key .. '"%s*:%s*"', item_end + 1) or (#payload + 1)
+    local chunk = payload:sub(item_start, next_start - 1)
+    local candidate = candidate_from(config, {
+      url = json_field(chunk, fields.url),
+      title = json_field(chunk, fields.title),
+      image_alt = json_field(chunk, fields.image_alt),
+      price_text = json_field(chunk, fields.price_text),
+      shipping_text = json_field(chunk, fields.shipping_text),
+      rating_text = json_field(chunk, fields.rating_text),
+    })
+    if candidate and not seen[candidate.product_id] then
+      seen[candidate.product_id] = true
+      candidates[#candidates + 1] = candidate
+    end
+    cursor = next_start
+  end
+  return candidates
+end
+
 --- Where the reader actually is, when that is not a result page. An empty grid and a bot wall count the
 --- same number of cards, and the difference is the whole answer: "this store had nothing" versus "this
 --- store wants proof you are human". The multi-store loop also branches on it — an empty page is worth a
@@ -181,15 +268,31 @@ function S.search(config, args)
              candidates = array({}), error = reason }
   end
 
-  local rows = dom.query_all(config.result_selector, fields_for(config), config.result_limit or 24)
-  local cards_seen = #rows
+  -- A payload store reads its payload first; the rendered grid repeats wrappers per card and mixes ad
+  -- chrome into the row text. A store that prefers the DOM (its payload prices are empty) still falls
+  -- back to the payload rather than reporting an empty store.
   local candidates = array({})
-  local seen = {}
-  for index = 1, cards_seen do
-    local candidate = candidate_from(config, rows[index] or {})
-    if candidate and not seen[candidate.product_id] then
-      seen[candidate.product_id] = true
-      candidates[#candidates + 1] = candidate
+  local cards_seen = 0
+  if config.prefer_embedded and config.embedded_json_selector then
+    candidates = read_embedded(config)
+    cards_seen = #candidates
+  end
+
+  if #candidates == 0 then
+    local rows = dom.query_all(config.result_selector, fields_for(config), config.result_limit or 24)
+    cards_seen = #rows
+    local seen = {}
+    for index = 1, #rows do
+      local candidate = candidate_from(config, rows[index] or {})
+      if candidate and not seen[candidate.product_id] then
+        seen[candidate.product_id] = true
+        candidates[#candidates + 1] = candidate
+      end
+    end
+    if #candidates == 0 and config.embedded_json_selector then
+      local embedded = read_embedded(config)
+      candidates = embedded
+      cards_seen = math.max(cards_seen, #embedded)
     end
   end
 

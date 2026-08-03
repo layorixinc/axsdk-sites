@@ -290,3 +290,77 @@ test('a paging site reports that paging is supported', () => {
   const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
   assert.equal(search(page, {}, PAGED).value.pagination_supported, true);
 });
+
+// Some storefronts render their grid from a hydration payload and give the DOM only build-generated
+// class names. ssg is one: live, the RPC reader saw `cards_seen: 0` where the production sweep reads six
+// rows. The payload carries one clean record per product, so it is read FIRST where a site offers it and
+// the DOM pass stays as the fallback.
+
+const PAYLOAD_SELECTOR = 'script#__NEXT_DATA__';
+const EMBEDDED = {
+  ...CONFIG,
+  prefer_embedded: true,
+  embedded_json_selector: PAYLOAD_SELECTOR,
+  embedded_item_key: 'itemId',
+  embedded_fields: { url: ['itemUrl'], title: ['itemName'], price_text: ['finalPrice'] },
+  product_id_patterns: ['/p/(%d+)'],
+  product_url_prefix: 'https://www.ssg.com/item/',
+};
+const payloadPage = (json, extra = {}) => makePage({
+  href: 'https://www.google.com/',
+  afterNavigate: { [PAYLOAD_SELECTOR]: [{ text: json }], ...extra },
+});
+
+test('a payload store reads its rows from the payload', () => {
+  const json = '{"items":[' +
+    '{"itemId":"111","itemName":"무선 마우스 A","finalPrice":"10000","itemUrl":"/p/111"},' +
+    '{"itemId":"222","itemName":"무선 마우스 B","finalPrice":"20000","itemUrl":"/p/222"}]}';
+  const { value } = search(payloadPage(json), {}, EMBEDDED);
+
+  assert.equal(value.next, 'ok');
+  assert.deepEqual(value.candidates.map((c) => [c.product_id, c.name, c.price]), [
+    ['111', '무선 마우스 A', 10000],
+    ['222', '무선 마우스 B', 20000],
+  ]);
+});
+
+test('a field never crosses into the next item', () => {
+  // The load-bearing property. If the price of the NEXT product can be picked up for a record that has
+  // none, the comparison shows a real product at somebody else's price — worse than a missing row.
+  const json = '{"items":[' +
+    '{"itemId":"111","itemName":"가격 없는 상품","itemUrl":"/p/111"},' +
+    '{"itemId":"222","itemName":"이웃 상품","finalPrice":"20000","itemUrl":"/p/222"}]}';
+  const { value } = search(payloadPage(json), {}, EMBEDDED);
+
+  assert.deepEqual(value.candidates.map((c) => [c.product_id, c.price]), [['222', 20000]]);
+});
+
+test('escaped text arrives readable', () => {
+  const json = '{"items":[{"itemId":"111","itemName":"27\\" 모니터 \\/ 대형","finalPrice":"10000","itemUrl":"/p/111"}]}';
+  assert.equal(search(payloadPage(json), {}, EMBEDDED).value.candidates[0].name, '27" 모니터 / 대형');
+});
+
+test('no payload on the page falls back to the rendered grid', () => {
+  // The card URL has to match THIS config's id pattern; a fixture that does not is testing the fixture.
+  const domRow = { text: 'DOM 상품 5,000원', url: 'https://www.ssg.com/p/999', title: 'DOM 상품', price_text: '5,000원' };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [domRow] } });
+  const { value } = search(page, {}, EMBEDDED);
+  assert.equal(value.next, 'ok');
+  assert.deepEqual(value.candidates.map((c) => c.name), ['DOM 상품']);
+});
+
+test('a grid that yields nothing falls back to the payload even when the DOM is preferred', () => {
+  // Walmart renders a grid whose price fields are empty, so it reads the DOM first — and must still have
+  // somewhere to fall to rather than reporting an empty store.
+  const domFirst = { ...EMBEDDED, prefer_embedded: false };
+  const json = '{"items":[{"itemId":"333","itemName":"페이로드 상품","finalPrice":"7000","itemUrl":"/p/333"}]}';
+  const { value } = search(payloadPage(json), {}, domFirst);
+  assert.deepEqual(value.candidates.map((c) => [c.product_id, c.price]), [['333', 7000]]);
+});
+
+test('the payload obeys the same row limit as the grid', () => {
+  const items = Array.from({ length: 30 }, (_, i) =>
+    `{"itemId":"${100 + i}","itemName":"상품 ${i}","finalPrice":"${1000 + i}","itemUrl":"/p/${100 + i}"}`).join(',');
+  const limited = { ...EMBEDDED, result_limit: 5 };
+  assert.equal(search(payloadPage(`{"items":[${items}]}`), {}, limited).value.candidates.length, 5);
+});

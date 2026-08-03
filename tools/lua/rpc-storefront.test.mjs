@@ -237,3 +237,56 @@ test('a login wall reports its own reason too', () => {
   assert.equal(value.next, 'login_required');
   assert.equal(value.error, 'login_required');
 });
+
+// Paging is opt-in per site and costs a full navigation per page. Three of the nine storefronts declare
+// a shape; the rest stay on page one on purpose, because a guessed parameter either does nothing or
+// silently returns page one again while the caller believes it read something new.
+
+const PAGED = {
+  ...CONFIG,
+  pagination: { mode: 'query', param: 'page', start: 1, step: 1, max_pages: 2, next_selector: 'a.next' },
+};
+
+test('a site that declares no paging never gets a page parameter', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const { ops } = search(page, { page: 2 });
+  const nav = ops.find((entry) => entry.op === 'nav.navigate');
+  assert.ok(!/[?&]page=/.test(nav.params.url), `no paging declared, so no parameter: ${nav.params.url}`);
+});
+
+test('a declared shape produces the parameter it declares', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const { ops } = search(page, { page: 2 }, PAGED);
+  assert.match(ops.find((entry) => entry.op === 'nav.navigate').params.url, /[?&]page=2/);
+});
+
+test('page one is the bare search url', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const { ops } = search(page, { page: 1 }, PAGED);
+  assert.ok(!/[?&]page=/.test(ops.find((entry) => entry.op === 'nav.navigate').params.url));
+});
+
+test('a next control that is present says there is more', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')], 'a.next': [{}] } });
+  assert.equal(search(page, {}, PAGED).value.has_more, true);
+});
+
+test('a next control that was looked for and is absent says there is no more', () => {
+  // A probed-and-absent control beats a row count: a full page of results can still be the last one.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  assert.equal(search(page, {}, PAGED).value.has_more, false);
+});
+
+test('a site that cannot tell reports nothing rather than false', () => {
+  // Absent means "cannot tell" and the caller treats it as no more. Answering `false` would claim a
+  // check that never happened.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const { value } = search(page, {});
+  assert.equal(value.has_more, undefined);
+  assert.equal(value.pagination_supported, false);
+});
+
+test('a paging site reports that paging is supported', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  assert.equal(search(page, {}, PAGED).value.pagination_supported, true);
+});

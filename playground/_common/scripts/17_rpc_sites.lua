@@ -41,6 +41,9 @@ RPC_SITES["11st"] = {
 }
 
 RPC_SITES["ssg"] = {
+  -- Opt-in paging, copied from the site adapter. A store without this block stays on page one:
+  -- a guessed parameter either does nothing or silently re-serves page one.
+  pagination = { mode = "query", param = "page", start = 1, step = 1, max_pages = 2 },
   site = "ssg",
   origin = "https://www.ssg.com",
   hosts = { "ssg.com" },
@@ -152,6 +155,9 @@ RPC_SITES["gmarket"] = {
 }
 
 RPC_SITES["walmart"] = {
+  -- Opt-in paging, copied from the site adapter. A store without this block stays on page one:
+  -- a guessed parameter either does nothing or silently re-serves page one.
+  pagination = { mode = "query", param = "page", start = 1, step = 1, max_pages = 2 },
   site = "walmart",
   origin = "https://www.walmart.com",
   hosts = { "walmart.com" },
@@ -229,6 +235,9 @@ RPC_SITES["ebay"] = {
 }
 
 RPC_SITES["aliexpress"] = {
+  -- Opt-in paging, copied from the site adapter. A store without this block stays on page one:
+  -- a guessed parameter either does nothing or silently re-serves page one.
+  pagination = { mode = "query", param = "page", start = 1, step = 1, max_pages = 2 },
   site = "aliexpress",
   origin = "https://ko.aliexpress.com",
   hosts = { "ko.aliexpress.com" },

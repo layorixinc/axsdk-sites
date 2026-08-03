@@ -193,6 +193,16 @@ function S.search(config, args)
     end
   end
 
+  -- Paging is opt-in. `has_more` stays ABSENT for a site that declares no next control: absent means
+  -- "cannot tell" and the caller treats it as no more, while `false` would claim a check that never
+  -- happened. A probed-and-absent control beats the row count — a full page can still be the last one.
+  local paging = config.pagination
+  local next_selector = paging and paging.next_selector
+  local has_more = nil
+  if type(next_selector) == "string" and next_selector ~= "" then
+    has_more = dom.exists(next_selector) == true
+  end
+
   local next_value = outcome(cards_seen, #candidates)
   return {
     next = next_value,
@@ -201,6 +211,8 @@ function S.search(config, args)
     href = dom.get_location_href(),
     cards_seen = cards_seen,
     candidates = candidates,
+    has_more = has_more,
+    pagination_supported = paging ~= nil and paging.param ~= nil,
     error = (next_value ~= "ok") and next_value or nil,
   }
 end

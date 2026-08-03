@@ -478,3 +478,15 @@ test('every RPC tool is granted exactly the ops its code calls', () => {
 
   assert.deepEqual(issues, [], issues.map((issue) => `${issue.tool}: ${issue.code} ${issue.op}`).join('\n'));
 });
+
+test('every shipped flow document declares a contexts section', () => {
+  // `contexts` is a document section, not an app column: a document without one leaves the session
+  // config with `contexts: undefined`, and the extension then fails to render the binding at all
+  // (`binding:render-failed`, no `session:ensure`, an empty reply after the full timeout). Measured on
+  // the sandbox app — the failure looks like a flow that produced nothing, so it is worth a test.
+  for (const path of ['_common/flows.yaml', 'playground/_common/flows.yaml']) {
+    const document = parseFlow(path);
+    assert.ok(document.contexts && typeof document.contexts === 'object',
+      `${path} must declare a contexts section`);
+  }
+});

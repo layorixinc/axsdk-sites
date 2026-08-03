@@ -1,6 +1,11 @@
 extends: app
 defaults:
   mapping: legacy
+# A document section, not an app column. Without it the session config carries `contexts: undefined`
+# and the extension cannot render its binding at all — no session, no turn, an empty reply after the
+# full timeout. The sitemap arrives here as `sites` once the section exists.
+contexts:
+  current_site: ""
 router:
   mode: fixed
   defaultIntent: playground_durable_checkpoint

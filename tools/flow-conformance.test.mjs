@@ -583,3 +583,61 @@ test('every branch the search script can answer is a branch the node routes', ()
     assert.ok(routed.includes(branch), `the script answers "${branch}" but the node routes ${routed.join(', ')}`);
   }
 });
+
+test('the quote dialog is driven in the runtime, with no step-by-step self-loop', () => {
+  // The dialog is a same-context overlay, yet the durable design re-entered `answer_quote` once per step
+  // (maxSelfSteps: 16) because each call died on its own. One runtime call walks the whole form, so the
+  // node and its self-loop are the artifact — and their absence is the assertion.
+  const common = parseFlow('_common/flows.yaml');
+  const nodes = common.flows?.request_service_quote?.nodes ?? {};
+  const tool = common.flowTools?.open_quote?.execute ?? {};
+
+  assert.equal(tool.implementation, 'lua');
+  for (const module of ['_common.00_base', '_common.10_form_wizard', '_common.65_rpc_quote']) {
+    assert.ok(tool.modules?.includes(module), `open_quote must declare ${module}`);
+  }
+  assert.ok(Array.isArray(tool.rpc?.allow) && tool.rpc.allow.includes('dom.click'));
+  assert.equal(common.flowTools.open_quote.output.next, 'result.next');
+
+  assert.ok(!nodes.answer_quote, 'the per-step node must be gone');
+  assert.ok(!common.flowTools.answer_quote, 'and so must its tool');
+  assert.equal(nodes.open_quote.next.submit, 'submit_quote');
+  assert.equal(nodes.open_quote.next.error, 'pick_quote');
+});
+
+test('sending the request stays a separate, confirmed node', () => {
+  // Driving a form and contacting a person are different acts. Collapsing the submit into the driver
+  // would remove the only place the flow can still stop.
+  const common = parseFlow('_common/flows.yaml');
+  const tool = common.flowTools?.submit_quote ?? {};
+
+  assert.equal(tool.execute?.implementation, 'lua');
+  assert.ok(tool.execute?.modules?.includes('_common.65_rpc_quote'));
+  assert.equal(common.flows.request_service_quote.nodes.submit_quote.next.done, 'pick_quote');
+  const source = read('_common/rpc/65_rpc_quote.lua');
+  assert.match(source, /args\.confirm ~= true/, 'the confirmation gate lives in the script, not the prompt');
+});
+
+test('every branch the quote script can answer is a branch its node routes', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const nodes = common.flows?.request_service_quote?.nodes ?? {};
+  const routed = new Set([...Object.keys(nodes.open_quote?.next ?? {}), ...Object.keys(nodes.submit_quote?.next ?? {})]);
+  const answered = [...read('_common/rpc/65_rpc_quote.lua').matchAll(/next = "([a-z_]+)"/g)].map((match) => match[1]);
+
+  assert.ok(answered.length >= 3);
+  for (const branch of new Set(answered)) {
+    assert.ok(routed.has(branch), `the script answers "${branch}" but the nodes route ${[...routed].join(', ')}`);
+  }
+});
+
+test('no runtime tool asks for more time than the platform grants', () => {
+  // The deploy endpoint refuses the whole document with "deadlineMs must be an integer between 1 and
+  // 120000". A single tool over the ceiling therefore takes every flow down, and the failure arrives at
+  // push time with no hint of which tool caused it.
+  const common = parseFlow('_common/flows.yaml');
+  for (const [name, tool] of Object.entries(common.flowTools ?? {})) {
+    const deadline = tool.execute?.rpc?.deadlineMs;
+    if (deadline === undefined) continue;
+    assert.ok(deadline >= 1 && deadline <= 120000, `${name} asks for ${deadline}ms`);
+  }
+});

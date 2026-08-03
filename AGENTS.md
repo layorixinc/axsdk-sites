@@ -743,3 +743,30 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   name/rating/URL and the results widget printed reviews, price and hires as `-` for all ten pros. Card
   numbers are parsed off the FULL text and only the stored `summary` is cut at 360 — parsing the cut copy
   drops the hire count of any card whose review quote runs long.
+- **A durable tool's `input:` block is invisible to a runtime script — twice now.** The search read
+  `args.query` while the node hands `service_query`; the quote driver expected `auto: true`, which lived
+  only in the tool's `input:`. Without it the wizard scored nothing, every step answered
+  `missing_answer`, and the form was handed over on step one. A runtime script must read the node's own
+  field names and set its own defaults.
+- **A transient op refusal is not a page fact.** Two live runs died on a raised op — `dom.query_all`
+  right after the navigation, then `dom.exists` inside the contact fill — and each was reported to the
+  user as a finished attempt ("stopped before submit"). Wrapping whichever op failed is whack-a-mole:
+  EVERY dom access in `65_rpc_quote.lua` goes through tolerant helpers that retry once and then answer
+  `nil`/`false`. `tools/lua/rpc-stub.mjs`'s `flakyEvery` refuses every Nth op so the suite enforces it.
+- **An op round trip is ~1s live, and `deadlineMs` is capped at 120000 by the platform.** So op count is
+  a feature budget, not a micro-optimization: a step that cost 32 round trips killed a three-step form
+  with `deadline exceeded`. Collapsing five contact-field probes into one read of the step's inputs and
+  memoizing the repeated option/control reads per step brought it to 15. `check:flows` pins the ceiling
+  (the deploy endpoint rejects the WHOLE document above it) and the quote suite pins the marginal cost.
+- **`page.eval` answers `op_not_permitted`.** It is in the live op vocabulary and granting it in
+  `rpc.allow` changes nothing. That matters because Thumbtack's "Request estimate" button carries no
+  `id`, no `aria-label`, no `data-test` and only hashed classes — so CSS cannot name it and the page
+  world is closed. What works is a WIDE list of structural candidates, each verified by reading its own
+  label before it is clicked; widening is safe precisely because of that check. Request: R23.
+- **A click that fires is not a click the site accepted.** The quote dialog's radios do carry ids, so the
+  label selector resolves and `dom.click` reports success — and the form still re-rendered the same
+  question. `select_option` now re-reads `checked` and falls through to the input itself; the durable code
+  had `click_verified` for this exact reason and the port had dropped it.
+- **A hand-maintained test file list means a new suite never runs.** `test:lua` named its fourteen files
+  explicitly, so a written, green, committed suite reported nothing. It is now
+  `node --test "tools/lua/*.test.mjs"`.

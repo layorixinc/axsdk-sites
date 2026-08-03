@@ -37,8 +37,22 @@ export function makePage(spec) {
     navigated: null,
     pollsSinceNavigate: 0,
     failHrefTimes: spec.failHrefTimes ?? 0,
+    failQueryTimes: spec.failQueryTimes ?? 0,
+    // Every Nth op is refused. The channel can drop ANY op while it re-attaches, and a script that lets
+    // one raise reports a page fact it never established — measured live twice, on two different ops.
+    flakyEvery: spec.flakyEvery ?? 0,
+    opCount: 0,
     sequence: spec.sequence ?? null,
     sequenceAt: {},
+    // A click's EFFECT belongs to the page, not to the op: the runtime answers whether it found
+    // something to click, and the site decides what that does. A stub whose click changes nothing can
+    // only ever prove that a wizard reports `advance_not_confirmed`.
+    onClick: spec.onClick ?? null,
+    // `page.eval` runs JS in the page world. The stub cannot execute DOM JS, so a test can only assert
+    // that the script was asked for and what the page answered — the script's own correctness is live
+    // evidence, never unit evidence.
+    onEval: spec.onEval ?? null,
+    filled: [],
   };
 
   page.record = (op, params) => { page.ops.push({ op, params }); };
@@ -107,6 +121,9 @@ export function installRpcStub(lua, page, { allow } = {}) {
       return first.text ?? '';
     },
     'dom.query_all': (selector, fields, limit) => {
+      // The channel can refuse an op while it is re-attaching — measured live as `rpc_timeout` on the
+      // first read after a navigation, which killed a whole tool because the error propagated.
+      if (page.failQueryTimes > 0) { page.failQueryTimes -= 1; throw new Error('rpc dom.query_all failed: rpc_timeout'); }
       // A hydrating list answers a different count on each poll. A reader that settles has to be able to
       // fail here — reading the first answer would report a half-rendered page as the final one.
       const seqKey = page.sequence && (page.sequence[selector] ? selector : String(selector||"").split(",").map(s=>s.trim()).find(s=>page.sequence[s]));
@@ -134,15 +151,34 @@ export function installRpcStub(lua, page, { allow } = {}) {
     },
     'nav.navigate': (url) => page.navigate(url),
     'nav.reload': () => true,
-    'dom.click': (selector) => { page.tick(); return true; },
-    'dom.set_value': () => true,
+    // Both report whether they FOUND their target. A script that treats "clicked nothing" as success
+    // reports a form it never advanced; the durable code checked `dom.exists` first for that reason.
+    'dom.click': (selector) => {
+      page.tick();
+      if (rowsFor(selector).length === 0) return false;
+      if (page.onClick) page.onClick(selector, page);
+      return true;
+    },
+    'dom.set_value': (selector, value) => {
+      page.tick();
+      if (rowsFor(selector).length === 0) return false;
+      page.filled.push({ selector, value });
+      return true;
+    },
     'dom.submit_form': () => true,
-    'page.eval': () => null,
+    'page.eval': (script) => {
+      page.tick();
+      return page.onEval ? page.onEval(script, page) : null;
+    },
   };
 
   const call = (op, ...args) => {
     guard(op);
     page.record(op, describe(op, args));
+    page.opCount += 1;
+    if (page.flakyEvery > 0 && page.opCount % page.flakyEvery === 0) {
+      throw new Error(`rpc ${op} failed: rpc_timeout`);
+    }
     return api[op](...args);
   };
 

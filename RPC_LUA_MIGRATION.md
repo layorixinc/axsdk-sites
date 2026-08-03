@@ -449,6 +449,23 @@ ebay 6, aliexpress 6, gmarket 2, etsy 1, walmart `price_unavailable`, naver `acc
 숏리스트 창까지 완주. 남은 것은 `detect_page` · `view_service` · `update_search` ·
 `open/answer/submit_quote`로, `confirm:true` 게이트는 노드 분리로 유지한다(D9). `kind: remote` 25 → 24.
 
+**진행 상태 — 견적 다이얼로그: 노드 합침 완료, 폼 진행은 미완(라이브 측정).** `open_quote` ·
+`answer_quote` · `submit_quote` 세 개의 `kind: remote` 툴이 두 개의 런타임 Lua 툴로 줄었다
+(`_common/rpc/65_rpc_quote.lua`). durable 시절 `answer_quote`는 스텝마다 노드를 다시 밟았는데
+(`maxSelfSteps: 16`), 다이얼로그는 같은 컨텍스트의 SPA 오버레이라 런타임에서는 **한 호출이 폼 전체를
+구동한다** — 그 노드와 자기 루프는 durable 산물이었고 삭제했다. 제출은 D9대로 별도 노드로 남았고
+`require: { quote_reached_submit: true }`가 그대로 게이트다. `kind: remote` 24 → 21.
+
+라이브에서 확인된 것: 프로 페이지 이동 → CTA 발견·클릭 → 다이얼로그 열림 → 위저드 진입 → 제출 노드가
+가드로 거부(**전송 없음**). 거부는 세 가지로 구분된다 — `pro_unavailable`(사이트가 "이 프로는 이 일을
+못 한다"고 말한 경우, 그 문장을 그대로 싣는다) · `quote_cta_unreachable`(CTA는 있는데 무엇으로도 닿지
+못함) · `quote_dialog_did_not_open`. 각각 실제로 라이브에서 한 번씩 관측했다.
+
+**남은 것**: 첫 스텝의 라디오는 선택되고(`checked` 확인) `Next`도 눌리는데 스텝이 넘어가지 않는다
+(`advance_not_confirmed` → `quote_stalled`). 다음 서베이 대상은 "선택은 됐는데 폼이 진행을 거부하는
+이유"다. 플랫폼 쪽 걸림돌 두 건은 `RPC_LUA_RUNTIME_REQUESTS_12.md`(R23 `page.eval`
+`op_not_permitted` · R24 op 왕복 ~1초와 `deadlineMs` 120000 상한)에 냈다.
+
 ### Phase 6 — 정리 (1일)
 `kind: remote` 툴 38개 제거 확인, `axsdk:lua` 스토어/`ax sync`의 Lua 경로 정리, `SCHEMA.md`(40개 엔트리)를
 RPC 툴 계약으로 교체, `AGENTS.md` §3/§4/§6/§8 갱신, `dist/` 산출물 규칙 추가.

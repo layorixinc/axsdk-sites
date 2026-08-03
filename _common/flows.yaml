@@ -753,6 +753,7 @@ flows:
           - quote_index
           - quote_results
           - quote_error
+          - quote_message
           - quote_reached_submit
           - quote_answer_status
           - quote_status
@@ -769,28 +770,18 @@ flows:
 
       open_quote:
         kind: action_contract
-        inputSelector: [quote_url, quote_target_service_id]
-        id: open_quote
-        description: Navigate to the picked pro and open its "Request estimate" dialog (never submits or sends). Detect-page aware — skips the cross-nav when already on the pro, then opens the same-context request-flow overlay.
-        next:
-          open: answer_quote
-          error: pick_quote
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      answer_quote:
-        kind: action_contract
         inputSelector:
+          - quote_url
+          - quote_target_service_id
           - user_requirements
           - submit_email
           - submit_first_name
           - submit_last_name
           - submit_phone
           - zip_code
-        id: answer_quote
-        maxSelfSteps: 16
-        description: Auto-answer the active request-flow step (auto mode answers from user_requirements and clicks Next/Continue/Skip), then self-loop to the next step; route to submit once only the final Submit remains. NEVER submits or sends. Deterministic — the answer/submit decision is computed from the tool result (no LLM).
+        id: open_quote
+        description: Open the picked pro's quote request and answer every step that can be answered from the collected requirements and contact details, stopping at the final Submit. One runtime call — the dialog is a same-context overlay, so the whole wizard runs without a per-step node. NEVER submits or sends.
         next:
-          answer: answer_quote
           submit: submit_quote
           error: pick_quote
         fallback: { invalidNext: error, exhaustedNext: error }
@@ -3982,7 +3973,7 @@ flowTools:
         -- per-pro signals open_quote/answer_quote wrote for the pro we just finished.
         local cands = args.candidates or {}
         local idx = args.quote_index or 0    -- count of pros already opened (0-based)
-        local MAX_OPEN = 6                    -- attempted = min(#candidates, MAX_OPEN). answer_quote's form self-loop is budgeted per-node via maxSelfSteps (exempt from global maxSteps), so each pro costs ~4 global flow steps (pick+open+answer-entry+submit); 6 pros fit maxSteps=64 with margin.
+        local MAX_OPEN = 6                    -- attempted = min(#candidates, MAX_OPEN). The whole quote form is now one runtime call, so each pro costs ~3 global flow steps (pick+open+submit); 6 pros fit maxSteps=64 with margin.
         -- quote_results is a newline-joined summary STRING (one line per pro). A string avoids
         -- the array/object serialization ambiguity an empty Lua table would hit at the schema.
         local results = args.quote_results or ""
@@ -3996,8 +3987,14 @@ flowTools:
           local submit_msg = nz(args.quote_submit_message)
           local submit_err = nz(args.quote_submit_error)
           local outcome
-          if open_err then
-            outcome = "FAILED to open/answer (" .. tostring(open_err) .. ")"
+          local open_msg = nz(args.quote_message)
+          if open_err == "pro_unavailable" then
+            -- Thumbtack renders no quote CTA when the pro cannot take the job, and it says why. Printing
+            -- our error code instead read as our failure and invited a retry that could never work.
+            outcome = "Thumbtack: \"" .. tostring(open_msg or "this pro cannot do the job") .. "\""
+          elseif open_err then
+            outcome = "FAILED to open/answer (" .. tostring(open_err)
+              .. (open_msg and (": " .. tostring(open_msg)) or "") .. ")"
           elseif submit_msg then
             outcome = "Submitted -> Thumbtack error popover: \"" .. tostring(submit_msg) .. "\""
           elseif submit_status == "submitted" then
@@ -4025,6 +4022,7 @@ flowTools:
             quote_results = results,
             -- clear per-pro signals so an open failure on the next pro can't inherit this result
             quote_error = "",
+            quote_message = "",
             quote_reached_submit = false,
             quote_answer_status = "",
             quote_status = "",
@@ -4046,6 +4044,7 @@ flowTools:
         quote_answer_status: { type: [string, "null"] }
         quote_status: { type: [string, "null"] }
         quote_advance_reason: { type: [string, "null"] }
+        quote_message: { type: [string, "null"] }
         quote_submit_status: { type: [string, "null"] }
         quote_submit_message: { type: [string, "null"] }
         quote_submit_error: { type: [string, "null"] }
@@ -4191,45 +4190,44 @@ flowTools:
         refine_selected: { type: [array, "null"] }
 
   open_quote:
-    description: Navigate to the picked pro and open its "Request estimate" dialog. Never submits or sends.
-    execute: { kind: remote, tool: AX_open_quote, timeoutMs: 60000 }
-    input:
-      url: tool.args.quote_url
-      service_id: tool.args.quote_target_service_id
+    description: Open the picked pro's quote request and answer every step it can answer, stopping at the final Submit. Never submits or sends.
+    execute:
+      kind: runtime
+      implementation: lua
+      # The wizard's decisions are the shared, DOM-free core; only the selectors are Thumbtack's.
+      modules: ["_common.00_base", "_common.10_form_wizard", "_common.65_rpc_quote"]
+      rpc:
+        # `page.eval` is the last rung of the CTA ladder — the button carries no id, aria-label or
+        # data-test, and its only classes are build hashes, so nothing CSS can name reaches it. Measured
+        # live: the platform answers `op_not_permitted` for it, so the grant is currently inert and the
+        # structural candidates are what actually open the dialog.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.query_all, dom.click, dom.set_value, page.eval]
+        opTimeoutMs: 2000
+        # A step costs ~15 round trips at roughly a second each. 120000 is the platform's CEILING — it
+        # refuses the document above it ("deadlineMs must be an integer between 1 and 120000") — so a
+        # longer form is bounded by the stall guard, not by more time.
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_QUOTE.request_quote(args)
+        end
     output:
-      next: { if: [{ var: result.error }, "error", "open"] }
-      quote_status: result.status
-      quote_service_id: result.service_id
-      quote_error: result.error
+      # The script walks the whole form, so it is the only thing that knows whether the form ended at the
+      # Submit, stalled, or was rejected. Deriving a branch here would overrule the pass that ran it.
+      next: result.next
+      quote_status: result.quote_status
+      quote_error: result.quote_error
+      quote_message: result.quote_message
+      quote_advance_reason: result.quote_advance_reason
+      quote_reached_submit: result.quote_reached_submit
+      quote_answer_status: result.quote_status
     parameters:
       type: object
       additionalProperties: true
       properties:
         quote_url: { type: string }
         quote_target_service_id: { type: [string, "null"] }
-
-  answer_quote:
-    description: Answer the active Thumbtack request-flow step in auto mode and advance via Next/Continue/Skip. Never clicks Send/Submit/Get quotes; stops once the only remaining action is the final submit.
-    execute: { kind: remote, tool: AX_answer_quote, timeoutMs: 60000 }
-    input:
-      auto: true
-      user_requirements: tool.args.user_requirements
-      email: tool.args.submit_email
-      first_name: tool.args.submit_first_name
-      last_name: tool.args.submit_last_name
-      phone: tool.args.submit_phone
-      zip_code: tool.args.zip_code
-    output:
-      next: { if: [{ var: result.error }, "error", { var: result.flow.reached_submit_step }, "submit", { "==": [{ var: result.flow.advance_reason }, "advance_button_not_found"] }, "submit", { "==": [{ var: result.flow.advance_reason }, "missing_answer"] }, "submit", "answer"] }
-      quote_answer_status: result.status
-      quote_advance_reason: result.flow.advance_reason
-      quote_reached_submit: result.flow.reached_submit_step
-      quote_error: result.error
-    parameters:
-      type: object
-      additionalProperties: true
-      properties:
-        auto: { type: boolean }
         user_requirements: { type: [string, "null"] }
         submit_email: { type: [string, "null"] }
         submit_first_name: { type: [string, "null"] }
@@ -4238,20 +4236,28 @@ flowTools:
         zip_code: { type: [string, "null"] }
 
   submit_quote:
-    description: Click the final Submit on the active Thumbtack quote step with the collected contact details (first/last name, email, phone); returns the resulting Thumbtack popover/outcome text.
-    execute: { kind: remote, tool: AX_submit_quote, timeoutMs: 60000 }
-    input:
-      confirm: true
-      phone: tool.args.submit_phone
-      email: tool.args.submit_email
-      first_name: tool.args.submit_first_name
-      last_name: tool.args.submit_last_name
-      zip_code: tool.args.zip_code
+    description: Send the quote request from the final step with the collected contact details, and report the Thumbtack popover or outcome that results.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.00_base", "_common.10_form_wizard", "_common.65_rpc_quote"]
+      rpc:
+        allow: [dom.exists, dom.get_text, dom.query_all, dom.click, dom.set_value]
+        opTimeoutMs: 2000
+        deadlineMs: 90000
+      entry: run
+      lua: |
+        function run(args)
+          -- The confirmation is the boundary between filling a form and contacting a person. It is
+          -- asserted inside the script too; this node is the flow's last chance to stop.
+          args.confirm = true
+          return AX_RPC_QUOTE.submit_quote(args)
+        end
     output:
-      next: { if: [{ var: result.flow_error }, "done", "done"] }
-      quote_submit_status: result.status
-      quote_submit_message: { if: [{ var: result.message }, { var: result.message }, { var: result.request_error.message }] }
-      quote_submit_error: result.flow_error
+      next: result.next
+      quote_submit_status: result.quote_submit_status
+      quote_submit_message: result.quote_submit_message
+      quote_submit_error: result.quote_submit_error
     effect: mutation
     consent: required
     idempotent: true

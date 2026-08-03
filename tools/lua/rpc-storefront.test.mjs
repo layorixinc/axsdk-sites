@@ -823,3 +823,39 @@ test('the screen-reader form glued to the human one is not the price', () => {
   const text = 'Logitech M185 Now$1699current price Now $16.99';
   assert.equal(priceOf(text, { price_text_strategy: 'decimal_preferred', default_currency: 'USD' }).price, 16.99);
 });
+
+// aliexpress does not take a query parameter: its search lives at a slugged path
+// (`/w/wholesale-logitech-m185.html`). Live, the reader concatenated a nil `search_param` and the Lua
+// error took the whole store out of the comparison — a missing config field should never cost more than
+// the store it describes.
+
+const PATH_SITE = {
+  ...CONFIG,
+  search_url: undefined,
+  search_param: undefined,
+  search_path_prefix: 'https://www.aliexpress.com/w/wholesale-',
+  search_path_suffix: '.html',
+  search_path_marker: '/w/wholesale-',
+  pagination: { mode: 'query', param: 'page', start: 1, step: 1, max_pages: 2 },
+};
+
+test('a path-based store gets a slugged url, not a query parameter', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const { ops } = search(page, { query: 'logitech m185' }, PATH_SITE);
+  const url = ops.find((entry) => entry.op === 'nav.navigate').params.url;
+  assert.equal(url, 'https://www.aliexpress.com/w/wholesale-logitech-m185.html');
+});
+
+test('a path-based store still pages', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
+  const { ops } = search(page, { query: 'mouse', page: 2 }, PATH_SITE);
+  assert.match(ops.find((entry) => entry.op === 'nav.navigate').params.url, /wholesale-mouse\.html\?page=2/);
+});
+
+test('a store that declares no search shape is reported, not crashed', () => {
+  // Raising loses the store entirely; the comparison then cannot even say which store it failed to read.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
+  const { value } = search(page, {}, { ...CONFIG, search_url: undefined, search_param: undefined });
+  assert.equal(value.next, 'error');
+  assert.equal(value.error, 'search_url_unavailable');
+});

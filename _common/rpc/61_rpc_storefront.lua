@@ -34,15 +34,32 @@ local function url_encode(value)
   end):gsub(" ", "+"))
 end
 
---- The search URL for this site and query, including whatever fixed params the site needs.
+--- The search URL for this site and query, or nil when the site declares no shape for one.
+---
+--- Two shapes exist. Most stores take a query parameter; aliexpress puts the query in the PATH
+--- (`/w/wholesale-logitech-m185.html`). Live, assuming the parameter concatenated a nil and the Lua
+--- error took the whole store out of the comparison — a missing field must never cost more than the
+--- store it describes.
 function S.search_url(config, query, page)
-  local url = config.search_url .. "?" .. config.search_param .. "=" .. url_encode(query)
-  for key, value in pairs(config.search_extra or {}) do
-    url = url .. "&" .. key .. "=" .. url_encode(value)
+  local url
+  if config.search_path_prefix then
+    url = config.search_path_prefix .. url_encode(query):gsub("%%20", "-"):gsub("+", "-")
+      .. (config.search_path_suffix or "")
+  elseif config.search_url and config.search_param then
+    url = config.search_url .. "?" .. config.search_param .. "=" .. url_encode(query)
+    for key, value in pairs(config.search_extra or {}) do
+      url = url .. "&" .. key .. "=" .. url_encode(value)
+    end
+  elseif config.search_url then
+    url = config.search_url
+  else
+    return nil
   end
+
   local paging = config.pagination
-  if paging and page and page > 1 then
-    url = url .. "&" .. paging.param .. "=" .. tostring(paging.start + (page - 1) * paging.step)
+  if paging and paging.param and page and page > 1 then
+    local separator = url:find("?", 1, true) and "&" or "?"
+    url = url .. separator .. paging.param .. "=" .. tostring(paging.start + (page - 1) * paging.step)
   end
   return url
 end
@@ -55,7 +72,11 @@ local function already_showing(config, href, query)
     return false
   end
   local encoded = url_encode(query)
-  return current:find(config.search_param .. "=" .. encoded, 1, true) ~= nil
+  if config.search_path_prefix then
+    return current:find(encoded:gsub("%%20", "-"):gsub("+", "-"), 1, true) ~= nil
+  end
+  return config.search_param ~= nil
+    and current:find(config.search_param .. "=" .. encoded, 1, true) ~= nil
 end
 
 local function fields_for(config)
@@ -496,8 +517,10 @@ function S.search(config, args)
   local ok, from = pcall(dom.get_location_href)
   if not ok then ok, from = pcall(dom.get_location_href) end
   if not ok then return { next = "error", error = "rpc_unavailable" } end
+  local target = S.search_url(config, query, tonumber(args.page))
+  if not target then return { next = "error", error = "search_url_unavailable" } end
   if not already_showing(config, from, query) then
-    nav.navigate(S.search_url(config, query, tonumber(args.page)))
+    nav.navigate(target)
     -- href first. A document that is still alive answers a selector check from the OLD page, so an
     -- element probe here is a false positive waiting to happen.
     if not nav.wait_for_navigation(from, { timeout = 8000, interval = 200 }) then

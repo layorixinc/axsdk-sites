@@ -758,3 +758,68 @@ test('a payload id survives even when no url pattern matches', () => {
   };
   assert.equal(search(payloadPage(json), {}, noUrlId).value.candidates[0]?.product_id, '777');
 });
+
+// Live, three separate turns died on the FIRST op: `rpc dom.get_location_href failed: rpc_timeout`,
+// always moments after the extension reloaded and the channel was still attaching. One refused read is
+// not a page problem and it should not cost the whole store — the worker marked it `failed` and the
+// comparison lost it entirely.
+//
+// The tight `opTimeoutMs` exists for navigating polls, where a document that accepts a poll and then
+// unloads must not hold the script. The opening read is not that, so it gets one more chance.
+
+test('a channel still attaching costs one retry, not the store', () => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    failHrefTimes: 1,
+    afterNavigate: { 'li.card': [card('1', '무선 마우스', '9,900원')] },
+  });
+  const { value } = search(page);
+  assert.equal(value.next, 'ok');
+  assert.equal(value.candidates.length, 1);
+});
+
+test('a channel that never answers is reported, not raised', () => {
+  // Raising takes the whole worker down and the store disappears from the comparison. A classified
+  // result keeps it visible as a store that could not be read.
+  const page = makePage({ href: 'https://www.google.com/', failHrefTimes: 99, afterNavigate: {} });
+  const { value } = search(page);
+  assert.equal(value.next, 'error');
+  assert.equal(value.error, 'rpc_unavailable');
+});
+
+// Live on coupang: `로지텍 무선 마우스, 블랙, M18519,400원` — the model code ends in digits and the price
+// follows with no separator. Stripping commas and taking the first digit run reported the product at
+// KRW 18,519,400. A wrong number in a price comparison is the worst thing this reader can produce, so an
+// amount only counts when it does not CONTINUE an alphanumeric token. Hangul is multi-byte, so a Korean
+// prefix never blocks a match.
+
+const priceOf = (text, over = {}) => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    afterNavigate: { 'li.card': [{ text, url: 'https://www.11st.co.kr/products/55', title: '마우스', price_text: '' }] },
+  });
+  return search(page, {}, { ...CONFIG, price_from_text: true, ...over }).value.candidates[0];
+};
+
+test('a model code glued to the price drops the row instead of inventing one', () => {
+  // The digits cannot be separated without knowing where the model code ends, so the honest outcome is
+  // no price and therefore no row. What must never happen is the naive reading, KRW 18,519,400.
+  assert.equal(priceOf('로지텍 무선 마우스, 블랙, M18519,400원 모레 도착'), undefined);
+});
+
+test('the last price before the shipping words is the price', () => {
+  // coupang prints the struck-through price, then the discount, then the real one, then the fee.
+  const text = '로지텍 무선마우스, M185, Gray 할인 16,510원 36% 10,480원 배송비 2,500원 조건부 무료배송';
+  assert.equal(priceOf(text, { price_text_strategy: 'last_before_shipping' }).price, 10480);
+});
+
+test('a reward figure after the cutoff is never the price', () => {
+  const text = '로지텍 M185 19,400원 무료배송 최대 970원 적립';
+  assert.equal(priceOf(text, { price_text_strategy: 'last_before_shipping' }).price, 19400);
+});
+
+test('the screen-reader form glued to the human one is not the price', () => {
+  // walmart: "Now$4999current price Now $49.99" — `decimal_preferred` takes the marked one.
+  const text = 'Logitech M185 Now$1699current price Now $16.99';
+  assert.equal(priceOf(text, { price_text_strategy: 'decimal_preferred', default_currency: 'USD' }).price, 16.99);
+});

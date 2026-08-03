@@ -95,15 +95,48 @@ end
 --- looked cheapest was simply quoted in a smaller unit.
 local CURRENCY_MARKS = {
   { "US$", "USD" }, { "USD", "USD" }, { "$", "USD" },
-  { "KRW", "KRW" }, { "₩", "KRW" }, { "원", "KRW" },
+  -- No `원` here: it is a SUFFIX, so the amount comes BEFORE it and `won_amount` reads it. Listing it
+  -- as a prefix mark made "배송비 2,500원 판매자 평점4.7" answer 4.7 — the number after the mark.
+  { "KRW", "KRW" }, { "₩", "KRW" },
   { "EUR", "EUR" }, { "€", "EUR" },
   { "GBP", "GBP" }, { "£", "GBP" },
   { "JPY", "JPY" }, { "¥", "JPY" },
 }
 
+local function normalize_number(value)
+  return tonumber((tostring(value or ""):gsub(",", "")))
+end
+
+--- Amounts in the text, in order, skipping any that CONTINUE an alphanumeric token.
+---
+--- Live on coupang: `로지텍 무선 마우스, 블랙, M18519,400원`. The model code ends in digits and the price
+--- follows with no separator, so a naive digit run read the product at KRW 18,519,400. Hangul is
+--- multi-byte, so a Korean prefix never blocks a match.
+local function amounts_in(text)
+  local value = tostring(text or "")
+  local found = {}
+  local cursor = 1
+  while true do
+    local start_at, end_at, amount = value:find("([%d][%d,]*%.?%d*)", cursor)
+    if not start_at then break end
+    local previous = start_at > 1 and value:sub(start_at - 1, start_at - 1) or ""
+    if not previous:match("[%a%d]") then found[#found + 1] = normalize_number(amount) end
+    cursor = end_at + 1
+  end
+  return found
+end
+
 local function amount_in(text)
-  local raw = tostring(text or ""):gsub(",", "")
-  return tonumber(raw:match("%d+%.?%d*"))
+  local found = amounts_in(text)
+  return found[1]
+end
+
+--- The amount stated right after a currency mark, which is what makes the mark meaningful.
+local function amount_after(text, marker)
+  local value = tostring(text or "")
+  local start_at = value:find(marker, 1, true)
+  if not start_at then return nil end
+  return normalize_number(value:sub(start_at + #marker):match("([%d][%d,]*%.?%d*)"))
 end
 
 local function parse_money(text, fallback_currency)
@@ -111,12 +144,69 @@ local function parse_money(text, fallback_currency)
   if not value then return nil, non_empty(fallback_currency) end
   for index = 1, #CURRENCY_MARKS do
     local mark, code = CURRENCY_MARKS[index][1], CURRENCY_MARKS[index][2]
-    if value:find(mark, 1, true) then
-      local amount = amount_in(value)
-      if amount then return amount, code end
-    end
+    local amount = amount_after(value, mark)
+    if amount then return amount, code end
   end
   return amount_in(value), non_empty(fallback_currency)
+end
+
+-- Everything a card prints after these belongs to delivery, rewards or financing, not to the price.
+local PRICE_CUTOFF_MARKERS = { "배송비", "무료배송", "배송", "적립", "포인트", "쿠폰", "할부",
+  "shipping", "delivery", "postage", "coupon", "cashback", "reward" }
+
+--- The last `원` amount in the text, on a token boundary.
+local function won_amount(text, pick_last)
+  local value = tostring(text or "")
+  local found, cursor = nil, 1
+  while true do
+    local start_at, end_at, amount = value:find("([%d][%d,]*%.?%d*)%s*원", cursor)
+    if not start_at then break end
+    local previous = start_at > 1 and value:sub(start_at - 1, start_at - 1) or ""
+    if not previous:match("[%a%d]") then
+      found = normalize_number(amount)
+      if not pick_last then return found end
+    end
+    cursor = end_at + 1
+  end
+  return found
+end
+
+--- A card prints several numbers and only one is what the buyer pays. Each site says which rule finds
+--- it; guessing produced a struck-through price, a per-month instalment, or a reward figure.
+local function parse_candidate_price(value, fallback_currency, strategy)
+  local text = non_empty(value)
+  if not text then return nil, non_empty(fallback_currency) end
+
+  if strategy == "decimal_preferred" then
+    -- The screen-reader form is glued to the human one ("Now$4999current price Now $49.99"); the marked
+    -- occurrence is the one meant for a person.
+    local _, currency = parse_money(text, fallback_currency)
+    local marker, cursor = nil, 1
+    while true do
+      local at = text:lower():find("current price", cursor, true)
+      if not at then break end
+      marker, cursor = at, at + 1
+    end
+    if marker then return parse_money(text:sub(marker), fallback_currency) end
+    local found = amounts_in(text)
+    if #found == 1 then return found[1], currency or non_empty(fallback_currency) end
+    return nil, currency or non_empty(fallback_currency)
+  end
+
+  if strategy == "last_before_shipping" then
+    local lowered = text:lower()
+    local cutoff = #text + 1
+    for index = 1, #PRICE_CUTOFF_MARKERS do
+      local at = lowered:find(PRICE_CUTOFF_MARKERS[index], 1, true)
+      if at and at < cutoff then cutoff = at end
+    end
+    local head = text:sub(1, cutoff - 1)
+    local won = won_amount(head, true)
+    if won then return won, "KRW" end
+    return parse_money(head, fallback_currency)
+  end
+
+  return parse_money(text, fallback_currency)
 end
 
 local function parse_price(text)
@@ -155,7 +245,9 @@ local function parse_shipping(text, fallback_currency, from_row_text)
 
   local fragment = value:sub(first, first + 60)
   if from_row_text then
-    local marked = false
+    -- `원` is a suffix and so is absent from the prefix marks, but a fee written "2,500원" in the row
+    -- text is exactly as stated as one written "$3.00".
+    local marked = fragment:find("원", 1, true) ~= nil
     for index = 1, #CURRENCY_MARKS do
       if fragment:find(CURRENCY_MARKS[index][1], 1, true) then marked = true break end
     end
@@ -210,7 +302,7 @@ local function candidate_from(config, row)
   -- holds for shipping on six of the eight. Mining the row text WITHOUT that declaration would read a
   -- reward-point figure as a delivery fee.
   local price_source = non_empty(row.price_text) or (config.price_from_text and row_text or nil)
-  local price, currency = parse_money(price_source, config.default_currency)
+  local price, currency = parse_candidate_price(price_source, config.default_currency, config.price_text_strategy)
   if not id or not name or not price then return nil end
 
   local shipping_field = non_empty(row.shipping_text)
@@ -397,7 +489,13 @@ function S.search(config, args)
   local query = non_empty(args.query)
   if not query then return { next = "error", error = "query_required" } end
 
-  local from = dom.get_location_href()
+  -- The channel can still be attaching — measured live as `rpc_timeout` on this exact read, moments
+  -- after an extension reload, three turns in a row. One refused read is not a page problem, and
+  -- raising here loses the whole store: the worker marks it failed and the comparison never shows it.
+  -- The tight `opTimeoutMs` is for navigating polls, not for the opening read.
+  local ok, from = pcall(dom.get_location_href)
+  if not ok then ok, from = pcall(dom.get_location_href) end
+  if not ok then return { next = "error", error = "rpc_unavailable" } end
   if not already_showing(config, from, query) then
     nav.navigate(S.search_url(config, query, tonumber(args.page)))
     -- href first. A document that is still alive answers a selector check from the OLD page, so an

@@ -36,6 +36,7 @@ export function makePage(spec) {
     ops: [],
     navigated: null,
     pollsSinceNavigate: 0,
+    failHrefTimes: spec.failHrefTimes ?? 0,
   };
 
   page.record = (op, params) => { page.ops.push({ op, params }); };
@@ -75,7 +76,13 @@ export function installRpcStub(lua, page, { allow } = {}) {
   const rowsFor = (selector) => page.dom[selector] ?? [];
 
   const api = {
-    'dom.get_location_href': () => { page.tick(); return page.href; },
+    'dom.get_location_href': () => {
+      page.tick();
+      // A real channel can refuse an op while it is still attaching — measured live as `rpc_timeout` on
+      // the very first read after an extension reload.
+      if (page.failHrefTimes > 0) { page.failHrefTimes -= 1; throw new Error('rpc dom.get_location_href failed: rpc_timeout'); }
+      return page.href;
+    },
     'dom.exists': (selector) => { page.tick(); return rowsFor(selector).length > 0; },
     'dom.get_text': (selector) => {
       page.tick();

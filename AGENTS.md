@@ -792,3 +792,31 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   could hide a side effect could not promise order or atomicity; `tools/rpc-allow.mjs` exports `BATCHABLE`
   and the stub enforces both rules so a script is never written against a permissiveness the platform
   does not have.
+- **A runtime tool is INLINED by the flow that names it; only a `kind: remote` action can be shared with
+  `run:`.** Measured against the deploy compiler in four steps: a remote tool plus `kind: action` + `run:`
+  compiles; deleting the tool answers `references missing action`; making it a runtime tool and keeping
+  `run:` answers the same, because `run:` resolves only against remote actions; and pointing three
+  DIFFERENT flows at one runtime tool with `action_contract` + `id:` answers `inline action duplicates
+  existing action`. Three nodes in the SAME flow may share an `id:`. So a runtime tool used from several
+  flows needs one thin entry per flow — `enter_shopping_site` / `enter_checkout_site` /
+  `enter_bluemoonsoft` all call `AX_RPC_NAV.open_site`. `check:flows` pins the reference graph (node `id`,
+  `run`, `allowedTools`, and every `next` target) so a dangling name fails there instead of killing the
+  whole document at the extension.
+- **Opening a store before a search that navigates to its own URL is a page load spent for nothing.** The
+  durable adapters only existed on their own domain, so every search needed an opener node first. The
+  runtime reader holds every site's config regardless of the current page, so `shopping_open_mapped_store`
+  and the quote flow's `open_site` are deleted outright. Three flows DO still need to arrive somewhere
+  first — the checkout's cart, a same-site page navigation, and the single-site loop that searches
+  "whichever store is open" — and deleting their opener broke all three.
+- **The guarded cart is one implementation, driven by config.** Amazon had a second bespoke cart (212
+  lines) whose only genuinely amazon-specific steps were declining a protection-plan upsell and comparing
+  a cart counter; both are config keys (`upsell_pane_selector`, `upsell_decline_selector`,
+  `cart_count_selectors`). Two copies mean the guard that stops a wrong-model or higher-price add lives
+  twice with one copy untested. The durable adapter's THREE `pending: "navigating"` answers are gone: one
+  runtime call navigates, revalidates identity and price, adds, and confirms.
+- **Two callers, two approval shapes, and both are gates.** The multi-store flow approves a compared OFFER
+  and must carry `identity_approval` + `comparison_approval` + `cart_approval`. The single-site flow has no
+  comparison at all — its gate is `refine_item`, where the user picks one product out of the searched list
+  — so it declares `cart_approval: user_picked_searched_product`. Requiring comparison markers there would
+  break a flow that never had a comparison; accepting a call with no marker would leave the guard off for
+  half the callers.

@@ -1,11 +1,17 @@
---- Amazon's SEARCH read expressed as a storefront config.
+--- Amazon's SEARCH and CART expressed as a storefront config.
 ---
 --- Like ebay's, this search predates the shared adapter and does the same four things: navigate, wait,
 --- classify a captcha or a login, read cards and ask whether a next control is there. Declaring it as
 --- data lets the RPC reader serve it, which is what removes the last store from the durable path.
 ---
---- `AX_AMAZON` keeps the product page, the cart and the checkout: those are not part of this port, and
---- the selectors below are its own, moved rather than rewritten.
+--- The cart followed for the same reason, and it is the more valuable half. Amazon had a second, bespoke
+--- cart script — 212 lines whose only genuinely amazon-specific steps were declining a protection-plan
+--- upsell and comparing a cart counter. Both are config keys, so the runtime cart is ONE implementation
+--- instead of two: the guard that stops a wrong-model or higher-price add is then exercised by every store
+--- rather than living twice with one copy untested.
+---
+--- `AX_AMAZON` keeps the product-view read, the cart page read and the checkout: those are not part of
+--- this port, and the selectors below are its own, moved rather than rewritten.
 local M = AX_AMAZON
 if not M then
   error("amazon/scripts/00_common.lua must be loaded before 01_storefront_config.lua")
@@ -42,6 +48,39 @@ local CONFIG = {
   blocked_selectors = { { selector = 'form[action*="validateCaptcha"]', error = "captcha_required" } },
   login_selector = M.LOGIN_SELECTOR,
   login_urls = { "/ap/signin" },
+  -- Cart. The selectors are amazon's own, lifted from `add_to_cart.lua` and `00_common.lua`.
+  product_title_selectors = { "span#productTitle", "#title span#productTitle", "h1#title" },
+  product_price_selectors = {
+    "#corePrice_feature_div .a-offscreen",
+    ".priceToPay .a-offscreen",
+    "#price_inside_buybox",
+    "#apex_desktop .a-offscreen",
+  },
+  add_selectors = {
+    "#add-to-cart-button",
+    'input[name="submit.add-to-cart"]',
+    '#submit.add-to-cart input',
+    'input[name="submit.addToCart"]',
+  },
+  quantity_selectors = { "#quantity" },
+  add_ready_selector = M.ADD_TO_CART_READY_SELECTOR,
+  confirmation_selector = M.ADD_TO_CART_CONFIRM_SELECTOR,
+  confirmation_text_selectors = {
+    "#NATC_SMART_WAGON_CONF_MSG_SUCCESS",
+    "#attachDisplayAddBaseAlert",
+    "#attach-added-to-cart-message",
+    "#huc-v2-order-row-confirm-text",
+    "#sw-atc-confirmation",
+    "#ewc-content",
+  },
+  -- "Add a protection plan" stands between the click and the confirmation. Declining is the default:
+  -- nobody approved a second product.
+  upsell_pane_selector = M.ATTACH_PANE_SELECTOR,
+  upsell_decline_selector = M.ATTACH_DECLINE_SELECTOR,
+  cart_url = "https://www.amazon.com/gp/cart/view.html",
+  cart_url_markers = { "/gp/cart/view.html", "/cart/view.html", "/cart?" },
+  cart_count_selectors = { "#nav-cart-count", "#sc-subtotal-label-activecart" },
+  product_timeout = 8000,
   pagination = {
     mode = "query", param = "page", start = 1, step = 1, max_pages = 2,
     next_selector = "a.s-pagination-next",

@@ -573,20 +573,9 @@ flows:
         id: verify_request
         description: Deterministically verify the collected request is complete (service_query, user_requirements, a resolved 5-digit zip_code, and all four contact fields) before leaving collection. No LLM, no navigation. Routes back to collect_request whenever anything is still missing.
         next:
-          ok: open_site
+          ok: search
           collect: collect_request
         fallback: { invalidNext: collect, exhaustedNext: collect }
-
-      open_site:
-        kind: action_contract
-        id: open_site
-        description: Navigate to Thumbtack before searching. Idempotent — a no-op when already on the site. A cross-domain navigation is terminal in the SDK (it fires the nav and completes the call without a durable replay, since the owning site script unloads on the domain change); the planner then resumes this flow on thumbtack to run the search.
-        inputSelector:
-          - site
-        next:
-          search: search
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
 
       search:
         kind: action_contract
@@ -918,8 +907,8 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
 
       open_amazon:
-        kind: action
-        run: open_site
+        kind: action_contract
+        id: enter_shopping_site
         inputSelector:
           - site
         next:
@@ -1089,8 +1078,8 @@ flows:
           error: report
         fallback: { invalidNext: error, exhaustedNext: error }
       open:
-        kind: action
-        run: open_site
+        kind: action_contract
+        id: enter_checkout_site
         inputSelector:
           - site
         next:
@@ -1680,20 +1669,9 @@ flows:
           - choice_stage
           - quantity
         next:
-          add: open_selected_store
+          add: add_selected_offer
           invalid: choose_offer
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      open_selected_store:
-        kind: action_contract
-        id: shopping_open_selected_store
-        description: Open the approved offer's store before mutation; off-site navigation resumes this flow on arrival.
-        inputSelector:
-          - site
-        next:
-          add: add_selected_offer
-          error: report_cart
         fallback: { invalidNext: error, exhaustedNext: error }
 
       add_selected_offer:
@@ -1713,51 +1691,6 @@ flows:
           - comparison_approval
           - cart_approval
         next:
-          navigating: add_selected_offer_after_navigation
-          done: report_cart
-          error: report_cart
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      add_selected_offer_after_navigation:
-        kind: action_contract
-        id: shopping_add_selected_store_offer
-        description: Re-enter on the selected product page, then revalidate and perform the approved cart click.
-        inputSelector:
-          - site
-          - product_id
-          - quantity
-          - expected_unit_price
-          - expected_currency
-          - expected_identity_model
-          - identity_id
-          - comparison_id
-          - identity_approval
-          - comparison_approval
-          - cart_approval
-        next:
-          navigating: confirm_selected_offer_after_navigation
-          done: report_cart
-          error: report_cart
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      confirm_selected_offer_after_navigation:
-        kind: action_contract
-        id: shopping_add_selected_store_offer
-        description: Confirm the approved product in the cart after an optional cart-page navigation.
-        inputSelector:
-          - site
-          - product_id
-          - quantity
-          - expected_unit_price
-          - expected_currency
-          - expected_identity_model
-          - identity_id
-          - comparison_id
-          - identity_approval
-          - comparison_approval
-          - cart_approval
-        next:
-          navigating: report_cart
           done: report_cart
           error: report_cart
         fallback: { invalidNext: error, exhaustedNext: error }
@@ -1817,20 +1750,6 @@ flows:
       tried_queries: null
       page_stop_reason: null
     nodes:
-      open:
-        kind: action_contract
-        id: shopping_open_mapped_store
-        description: Open the mapped store before search; an off-site navigation resumes this task on arrival.
-        inputSelector:
-          - item
-          - index
-          - key
-          - context
-        next:
-          search: search
-          error: complete
-        fallback: { invalidNext: error, exhaustedNext: error }
-
       search:
         kind: action_contract
         id: shopping_search_one_store
@@ -1927,8 +1846,8 @@ flows:
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
       enter:
-        kind: action
-        run: open_site
+        kind: action_contract
+        id: enter_bluemoonsoft
         inputSelector:
           - site
         next:
@@ -2384,28 +2303,6 @@ flowTools:
         brand_aliases: { type: [string, "null"] }
         locked_hard_constraints: { type: [object, "null"], additionalProperties: true }
 
-  shopping_open_mapped_store:
-    description: Re-entrantly open one mapped store before invoking its site-specific search adapter.
-    execute: { kind: remote, tool: AX_open_site, timeoutMs: 30000 }
-    input:
-      site: tool.args.item.site
-    output:
-      next: { if: [{ var: result.error }, "error", "search"] }
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [item, index, key, context]
-      properties:
-        item:
-          type: object
-          additionalProperties: false
-          required: [site]
-          properties:
-            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
-        index: { type: number }
-        key: { type: string }
-        context: { type: object, additionalProperties: true }
-
   shopping_search_one_store:
     description: Search one mapped store with a runtime-side script that drives the page over RPC.
     execute:
@@ -2857,40 +2754,29 @@ flowTools:
         choice_stage: { type: string, enum: [asked] }
         quantity: { type: [integer, number] }
 
-  shopping_open_selected_store:
-    description: Re-entrantly open the deterministically selected store before the guarded cart adapter.
-    execute: { kind: remote, tool: AX_open_site, timeoutMs: 30000 }
-    input:
-      site: tool.args.site
-    output:
-      next: { if: [{ var: result.error }, "error", "add"] }
-      cart_error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [site]
-      properties:
-        site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
 
   shopping_add_selected_store_offer:
     description: Revalidate product identity and price, then add only the explicitly selected current offer. Never checks out or orders.
-    execute: { kind: remote, tool: AX_add_store_product_to_cart, timeoutMs: 120000 }
-    input:
-      site: tool.args.site
-      product_id: tool.args.product_id
-      quantity: tool.args.quantity
-      expected_unit_price: tool.args.expected_unit_price
-      expected_currency: tool.args.expected_currency
-      expected_identity_model: tool.args.expected_identity_model
-      identity_id: tool.args.identity_id
-      comparison_id: tool.args.comparison_id
-      identity_approval: tool.args.identity_approval
-      comparison_approval: tool.args.comparison_approval
-      cart_approval: tool.args.cart_approval
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.61_rpc_storefront", "_common.62_rpc_sites", "_common.67_rpc_cart"]
+      rpc:
+        # Everything the cart needs and nothing else: no form submit, and no way to reach a checkout.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.get_attr, dom.click, dom.set_value]
+        opTimeoutMs: 2000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_CART.add_to_cart(args)
+        end
     output:
-      next: { if: [{ var: result.pending }, "navigating", { if: [{ var: result.added }, "done", "error"] }] }
-      cart_status: { if: [{ var: result.pending }, "navigating", { if: [{ var: result.added }, "added", "failed"] }] }
-      cart_error: { if: [{ var: result.pending }, "navigation_pending", { if: [{ var: result.login_required }, "login_required", { var: result.error }] }] }
+      # There is no `navigating` branch any more: one call navigates, revalidates, adds and confirms. The
+      # durable adapter needed three of them because each navigation destroyed its context.
+      next: result.next
+      cart_status: { if: [{ var: result.added }, "added", "failed"] }
+      cart_error: { if: [{ var: result.login_required }, "login_required", { var: result.error }] }
       cart_confirmation: result.confirmation
       cart_url: result.cart_url
     effect: mutation
@@ -3385,14 +3271,113 @@ flowTools:
         regex: { type: string }
         limit: { type: [integer, number] }
 
-  navigate_page:
-    description: Navigate the current page to a same-site path or URL (a BlueMoonSoft sitemap page).
-    execute: { kind: remote, tool: AX_navigate, timeoutMs: 60000 }
-    input:
-      link: tool.args.link
+  # A runtime tool is INLINED into the flow that names it with `id:`, and an inline action cannot be
+  # shared across flows — three flows calling one entry tool compiles to "inline action duplicates
+  # existing action". `run:` is not the way out either: it resolves only against `kind: remote` actions,
+  # so it answers "references missing action" for a runtime tool. Hence one thin entry per flow.
+  enter_shopping_site:
+    description: Get the browser onto the store before the single-site shopping loop searches whichever store is open, and confirm it arrived.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.62_rpc_sites", "_common.66_rpc_navigate"]
+      rpc:
+        allow: [dom.get_location_href, nav.navigate]
+        opTimeoutMs: 2000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          args = type(args) == "table" and args or {}
+          args.site = args.site or "amazon"
+          return AX_RPC_NAV.open_site(args)
+        end
     output:
-      next: { if: [{ var: result.error }, "error", "go"] }
+      next: result.next
       error: result.error
+      page_href: result.href
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        site: { type: string }
+
+  enter_checkout_site:
+    description: Get the browser onto the store before the checkout reads its cart, and confirm it arrived.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.62_rpc_sites", "_common.66_rpc_navigate"]
+      rpc:
+        allow: [dom.get_location_href, nav.navigate]
+        opTimeoutMs: 2000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          args = type(args) == "table" and args or {}
+          args.site = args.site or "amazon"
+          return AX_RPC_NAV.open_site(args)
+        end
+    output:
+      next: result.next
+      error: result.error
+      page_href: result.href
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        site: { type: string }
+
+  enter_bluemoonsoft:
+    description: Get the browser onto bluemoonsoft before its sitemap search and same-site navigation, and confirm it arrived.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.62_rpc_sites", "_common.66_rpc_navigate"]
+      rpc:
+        allow: [dom.get_location_href, nav.navigate]
+        opTimeoutMs: 2000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          args = type(args) == "table" and args or {}
+          args.site = args.site or "bluemoonsoft"
+          return AX_RPC_NAV.open_site(args)
+        end
+    output:
+      next: result.next
+      error: result.error
+      page_href: result.href
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        site: { type: string }
+
+  navigate_page:
+    description: Navigate the current page to a same-site path or URL (a BlueMoonSoft sitemap page), and confirm it landed there.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.66_rpc_navigate"]
+      rpc:
+        # Read the current location, fire the navigation, poll for arrival. Nothing else.
+        allow: [dom.get_location_href, nav.navigate]
+        opTimeoutMs: 2000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_NAV.navigate_page(args)
+        end
+    output:
+      # The script confirms arrival, so it is the only thing that knows whether the page moved, refused, or
+      # landed somewhere else. Deriving a branch from `result.error` here would flatten those three.
+      next: result.next
+      error: result.error
+      page_href: result.href
     parameters:
       type: object
       additionalProperties: false
@@ -3511,15 +3496,31 @@ flowTools:
         candidates: { type: [array, "null"] }
 
   shopping_add_to_cart:
-    description: Add the picked product to the cart with the requested quantity. Navigates to the product page, clicks Add to Cart, declines optional warranty, reads the confirmation. Never places an order.
-    execute: { kind: remote, tool: AX_add_to_cart, timeoutMs: 90000 }
-    input:
-      product_id: tool.args.product_id
-      quantity: tool.args.quantity
+    description: Add the picked product to the cart with the requested quantity. Navigates to the product page, revalidates the price, clicks Add to Cart, declines the optional protection plan, and reads the confirmation. Never places an order.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.61_rpc_storefront", "_common.62_rpc_sites", "_common.67_rpc_cart"]
+      rpc:
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.get_attr, dom.click, dom.set_value]
+        opTimeoutMs: 2000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          args = type(args) == "table" and args or {}
+          -- The gate for this flow is `refine_item`, where the user picked THIS product out of the searched
+          -- list. Naming it here is what lets the shared cart refuse a call that carries no approval at all
+          -- while still serving a flow that has no comparison to approve.
+          args.cart_approval = "user_picked_searched_product"
+          args.site = args.site or "amazon"
+          return AX_RPC_CART.add_to_cart(args)
+        end
     output:
-      next: "done"
-      add_status: { if: [{ var: result.added }, "added", { var: result.pending }, "pending", "failed"] }
+      next: result.next
+      add_status: { if: [{ var: result.added }, "added", "failed"] }
       add_error: result.error
+      add_confirmation: result.confirmation
     effect: mutation
     consent: required
     idempotent: true
@@ -3637,21 +3638,6 @@ flowTools:
       required: [address]
       properties:
         address: { type: string }
-
-  open_site:
-    description: Navigate to the target site's home page before searching. Site-keyed and idempotent — a no-op when already on the site; off-site it fires the navigation. A cross-domain navigation is terminal (no durable replay — the site script unloads on the domain change); the planner resumes the flow on the destination.
-    execute: { kind: remote, tool: AX_open_site, timeoutMs: 60000 }
-    input:
-      site: tool.args.site
-    output:
-      next: { if: [{ var: result.error }, "error", "search"] }
-      error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [site]
-      properties:
-        site: { type: string, enum: [thumbtack, amazon, bluemoonsoft] }
 
   search_service:
     description: Search Thumbtack for local pros matching the service query in the resolved ZIP.

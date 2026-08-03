@@ -179,6 +179,11 @@ local PRICE_CUTOFF_MARKERS = { "배송비", "무료배송", "배송", "적립", 
   "shipping", "delivery", "postage", "coupon", "cashback", "reward" }
 
 --- The last `원` amount in the text, on a token boundary.
+--- The money parser is shared with the cart, which revalidates a price on the product page before it
+--- clicks. Two parsers would disagree about the same string, and the one guarding the money would be the
+--- one nobody exercised.
+S.parse_money = parse_money
+
 local function won_amount(text, pick_last)
   local value = tostring(text or "")
   local found, cursor = nil, 1

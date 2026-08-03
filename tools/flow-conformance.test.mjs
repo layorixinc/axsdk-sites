@@ -207,9 +207,13 @@ test('multi-store shopping discovers and locks product identity before ranking',
   // The hop chain and the durable pair are both gone: every storefront reads in the runtime.
   assert.ok(!common.flows.shopping_search_one_store.nodes.search_bespoke);
   assert.ok(!common.flowTools.shopping_search_one_store_durable);
-  assert.equal(nodes.add_selected_offer.next.navigating, 'add_selected_offer_after_navigation');
-  assert.equal(nodes.add_selected_offer_after_navigation.next.navigating, 'confirm_selected_offer_after_navigation');
-  assert.equal(nodes.confirm_selected_offer_after_navigation.next.done, 'report_cart');
+  // The durable re-entry chain is gone too. `open_selected_store → add → add_after_navigation →
+  // confirm_after_navigation` existed only because each navigation destroyed the call; one runtime call
+  // navigates, revalidates, adds and confirms.
+  assert.equal(nodes.add_selected_offer.next.done, 'report_cart');
+  assert.ok(!nodes.add_selected_offer.next.navigating, 'no navigating branch remains');
+  assert.ok(!nodes.add_selected_offer_after_navigation);
+  assert.ok(!nodes.confirm_selected_offer_after_navigation);
   assert.equal(common.flowTools.shopping_search_one_store.output.next, 'result.next');
 
   assert.equal(common.flows.shopping_search_one_store.nodes.normalize.id, 'shopping_normalize_store_result');
@@ -640,4 +644,152 @@ test('no runtime tool asks for more time than the platform grants', () => {
     if (deadline === undefined) continue;
     assert.ok(deadline >= 1 && deadline <= 120000, `${name} asks for ${deadline}ms`);
   }
+});
+
+test('opening a store before a runtime search is not a step', () => {
+  // The durable adapters only existed once the browser was on their domain, so every search needed a
+  // separate node to get there first. A runtime search navigates to the search URL itself — the reader
+  // holds every site's config regardless of the current page — so the open is a whole page load spent to
+  // arrive somewhere the next call leaves immediately.
+  const common = parseFlow('_common/flows.yaml');
+
+  // The opener itself is NOT gone — three flows genuinely need to BE on a site before their next step
+  // (the checkout's cart, a same-site page navigation, a search of whichever store is open). What is gone is
+  // opening a store before a search that navigates to its own URL.
+  //
+  // One entry tool per calling flow. A runtime tool is INLINED by the flow that names it with `id:`, and
+  // an inline action cannot be shared — three flows on one entry tool compiles to "inline action duplicates
+  // existing action". `run:` is not the way out: it resolves only against `kind: remote` actions, so it
+  // answers "references missing action" for a runtime tool. Both were measured against the compiler.
+  for (const name of ['enter_shopping_site', 'enter_checkout_site', 'enter_bluemoonsoft']) {
+    assert.equal(common.flowTools[name]?.execute?.implementation, 'lua', `${name} runs in the runtime`);
+  }
+  assert.ok(!common.flowTools.open_site, 'the shared opener is gone');
+  assert.ok(!common.flowTools.shopping_open_mapped_store, 'and so is the per-store opener');
+
+  const quote = common.flows.request_service_quote.nodes;
+  assert.ok(!quote.open_site, 'the quote flow opens nothing');
+  assert.equal(quote.verify_request.next.ok, 'search', 'a verified request searches directly');
+
+  const worker = common.flows.shopping_search_one_store.nodes;
+  assert.ok(!worker.open, 'the worker opens nothing');
+  assert.equal(Object.keys(worker)[0], 'search', 'and starts at its search');
+});
+
+test('a same-site navigation runs in the runtime', () => {
+  // `AX_navigate` builds a URL from a link plus params and confirms arrival against an expected URL. That
+  // is `nav.navigate` + `nav.wait_for_navigation` + `dom.get_location_href` — the combination the search
+  // and quote paths already run. It was never a platform-owned command.
+  const common = parseFlow('_common/flows.yaml');
+  const tool = common.flowTools?.navigate_page?.execute ?? {};
+
+  assert.equal(tool.implementation, 'lua');
+  assert.ok(tool.modules?.includes('_common.66_rpc_navigate'));
+  assert.ok(tool.rpc?.allow?.includes('nav.navigate'));
+  assert.equal(common.flowTools.navigate_page.output.next, 'result.next');
+});
+
+test('the guarded cart runs in the runtime, and its guards live in the script', () => {
+  // A cart that spends money must not depend on a prompt for its approvals. The markers are checked in the
+  // script, before any op, so a call that should not touch the page does not touch it.
+  const common = parseFlow('_common/flows.yaml');
+  for (const name of ['shopping_add_selected_store_offer', 'shopping_add_to_cart']) {
+    const tool = common.flowTools?.[name] ?? {};
+    assert.equal(tool.execute?.kind, 'runtime', `${name} must run in the runtime`);
+    assert.ok(tool.execute?.modules?.includes('_common.67_rpc_cart'), `${name} must declare the cart module`);
+    assert.equal(tool.effect, 'mutation', `${name} stays a declared mutation`);
+    assert.equal(tool.consent, 'required');
+  }
+
+  const source = read('_common/rpc/67_rpc_cart.lua');
+  assert.match(source, /approval ~= "user_selected_compared_offer"/);
+  assert.match(source, /approval ~= "user_picked_searched_product"/);
+  assert.match(source, /args\.identity_approval ~= "locked_product_identity"/);
+  // Comments are stripped: the prose says "never checks out", and the point is that no CODE does. A
+  // checkout selector or a config key naming one would be the real leak.
+  const code = source.replace(/^\s*--.*$/gm, '');
+  assert.ok(
+    !/checkout|place_?order|buy_?now|proceed_?to/i.test(code),
+    'the cart script must not know how to order',
+  );
+});
+
+test('opening the store before the runtime cart is not a step either', () => {
+  // Same reason as the search: the cart navigates to the product page itself, and the reader holds every
+  // site's config regardless of which page is open.
+  const common = parseFlow('_common/flows.yaml');
+  assert.ok(!common.flowTools.shopping_open_selected_store, 'the opener tool is gone');
+  const nodes = Object.values(common.flows).flatMap((flow) => Object.keys(flow.nodes ?? {}));
+  assert.ok(!nodes.includes('open_selected_store'), 'and so is its node');
+});
+
+test('every node action resolves to a tool that exists', () => {
+  // Removing a tool leaves any node that still names it dangling, and the failure arrives as
+  // "flow document failed to compile" at the extension — after a push, with the whole document dead. The
+  // reference graph is right here in the document, so check it here.
+  const common = parseFlow('_common/flows.yaml');
+  const tools = new Set(Object.keys(common.flowTools ?? {}));
+  const missing = [];
+
+  for (const [flowName, flow] of Object.entries(common.flows ?? {})) {
+    for (const [nodeName, node] of Object.entries(flow.nodes ?? {})) {
+      // `allowedTools` holds either a bare name or `{ tool, when }` — a tool offered only when the state
+      // satisfies a condition. Both name a tool that has to exist.
+      const named = (node.allowedTools ?? []).map((entry) => (typeof entry === 'string' ? entry : entry?.tool));
+      // `kind: action` names its tool with `run:` rather than `id:` — the shape the compiler complained
+      // about ("nodes.open_amazon.run references missing action"), and the one this check first missed.
+      for (const id of [node.id, node.run, ...named]) {
+        if (id && !tools.has(id)) missing.push(`${flowName}.${nodeName} -> ${id}`);
+      }
+    }
+  }
+
+  assert.deepEqual(missing, [], `dangling references: ${missing.join(' | ')}`);
+});
+
+test('every node a flow routes to exists', () => {
+  // The other half of the same graph: a `next` pointing at a deleted node is just as fatal, and just as
+  // checkable without a browser.
+  const common = parseFlow('_common/flows.yaml');
+  const dangling = [];
+
+  for (const [flowName, flow] of Object.entries(common.flows ?? {})) {
+    const nodes = new Set(Object.keys(flow.nodes ?? {}));
+    for (const [nodeName, node] of Object.entries(flow.nodes ?? {})) {
+      for (const target of Object.values(node.next ?? {})) {
+        if (typeof target === 'string' && !nodes.has(target)) {
+          dangling.push(`${flowName}.${nodeName} -> ${target}`);
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(dangling, [], `dangling routes: ${dangling.join(' | ')}`);
+});
+
+test('a tool shared ACROSS flows is referenced, not inlined', () => {
+  // Measured against the compiler, in four steps:
+  //   1. a `flowTools` entry plus nodes using `kind: action` + `run:`   -> compiles
+  //   2. removing the entry                                             -> "references missing action"
+  //   3. keeping it and switching to `action_contract` + `id:` in three
+  //      DIFFERENT flows                                                -> "inline action duplicates
+  //                                                                         existing action"
+  //   4. three nodes in the SAME flow sharing an `id:`                  -> compiles (shopping_search_one_store)
+  //
+  // So `id:` inlines the action once per flow, and a tool used from more than one FLOW has to be referenced
+  // with `run:`. [INFERENCE] the scoping is per flow — that is what these four observations fit, and the
+  // compiler's internals are not ours to read.
+  const common = parseFlow('_common/flows.yaml');
+  const flowsById = new Map();
+
+  for (const [flowName, flow] of Object.entries(common.flows ?? {})) {
+    for (const node of Object.values(flow.nodes ?? {})) {
+      if (!node.id) continue;
+      flowsById.set(node.id, new Set([...(flowsById.get(node.id) ?? []), flowName]));
+    }
+  }
+
+  const shared = [...flowsById].filter(([, flows]) => flows.size > 1)
+    .map(([id, flows]) => `${id}: ${[...flows].join(', ')}`);
+  assert.deepEqual(shared, [], `these must use run: instead of id: ${shared.join(' | ')}`);
 });

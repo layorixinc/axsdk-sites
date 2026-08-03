@@ -212,6 +212,49 @@ RPC_SITES["amazon"] = {
   login_urls = {
     "/ap/signin"
   },
+  product_title_selectors = {
+    "span#productTitle",
+    "#title span#productTitle",
+    "h1#title"
+  },
+  product_price_selectors = {
+    "#corePrice_feature_div .a-offscreen",
+    ".priceToPay .a-offscreen",
+    "#price_inside_buybox",
+    "#apex_desktop .a-offscreen"
+  },
+  add_selectors = {
+    "#add-to-cart-button",
+    "input[name=\"submit.add-to-cart\"]",
+    "#submit.add-to-cart input",
+    "input[name=\"submit.addToCart\"]"
+  },
+  quantity_selectors = {
+    "#quantity"
+  },
+  add_ready_selector = "#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin], #attach-warranty-pane:not(.aok-hidden), #authportal-main-section, #ap_email, #ap_password, form[action*=\"validateCaptcha\"]",
+  confirmation_selector = "#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin]",
+  confirmation_text_selectors = {
+    "#NATC_SMART_WAGON_CONF_MSG_SUCCESS",
+    "#attachDisplayAddBaseAlert",
+    "#attach-added-to-cart-message",
+    "#huc-v2-order-row-confirm-text",
+    "#sw-atc-confirmation",
+    "#ewc-content"
+  },
+  upsell_pane_selector = "#attach-warranty-pane:not(.aok-hidden)",
+  upsell_decline_selector = "#attach-warranty-pane:not(.aok-hidden) #attachSiNoCoverage input, #attach-warranty-pane:not(.aok-hidden) #attachSiNoCoverage .a-button-input, #attach-warranty-pane:not(.aok-hidden) #attachSiNoCoverage",
+  cart_url = "https://www.amazon.com/gp/cart/view.html",
+  cart_url_markers = {
+    "/gp/cart/view.html",
+    "/cart/view.html",
+    "/cart?"
+  },
+  cart_count_selectors = {
+    "#nav-cart-count",
+    "#sc-subtotal-label-activecart"
+  },
+  product_timeout = 8000,
   pagination = {
     mode = "query",
     param = "page",

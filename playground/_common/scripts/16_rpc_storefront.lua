@@ -90,9 +90,81 @@ local function fields_for(config)
   return fields
 end
 
-local function parse_price(text)
+--- The amount and the currency the text itself states. A symbol in the text beats the site default:
+--- ranking 13,190 KRW against 13.95 USD as if both were the base was a real defect, and the store that
+--- looked cheapest was simply quoted in a smaller unit.
+local CURRENCY_MARKS = {
+  { "US$", "USD" }, { "USD", "USD" }, { "$", "USD" },
+  { "KRW", "KRW" }, { "₩", "KRW" }, { "원", "KRW" },
+  { "EUR", "EUR" }, { "€", "EUR" },
+  { "GBP", "GBP" }, { "£", "GBP" },
+  { "JPY", "JPY" }, { "¥", "JPY" },
+}
+
+local function amount_in(text)
   local raw = tostring(text or ""):gsub(",", "")
   return tonumber(raw:match("%d+%.?%d*"))
+end
+
+local function parse_money(text, fallback_currency)
+  local value = non_empty(text)
+  if not value then return nil, non_empty(fallback_currency) end
+  for index = 1, #CURRENCY_MARKS do
+    local mark, code = CURRENCY_MARKS[index][1], CURRENCY_MARKS[index][2]
+    if value:find(mark, 1, true) then
+      local amount = amount_in(value)
+      if amount then return amount, code end
+    end
+  end
+  return amount_in(value), non_empty(fallback_currency)
+end
+
+local function parse_price(text)
+  return (amount_in(text))
+end
+
+local SHIPPING_WORDS = { "shipping", "delivery", "postage", "배송비", "배송료" }
+local FREE_PHRASES = { "free shipping", "free delivery", "free postage", "shipping: free",
+  "무료배송", "무료 배송", "배송비 무료" }
+
+--- The shipping figure a row states, or nil when it states none.
+---
+--- nil and 0 are different answers and the comparison ranks on the difference: 무료배송 is zero, and a
+--- row that simply never mentions shipping has an UNKNOWN total. Reading the second as the first makes
+--- a store the cheapest on the page for free.
+--- `from_row_text` says the source is the card's whole concatenated text rather than a field the site
+--- set aside for shipping. There a bare number next to a delivery word is not a fee: live on 11st a card
+--- came back with a 4.7 KRW delivery charge, which was its seller rating sitting inside the window. So
+--- the row text must state a currency; a dedicated field may state a bare number.
+local function parse_shipping(text, fallback_currency, from_row_text)
+  local value = non_empty(text)
+  if not value then return nil, non_empty(fallback_currency) end
+  local lowered = value:lower()
+
+  for index = 1, #FREE_PHRASES do
+    if lowered:find(FREE_PHRASES[index], 1, true) then return 0, non_empty(fallback_currency) end
+  end
+
+  local first = nil
+  for index = 1, #SHIPPING_WORDS do
+    local at = lowered:find(SHIPPING_WORDS[index], 1, true)
+    if at and (not first or at < first) then first = at end
+  end
+  -- A number with no shipping word near it is a reward point, a rating count, anything.
+  if not first then return nil, non_empty(fallback_currency) end
+
+  local fragment = value:sub(first, first + 60)
+  if from_row_text then
+    local marked = false
+    for index = 1, #CURRENCY_MARKS do
+      if fragment:find(CURRENCY_MARKS[index][1], 1, true) then marked = true break end
+    end
+    if not marked then return nil, non_empty(fallback_currency) end
+  end
+
+  local amount, currency = parse_money(fragment, fallback_currency)
+  if not amount then return nil, non_empty(fallback_currency) end
+  return amount, currency
 end
 
 --- The id a card carries, from its link or from the attribute the site hides it in. Patterns are tried
@@ -132,8 +204,20 @@ local function candidate_from(config, row)
   local href = non_empty(row.url)
   local id = product_id(config, href, row.root_id)
   local name = non_empty(row.title) or non_empty(row.image_alt)
-  local price = parse_price(row.price_text)
+  local row_text = non_empty(row.text)
+
+  -- Several adapters put no price in a field of its own and declare `price_from_text` instead; the same
+  -- holds for shipping on six of the eight. Mining the row text WITHOUT that declaration would read a
+  -- reward-point figure as a delivery fee.
+  local price_source = non_empty(row.price_text) or (config.price_from_text and row_text or nil)
+  local price, currency = parse_money(price_source, config.default_currency)
   if not id or not name or not price then return nil end
+
+  local shipping_field = non_empty(row.shipping_text)
+  local shipping_source = shipping_field or (config.shipping_from_text and row_text or nil)
+  local shipping_cost, shipping_currency =
+    parse_shipping(shipping_source, currency, shipping_field == nil)
+
   return {
     site = config.site,
     product_id = id,
@@ -141,7 +225,9 @@ local function candidate_from(config, row)
     name = name,
     price = price,
     price_text = non_empty(row.price_text),
-    currency = config.default_currency,
+    currency = currency or config.default_currency,
+    shipping_cost = shipping_cost,
+    shipping_currency = shipping_currency,
     url = (config.product_url_prefix and (config.product_url_prefix .. id)) or href,
     image_url = non_empty(row.image_url),
     -- The comparison ranks on these. A row that reaches it without a shipping figure has no known

@@ -471,3 +471,93 @@ test('the candidate carries what the comparison ranks on', () => {
   assert.equal(candidate.rating_text, '4.5');
   assert.equal(candidate.condition, '새 상품');
 });
+
+// The comparison ranks on a TOTAL, so a row that reaches it with only `shipping_text` has no known total
+// and is folded out of the default window. Parsing that text is therefore not a nicety — without it the
+// window the user reads is empty.
+//
+// The distinction that decides correctness: 무료배송 is 0 and "no shipping information" is nil. Treating
+// the second as the first makes a store look like the cheapest one on the page.
+
+// The reader only requests fields the config declares — the contract asserted just above — so a
+// fixture that sets a row field without declaring its selector is testing nothing.
+const COSTED = { ...CONFIG, result_shipping_selector: '.ship', shipping_from_text: true, price_from_text: true };
+const costRow = (over) => ({ text: '무선 마우스 9,900원', url: 'https://www.11st.co.kr/products/55', title: '무선 마우스', price_text: '9,900원', ...over });
+const costOf = (over, config = COSTED) => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [costRow(over)] } });
+  return search(page, {}, config).value.candidates[0];
+};
+
+test('a stated shipping fee becomes a number in its own currency', () => {
+  const c = costOf({ shipping_text: '배송비 2,500원' });
+  assert.equal(c.shipping_cost, 2500);
+  assert.equal(c.shipping_currency, 'KRW');
+});
+
+test('free shipping is zero, not unknown', () => {
+  assert.equal(costOf({ shipping_text: '무료배송' }).shipping_cost, 0);
+  assert.equal(costOf({ shipping_text: 'Free shipping' }).shipping_cost, 0);
+});
+
+test('no shipping information is unknown, never zero', () => {
+  // A row with nothing to say about shipping must not be ranked as if it shipped for nothing.
+  const c = costOf({ shipping_text: '내일 도착' });
+  assert.equal(c.shipping_cost, undefined);
+});
+
+test('a currency symbol in the text wins over the site default', () => {
+  const c = costOf({ price_text: '$12.99', shipping_text: 'Shipping $3.00' });
+  assert.equal(c.price, 12.99);
+  assert.equal(c.currency, 'USD');
+  assert.equal(c.shipping_cost, 3);
+  assert.equal(c.shipping_currency, 'USD');
+});
+
+test('a store that hides shipping in the row text is still read', () => {
+  // Six of the eight adapters declare `shipping_from_text`, because the fee is not in a field of its own.
+  const c = costOf({ text: '무선 마우스 9,900원 무료배송', shipping_text: undefined });
+  assert.equal(c.shipping_cost, 0);
+});
+
+test('the row text is not mined for shipping unless the site says so', () => {
+  // Guessing would read "2,500" out of any row that happens to mention a number near a delivery word.
+  const c = costOf({ text: '무선 마우스 9,900원 배송비 2,500원', shipping_text: undefined }, { ...CONFIG, result_shipping_selector: '.ship', price_from_text: true });
+  assert.equal(c.shipping_cost, undefined);
+});
+
+test('a number with no shipping word nearby is not a shipping fee', () => {
+  const c = costOf({ shipping_text: '2,500 포인트 적립' });
+  assert.equal(c.shipping_cost, undefined);
+});
+
+test('a bare number near a shipping word in the row text is not a fee', () => {
+  // Live on 11st: a card named EMBLEM came back with `shipping_cost: 4.7` — its seller rating, sitting
+  // inside the window after a delivery word in the card's concatenated text. A 4.7 KRW delivery fee makes
+  // that row look nearly free in a total-cost comparison.
+  //
+  // A dedicated shipping field may hold a bare number; the row text may not. There the figure has to
+  // carry a currency mark to be believed.
+  const rowText = '무선 마우스 9,900원 배송비 판매자 평점4.7 리뷰 (23)';
+  const page = makePage({
+    href: 'https://www.google.com/',
+    afterNavigate: { 'li.card': [{ text: rowText, url: 'https://www.11st.co.kr/products/55', title: '무선 마우스', price_text: '9,900원', shipping_text: '' }] },
+  });
+  assert.equal(search(page, {}, COSTED).value.candidates[0].shipping_cost, undefined);
+});
+
+test('a fee stated with its currency in the row text is still read', () => {
+  const rowText = '무선 마우스 9,900원 배송비 2,500원 판매자 평점4.7';
+  const page = makePage({
+    href: 'https://www.google.com/',
+    afterNavigate: { 'li.card': [{ text: rowText, url: 'https://www.11st.co.kr/products/55', title: '무선 마우스', price_text: '9,900원', shipping_text: '' }] },
+  });
+  assert.equal(search(page, {}, COSTED).value.candidates[0].shipping_cost, 2500);
+});
+
+test('a dedicated shipping field may state a bare number', () => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    afterNavigate: { 'li.card': [{ text: 'x', url: 'https://www.11st.co.kr/products/55', title: '무선 마우스', price_text: '9,900원', shipping_text: 'shipping 2500' }] },
+  });
+  assert.equal(search(page, {}, COSTED).value.candidates[0].shipping_cost, 2500);
+});

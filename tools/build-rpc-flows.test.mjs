@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import { parse } from 'yaml';
 
-import { buildRpcFlows } from './build-rpc-flows.mjs';
+import { buildRpcFlows, emitWorkspace } from './build-rpc-flows.mjs';
 
 // Lua is authored as files — reviewed, unit tested, diffed. The runtime wants it inside the flow
 // document (until the module registry ships), and hand-inlining thousands of lines into YAML would end
@@ -179,4 +179,25 @@ test('an unresolvable module fails the build in either delivery mode', () => {
   const root = workspace({ '_common/flows.yaml': FLOWS, '_common/scripts/helpers.lua': 'HELPERS = {}\n' });
   const paths = { '_common.helpers': '_common/scripts/helpers.lua' };
   assert.throws(() => buildRpcFlows({ root, modulePaths: paths, delivery: 'registry' }), /_common\.reader/);
+});
+
+test('an emitted workspace can keep the module names instead of the sources', () => {
+  // The two halves travel separately in the real composition: the flow document goes through the
+  // clientFlows overlay (it is an `extends: app` overlay, not an app document — pushing it as one fails
+  // with "actions must define at least one action"), while the modules go in the app package. A
+  // workspace that can only be emitted with sources inlined cannot express that.
+  const root = workspace({
+    '_common/flows.yaml': FLOWS,
+    '_common/scripts/helpers.lua': 'HELPERS = { tag = "helper-source" }\n',
+    '_common/scripts/reader.lua': 'READER = {}\n',
+    'index.md': '# sites\n',
+  });
+  const dest = join(mkdtempSync(join(tmpdir(), 'rpcemit-')), 'out');
+
+  const report = emitWorkspace({ root, dest, delivery: 'registry' });
+
+  const emitted = readFileSync(join(dest, '_common/flows.yaml'), 'utf8');
+  assert.ok(!emitted.includes('helper-source'), 'the source must not travel in the emitted document');
+  assert.match(emitted, /modules:/);
+  assert.equal(report.moduleSources['_common.helpers'], 'HELPERS = { tag = "helper-source" }\n');
 });

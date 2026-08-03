@@ -117,9 +117,16 @@ function flowDocuments(root) {
   return found;
 }
 
-/** Emits a complete runnable workspace copy (index, site layers, built flows) under `dest`. */
-export function emitWorkspace({ root, dest }) {
-  const built = buildRpcFlows({ root });
+/**
+ * Emits a complete runnable workspace copy (index, site layers, built flows) under `dest`.
+ *
+ * `delivery` decides whether the emitted documents carry their Lua. The two halves travel separately
+ * in the real composition: the flow document is an `extends: app` OVERLAY and goes through
+ * `clientFlows`, while the modules go in the app package. Pushing the overlay as an app document fails
+ * validation ("actions must define at least one action") — it was never a whole document.
+ */
+export function emitWorkspace({ root, dest, delivery = 'inline' }) {
+  const built = buildRpcFlows({ root, delivery });
   rmSync(dest, { recursive: true, force: true });
   mkdirSync(dest, { recursive: true });
   cpSync(root, dest, { recursive: true });

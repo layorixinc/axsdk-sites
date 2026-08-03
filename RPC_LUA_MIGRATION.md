@@ -383,18 +383,26 @@ dom.get_location_href → received, 응답 없음 (문서가 unload 중)
 
 **게이트**: `npm run test:lua` 197개 그대로 통과(파일 위치만 바뀜), `check:flows` 통과.
 
-### Phase 3 — 스토어프론트 어댑터 (2~3일) — **선행: Playground 패키지 모드**
+### Phase 3 — 스토어프론트 어댑터 (2~3일) — **전달 경로 증명 완료**
 `60_storefront.lua`(823) + 8개 CONFIG → RPC 툴 1개. 리더 로직은 §4 호환성에 따라 무변경 이식하고,
 바꾸는 것은 **탐색과 대기**뿐이다.
 
-**플랫폼 쪽은 열렸다**(10차): 시험용 앱 `axsdk-sites-sandbox`가 사이트 origin에서 열리고, 패키지
-푸시가 동작한다(revision 13→14, 모듈 2개 22,064 B, 모듈별 sha256, **문서 51.5 → 26.0 KiB**).
+**전달 조합이 라이브로 확정됐다(2026-07-27).** 문서에 Lua 0줄, 모듈은 앱 패키지에서:
 
-막힌 것은 우리 하니스다. Playground는 저장 오버레이를 전제해서, `clientFlows.stored`를 끄고 패키지를
-권위로 삼으면 확장이 `binding:render-failed`(`hasSites:false`)로 세션을 아예 만들지 않고 `ax send`가
-타임아웃까지 빈 응답을 준다 — 플로우가 아무것도 못 만든 것과 구별되지 않는다. `playground sync`는 그
-구성에서 영영 기다린다. **선행 작업**: 패키지 모드(저장 활성화 대기 대신 앱 패키지 revision/hash로
-검증)를 하니스에 넣는다. 그 전까지 패키지 검증은 HTTP 계층까지만이다.
+```
+앱 패키지     flowDocument = 플랫폼 소유(앱 문서) · luaModules = 우리 모듈
+clientFlows   우리 flows.yaml 오버레이 — execute.modules 는 이름만
+결과          RPC SEARCH OK · found=22 · cards=24  (실제 11번가, 24.8s)
+```
+
+**D15를 정정한다**: "프로덕션 = 앱 패키지 push"는 반쪽이었다. 우리 `_common/flows.yaml`은 `extends: app`
+**오버레이**이지 앱 문서가 아니다 — 앱 문서로 밀면 `actions must define at least one action`으로 거부된다.
+앱 문서는 플랫폼이 소유하고, 우리가 패키지에 싣는 것은 **`luaModules`뿐**이다. 그래서
+`package:verify --modules-only`가 있다: 우리가 만들지 않은 문서를 대조하면 영구 불일치가 나고, 영구
+불일치는 아무도 안 읽는 검사가 된다.
+
+여기까지 오는 데 걸린 것들(전부 해결): R20 도메인 허용목록 · R21 배포 엔드포인트가 `defaults`/`tools`를
+안 씀 · R22 `app.translations`가 NULL(`Object.keys(null)`) · 우리 문서에 `contexts:` 섹션 누락.
 
 ```lua
 function run(args)

@@ -402,15 +402,26 @@ console (cache-sticky `raw.githubusercontent.com` → **test from the store with
   shape differs per delivery path: the package takes `luaModules` as a **name→source map**, the overlay
   takes either, and the session registry (`POST /axsdk/v2/lua`) takes one `{name, source}` per call
   because it is an imperative "replace this one".
-- **The Playground harness cannot yet verify an app package in the browser.** It assumes the stored
-  overlay: turn `clientFlows.stored` off (so the package is authoritative) and the extension logs
-  `binding:render-failed` with `hasSites:false`, never attempts a session, and `ax send` returns an
-  empty reply after the full timeout — indistinguishable from a flow that produced nothing. Worse,
-  `playground sync` then blocks forever waiting for a local activation that configuration cannot
-  produce. Recovery: rewrite `axsdk:extension:config` from `.env` with
-  `clientFlows {remoteSites:false, stored:true}`, then `sync --root=dist/playground`. Verifying package
-  delivery end to end needs a package mode in the harness; the platform side already works
-  (push → revision bump, hashes per module).
+- **Module delivery is a COMPOSITION, proven live**: the app package carries `luaModules` and the
+  platform's own app document; our `flows.yaml` rides the `clientFlows` overlay declaring
+  `execute.modules` by name. Our document is an `extends: app` OVERLAY — pushing it as an app document
+  is rejected (`actions must define at least one action`) and, if it is accepted anyway on a sandbox,
+  the turn answers with the raw terminal template because the `app:` layer is missing. Verify with
+  `npm run package:verify --modules-only`; comparing a document we did not build reports a permanent
+  mismatch, and a permanently red check is one nobody reads.
+- **A flow document MUST declare a `contexts:` section.** Without it the session config carries
+  `contexts: undefined`. `check:flows` asserts it for every shipped document.
+- **`axsdk:extension:config` has no `clientFlows` key.** Writing one changes nothing —
+  `build-axsdk-config.ts` reads `remoteSiteFlowsEnabled` / `storedFlowsEnabled` and derives
+  `clientFlows` from them. An edit to the wrong key looks applied (it persists) and silently does not
+  take, which is how a whole afternoon gets attributed to the wrong variable.
+- **Recovery from a broken Playground profile:** rewrite `axsdk:extension:config` from `.env`, reload
+  the extension, then `node tools/playground.mjs sync --root=dist/playground`. Do NOT run `sync` while
+  the profile is misconfigured — it blocks waiting for a local activation that cannot happen (measured:
+  still waiting at 900s).
+- **`npm run package:verify` compares the built workspace against what an app serves**, part by part
+  (`sha256:` + 12 hex, the server's own format). `package:push` pushes and re-reads. Both refuse the
+  production app id outright.
 - **`run` vs `call`:** prefer durable `run`; `call` is one turn and returns a pending marker for any
   navigating/fetching step.
 - **`ax run` / `ax call` nest the command result under `.value`.** The CLI prints the durable envelope

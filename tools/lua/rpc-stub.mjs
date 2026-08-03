@@ -37,6 +37,8 @@ export function makePage(spec) {
     navigated: null,
     pollsSinceNavigate: 0,
     failHrefTimes: spec.failHrefTimes ?? 0,
+    sequence: spec.sequence ?? null,
+    sequenceAt: {},
   };
 
   page.record = (op, params) => { page.ops.push({ op, params }); };
@@ -73,7 +75,16 @@ export function installRpcStub(lua, page, { allow } = {}) {
   const guard = (op) => {
     if (allow && !allow.includes(op)) throw new Error(`rpc op '${op}' is not allowed`);
   };
-  const rowsFor = (selector) => page.dom[selector] ?? [];
+  // A CSS list matches ANY of its parts, the way `querySelectorAll` does. A stub that only matched the
+  // whole string reported an empty page for a reader whose selector merely listed a fallback.
+  const rowsFor = (selector) => {
+    if (page.dom[selector]) return page.dom[selector];
+    for (const part of String(selector ?? '').split(',')) {
+      const key = part.trim();
+      if (key && page.dom[key]) return page.dom[key];
+    }
+    return [];
+  };
 
   const api = {
     'dom.get_location_href': () => {
@@ -96,6 +107,17 @@ export function installRpcStub(lua, page, { allow } = {}) {
       return first.text ?? '';
     },
     'dom.query_all': (selector, fields, limit) => {
+      // A hydrating list answers a different count on each poll. A reader that settles has to be able to
+      // fail here — reading the first answer would report a half-rendered page as the final one.
+      const seqKey = page.sequence && (page.sequence[selector] ? selector : String(selector||"").split(",").map(s=>s.trim()).find(s=>page.sequence[s]));
+      if (seqKey) {
+        const steps = page.sequence[seqKey];
+        const rows = steps[Math.min(page.sequenceAt[seqKey] ?? 0, steps.length - 1)];
+        page.sequenceAt[seqKey] = (page.sequenceAt[seqKey] ?? 0) + 1;
+        page.tick();
+        page.record('dom.query_all', { selector, fields, limit });
+        return rows.slice(0, limit ?? rows.length);
+      }
       page.tick();
       const rows = rowsFor(selector).slice(0, limit ?? 24);
       // Mirrors `queryLuaElements`: a field that matches nothing is ABSENT, not null-ish. Our readers use

@@ -461,10 +461,12 @@ ebay 6, aliexpress 6, gmarket 2, etsy 1, walmart `price_unavailable`, naver `acc
 못 한다"고 말한 경우, 그 문장을 그대로 싣는다) · `quote_cta_unreachable`(CTA는 있는데 무엇으로도 닿지
 못함) · `quote_dialog_did_not_open`. 각각 실제로 라이브에서 한 번씩 관측했다.
 
-**남은 것**: 첫 스텝의 라디오는 선택되고(`checked` 확인) `Next`도 눌리는데 스텝이 넘어가지 않는다
-(`advance_not_confirmed` → `quote_stalled`). 다음 서베이 대상은 "선택은 됐는데 폼이 진행을 거부하는
-이유"다. 플랫폼 쪽 걸림돌 두 건은 `RPC_LUA_RUNTIME_REQUESTS_12.md`(R23 `page.eval`
-`op_not_permitted` · R24 op 왕복 ~1초와 `deadlineMs` 120000 상한)에 냈다.
+**남은 것**: 폼은 이제 실제로 전진한다(라이브 5스텝, `advance_reason: advanced`). 막는 것은 **왕복
+예산**이다 — 스텝당 약 15회 × op당 약 1초, `deadlineMs` 상한 120000. 그래서 스크립트는 왕복을 세고
+`quote_budget_spent`로 무엇을 봤는지 보고한 뒤 멈춘다(플랫폼이 죽이는 대신). 플랫폼이 12차 회신에서
+`dom.read_many`(배치 읽기)와 `dom.click_text`(라벨 클릭)를 넣었고 **우리는 폴백과 함께 이미 채택했다**;
+다만 클라이언트(SDK)가 아직 구현하지 않아 지금은 폴백 경로가 돈다. 측정과 차단 상태는
+`RPC_LUA_RUNTIME_REQUESTS_12.md` §5에 있다.
 
 ### Phase 6 — 정리 (1일)
 `kind: remote` 툴 38개 제거 확인, `axsdk:lua` 스토어/`ax sync`의 Lua 경로 정리, `SCHEMA.md`(40개 엔트리)를

@@ -91,11 +91,44 @@ adapters.adapters.open_quote.execute.rpc.deadlineMs must be an integer between 1
 
 ## 3. 우리 쪽 상태
 
-게이트: `test:lua` **310** · `check:flows` **78** · `test:commerce` 24/24 + 17/17 ·
-`test:playground` 47 · `build:lua:check` 13파일. 앱 패키지 `browser-extension` revision 38,
+게이트: `test:lua` **317** · `check:flows` **79** · `test:commerce` 24/24 + 17/17 ·
+`test:playground` 47 · `build:lua:check` 13파일. 앱 패키지 `browser-extension` revision 43,
 `luaModules` 17개.
 
-라이브에서 확인된 것: 검색·후보 브라우징·승인 게이트·다이얼로그 열기·위저드 진입·제출 노드의
-`quote_reached_submit` 가드 거부(전송 없음). 남은 것: 다이얼로그 첫 스텝의 `Next`가 눌리는데도 스텝이
-넘어가지 않는다(`advance_not_confirmed`). 라디오는 `id`를 갖고 있고 클릭 후 `checked`도 확인되므로,
-다음 서베이 대상은 "선택은 됐는데 폼이 진행을 거부하는 이유"다.
+라이브에서 확인된 것: 검색 · 후보 브라우징 · 승인 게이트 · 다이얼로그 열기 · **위저드가 폼 5스텝을 실제로
+전진** · 제출 노드의 `quote_reached_submit` 가드 거부(전송 없음). 남은 한계는 §5의 왕복 예산이다.
+
+## 5. §4의 요청에 대한 측정 — op 공백이 아니라 왕복 예산이었다
+
+`advance_not_confirmed`의 원인을 여러분 제안대로 좁혔고, **op 공백은 아니었다.** 필요한 op은 이미 있었다.
+
+**원인 1 — 합성 클릭을 페이지가 무시한다.** Thumbtack의 `Next`는 `<form data-test="request-flow-step-form">`
+안의 `type=submit`이다. SDK의 `dom.submit_form` 주석이 그대로 정답이었다("`requestSubmit()`을 호출하므로
+많은 SPA가 무시하는 합성 버튼 클릭과 달리 폼의 실제 핸들러가 실행된다"). 클릭이 확인되지 않으면 폼을
+제출하도록 바꾼 뒤 **폼이 실제로 전진한다.**
+
+**원인 2 — 라디오는 클릭됐다고 선택된 것이 아니다.** 라벨 셀렉터는 맞는데 사이트가 무시한다.
+`checked`를 다시 읽고 안 됐으면 input 자체를 누른다. durable 코드엔 `click_verified`가 있었고 이식에서
+빠졌던 부분이다.
+
+**그리고 남은 것은 전부 왕복 예산이다.** 고친 뒤 라이브 결과:
+
+```
+quote_steps: 5          advance_reason: "advanced"
+quote_error: quote_budget_spent
+현재 스텝: options[Bathroom … Garage … Closet] (체크박스 9개) buttons[Next disabled=false; Back]
+```
+
+스텝당 약 15회 × 5스텝 + 다이얼로그 열기 ≈ **95 왕복에서 예산 소진**. 폼은 더 길다. 즉 **기능이 막힌
+지점은 op 어휘가 아니라 왕복 비용**이고, 그것이 `dom.read_many`가 필요한 이유의 전부다.
+
+**차단 상태.** `dom.read_many`와 `dom.click_text`를 폴백과 함께 이미 채택해 뒀다(`65_rpc_quote.lua`).
+그런데 **클라이언트가 아직 구현하지 않았다** — `../axsdk-sdk-js`에 두 op이 없고 `dist`에도 없다. 그리고
+미구현 op은 빠르게 실패하지 않고 `opTimeoutMs`를 통째로 태운다. 그래서 우리 쪽은 지원 여부를 **호출당
+한 번만** 확인하고 기억하게 했다(일시 거부와 미구현을 구분해서 — 플래키 한 번으로 지원되는 op을 영구
+차단하면 안 되므로).
+
+정리하면 **공은 SDK에 있다.** `read_many`가 클라이언트에 들어오는 순간 스텝당 15회가 2~3회가 되고, 우리
+코드는 그날 바로 그 경로를 탄다. 그때까지 이 플로우는 5스텝에서 정직하게 멈추고 무엇을 봤는지 보고한다
+(하드 킬 대신). §2에서 지적한 **클라이언트가 프레임을 폴링하는지**도 같은 이유로 중요하다 — 그쪽이
+근본이면 배치보다 큰 승리다.

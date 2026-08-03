@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { auditRpcAllow, OPS, COMPOSED } from './rpc-allow.mjs';
+import { BATCHABLE, auditRpcAllow, OPS, COMPOSED } from './rpc-allow.mjs';
 
 // `rpc.allow` is the only thing standing between a read-only node and a click. The runtime enforces it
 // per op, which means a mistake surfaces as one refused op in the middle of a live run — the most
@@ -54,13 +54,26 @@ test('a tool with no rpc block is not audited', () => {
 });
 
 test('the op vocabulary matches what the server reports', () => {
-  // Pinned from a live `GET /axsdk/v2/lua/ops` (version sha256:0bb4bf33418e). D10: the vocabulary is a
-  // server fact, not a document fact — this list is a mirror and the live check is what re-validates it.
-  assert.equal(OPS.length, 16);
-  assert.ok(OPS.includes('page.eval'));
+  // Pinned from a live `GET /axsdk/v2/lua/ops` (version sha256:0bb4bf33418e), then extended by the
+  // platform's 12th reply with `dom.click_text` and `dom.read_many`. D10: the vocabulary is a server fact,
+  // not a document fact — this list is a mirror and the live check is what re-validates it.
+  assert.equal(OPS.length, 18);
+  assert.ok(OPS.includes('dom.click_text'));
+  assert.ok(OPS.includes('dom.read_many'));
   assert.deepEqual(COMPOSED['dom.wait_for_selector'], 'dom.exists');
   assert.deepEqual(COMPOSED['nav.wait_for_navigation'], 'dom.get_location_href');
   for (const polled of Object.values(COMPOSED)) assert.ok(OPS.includes(polled), `${polled} must be a real op`);
+});
+
+test('a batch carries reads only', () => {
+  // A round trip that could hide a side effect could not promise order or atomicity, so the runtime refuses
+  // a write inside `dom.read_many`. Mirroring that here keeps a script from being written against a
+  // permissiveness the platform does not have.
+  for (const op of ['dom.exists', 'dom.get_text', 'dom.query_all']) assert.ok(BATCHABLE.has(op), op);
+  for (const op of ['dom.click', 'dom.set_value', 'nav.navigate', 'dom.submit_form', 'page.eval']) {
+    assert.ok(!BATCHABLE.has(op), `${op} must never be batchable`);
+  }
+  for (const op of BATCHABLE) assert.ok(OPS.includes(op), `${op} must be a real op`);
 });
 
 test('every issue names the tool it came from', () => {

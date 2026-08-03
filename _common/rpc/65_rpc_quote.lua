@@ -52,6 +52,25 @@ local function trim(value)
   return B.non_empty(value)
 end
 
+--- Round trips spent by this invocation.
+---
+--- The platform's deadline is 120s and it refuses a document that asks for more; an op costs about a second
+--- on the current client (their measurement: the second is the client noticing the frame, not transport).
+--- So a long enough form CANNOT finish, and being killed mid-run surfaces
+--- `deadline exceeded before dom.exists` — a sentence that explains nothing to anyone. Counting is exact,
+--- needs no clock, and turns the kill into a report. The batch op collapses several reads into one round
+--- trip, so this budget also stops shrinking the moment the client implements it.
+Q.OP_BUDGET = 95
+Q.spent = 0
+
+local function charge()
+  Q.spent = Q.spent + 1
+end
+
+local function over_budget()
+  return Q.spent >= Q.OP_BUDGET
+end
+
 --- There is no wait op: the runtime's vocabulary is reads and writes. Pacing is therefore a bounded
 --- series of real round trips, which is what the durable `dom.wait` cost anyway. Naming it `pace` keeps
 --- it from being read as a timer it is not.
@@ -60,6 +79,7 @@ local function pace(ms)
   -- three seconds of the tool's deadline, several times per step.
   for _ = 1, math.min(2, math.max(1, math.floor((ms or 200) / 100))) do
     -- This read exists for its round trip, not its answer, so a refusal is nothing to report.
+    charge()
     pcall(dom.exists, Q.ACTIVE)
   end
 end
@@ -85,19 +105,85 @@ Q.probe = probe
 --- `dom.query_all` right after the navigation, then `dom.exists` inside the contact fill — and wrapping
 --- whichever one failed is whack-a-mole: ANY op can be refused while the channel re-attaches. A refusal
 --- that survives a retry answers `nil`/`false`, which every caller already treats as "not there".
-local function exists(selector) return probe(function() return dom.exists(selector) end, 2) == true end
-local function text_of(selector) return probe(function() return dom.get_text(selector) end, 2) end
+local function exists(selector)
+  charge()
+  return probe(function() return dom.exists(selector) end, 2) == true
+end
+local function text_of(selector)
+  charge()
+  return probe(function() return dom.get_text(selector) end, 2)
+end
 local function rows_of(selector, fields, limit)
+  charge()
   return probe(function() return dom.query_all(selector, fields, limit) end, 2) or {}
 end
-local function click(selector) return probe(function() return dom.click(selector) end, 2) == true end
+local function click(selector)
+  charge()
+  return probe(function() return dom.click(selector) end, 2) == true
+end
 local function set_value(selector, value)
+  charge()
   return probe(function() return dom.set_value(selector, value) end, 2) == true
 end
 local function wait_for(selector, timeout)
+  charge()
   return probe(function()
     return dom.wait_for_selector(selector, { timeout = timeout or 6000, interval = 200 })
   end, 2) == true
+end
+
+--- Optional ops: the platform ships one before the client implements it, and a call to an op the client
+--- does not know does NOT fail fast — it burns the full `opTimeoutMs`. So support is decided ONCE per tool
+--- invocation and remembered; retrying per step spent the whole deadline on ops that would never answer.
+---
+--- "Not implemented" and "refused this once" are different facts. Only the first is remembered: marking an
+--- op unavailable because a flaky channel dropped one call would disable an op the client does support,
+--- for the rest of the run.
+Q.unavailable = {}
+
+local function permanent_refusal(message)
+  local text = tostring(message or ""):lower()
+  return text:find("op_not_permitted", 1, true) ~= nil
+    or text:find("not allowed", 1, true) ~= nil
+    or text:find("unknown", 1, true) ~= nil
+    or text:find("nil value", 1, true) ~= nil
+end
+
+local function optional(name, call)
+  if Q.unavailable[name] then return nil end
+  charge()
+  if type(dom[name]) ~= "function" then
+    Q.unavailable[name] = true
+    return nil
+  end
+  local ok, value = pcall(call)
+  if not ok then
+    if permanent_refusal(value) then Q.unavailable[name] = true end
+    return nil
+  end
+  return value
+end
+
+--- One round trip for several READS. Returns `nil` when unavailable, meaning "read them one by one".
+--- `dom.read_many` answers `{ value = … }` / `{ error = … }` per entry in request order.
+local function read_many(requests)
+  local answers = optional("read_many", function() return dom.read_many(requests) end)
+  if type(answers) ~= "table" then return nil end
+  local out = {}
+  for index = 1, #requests do
+    local answer = answers[index]
+    if type(answer) ~= "table" or answer.error ~= nil then return nil end
+    out[index] = answer.value
+  end
+  return out
+end
+
+--- Clicks the element whose VISIBLE LABEL matches, within `selector` — the gap CSS left, since the quote
+--- CTA carries no id, no aria-label and no data-test, only build hashes.
+local function click_text(selector, label)
+  return optional("click_text", function()
+    return dom.click_text(selector, label, { exact = false })
+  end) == true
 end
 
 function Q.service_id_from(url)
@@ -135,18 +221,26 @@ function Q.read_error()
   return { error = code, message = text, retry_field = field, bad_value = email }
 end
 
+-- The batch and the one-by-one reads must ask for exactly the same thing, so the selector and its field
+-- set are named once and shared.
+Q.OPTION_SELECTOR = Q.ACTIVE .. ' label:has(input[type="radio"]), ' .. Q.ACTIVE .. ' label:has(input[type="checkbox"])'
+Q.OPTION_FIELDS = {
+  text = true,
+  control = { selector = "input", attr = "type" },
+  group = { selector = "input", attr = "name" },
+  id = { selector = "input", attr = "id" },
+  checked = { selector = "input", attr = "checked" },
+}
+Q.CONTROL_SELECTOR = Q.ACTIVE .. ' textarea, ' .. Q.ACTIVE .. ' select, '
+  .. Q.ACTIVE .. ' input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"]):not([type="file"])'
+Q.CONTROL_FIELDS = {
+  tag = { attr = "tagName" }, type = { attr = "type" }, placeholder = { attr = "placeholder" },
+  aria = { attr = "aria-label" }, autocomplete = { attr = "autocomplete" },
+}
+Q.BUTTON_FIELDS = { text = true, aria = { attr = "aria-label" }, title = { attr = "title" } }
+
 function Q.options()
-  return rows_of(
-    Q.ACTIVE .. ' label:has(input[type="radio"]), ' .. Q.ACTIVE .. ' label:has(input[type="checkbox"])',
-    {
-      text = true,
-      control = { selector = "input", attr = "type" },
-      group = { selector = "input", attr = "name" },
-      id = { selector = "input", attr = "id" },
-      checked = { selector = "input", attr = "checked" },
-    },
-    160
-  )
+  return rows_of(Q.OPTION_SELECTOR, Q.OPTION_FIELDS, 160)
 end
 
 --- Selects an option and CONFIRMS it took.
@@ -296,13 +390,11 @@ function Q.control_count(prefetched_options, prefetched_controls)
 end
 
 function Q.free_controls()
-  return rows_of(
-    Q.ACTIVE .. ' textarea, ' .. Q.ACTIVE .. ' select, '
-      .. Q.ACTIVE .. ' input:not([type="radio"]):not([type="checkbox"]):not([type="hidden"]):not([type="file"])',
-    { tag = { attr = "tagName" }, type = { attr = "type" }, placeholder = { attr = "placeholder" },
-      aria = { attr = "aria-label" }, autocomplete = { attr = "autocomplete" } },
-    160
-  )
+  return rows_of(Q.CONTROL_SELECTOR, Q.CONTROL_FIELDS, 160)
+end
+
+function Q.read_buttons()
+  return rows_of(Q.ACTIVE .. ' button', Q.BUTTON_FIELDS, 20)
 end
 
 function Q.has_text()
@@ -323,14 +415,36 @@ end
 --- invalidates it.
 function Q.ctx()
   local cache = {}
-  local function invalidate() cache.options, cache.controls = nil, nil end
+  local function invalidate() cache.options, cache.controls, cache.buttons = nil, nil, nil end
+
+  --- The option list, the free controls and the buttons all describe the SAME instant, and the wizard asks
+  --- for them three or four times per pass. One batch fills all three for one call; without the op each
+  --- one is read on demand exactly as before.
+  local function fill()
+    if cache.options ~= nil then return end
+    local answers = read_many({
+      { op = "dom.query_all", params = { selector = Q.OPTION_SELECTOR, fields = Q.OPTION_FIELDS, limit = 160 } },
+      { op = "dom.query_all", params = { selector = Q.CONTROL_SELECTOR, fields = Q.CONTROL_FIELDS, limit = 160 } },
+      { op = "dom.query_all", params = { selector = Q.ACTIVE .. ' button', fields = Q.BUTTON_FIELDS, limit = 20 } },
+    })
+    if answers then
+      cache.options, cache.controls, cache.buttons = answers[1] or {}, answers[2] or {}, answers[3] or {}
+    end
+  end
   local function options()
+    fill()
     if cache.options == nil then cache.options = Q.options() end
     return cache.options
   end
   local function controls()
+    fill()
     if cache.controls == nil then cache.controls = Q.free_controls() end
     return cache.controls
+  end
+  local function buttons()
+    fill()
+    if cache.buttons == nil then cache.buttons = Q.read_buttons() end
+    return cache.buttons
   end
   return {
     active_exists = function() return exists(Q.ACTIVE) end,
@@ -361,10 +475,7 @@ function Q.ctx()
     has_text = function() return Q.has_text() end,
     control_count = function() return Q.control_count(options(), controls()) end,
     extra_control_count = function() return #controls() end,
-    read_buttons = function()
-      return rows_of(Q.ACTIVE .. ' button',
-        { text = true, aria = { attr = "aria-label" }, title = { attr = "title" } }, 20)
-    end,
+    read_buttons = buttons,
     advance_click = function(decision)
       local selector = Q.ACTIVE .. ' button:not([aria-label])'
       if decision.kind == "skip" then selector = selector .. ':not([title])' end
@@ -428,28 +539,6 @@ function Q.is_cta(text)
   return false
 end
 
---- Clicks the quote CTA in the PAGE world, by its visible text.
----
---- Surveyed live: the button carries no id, no aria-label and no data-test, and its only classes are
---- build hashes — which AGENTS.md §10 forbids precisely because they change every deploy. It is the last
---- of four buttons in the aside, under a `<div class="">`, so no structural selector isolates it either.
---- The `dom` capability resolves standard CSS and cannot match text, so this is the one thing left: ask
---- the page. Returns the label it clicked, or nil.
-function Q.click_by_text()
-  local quoted = {}
-  for index = 1, #Q.CTA_PHRASES do quoted[index] = '"' .. Q.CTA_PHRASES[index] .. '"' end
-  local script = "(function(){var p=[" .. table.concat(quoted, ",") .. "];"
-    .. "var b=document.querySelectorAll('aside button, main button');"
-    .. "for(var i=0;i<b.length;i++){var t=(b[i].textContent||'').toLowerCase();"
-    .. "for(var j=0;j<p.length;j++){if(t.indexOf(p[j])>=0){b[i].click();"
-    .. "return (b[i].textContent||'').trim().slice(0,60);}}}return null;})()"
-  local ok, value = pcall(page.eval, script)
-  -- A refused or failing op is a fact about our own reach, not about the page. Swallowing it left the
-  -- refusal saying only "unreachable", which is exactly the sentence that needed explaining.
-  if not ok then return nil, tostring(value) end
-  return trim(value), nil
-end
-
 --- Opens the request-flow dialog, polling for the CTA and confirming a step actually mounted. Detection
 --- keys on the ACTIVE step, never the modal container: the page pre-renders empty placeholders that look
 --- open. Returns `ok, seen` — the labels it read, so a refusal can say what the page offered instead of
@@ -487,7 +576,7 @@ function Q.open_dialog()
   -- CTA that was clicked and opened nothing. Collapsing them into one string meant every live refusal
   -- needed a manual survey of the page to tell which had happened. The verdict is reached only after the
   -- attempts are spent — deciding on the first pass removed the wait the sidebar's hydration needs.
-  local label, handles, eval_note = nil, nil, nil
+  local label, handles = nil, nil
   for attempt = 1, 8 do
     if attempt > 1 then pace(200) end
     if exists(Q.ACTIVE) then return true, nil end
@@ -508,6 +597,13 @@ function Q.open_dialog()
     if candidate then
       label = trim(candidate.text)
       handles = table.concat({ trim(candidate.id) or "-", trim(candidate.aria) or "-", trim(candidate.testid) or "-" }, "/")
+      -- The label op first: it narrows by selector and picks by visible text, which is the one thing CSS
+      -- cannot do and the whole reason the ladder below had to be surveyed. When the client implements it,
+      -- nothing else runs.
+      if click_text(Q.PRO_READY, label) then
+        clicked_any = true
+        if wait_for(Q.ACTIVE) then return true, nil end
+      end
       local handle = Q.handle_selector(candidate)
       if handle and open_with(handle) then return true, nil end
       -- No handle: fall back to the positional candidates, which work when the CTA does lead its region.
@@ -517,15 +613,6 @@ function Q.open_dialog()
         local text = one and #one > 0 and trim(one[1].text) or nil
         if text and Q.is_cta(text) and open_with(selector) then return true, nil end
       end
-      -- Nothing CSS can name reached it. Ask the page.
-      local hit, why = Q.click_by_text()
-      eval_note = hit and ("clicked " .. hit) or (why or "no match")
-      if hit then
-        clicked_any = true
-        if wait_for(Q.ACTIVE) then
-          return true, nil
-        end
-      end
     end
   end
   if not label then return false, order end
@@ -533,8 +620,63 @@ function Q.open_dialog()
     code = clicked_any and "quote_dialog_did_not_open" or "quote_cta_unreachable",
     label = label,
     handles = handles,
-    eval = eval_note,
   }
+end
+
+Q.STEP_FORM = '[data-test="request-flow-step-form"]'
+
+--- Submits the step's own form. A synthetic click on a `type=submit` button is ignored by many SPAs;
+--- `dom.submit_form` calls `requestSubmit()`, which runs the form's real handler.
+function Q.submit_step_form()
+  local ok = probe(function() return dom.submit_form(Q.STEP_FORM) end, 2)
+  if ok == true then pace(400) end
+  return ok == true
+end
+
+--- What the form looked like at ONE instant: whether the option is checked, and whether the button that
+--- should advance is disabled. Together they separate "selected but the page never learned" from
+--- "selected and the page is refusing" — a stall that reports neither needs a manual survey, which is
+--- exactly what this replaces. One batched round trip when the client has it, three otherwise.
+function Q.stall_snapshot()
+  local batched = read_many({
+    { op = "dom.query_all", params = { selector = Q.OPTION_SELECTOR, fields = Q.OPTION_FIELDS, limit = 8 } },
+    { op = "dom.query_all", params = { selector = Q.ACTIVE .. ' button',
+      fields = { text = true, disabled = { attr = "disabled" }, type = { attr = "type" } }, limit = 8 } },
+    { op = "dom.exists", params = { selector = Q.STEP_FORM } },
+  })
+  local options = batched and batched[1] or Q.options()
+  local buttons = batched and batched[2]
+    or rows_of(Q.ACTIVE .. ' button', { text = true, disabled = { attr = "disabled" }, type = { attr = "type" } }, 8)
+  local has_form = batched and batched[3] or exists(Q.STEP_FORM)
+
+  local picked = {}
+  for index = 1, #options do
+    local option = options[index]
+    picked[#picked + 1] = tostring(trim(option.text) or "?") .. " checked=" .. tostring(option.checked == true)
+  end
+  local controls = {}
+  for index = 1, #buttons do
+    local button = buttons[index]
+    controls[#controls + 1] = tostring(trim(button.text) or "?")
+      .. " disabled=" .. tostring(button.disabled ~= nil and button.disabled ~= false)
+  end
+  return "options[" .. table.concat(picked, "; ") .. "] buttons[" .. table.concat(controls, "; ")
+    .. "] step_form=" .. tostring(has_form == true)
+end
+
+--- What the page shows once the active step is gone: whether the dialog frame is still there, and what the
+--- surface says. One batched round trip when the client has it.
+function Q.closed_snapshot()
+  local batched = read_many({
+    { op = "dom.exists", params = { selector = Q.DIALOG } },
+    { op = "dom.exists", params = { selector = Q.STEP_FORM } },
+    { op = "dom.get_text", params = { selector = "main" } },
+  })
+  local dialog = batched and batched[1] or exists(Q.DIALOG)
+  local form = batched and batched[2] or exists(Q.STEP_FORM)
+  local text = trim(batched and batched[3] or text_of("main")) or ""
+  return "dialog=" .. tostring(dialog == true) .. " step_form=" .. tostring(form == true)
+    .. " surface=\"" .. text:sub(1, 200) .. "\""
 end
 
 --- Navigates to the pro when needed, opens the dialog, and drives every step it can answer. Returns the
@@ -542,6 +684,9 @@ end
 --- they are the durable ones.
 function Q.request_quote(args)
   args = type(args) == "table" and args or {}
+  -- Support is a fact about the client, and the client can be upgraded between turns. Detect it per call.
+  Q.unavailable = {}
+  Q.spent = 0
   -- `auto: true` lived in the durable tool's `input:` block, and a runtime lua tool never sees that
   -- block — the same mapping trap that made the search answer `query_required`. Without it the wizard
   -- scores nothing, every step reports `missing_answer`, and the form is handed over on step one.
@@ -581,7 +726,7 @@ function Q.request_quote(args)
     if blocked then
       return { next = "error", quote_error = blocked.code, quote_status = blocked.code,
                quote_message = 'CTA "' .. tostring(blocked.label) .. '" (id/aria/data-test: '
-                 .. tostring(blocked.handles) .. '; page.eval: ' .. tostring(blocked.eval or '-') .. ')' }
+                 .. tostring(blocked.handles) .. ')' }
     end
     -- Otherwise the page offered SOMETHING; naming it is the difference between "the CTA is gone" and
     -- "the CTA moved". Live, the sidebar had become an inline mini-form and this was the only way to see
@@ -598,9 +743,21 @@ function Q.request_quote(args)
   local applied = {}
   local steps, stalled, flow = 0, 0, nil
   while steps < Q.MAX_STEPS do
+    if over_budget() then
+      -- Out of round trips before out of steps. Say so, with what was driven and what the form looks like
+      -- now, instead of letting the platform kill the call.
+      return { next = "error", quote_error = "quote_budget_spent", quote_status = "budget_spent",
+               quote_steps = steps, quote_advance_reason = flow and flow.advance_reason or nil,
+               quote_message = Q.stall_snapshot() }
+    end
     local before = #applied
     flow = W.drive_step(Q.ctx(), drive, applied, before)
-    if not flow then break end
+    if not flow then
+      -- The wizard answers nil when there is no active step. That is the dialog going away under us — a
+      -- different fact from "the step budget ran out", and the only one that names the page's state.
+      return { next = "error", quote_error = "quote_dialog_closed", quote_status = "dialog_closed",
+               quote_steps = steps, quote_message = Q.closed_snapshot() }
+    end
     steps = steps + 1
 
     if flow.request_error then
@@ -618,10 +775,18 @@ function Q.request_quote(args)
     if flow.advanced then
       stalled = 0
     else
+      -- The click reported success and the step did not move. The SDK's note on `dom.submit_form` says
+      -- why: it calls `requestSubmit()`, "which fires the form's real submit handler -- unlike a synthetic
+      -- button click, which many SPAs ignore". Thumbtack's Next is a `type=submit` inside
+      -- `<form data-test="request-flow-step-form">`, so a real submit is the second attempt.
+      if flow.advance_reason == "advance_not_confirmed" then
+        Q.submit_step_form()
+      end
       stalled = stalled + 1
       if stalled >= Q.MAX_STALLED then
         return { next = "error", quote_error = "quote_stalled", quote_status = "stalled",
-                 quote_advance_reason = flow.advance_reason, quote_steps = steps }
+                 quote_advance_reason = flow.advance_reason, quote_steps = steps,
+                 quote_message = Q.stall_snapshot() }
       end
     end
   end

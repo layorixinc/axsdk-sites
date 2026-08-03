@@ -16,6 +16,10 @@ export const OPS = [
   'dom.get_outerHTML',
   'dom.query_all',
   'dom.click',
+  // Added by the platform in reply 12. `click_text` narrows by selector and picks by visible label, which
+  // CSS cannot express; `read_many` runs several READS in one round trip and spends one call.
+  'dom.click_text',
+  'dom.read_many',
   'dom.set_value',
   'dom.get_form_field_names',
   'dom.get_form_field_value',
@@ -23,6 +27,12 @@ export const OPS = [
   'dom.submit_form',
   'page.eval',
 ];
+
+/** Reads only: a batch that could hide a side effect could not promise order or atomicity. */
+export const BATCHABLE = new Set([
+  'dom.exists', 'dom.get_text', 'dom.get_attr', 'dom.get_innerHTML', 'dom.get_outerHTML',
+  'dom.query_all', 'dom.get_location_href', 'dom.get_form_field_names', 'dom.get_form_field_value',
+]);
 
 /**
  * Helpers the runtime prelude synthesises by polling a real op. Calling them is fine and encouraged;

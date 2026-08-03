@@ -16,6 +16,8 @@
  *    touched (write ops), not just what it returned.
  */
 
+import { BATCHABLE } from '../rpc-allow.mjs';
+
 const WRITE_OPS = new Set([
   'dom.click', 'dom.set_value', 'dom.set_form_field_value', 'dom.submit_form', 'page.eval',
   'nav.navigate', 'nav.reload',
@@ -42,6 +44,9 @@ export function makePage(spec) {
     // one raise reports a page fact it never established — measured live twice, on two different ops.
     flakyEvery: spec.flakyEvery ?? 0,
     opCount: 0,
+    // Ops the CLIENT has not implemented. The platform can ship an op the extension does not know yet, and
+    // a script that bets on one loses the whole tool — so adoption is always tested against refusal too.
+    refuseOps: spec.refuseOps ?? [],
     sequence: spec.sequence ?? null,
     sequenceAt: {},
     // A click's EFFECT belongs to the page, not to the op: the runtime answers whether it found
@@ -165,7 +170,51 @@ export function installRpcStub(lua, page, { allow } = {}) {
       page.filled.push({ selector, value });
       return true;
     },
-    'dom.submit_form': () => true,
+    'dom.submit_form': (form) => {
+      page.tick();
+      // A real submit fires the form's own handler, which the page reacts to. `requestSubmit()` is why
+      // the SDK has this op at all: many SPAs ignore a synthetic click on a submit button.
+      if (page.onClick) page.onClick(`submit:${form}`, page);
+      return true;
+    },
+    // Narrows by selector, picks by NORMALIZED visible label, clicks. The point is that the label the
+    // script cannot express in CSS is chosen by the client, so no selector is returned or needed.
+    'dom.click_text': (selector, wanted, opts) => {
+      page.tick();
+      const want = String(wanted ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+      const exact = opts?.exact === true;
+      for (const row of rowsFor(selector)) {
+        const label = String(row.text ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (exact ? label === want : label.includes(want)) {
+          if (page.onClick) page.onClick(`${selector}::text(${wanted})`, page, row);
+          return true;
+        }
+      }
+      throw new Error('rpc dom.click_text failed: no_element');
+    },
+    // Several READS, one round trip, results in request order. The constraints are the contract: writes
+    // are refused, `allow` still applies per inner op, and an unknown op fails only ITS OWN entry.
+    'dom.read_many': (requests) => {
+      page.tick();
+      const list = Array.isArray(requests) ? requests : [];
+      return list.map((request) => {
+        const op = request?.op;
+        if (!BATCHABLE.has(op)) return { error: 'op_not_permitted' };
+        if (allow && !allow.includes(op)) return { error: 'op_not_permitted' };
+        const params = request.params ?? {};
+        try {
+          if (op === 'dom.exists') return { value: api['dom.exists'](params.selector) };
+          if (op === 'dom.get_text') return { value: api['dom.get_text'](params.selector) };
+          if (op === 'dom.get_location_href') return { value: api['dom.get_location_href']() };
+          if (op === 'dom.query_all') {
+            return { value: api['dom.query_all'](params.selector, params.fields, params.limit) };
+          }
+          return { error: 'op_not_permitted' };
+        } catch (error) {
+          return { error: error instanceof Error ? error.message : String(error) };
+        }
+      });
+    },
     'page.eval': (script) => {
       page.tick();
       return page.onEval ? page.onEval(script, page) : null;
@@ -176,6 +225,7 @@ export function installRpcStub(lua, page, { allow } = {}) {
     guard(op);
     page.record(op, describe(op, args));
     page.opCount += 1;
+    if (page.refuseOps.includes(op)) throw new Error(`rpc ${op} failed: op_not_permitted: ${op}`);
     if (page.flakyEvery > 0 && page.opCount % page.flakyEvery === 0) {
       throw new Error(`rpc ${op} failed: rpc_timeout`);
     }
@@ -191,6 +241,8 @@ export function installRpcStub(lua, page, { allow } = {}) {
       click: (selector) => call('dom.click', selector),
       set_value: (selector, value) => call('dom.set_value', selector, value),
       submit_form: (form) => call('dom.submit_form', form),
+      click_text: (selector, text, opts) => call('dom.click_text', selector, text, opts),
+      read_many: (requests) => call('dom.read_many', requests),
       // Prelude helper: polls dom.exists. NOT a wire op.
       wait_for_selector: (selector, opts) => poll(() => call('dom.exists', selector), opts),
     },

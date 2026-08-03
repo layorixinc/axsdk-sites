@@ -68,7 +68,7 @@ function step(text, { choices = [], buttons = ['Next'], textarea = false, contac
     dom[`${ACTIVE} input[autocomplete="family-name"]`] = [{ text: '' }];
     dom[`${ACTIVE} input[autocomplete="postal-code"]`] = [{ text: '' }];
   }
-  const rows = buttons.map((label) => ({ text: label }));
+  const rows = buttons.map((label) => (typeof label === 'string' ? { text: label } : label));
   dom[`${ACTIVE} button`] = rows;
   dom[`${ACTIVE} button:not([aria-label])`] = rows;
   dom[`${ACTIVE} button:not([aria-label]):not([title])`] = rows;
@@ -87,7 +87,7 @@ const unanswerable = () => {
 const finalStep = () => step('Review and send your request', { buttons: ['Submit request'], contact: true });
 
 /** A pro page whose sidebar CTA opens the dialog, and a dialog whose Next walks `steps`. */
-function quotePage({ href = PRO_URL, steps = [], cta = 'Request estimate', ctaAfter = 0 } = {}) {
+function quotePage({ href = PRO_URL, steps = [], cta = 'Request estimate', ctaAfter = 0, advanceOn = 'click' } = {}) {
   let at = -1;
   // ONE dom object, mutated in place: `makePage` reads `afterNavigate` at navigation time, so a fixture
   // that hands over a fresh object leaves the pro page blank after the hop — which reads exactly like a
@@ -110,10 +110,19 @@ function quotePage({ href = PRO_URL, steps = [], cta = 'Request estimate', ctaAf
         return;
       }
       if (selector.includes('aside') || selector.includes('main')) at = 0;
-      else if (selector.includes(ACTIVE) && selector.includes('button')) at += 1;
+      // What actually advances a step is the page's business: some ignore a synthetic click on a submit
+      // button and move only on a real form submit, and some refuse both.
+      else if (selector.startsWith('submit:')) {
+        if (page.advanceOn !== 'form') return;
+        at += 1;
+      } else if (selector.includes(ACTIVE) && selector.includes('button')) {
+        if (page.advanceOn !== 'click') return;
+        at += 1;
+      }
       apply();
     },
   });
+  page.advanceOn = advanceOn;
 
   const apply = () => {
     for (const key of Object.keys(dom)) delete dom[key];
@@ -337,6 +346,9 @@ test('a CTA that is present but unreachable is its own answer', () => {
   // means this pro takes no requests, the second means the page changed and the selectors must follow.
   // Live they were the same string, so every run needed a manual survey to tell them apart.
   const page = quotePage({ steps: [finalStep()] });
+  // On a client that implements `dom.click_text` this state cannot arise at all — the label op reaches it.
+  // The floor is a client without it, which is what the extension shipped when this was written.
+  page.refuseOps = ['dom.click_text'];
   delete page.dom['aside button:not(:last-child)'];
   page.dom['aside button, main button'] = [
     { text: 'Share' },
@@ -353,29 +365,6 @@ test('a CTA that opens nothing says so instead of blaming the CTA', () => {
   const result = drive(page);
 
   assert.equal(result.quote_error, 'quote_dialog_did_not_open');
-});
-
-test('a CTA CSS cannot address is clicked in the page world', () => {
-  // Surveyed live: the "Request estimate" button carries no id, no aria-label, no data-test, and its only
-  // classes are build hashes — which AGENTS.md §10 forbids because they change every deploy. It is the
-  // 4th of 4 buttons in the aside, under a `<div class="">`, so no structural selector isolates it
-  // either. `page.eval` is the sanctioned way to reach an element CSS cannot name.
-  //
-  // The stub cannot run DOM JS, so this asserts the ladder REACHES the eval and uses its answer; whether
-  // the script itself is correct is live evidence, recorded in the report.
-  const page = quotePage({ steps: [finalStep()] });
-  delete page.dom['aside button:not(:last-child)'];
-  page.dom['aside button, main button'] = [{ text: 'Share' }, { text: 'Request estimate' }];
-  let asked = null;
-  page.onEval = (script, self) => {
-    asked = script;
-    self.onClick(`${ACTIVE} button`);   // the page's own reaction to the click
-    return 'Request estimate';
-  };
-  const result = drive(page);
-
-  assert.equal(result.next, 'submit', `the eval fallback must open the dialog, got ${result.quote_error}`);
-  assert.match(asked, /request estimate/i, 'the phrases must travel into the page');
 });
 
 test('a structural candidate is only clicked once its own label is confirmed', () => {
@@ -514,4 +503,122 @@ test('an option is not called selected until it is checked', () => {
   lua.call('AX_RPC_QUOTE.request_quote', { quote_url: PRO_URL, user_requirements: 'a full day of work' });
 
   assert.ok(radios.some((row) => row.checked), 'the module must fall through to the input itself');
+});
+
+test('the CTA is clicked by its label when the client supports it', () => {
+  // `dom.click_text` narrows by selector and picks by visible label, which is exactly the thing CSS could
+  // not express: the button carries no id, no aria-label, no data-test and only hashed classes. When it
+  // works there is no candidate ladder and no label re-check.
+  const page = quotePage({ steps: [finalStep()] });
+  delete page.dom['aside button:not(:last-child)'];
+  page.dom['aside button, main button'] = [{ text: 'Share' }, { text: 'Request estimate' }];
+  const result = drive(page);
+
+  assert.equal(result.next, 'submit', `got ${result.quote_error} ${result.quote_message ?? ''}`);
+  assert.ok(
+    page.ops.some((entry) => entry.op === 'dom.click_text'),
+    'the label op must be tried first',
+  );
+});
+
+test('an op the client has not implemented falls back instead of failing', () => {
+  // The platform shipped `click_text` and `read_many`; the SDK had not implemented either when this was
+  // written, and a runtime op the client does not know simply fails. Adopting a new op must therefore
+  // never be a bet: the structural ladder and the one-by-one reads stay as the floor.
+  const page = quotePage({ steps: [finalStep()] });
+  page.refuseOps = ['dom.click_text', 'dom.read_many'];
+  const result = drive(page);
+
+  assert.equal(result.next, 'submit', `got ${result.quote_error} ${result.quote_message ?? ''}`);
+});
+
+test('a step reads its options, controls and buttons in one round trip', () => {
+  // Measured live at ~1s per op with a 120s ceiling, so op count is the feature budget. These reads all
+  // describe the SAME instant, which is exactly what a batch is for.
+  const page = quotePage({
+    steps: [step('What do you need?', { choices: ['Shelf installation', 'Painting'] }), finalStep()],
+  });
+  drive(page);
+
+  assert.ok(page.ops.some((entry) => entry.op === 'dom.read_many'), 'the step reads must be batched');
+});
+
+test('a stall reports what the form saw at one instant', () => {
+  // The platform's suggestion, and the right one: read the radio's `checked` and the Next button's
+  // `disabled` TOGETHER, so "selected but the form does not know" is one round trip away from
+  // "selected and the form is refusing". A stall that only says `advance_not_confirmed` needs a survey.
+  const bare = step('How much help?', { choices: ['A full day'] });
+  bare.dom[`${ACTIVE} button`] = [{ text: 'Next', disabled: 'true' }];
+  bare.dom[`${ACTIVE} button:not([aria-label])`] = [{ text: 'Next', disabled: 'true' }];
+  // Nothing advances: the click is ignored and the real form submit is refused too, which is the shape
+  // that needs explaining.
+  const page = quotePage({ steps: [bare, bare, bare, bare], advanceOn: 'nothing' });
+  const result = drive(page);
+
+  assert.equal(result.quote_error, 'quote_stalled');
+  assert.match(result.quote_message, /checked/, 'the option state must be in the answer');
+  assert.match(result.quote_message, /disabled/, 'and so must the button state');
+});
+
+test('a step whose button click is ignored is submitted as a form', () => {
+  // The SDK's own note on `dom.submit_form`: it calls `requestSubmit()`, "which fires the form's real
+  // submit handler -- unlike a synthetic button click, which many SPAs ignore". Thumbtack's Next is a
+  // `type=submit` inside `<form data-test="request-flow-step-form">`, so that is the second attempt.
+  const stubborn = step('How much help?', { choices: ['A full day'] });
+  // The button exists and reports a click, but only a real form submit advances this page.
+  const page = quotePage({ steps: [stubborn, finalStep()], advanceOn: 'form' });
+  const result = drive(page);
+
+  assert.ok(
+    page.ops.some((entry) => entry.op === 'dom.submit_form'),
+    'the form must be submitted when the click did not confirm',
+  );
+  assert.equal(result.next, 'submit', `got ${result.quote_error}`);
+});
+
+test('an unimplemented op is tried once, not on every step', () => {
+  // A refused op does not fail fast on the wire: it burns the full `opTimeoutMs`. Retrying it per step
+  // spent the tool's whole deadline on ops the client will never answer — the live run died with
+  // `deadline exceeded before dom.exists` after the batch and label ops were adopted.
+  const page = quotePage({
+    steps: [
+      step('What do you need?', { choices: ['Shelf installation', 'Painting'] }),
+      step('How much help?', { choices: ['A full day'] }),
+      finalStep(),
+    ],
+  });
+  page.refuseOps = ['dom.read_many', 'dom.click_text'];
+  const result = drive(page);
+
+  assert.equal(result.next, 'submit');
+  for (const op of ['dom.read_many', 'dom.click_text']) {
+    const tries = page.ops.filter((entry) => entry.op === op).length;
+    assert.ok(tries <= 1, `${op} must be attempted at most once, saw ${tries}`);
+  }
+});
+
+test('a dialog that disappears mid-form is its own answer', () => {
+  // Live, the loop ended with `quote_steps_exhausted` and no advance reason at all — the wizard had
+  // returned nil because the active step was gone. "Sixteen steps were not enough" and "the dialog closed
+  // under us" are different facts and the second one names the page state.
+  const page = quotePage({ steps: [step('What do you need?', { choices: ['Shelf installation'] })] });
+  const result = drive(page);
+
+  assert.equal(result.quote_error, 'quote_dialog_closed');
+  assert.ok(result.quote_steps >= 1, 'the steps it did drive must be reported');
+});
+
+test('a form longer than the budget is reported, not killed', () => {
+  // The platform's ceiling is 120s and an op costs ~1s on the current client, so a long enough form cannot
+  // finish. Being killed mid-run surfaces `lua rpc execution deadline exceeded before dom.exists`, which
+  // tells the user nothing and the operator almost nothing. Stopping first does both.
+  const many = [];
+  for (let index = 0; index < 14; index += 1) many.push(step(`Question ${index}`, { choices: ['A full day', 'Painting'] }));
+  many.push(finalStep());
+  const page = quotePage({ steps: many });
+  const result = drive(page);
+
+  assert.equal(result.quote_error, 'quote_budget_spent');
+  assert.ok(result.quote_steps >= 4, `it must report the steps it drove, said ${result.quote_steps}`);
+  assert.ok(page.ops.length <= 120, `and stop before the ceiling, spent ${page.ops.length}`);
 });

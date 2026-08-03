@@ -4197,15 +4197,18 @@ flowTools:
       # The wizard's decisions are the shared, DOM-free core; only the selectors are Thumbtack's.
       modules: ["_common.00_base", "_common.10_form_wizard", "_common.65_rpc_quote"]
       rpc:
-        # `page.eval` is the last rung of the CTA ladder — the button carries no id, aria-label or
-        # data-test, and its only classes are build hashes, so nothing CSS can name reaches it. Measured
-        # live: the platform answers `op_not_permitted` for it, so the grant is currently inert and the
-        # structural candidates are what actually open the dialog.
-        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.query_all, dom.click, dom.set_value, page.eval]
+        # `click_text` picks by visible label, the one thing CSS cannot express — the quote CTA carries no
+        # id, aria-label or data-test and only build hashes. `read_many` batches a step's reads into one
+        # round trip. Both are OPTIONAL: the script falls back when the client has not implemented them.
+        # `submit_form` calls requestSubmit(), which advances a step whose synthetic button click the SPA
+        # ignored. `page.eval` is gone — the client refuses it (`op_not_permitted`) and `click_text` is the
+        # sanctioned replacement.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.query_all, dom.click,
+                dom.click_text, dom.read_many, dom.set_value, dom.submit_form]
         opTimeoutMs: 2000
-        # A step costs ~15 round trips at roughly a second each. 120000 is the platform's CEILING — it
-        # refuses the document above it ("deadlineMs must be an integer between 1 and 120000") — so a
-        # longer form is bounded by the stall guard, not by more time.
+        # A step costs ~15 round trips at roughly a second each — measured, and the platform says the second
+        # is the CLIENT noticing the frame, not transport. 120000 is the platform's ceiling (it refuses the
+        # document above it), so a longer form is bounded by the stall guard, not by more time.
         deadlineMs: 120000
       entry: run
       lua: |
@@ -4220,6 +4223,9 @@ flowTools:
       quote_error: result.quote_error
       quote_message: result.quote_message
       quote_advance_reason: result.quote_advance_reason
+      # How many steps the single call drove. Without it a refusal cannot say whether the form was walked
+      # or never started, which is the first thing anyone asks of one.
+      quote_steps: result.quote_steps
       quote_reached_submit: result.quote_reached_submit
       quote_answer_status: result.quote_status
     parameters:

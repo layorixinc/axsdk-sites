@@ -174,6 +174,54 @@ RPC_SITES["aliexpress"] = {
   }
 }
 
+RPC_SITES["amazon"] = {
+  site = "amazon",
+  home_url = "https://www.amazon.com/",
+  hosts = {
+    "www.amazon.com",
+    "amazon.com"
+  },
+  search_url = "https://www.amazon.com/s",
+  search_param = "k",
+  search_path_marker = "/s",
+  result_selector = "[data-component-type=\"s-search-result\"][data-asin]",
+  result_ready_selector = "[data-component-type=\"s-search-result\"][data-asin], .s-no-results-result, #authportal-main-section, #ap_email, #ap_password, form[action*=\"validateCaptcha\"]",
+  result_id_attr = "data-asin",
+  result_url_selector = "h2 a, a.a-link-normal.s-no-outline, a[href*=\"/dp/\"], a[href*=\"/gp/product/\"]",
+  result_title_selector = "h2, h2 a",
+  result_image_selector = "img.s-image",
+  result_price_selector = ".a-price .a-offscreen",
+  result_shipping_selector = "[data-cy=\"delivery-block\"], [data-cy=\"delivery-recipe\"]",
+  result_rating_selector = "i.a-icon-star-small span.a-icon-alt, .a-icon-alt",
+  result_reviews_selector = "a[href*=\"#customerReviews\"] span, a[href*=\"#customerReviews\"]",
+  result_limit = 24,
+  default_currency = "USD",
+  product_id_patterns = {
+    "/dp/([A-Z0-9]+)",
+    "/gp/product/([A-Z0-9]+)",
+    "^([A-Z0-9]+)$"
+  },
+  product_url_prefix = "https://www.amazon.com/dp/",
+  blocked_selectors = {
+    {
+      selector = "form[action*=\"validateCaptcha\"]",
+      error = "captcha_required"
+    }
+  },
+  login_selector = "#authportal-main-section, #ap_email, #ap_password",
+  login_urls = {
+    "/ap/signin"
+  },
+  pagination = {
+    mode = "query",
+    param = "page",
+    start = 1,
+    step = 1,
+    max_pages = 2,
+    next_selector = "a.s-pagination-next"
+  }
+}
+
 RPC_SITES["coupang"] = {
   site = "coupang",
   home_url = "https://www.coupang.com/",

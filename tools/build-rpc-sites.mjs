@@ -17,9 +17,9 @@ import { loadLuaModules } from './lua/harness.mjs';
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-/** Storefronts served by the shared adapter. amazon still carries a bespoke layer and is not here. */
+/** Every storefront served by the shared adapter. Bespoke layers keep only their product and cart paths. */
 export const STOREFRONT_SITES = Object.freeze([
-  '11st', 'aliexpress', 'coupang', 'ebay', 'etsy', 'gmarket', 'naver-shopping', 'ssg', 'walmart',
+  '11st', 'aliexpress', 'amazon', 'coupang', 'ebay', 'etsy', 'gmarket', 'naver-shopping', 'ssg', 'walmart',
 ]);
 
 /**

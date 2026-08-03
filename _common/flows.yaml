@@ -956,19 +956,6 @@ flows:
         description: Search the store that is open, in the runtime, and read its candidates.
         next:
           done: refine_item
-          # TEMPORARY, with `search_item_bespoke`: amazon still reads through its browser layer. A
-          # refusal without this branch reaches the user as "not found" on a store that has the item.
-          unsupported_site: search_item_bespoke
-          error: next_product
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      search_item_bespoke:
-        kind: action_contract
-        inputSelector: [query]
-        id: shopping_search_product_durable
-        description: Search a store whose browser layer has not been ported to the runtime yet.
-        next:
-          done: refine_item
           error: next_product
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -1862,41 +1849,6 @@ flows:
           - query
         next:
           done: normalize
-          unsupported_site: search_bespoke
-        fallback: { invalidNext: done, exhaustedNext: done }
-
-      # TEMPORARY. amazon and ebay still read through their durable browser layers; every other store
-      # reads in the runtime. This node and its `navigating` hop exist only until those two are ported,
-      # and `check:flows` will refuse the document once no site needs them.
-      search_bespoke:
-        kind: action_contract
-        id: shopping_search_one_store_durable
-        description: Search a store whose layer has not been ported to the runtime yet.
-        inputSelector:
-          - item
-          - index
-          - key
-          - context
-          - page
-          - query
-        next:
-          navigating: search_bespoke_after_navigation
-          done: normalize
-        fallback: { invalidNext: done, exhaustedNext: done }
-      search_bespoke_after_navigation:
-        kind: action_contract
-        id: shopping_search_one_store_durable
-        description: Re-invoke the durable read once its first call fired a document navigation.
-        inputSelector:
-          - item
-          - index
-          - key
-          - context
-          - page
-          - query
-        next:
-          navigating: normalize
-          done: normalize
         fallback: { invalidNext: done, exhaustedNext: done }
 
       normalize:
@@ -1942,7 +1894,6 @@ flows:
           - query
         next:
           done: normalize
-          unsupported_site: search_bespoke
         fallback: { invalidNext: done, exhaustedNext: done }
 
       search_other_wording:
@@ -1958,7 +1909,6 @@ flows:
           - query
         next:
           done: normalize
-          unsupported_site: search_bespoke
         fallback: { invalidNext: done, exhaustedNext: done }
 
       complete:
@@ -2497,47 +2447,6 @@ flowTools:
       # No `navigating`: the script keeps its own stack across the reload, so there is nothing to resume.
       next: result.next
       store_result: result.store_result
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [item, index, key, context]
-      properties:
-        item:
-          type: object
-          additionalProperties: false
-          required: [site]
-          properties:
-            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
-        index: { type: number }
-        key: { type: string }
-        context:
-          type: object
-          additionalProperties: true
-          required: [query]
-          properties:
-            query: { type: string }
-            quantity: { type: [integer, number] }
-        page: { type: [integer, number] }
-
-  # TEMPORARY, paired with the `search_bespoke` nodes: amazon and ebay still read through their durable
-  # browser layers. Deleted when those two are ported.
-  shopping_search_one_store_durable:
-    description: Search a store whose browser layer has not been ported to the runtime yet.
-    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
-    input:
-      site: tool.args.item.site
-      query: { if: [{ var: tool.args.query }, { var: tool.args.query }, { var: tool.args.context.query }] }
-      quantity: tool.args.context.quantity
-      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
-      requested_brand: tool.args.context.requested_brand
-      identity_brand: tool.args.context.identity_brand
-      identity_model: tool.args.context.identity_model
-      product_category: tool.args.context.product_category
-      hard_constraints: tool.args.context.locked_hard_constraints
-      page: tool.args.page
-    output:
-      next: { if: [{ var: result.pending }, "navigating", { var: result.navigated }, "navigating", { "==": [{ var: result.status }, "navigating"] }, "navigating", "done"] }
-      store_result: result
     parameters:
       type: object
       additionalProperties: false
@@ -3553,23 +3462,6 @@ flowTools:
         add_status: { type: [string, "null"] }
         add_error: { type: [string, "null"] }
 
-  # TEMPORARY, paired with the `search_item_bespoke` node: amazon still reads through its browser
-  # layer. Deleted when that layer is ported.
-  shopping_search_product_durable:
-    description: Search a store whose browser layer has not been ported to the runtime yet.
-    execute: { kind: remote, tool: AX_search_product, timeoutMs: 90000 }
-    input:
-      query: tool.args.query
-    output:
-      next: { if: [{ var: result.error }, "error", "done"] }
-      candidates: result.candidates
-      search_status: { if: [{ var: result.error }, { var: result.error }, "ok"] }
-      error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        query: { type: string }
 
   shopping_search_product:
     description: Search the shopping site for the current item's query; returns candidate products.

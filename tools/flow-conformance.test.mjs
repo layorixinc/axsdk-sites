@@ -161,7 +161,8 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(nodes.verify_offers.next.done, 'normalize_rank');
   // The search used to branch `navigating` into a re-invoke node. A runtime script keeps its stack
   // across the reload, so the only remaining branches are the answer and the not-yet-ported site.
-  assert.equal(common.flows.shopping_search_one_store.nodes.search.next.unsupported_site, 'search_bespoke');
+  assert.ok(!common.flows.shopping_search_one_store.nodes.search.next.unsupported_site,
+    'every store is ported; nothing should still route to a durable reader');
   assert.equal(common.flows.shopping_search_one_store.nodes.search.next.done, 'normalize');
   assert.equal(nodes.normalize_rank.next.done, 'choose_offer');
   assert.deepEqual(nodes.choose_offer.allowedTools, ['present_store_offers', 'choose_store_offer']);
@@ -203,14 +204,14 @@ test('multi-store shopping discovers and locks product identity before ranking',
   for (const key of ['view_page', 'view_pages', 'view_total']) {
     assert.ok(Object.hasOwn(flow.state, key), `flow state must include ${key}`);
   }
-  // The three-node hop chain per search is gone; the durable pair that remains is the unported one.
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_bespoke.next.navigating, 'search_bespoke_after_navigation');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_bespoke_after_navigation.next.done, 'normalize');
+  // The hop chain and the durable pair are both gone: every storefront reads in the runtime.
+  assert.ok(!common.flows.shopping_search_one_store.nodes.search_bespoke);
+  assert.ok(!common.flowTools.shopping_search_one_store_durable);
   assert.equal(nodes.add_selected_offer.next.navigating, 'add_selected_offer_after_navigation');
   assert.equal(nodes.add_selected_offer_after_navigation.next.navigating, 'confirm_selected_offer_after_navigation');
   assert.equal(nodes.confirm_selected_offer_after_navigation.next.done, 'report_cart');
   assert.equal(common.flowTools.shopping_search_one_store.output.next, 'result.next');
-  assert.deepEqual(common.flowTools.shopping_search_one_store_durable.output.next.if.slice(-2), ['navigating', 'done']);
+
   assert.equal(common.flows.shopping_search_one_store.nodes.normalize.id, 'shopping_normalize_store_result');
   // A store search reads up to its page budget: normalize hands each page to the collector, which either
   // asks for one more page or completes the worker. Collapsing this back to normalize -> complete would
@@ -220,13 +221,13 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.more, 'search_next_page');
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.done, 'complete');
   assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.done, 'normalize');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_next_page.next.unsupported_site, 'search_bespoke');
+
   assert.equal(common.flowTools.shopping_collect_store_page.execute.implementation, 'lua');
   // A store searched in the wrong language answers nothing. Before the worker gives up on it, the
   // collector hands back another wording and the search runs again from page one. Only a store that
   // found NOTHING pays for this, and the attempted wordings are remembered.
   assert.equal(common.flows.shopping_search_one_store.nodes.collect.next.retry_query, 'search_other_wording');
-  assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.unsupported_site, 'search_bespoke');
+
   assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.done, 'normalize');
   assert.equal(common.flowTools.shopping_collect_store_page.output.query, 'result.query');
   assert.equal(common.flowTools.shopping_collect_store_page.output.tried_queries, 'result.tried_queries');
@@ -265,7 +266,7 @@ test('multi-store shopping discovers and locks product identity before ranking',
   // The storefront search no longer names a browser command: it names the modules it runs in the runtime.
   assert.deepEqual(common.flowTools.shopping_search_one_store.execute.modules,
     ['_common.61_rpc_storefront', '_common.62_rpc_sites']);
-  assert.equal(common.flowTools.shopping_search_one_store_durable.execute.tool, 'AX_search_product');
+
   // Pure commands crossed into the runtime: they name modules and grant no ops, because they never
   // touch the browser.
   assert.equal(common.flowTools.shopping_normalize_store_result.execute.implementation, 'lua');
@@ -526,23 +527,20 @@ test('the search hops that only existed to survive a navigation are gone', () =>
   assert.ok(searchNodes.length > 0, 'the worker must still search');
   for (const [name, node] of searchNodes) {
     assert.ok(!node.next?.navigating, `${name} must not branch on navigating`);
-    assert.ok(node.next?.unsupported_site, `${name} must route a site this cutover does not cover`);
+    assert.ok(!node.next?.unsupported_site, `${name} must not still route to a durable reader`);
   }
-  // One durable pair survives on purpose while amazon and ebay are unported; it is named for what it
-  // is, and nothing else may reintroduce a hop.
-  const hops = Object.keys(nodes).filter((name) => name.includes('after_navigation'));
-  assert.deepEqual(hops, ['search_bespoke_after_navigation'],
-    'a node exists only to be called again after a navigation');
+  assert.deepEqual(Object.keys(nodes).filter((name) => name.includes('after_navigation')), [],
+    'no node should exist only to be called again after a navigation');
 });
 
-test('single-site shopping still reaches a store this cutover has not ported', () => {
-  // The runtime reader resolves the open page to a ported store or refuses. amazon is still bespoke, so
-  // without a durable sibling the refusal reads to the user as "not found" on a store that has the item.
+test('single-site shopping reads every store in the runtime', () => {
+  // Every storefront is ported, so the durable sibling that carried amazon is gone and nothing routes to
+  // it. A branch left behind here would be a path no store can reach and nobody would notice it rot.
   const common = parseFlow('_common/flows.yaml');
   const nodes = common.flows?.shopping_single_site?.nodes ?? {};
 
-  assert.equal(nodes.search_item.next.unsupported_site, 'search_item_bespoke');
-  assert.equal(nodes.search_item_bespoke.id, 'shopping_search_product_durable');
-  assert.equal(nodes.search_item_bespoke.next.done, 'refine_item');
-  assert.equal(common.flowTools.shopping_search_product_durable.execute.tool, 'AX_search_product');
+  assert.ok(!nodes.search_item.next.unsupported_site);
+  assert.ok(!nodes.search_item_bespoke);
+  assert.ok(!common.flowTools.shopping_search_product_durable);
+  assert.equal(common.flowTools.shopping_search_product.execute.implementation, 'lua');
 });

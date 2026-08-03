@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { packageHash, packageHashes, diffPackage } from './rpc-package.mjs';
+import { packageHash, packageHashes, diffPackage, pushPackage } from './rpc-package.mjs';
 
 // A package push replaces a whole app: flow document, sitemap, every module. The only way to know the
 // server is serving what we built is to compare hashes, and the only way to trust that comparison is to
@@ -86,4 +86,56 @@ test('a scoped verification still catches a stale module', () => {
   const remote = { revision: 9, hash: packageHashes({ ...LOCAL, luaModules: { ...LOCAL.luaModules, 'site.reader': 'READER = { v: 2 }\n' } }) };
   assert.deepEqual(diffPackage(LOCAL, remote, { compare: ['luaModules'] }).map((issue) => [issue.code, issue.name]),
     [['module_stale', 'site.reader']]);
+});
+
+// The production app's document belongs to the platform and our modules ride beside it. So the delivery
+// that production needs is not "push a package" but "put these modules there and leave everything else
+// exactly as it was" — read the current document, send it back byte for byte, add the modules, and prove
+// afterwards that only the modules changed.
+
+function fakeServer(initial) {
+  const state = { ...initial };
+  return {
+    state,
+    fetchImpl: async (url, init) => {
+      if (!init || init.method !== 'POST') {
+        return { ok: true, status: 200, json: async () => ({ revision: state.revision, hash: packageHashes(state), flowDocument: state.flowDocument, sitemap: state.sitemap, luaModules: state.luaModules }) };
+      }
+      const body = JSON.parse(init.body);
+      state.flowDocument = body.flowDocument;
+      state.sitemap = body.sitemap;
+      state.luaModules = body.luaModules;
+      state.revision += 1;
+      return { ok: true, status: 200, json: async () => ({ revision: state.revision, previousRevision: state.revision - 1 }) };
+    },
+  };
+}
+
+const LIVE = { revision: 4, flowDocument: 'version: 1\n# platform owned\n', sitemap: '# sites\n', luaModules: { 'old.module': 'OLD = {}\n' } };
+
+test('a modules-only delivery leaves the document byte for byte', async () => {
+  const server = fakeServer(LIVE);
+  const result = await pushPackage({
+    baseUrl: 'https://backend.test', appId: 'browser-extension', headers: {},
+    local: { luaModules: { 'new.module': 'NEW = {}\n' } },
+    modulesOnly: true,
+    fetchImpl: server.fetchImpl,
+  });
+
+  assert.equal(server.state.flowDocument, LIVE.flowDocument, 'the document must not be rewritten');
+  assert.equal(server.state.sitemap, LIVE.sitemap);
+  assert.deepEqual(Object.keys(server.state.luaModules), ['new.module']);
+  assert.deepEqual(result.issues, []);
+});
+
+test('a modules-only delivery refuses to invent a document', async () => {
+  // If the app has none, sending an empty one would replace a real deployment with nothing.
+  const server = fakeServer({ revision: 0, flowDocument: '', sitemap: '', luaModules: null });
+  await assert.rejects(
+    () => pushPackage({
+      baseUrl: 'https://backend.test', appId: 'browser-extension', headers: {},
+      local: { luaModules: { 'new.module': 'NEW = {}\n' } }, modulesOnly: true, fetchImpl: server.fetchImpl,
+    }),
+    /document/i,
+  );
 });

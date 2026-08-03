@@ -466,15 +466,42 @@ end
 --- context and the flow had to call it again; this script keeps its own stack across the reload.
 function S.run_store_search(args)
   args = type(args) == "table" and args or {}
-  local site = non_empty(args.site)
-  local config = site and RPC_SITES and RPC_SITES[site]
-  if not config then
-    -- amazon and ebay carry bespoke layers and are not part of this cutover. An empty result would read
-    -- as "that store had nothing", which is a claim about listings nobody looked at.
-    return { next = "unsupported_site", site = site }
+  local item = type(args.item) == "table" and args.item or {}
+  local context = type(args.context) == "table" and args.context or {}
+
+  -- A `kind: remote` tool receives the tool's `input:` mapping; a runtime lua tool receives the node's
+  -- SELECTED FLOW STATE. The worker selects `item`, `context`, `page`, `query`, so the site arrives as
+  -- `item.site`. Live, reading only the flat key made every store refuse with an empty site.
+  local site = non_empty(args.site) or non_empty(item.site)
+  -- The collector hands back the wording this store's own listings use; until then the shared query
+  -- stands.
+  local query = non_empty(args.query) or non_empty(context.query)
+  -- Two different failures wear the same word. "The site data module did not load" is a delivery
+  -- problem and every store refuses; "this store has no config" is a porting gap and only that store
+  -- refuses. Live, both 11st and ssg came back with a bare `unsupported_site` and the two were
+  -- indistinguishable, which cost a whole diagnosis round.
+  --
+  -- The reason rides in `store_result` because that is the only field the flow maps. A reason parked
+  -- anywhere else is a reason nobody downstream can read.
+  local function refuse(reason, extra)
+    local out = { next = "unsupported_site", site = site, error = reason,
+      store_result = { site = site, status = reason, error = reason, candidates = array({}) } }
+    for key, value in pairs(extra or {}) do out[key] = value end
+    return out
   end
 
-  local result = S.search(config, args)
+  if type(RPC_SITES) ~= "table" then return refuse("site_data_unavailable") end
+
+  local config = site and RPC_SITES[site]
+  if not config then
+    local known = array({})
+    for name in pairs(RPC_SITES) do known[#known + 1] = name end
+    table.sort(known)
+    -- An empty result would read as "that store had nothing", a claim about listings nobody looked at.
+    return refuse("site_not_ported", { known_sites = known })
+  end
+
+  local result = S.search(config, { query = query, page = args.page })
   local branch = result.next
   local status = (branch == "ok") and "candidates" or (result.error or branch)
 

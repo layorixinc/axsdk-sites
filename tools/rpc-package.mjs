@@ -17,9 +17,12 @@ export function packageHash(source) {
  * @param {{ flowDocument: string, sitemap: string, luaModules?: Record<string,string> }} pkg
  * @returns {{ flowDocument: string, sitemap: string, luaModules: Record<string,string> }}
  */
-export function packageHashes({ flowDocument, sitemap, luaModules = {} }) {
+export function packageHashes({ flowDocument, sitemap, luaModules }) {
   const modules = {};
-  for (const [name, source] of Object.entries(luaModules)) modules[name] = packageHash(source);
+  // The live endpoint answers `luaModules: null` for an app that has never carried any — a default
+  // parameter only fills `undefined`, so this is the same shape that broke `Object.keys` inside the
+  // SDK's own init. An app with no modules has no modules; it is not a crash.
+  for (const [name, source] of Object.entries(luaModules ?? {})) modules[name] = packageHash(source);
   return { flowDocument: packageHash(flowDocument), sitemap: packageHash(sitemap), luaModules: modules };
 }
 
@@ -83,12 +86,29 @@ export async function fetchPackage({ baseUrl, appId, headers, fetchImpl = fetch 
 /**
  * Pushes and then re-reads, so the return value is what the app is serving rather than what the push
  * claimed. A push that reports success and a package that disagrees is the one failure this is for.
+ *
+ * `modulesOnly` is the production delivery: the app document belongs to the platform and our modules
+ * ride beside it, but the endpoint replaces the WHOLE package. So the current document is read and sent
+ * back byte for byte, and only the modules change. An app with no document is refused rather than given
+ * an empty one — that would replace a real deployment with nothing.
  */
-export async function pushPackage({ baseUrl, appId, headers, local, compare, fetchImpl = fetch }) {
+export async function pushPackage({ baseUrl, appId, headers, local, compare, modulesOnly = false, fetchImpl = fetch }) {
+  let payload = { flowDocument: local.flowDocument, sitemap: local.sitemap, luaModules: local.luaModules ?? {} };
+  let scope = compare;
+
+  if (modulesOnly) {
+    const current = await fetchPackage({ baseUrl, appId, headers, fetchImpl });
+    if (!current.flowDocument) {
+      throw new Error(`app '${appId}' serves no flow document; refusing to send an empty one`);
+    }
+    payload = { flowDocument: current.flowDocument, sitemap: current.sitemap ?? '', luaModules: local.luaModules ?? {} };
+    scope = ['luaModules'];
+  }
+
   const response = await fetchImpl(`${baseUrl.replace(/\/+$/, '')}${PACKAGE_PATH(appId)}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify({ flowDocument: local.flowDocument, sitemap: local.sitemap, luaModules: local.luaModules ?? {} }),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     let detail = `${response.status}`;
@@ -97,7 +117,11 @@ export async function pushPackage({ baseUrl, appId, headers, local, compare, fet
   }
   const receipt = await response.json();
   const served = await fetchPackage({ baseUrl, appId, headers, fetchImpl });
-  return { revision: served.revision, previousRevision: receipt.previousRevision, issues: diffPackage(local, served, compare ? { compare } : undefined) };
+  return {
+    revision: served.revision,
+    previousRevision: receipt.previousRevision,
+    issues: diffPackage({ ...local, ...payload, luaModules: local.luaModules ?? {} }, served, scope ? { compare: scope } : undefined),
+  };
 }
 
 // ── CLI ───────────────────────────────────────────────────────────────────────
@@ -118,8 +142,10 @@ if (process.argv[1] && (await import('node:url')).fileURLToPath(import.meta.url)
   const apiKey = appId === env.AXSDK_SANDBOX_APP_ID ? env.AXSDK_SANDBOX_API_KEY : env.AXSDK_API_KEY;
   const baseUrl = env.AXSDK_BASE_URL;
 
-  if (appId === env.AXSDK_APP_ID) {
-    console.error(`refusing to touch '${appId}': its package is production. Use the sandbox app.`);
+  // Production's document belongs to the platform. Reading it is always fine; writing it is only fine
+  // when the write cannot touch it — that is what `--modules-only` guarantees.
+  if (appId === env.AXSDK_APP_ID && command === 'push' && !process.argv.includes('--modules-only')) {
+    console.error(`refusing to replace the package of '${appId}': its document is production. Use --modules-only, or the sandbox app.`);
     process.exit(2);
   }
 
@@ -143,7 +169,7 @@ if (process.argv[1] && (await import('node:url')).fileURLToPath(import.meta.url)
   const modulesOnly = process.argv.includes('--modules-only');
   const compare = modulesOnly ? ['luaModules'] : PACKAGE_PARTS;
   const result = command === 'push'
-    ? await pushPackage({ baseUrl, appId, headers, local, compare })
+    ? await pushPackage({ baseUrl, appId, headers, local, compare, modulesOnly })
     : { ...(await fetchPackage({ baseUrl, appId, headers })), issues: null };
   const issues = result.issues ?? diffPackage(local, result, { compare });
 

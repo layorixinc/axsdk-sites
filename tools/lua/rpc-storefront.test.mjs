@@ -611,7 +611,7 @@ test('a site with no RPC config is refused, not silently empty', () => {
   const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
   const value = runStore(page, { site: 'amazon', query: '마우스' }, SITES_LUA);
   assert.equal(value.next, 'unsupported_site');
-  assert.ok(!value.store_result);
+  assert.equal(value.store_result.status, 'site_not_ported');
 });
 
 test('the result never asks the caller to come back mid-navigation', () => {
@@ -621,4 +621,69 @@ test('the result never asks the caller to come back mid-navigation', () => {
   const value = runStore(page, { site: '11st', query: '마우스' }, SITES_LUA);
   assert.notEqual(value.next, 'navigating');
   assert.ok(!value.store_result.pending);
+});
+
+test('a refusal says whether the data module is missing or the site is', () => {
+  // Live, both 11st and ssg refused with a bare `unsupported_site`, and the two possible causes — the
+  // site data module never loaded, or this store genuinely has no config — need different fixes. A
+  // refusal that cannot tell them apart costs a diagnosis round every time.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
+
+  installRpcStub(lua, page);
+  lua.define('RPC_SITES = nil');
+  const noModule = lua.call('AX_RPC_STOREFRONT.run_store_search', { site: '11st', query: 'x' });
+  assert.equal(noModule.next, 'unsupported_site');
+  assert.equal(noModule.error, 'site_data_unavailable');
+
+  installRpcStub(lua, page);
+  lua.define('RPC_SITES = { ["11st"] = { site = "11st" } }');
+  const noSite = lua.call('AX_RPC_STOREFRONT.run_store_search', { site: 'amazon', query: 'x' });
+  assert.equal(noSite.next, 'unsupported_site');
+  assert.equal(noSite.error, 'site_not_ported');
+  assert.deepEqual(noSite.known_sites, ['11st']);
+});
+
+test('a refusal still produces a store_result, so the reason travels', () => {
+  // The flow maps `store_result` and nothing else. A refusal that puts its reason anywhere else is a
+  // reason the flow cannot see — live, two stores refused and the output showed only the branch name.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
+  installRpcStub(lua, page);
+  lua.define('RPC_SITES = { ["11st"] = { site = "11st" } }');
+  const refused = lua.call('AX_RPC_STOREFRONT.run_store_search', { site: 'amazon', query: 'x' });
+
+  assert.equal(refused.store_result.status, 'site_not_ported');
+  assert.equal(refused.store_result.error, 'site_not_ported');
+  assert.equal(refused.store_result.site, 'amazon');
+});
+
+test('the entry reads the shape an action_contract actually hands it', () => {
+  // A `kind: remote` tool gets the `input:` mapping; a runtime lua tool gets the node's SELECTED FLOW
+  // STATE. The worker selects `item`, `context`, `page`, `query` — so the site arrives as `item.site`,
+  // not `site`. Live, reading only the flat key made every store refuse with an empty site.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('7', '무선 마우스', '9,900원')] } });
+  installRpcStub(lua, page);
+  lua.define(`RPC_SITES = ${SITES_LUA}`);
+  const value = lua.call('AX_RPC_STOREFRONT.run_store_search', {
+    item: { site: '11st' },
+    context: { query: '마우스' },
+    page: 1,
+  });
+
+  assert.equal(value.next, 'done');
+  assert.equal(value.store_result.site, '11st');
+  assert.equal(value.store_result.candidates.length, 1);
+});
+
+test('an explicit query still wins over the shared one', () => {
+  // The collector hands back the wording this store's own listings use; until then the shared query
+  // stands. Both arrive in the same state, so precedence has to be stated.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('7', 'x', '1원')] } });
+  installRpcStub(lua, page);
+  lua.define(`RPC_SITES = ${SITES_LUA}`);
+  lua.call('AX_RPC_STOREFRONT.run_store_search', {
+    item: { site: '11st' }, context: { query: '공용 검색어' }, query: '이 스토어 표현', page: 1,
+  });
+  const nav = page.ops.find((entry) => entry.op === 'nav.navigate');
+  assert.ok(/%EC%9D%B4%20%EC%8A%A4|%EC%9D%B4\+%EC%8A%A4/.test(nav.params.url) || decodeURIComponent(nav.params.url).includes('이 스토어 표현'),
+    `the store's own wording must be used: ${nav.params.url}`);
 });

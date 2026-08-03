@@ -532,8 +532,13 @@ function S.search(config, args)
   -- after an extension reload, three turns in a row. One refused read is not a page problem, and
   -- raising here loses the whole store: the worker marks it failed and the comparison never shows it.
   -- The tight `opTimeoutMs` is for navigating polls, not for the opening read.
-  local ok, from = pcall(dom.get_location_href)
-  if not ok then ok, from = pcall(dom.get_location_href) end
+  -- Each failed attempt already costs the op timeout, so the retries ARE the wait. Live, one retry was
+  -- not enough right after an extension reload: the channel needed a beat longer than a single 2s budget.
+  local ok, from
+  for _ = 1, 3 do
+    ok, from = pcall(dom.get_location_href)
+    if ok then break end
+  end
   if not ok then return { next = "error", error = "rpc_unavailable" } end
   local target = S.search_url(config, query, tonumber(args.page))
   if not target then return { next = "error", error = "search_url_unavailable" } end
@@ -675,4 +680,48 @@ function S.run_store_search(args)
       pagination_supported = result.pagination_supported,
     },
   }
+end
+
+--- The site whose store is showing at `href`, or nil when no ported store claims that host.
+---
+--- The single-site shopping flow opens a store and then searches "the site that is open": its node
+--- carries a query and nothing else. The durable adapter got the site for free because the browser had
+--- already loaded that site's layer; a runtime script has to read it off the page.
+---
+--- A subdomain of a declared host counts (`www.ebay.com` for `ebay.com`), because a store rarely serves
+--- search from the exact host it names. A page no config claims resolves to NOTHING — answering with
+--- some other store would search the wrong shop.
+function S.site_for_url(href)
+  local host = tostring(href or ""):match("^https?://([^/]+)")
+  if not host or type(RPC_SITES) ~= "table" then return nil end
+  host = host:lower()
+
+  for name, config in pairs(RPC_SITES) do
+    for index = 1, #(config.hosts or {}) do
+      local declared = tostring(config.hosts[index]):lower()
+      if host == declared or host:sub(-(#declared + 1)) == "." .. declared then return name end
+    end
+  end
+  return nil
+end
+
+--- Searches whichever ported store is currently open. Same result shape as `run_store_search`, so the
+--- flow reads it the same way.
+function S.run_open_site_search(args)
+  args = type(args) == "table" and args or {}
+  local ok, href = pcall(dom.get_location_href)
+  if not ok then return { next = "error", error = "rpc_unavailable" } end
+
+  local site = S.site_for_url(href)
+  if not site then
+    return { next = "unsupported_site", site = site, error = "site_not_ported",
+             store_result = { status = "site_not_ported", error = "site_not_ported", candidates = array({}) } }
+  end
+  local result = S.run_store_search({ site = site, query = args.query, page = args.page })
+  -- The single-site flow predates the worker's envelope and maps `result.candidates` directly, so the
+  -- list is exposed at the top level too rather than reshaping a flow to match a reader.
+  local store = result.store_result or {}
+  result.candidates = store.candidates
+  result.error = store.error
+  return result
 end

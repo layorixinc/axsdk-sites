@@ -534,3 +534,15 @@ test('the search hops that only existed to survive a navigation are gone', () =>
   assert.deepEqual(hops, ['search_bespoke_after_navigation'],
     'a node exists only to be called again after a navigation');
 });
+
+test('single-site shopping still reaches a store this cutover has not ported', () => {
+  // The runtime reader resolves the open page to a ported store or refuses. amazon is still bespoke, so
+  // without a durable sibling the refusal reads to the user as "not found" on a store that has the item.
+  const common = parseFlow('_common/flows.yaml');
+  const nodes = common.flows?.shopping_single_site?.nodes ?? {};
+
+  assert.equal(nodes.search_item.next.unsupported_site, 'search_item_bespoke');
+  assert.equal(nodes.search_item_bespoke.id, 'shopping_search_product_durable');
+  assert.equal(nodes.search_item_bespoke.next.done, 'refine_item');
+  assert.equal(common.flowTools.shopping_search_product_durable.execute.tool, 'AX_search_product');
+});

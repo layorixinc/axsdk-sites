@@ -767,10 +767,10 @@ test('a payload id survives even when no url pattern matches', () => {
 // The tight `opTimeoutMs` exists for navigating polls, where a document that accepts a poll and then
 // unloads must not hold the script. The opening read is not that, so it gets one more chance.
 
-test('a channel still attaching costs one retry, not the store', () => {
+test('a channel still attaching costs a couple of retries, not the store', () => {
   const page = makePage({
     href: 'https://www.google.com/',
-    failHrefTimes: 1,
+    failHrefTimes: 2,
     afterNavigate: { 'li.card': [card('1', '무선 마우스', '9,900원')] },
   });
   const { value } = search(page);
@@ -887,4 +887,56 @@ test('a seller line without a percentage yields no rating rather than a wrong on
   const row = { text: 'x', url: 'https://www.11st.co.kr/products/9', title: 'M185', price_text: '9,900원', seller_text: 'Top Rated Seller' };
   const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
   assert.equal(search(page, {}, SELLER_SITE).value.candidates[0].seller_rating_percent, undefined);
+});
+
+// The single-site shopping flow opens a store and then searches "the site that is open" — the node
+// carries a query and nothing else. The durable adapter got the site for free, because the browser had
+// already loaded that site's layer. A runtime script has no such context, so it resolves the site from
+// the page it is looking at.
+
+test('the open page decides which store is being searched', () => {
+  installRpcStub(lua, makePage({ href: 'https://search.11st.co.kr/pc/total-search?kwd=x' }));
+  lua.define('RPC_SITES = { ["11st"] = { site = "11st", hosts = { "search.11st.co.kr" } }, ssg = { site = "ssg", hosts = { "www.ssg.com" } } }');
+  assert.equal(lua.call('AX_RPC_STOREFRONT.site_for_url', 'https://search.11st.co.kr/pc/total-search?kwd=x'), '11st');
+  assert.equal(lua.call('AX_RPC_STOREFRONT.site_for_url', 'https://www.ssg.com/search.ssg?query=x'), 'ssg');
+});
+
+test('a subdomain of a declared host still resolves', () => {
+  installRpcStub(lua, makePage({ href: 'https://www.google.com/' }));
+  lua.define('RPC_SITES = { ebay = { site = "ebay", hosts = { "ebay.com" } } }');
+  assert.equal(lua.call('AX_RPC_STOREFRONT.site_for_url', 'https://www.ebay.com/sch/i.html?_nkw=x'), 'ebay');
+});
+
+test('a page belonging to no ported store resolves to nothing', () => {
+  // amazon is still bespoke; answering with some other store would search the wrong shop.
+  installRpcStub(lua, makePage({ href: 'https://www.google.com/' }));
+  lua.define('RPC_SITES = { ebay = { site = "ebay", hosts = { "ebay.com" } } }');
+  assert.equal(lua.call('AX_RPC_STOREFRONT.site_for_url', 'https://www.amazon.com/s?k=x'), null);
+});
+
+test('searching the open store needs only a query', () => {
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=old',
+    afterNavigate: { 'li.card': [card('5', '무선 마우스', '9,900원')] },
+  });
+  installRpcStub(lua, page);
+  lua.define(`RPC_SITES = { ["11st"] = ${SITES_LUA.replace(/^\{ \["11st"\] = /, '').replace(/ \}$/, '')}, hosts = { "search.11st.co.kr" } } }`.replace('} }, hosts', '}, hosts'));
+  const value = lua.call('AX_RPC_STOREFRONT.run_open_site_search', { query: '마우스' });
+  assert.equal(value.next, 'done');
+  assert.equal(value.store_result.site, '11st');
+});
+
+test('the single-site search answers in the shape that flow already reads', () => {
+  // Its `output:` maps `result.candidates` and `result.error` directly — the tool predates the worker's
+  // `store_result` envelope. Reshaping the flow to match the reader would be the tail wagging the dog.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=old',
+    afterNavigate: { 'li.card': [card('5', '무선 마우스', '9,900원')] },
+  });
+  installRpcStub(lua, page);
+  lua.define('RPC_SITES = { ["11st"] = { site = "11st", hosts = { "search.11st.co.kr" }, search_url = "https://search.11st.co.kr/pc/total-search", search_param = "kwd", search_path_marker = "/pc/total-search", result_selector = "li.card", result_url_selector = "a", result_title_selector = ".name", result_price_selector = ".price", default_currency = "KRW", product_id_patterns = { "/products/(%d+)" } } }');
+  const value = lua.call('AX_RPC_STOREFRONT.run_open_site_search', { query: '마우스' });
+
+  assert.ok(Object.values(value.candidates ?? {}).length >= 1, 'candidates must be readable at the top level');
+  assert.equal(value.error, undefined);
 });

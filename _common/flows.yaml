@@ -953,7 +953,20 @@ flows:
         kind: action_contract
         inputSelector: [query]
         id: shopping_search_product
-        description: Search the shopping site for the current item's query. Single durable call — fires the search, suspends across the results navigation, then resumes to read candidates.
+        description: Search the store that is open, in the runtime, and read its candidates.
+        next:
+          done: refine_item
+          # TEMPORARY, with `search_item_bespoke`: amazon still reads through its browser layer. A
+          # refusal without this branch reaches the user as "not found" on a store that has the item.
+          unsupported_site: search_item_bespoke
+          error: next_product
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      search_item_bespoke:
+        kind: action_contract
+        inputSelector: [query]
+        id: shopping_search_product_durable
+        description: Search a store whose browser layer has not been ported to the runtime yet.
         next:
           done: refine_item
           error: next_product
@@ -3540,13 +3553,45 @@ flowTools:
         add_status: { type: [string, "null"] }
         add_error: { type: [string, "null"] }
 
-  shopping_search_product:
-    description: Search the shopping site for the current item's query; returns candidate products.
+  # TEMPORARY, paired with the `search_item_bespoke` node: amazon still reads through its browser
+  # layer. Deleted when that layer is ported.
+  shopping_search_product_durable:
+    description: Search a store whose browser layer has not been ported to the runtime yet.
     execute: { kind: remote, tool: AX_search_product, timeoutMs: 90000 }
     input:
       query: tool.args.query
     output:
       next: { if: [{ var: result.error }, "error", "done"] }
+      candidates: result.candidates
+      search_status: { if: [{ var: result.error }, { var: result.error }, "ok"] }
+      error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        query: { type: string }
+
+  shopping_search_product:
+    description: Search the shopping site for the current item's query; returns candidate products.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.61_rpc_storefront", "_common.62_rpc_sites"]
+      rpc:
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all, dom.get_text]
+        opTimeoutMs: 2000
+        deadlineMs: 90000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_STOREFRONT.run_open_site_search(args)
+        end
+    input:
+      query: tool.args.query
+    output:
+      # The script already chose its branch; deriving one from `result.error` here overrode it and sent
+      # an unported store to `next_product` instead of to the durable sibling.
+      next: result.next
       candidates: result.candidates
       search_status: { if: [{ var: result.error }, { var: result.error }, "ok"] }
       error: result.error

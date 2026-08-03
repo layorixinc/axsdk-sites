@@ -67,9 +67,26 @@ local function fields_for(config)
   end
   add("url", config.result_url_selector, "href")
   add("title", config.result_title_selector)
+  -- A title selector is often a CSS LIST and the browser answers with the first match in document
+  -- order. On 11st that is the image, whose textContent is empty; the alt carries the name. Live, not
+  -- asking for it turned 24 cards into zero candidates.
+  add("image_alt", config.result_image_selector, "alt")
+  add("image_url", config.result_image_selector, "src")
+  add("brand", config.result_brand_selector)
+  add("manufacturer_model", config.result_model_selector)
   add("price_text", config.result_price_selector)
   add("shipping_text", config.result_shipping_selector)
   add("rating_text", config.result_rating_selector)
+  add("reviews_text", config.result_reviews_selector)
+  add("condition", config.result_condition_selector)
+  add("delivery_text", config.result_delivery_selector)
+  add("return_terms", config.result_return_selector)
+  -- The id attribute may sit on the row itself or on an element inside it: 11st keeps it on the card's
+  -- anchor, whose href is an ad-server redirect carrying no product id at all.
+  if config.result_id_attr or config.result_id_selector then
+    fields.root_id = { attr = config.result_id_attr or "id" }
+    if config.result_id_selector then fields.root_id.selector = config.result_id_selector end
+  end
   return fields
 end
 
@@ -78,21 +95,42 @@ local function parse_price(text)
   return tonumber(raw:match("%d+%.?%d*"))
 end
 
-local function product_id(config, href)
-  local text = non_empty(href)
-  if not text then return nil end
-  for index = 1, #(config.product_id_patterns or {}) do
-    local id = text:match(config.product_id_patterns[index])
-    if id then return id end
+--- The id a card carries, from its link or from the attribute the site hides it in. Patterns are tried
+--- against BOTH sources.
+---
+--- A structured value no pattern understands yields NOTHING. Mining a first token out of
+--- `{"content_type":"PRODUCT","content_no":"917…"}` gave every card on the page the id `content_type`;
+--- the dedupe then collapsed 156 cards into one and a store full of listings reported almost nothing.
+local function product_id(config, href, attr_value)
+  local patterns = config.product_id_patterns or {}
+  local function by_pattern(text)
+    for index = 1, #patterns do
+      local id = text:match(patterns[index])
+      if id then return id end
+    end
+    return nil
   end
-  return nil
+
+  local direct = non_empty(attr_value)
+  if direct then
+    local matched = by_pattern(direct)
+    if matched then return matched end
+    -- A bare id is usable; anything with JSON punctuation in it is a structure we did not parse.
+    if not direct:find('[{}"]') then
+      local token = direct:match("([%w_-]+)")
+      if token then return token end
+    end
+  end
+
+  local text = non_empty(href)
+  return text and by_pattern(text) or nil
 end
 
 --- Turns one read row into a candidate, or nil when it cannot be compared. A row without an id or a
 --- price is dropped rather than guessed: a wrong number in a price comparison is worse than a missing row.
 local function candidate_from(config, row)
   local href = non_empty(row.url)
-  local id = product_id(config, href)
+  local id = product_id(config, href, row.root_id)
   local name = non_empty(row.title) or non_empty(row.image_alt)
   local price = parse_price(row.price_text)
   if not id or not name or not price then return nil end
@@ -102,10 +140,21 @@ local function candidate_from(config, row)
     id = id,
     name = name,
     price = price,
+    price_text = non_empty(row.price_text),
     currency = config.default_currency,
     url = (config.product_url_prefix and (config.product_url_prefix .. id)) or href,
+    image_url = non_empty(row.image_url),
+    -- The comparison ranks on these. A row that reaches it without a shipping figure has no known
+    -- total and is folded out of the default window, so dropping them here empties the window that the
+    -- user actually reads.
+    brand = non_empty(row.brand),
+    manufacturer_model = non_empty(row.manufacturer_model),
     shipping_text = non_empty(row.shipping_text),
     rating_text = non_empty(row.rating_text),
+    reviews_text = non_empty(row.reviews_text),
+    condition = non_empty(row.condition),
+    delivery_text = non_empty(row.delivery_text),
+    return_terms = non_empty(row.return_terms),
   }
 end
 

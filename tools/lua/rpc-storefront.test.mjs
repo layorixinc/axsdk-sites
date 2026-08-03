@@ -364,3 +364,110 @@ test('the payload obeys the same row limit as the grid', () => {
   const limited = { ...EMBEDDED, result_limit: 5 };
   assert.equal(search(payloadPage(`{"items":[${items}]}`), {}, limited).value.candidates.length, 5);
 });
+
+// 11st routes every card through an ad-server redirect, so the href carries no product id at all; the id
+// survives only in the anchor's `data-log-body` JSON. Deriving ids from the href alone made a grid of 156
+// cards dedupe down to one — a store full of listings reporting almost nothing.
+
+const ATTR_ID = {
+  ...CONFIG,
+  result_id_selector: 'a.c-card-item__anchor[data-log-body]',
+  result_id_attr: 'data-log-body',
+  product_id_patterns: ['/products/(%d+)', '"content_no"%s*:%s*"(%d+)"'],
+};
+const adRow = (id, name, price) => ({
+  text: `${name} ${price}`,
+  url: 'https://action.adoffice.11st.co.kr/act?trcKey=abc',
+  title: name,
+  price_text: price,
+  root_id: `{"content_type":"PRODUCT","content_no":"${id}"}`,
+});
+
+test('an id hidden in an attribute is read when the href has none', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [adRow('9170626560', '무선 마우스', '10,000원')] } });
+  const { value } = search(page, {}, ATTR_ID);
+  assert.equal(value.candidates[0]?.product_id, '9170626560');
+});
+
+test('cards that differ only in the attribute stay distinct', () => {
+  // The dedupe key is the id. When every card answered the same id the grid collapsed to one row.
+  const rows = ['111', '222', '333'].map((id, i) => adRow(id, `상품 ${i}`, `${i + 1},000원`));
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': rows } });
+  assert.equal(search(page, {}, ATTR_ID).value.candidates.length, 3);
+});
+
+test('a structured attribute no pattern understands yields nothing, not a first token', () => {
+  // Mining the first token out of `{"content_type":"PRODUCT",…}` gave every card the id "content_type".
+  const noPattern = { ...ATTR_ID, product_id_patterns: ['/products/(%d+)'] };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [adRow('9170626560', 'x', '1원')] } });
+  // An empty Lua table marshals to an object, not an array (AGENTS §9), so assert the emptiness
+  // itself rather than the shape the converter happened to choose.
+  assert.equal(Object.keys(search(page, {}, noPattern).value.candidates).length, 0);
+});
+
+test('a bare attribute id is taken as the id', () => {
+  const bare = { ...ATTR_ID, product_id_patterns: ['^(%d+)$'] };
+  const row = { ...adRow('777', 'x', '1원'), root_id: '777' };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
+  assert.equal(search(page, {}, bare).value.candidates[0]?.product_id, '777');
+});
+
+test('the href still wins when it carries the id', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('4242', 'x', '1원')] } });
+  assert.equal(search(page, {}, ATTR_ID).value.candidates[0]?.product_id, '4242');
+});
+
+// Live, 11st found 24 cards and produced zero candidates. Its title selector is a CSS LIST
+// (`.c-card-item__name dd, img[alt]`) and the browser answers with the first match in document order —
+// the image, whose textContent is empty. The durable reader survives that by also asking for the image's
+// `alt`; this reader never requested the field it then read from the row.
+//
+// The lesson generalises: whatever the reader consumes it must ASK for. So the requested set is the
+// durable reader's set, and the comparison's own fields — shipping, brand, model, rating — come with it,
+// because a row without them is folded out of the default window as an unknown total.
+
+const RICH = {
+  ...CONFIG,
+  result_title_selector: '.name, img[alt]',
+  result_image_selector: 'img',
+  result_brand_selector: '.brand',
+  result_model_selector: '.model',
+  result_shipping_selector: '.ship',
+  result_rating_selector: '.rate',
+  result_reviews_selector: '.reviews',
+  result_condition_selector: '.cond',
+  result_delivery_selector: '.delivery',
+};
+
+test('a title that only exists as an image alt is still a name', () => {
+  const row = { text: '무선 마우스', url: 'https://www.11st.co.kr/products/55', title: '', image_alt: '무선 마우스', price_text: '9,900원' };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
+  assert.equal(search(page, {}, RICH).value.candidates[0]?.name, '무선 마우스');
+});
+
+test('the reader asks for every field it reads', () => {
+  const row = { text: 'x', url: 'https://www.11st.co.kr/products/55', title: '무선 마우스', price_text: '9,900원' };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
+  search(page, {}, RICH);
+  const fields = page.ops.find((entry) => entry.op === 'dom.query_all').params.fields ?? {};
+  for (const name of ['url', 'title', 'image_alt', 'brand', 'manufacturer_model', 'price_text',
+    'shipping_text', 'rating_text', 'reviews_text', 'condition', 'delivery_text']) {
+    assert.ok(fields[name], `${name} must be requested`);
+  }
+});
+
+test('the candidate carries what the comparison ranks on', () => {
+  const row = {
+    text: 'x', url: 'https://www.11st.co.kr/products/55', title: '무선 마우스', price_text: '9,900원',
+    brand: '로지텍', manufacturer_model: 'M185', shipping_text: '무료배송', rating_text: '4.5',
+    reviews_text: '120', condition: '새 상품', delivery_text: '내일 도착',
+  };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row] } });
+  const candidate = search(page, {}, RICH).value.candidates[0];
+
+  assert.equal(candidate.brand, '로지텍');
+  assert.equal(candidate.manufacturer_model, 'M185');
+  assert.equal(candidate.shipping_text, '무료배송');
+  assert.equal(candidate.rating_text, '4.5');
+  assert.equal(candidate.condition, '새 상품');
+});

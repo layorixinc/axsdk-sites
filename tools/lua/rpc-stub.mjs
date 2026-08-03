@@ -160,6 +160,9 @@ function poll(probe, opts) {
 
 function describe(op, args) {
   if (op === 'nav.navigate') return { url: args[0] };
-  if (op === 'dom.query_all') return { selector: args[0], limit: args[2] };
+  // The requested fields are part of what the op asked for, and "did the reader ask for what it later
+  // reads" is a real contract: 11st produced zero candidates from 24 cards because a field was read
+  // from the row and never requested.
+  if (op === 'dom.query_all') return { selector: args[0], fields: args[1], limit: args[2] };
   return { selector: args[0] };
 }

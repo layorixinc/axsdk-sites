@@ -109,6 +109,42 @@ local function candidate_from(config, row)
   }
 end
 
+--- Where the reader actually is, when that is not a result page. An empty grid and a bot wall count the
+--- same number of cards, and the difference is the whole answer: "this store had nothing" versus "this
+--- store wants proof you are human". The multi-store loop also branches on it — an empty page is worth a
+--- second navigation, a wall never is.
+--- Costs at most three reads and only on the page we already landed on: no extra navigation.
+---
+--- Returns `kind, reason`. The KIND is one of two stable branch keys a flow can enumerate; the REASON is
+--- whatever that site calls its wall. Returning the site's wording as the branch key made naver answer
+--- `next = "security_verification_required"` live, which no flow enumerates — it would fall through
+--- `invalidNext` into a generic error and lose the very reason it was carrying.
+local function access_error(config, href)
+  local low = href:lower()
+  for index = 1, #(config.blocked_urls or {}) do
+    local item = config.blocked_urls[index]
+    if low:find(tostring(item.text):lower(), 1, true) then return "access_denied", item.error or "access_denied" end
+  end
+  for index = 1, #(config.login_urls or {}) do
+    if low:find(tostring(config.login_urls[index]):lower(), 1, true) then return "login_required", "login_required" end
+  end
+  for index = 1, #(config.blocked_selectors or {}) do
+    local item = config.blocked_selectors[index]
+    if dom.exists(item.selector) then return "access_denied", item.error or "access_denied" end
+  end
+  if config.login_selector and dom.exists(config.login_selector) then return "login_required", "login_required" end
+  if #(config.blocked_text or {}) > 0 then
+    -- Read the body ONLY when a phrase is configured: it is the most expensive read here and most sites
+    -- declare no phrases at all.
+    local body = tostring(dom.get_text("body") or ""):lower()
+    for index = 1, #config.blocked_text do
+      local item = config.blocked_text[index]
+      if body:find(tostring(item.text):lower(), 1, true) then return "access_denied", item.error or "access_denied" end
+    end
+  end
+  return nil, nil
+end
+
 --- Why a read produced nothing: a grid full of cards nobody could price is a different fact from an
 --- empty grid, and the flow branches on it.
 local function outcome(cards_seen, kept)
@@ -135,6 +171,15 @@ function S.search(config, args)
 
   local ready = config.result_ready_selector or config.result_selector
   dom.wait_for_selector(ready, { timeout = config.search_timeout or 6000, interval = 200 })
+
+  -- Before counting cards. A wall that happens to render one card would otherwise report `ok`, and a
+  -- wall that renders none would report `no_results` — both are answers about prices never compared.
+  local landed = dom.get_location_href()
+  local kind, reason = access_error(config, tostring(landed or ""))
+  if kind then
+    return { next = kind, site = config.site, query = query, href = landed, cards_seen = 0,
+             candidates = array({}), error = reason }
+  end
 
   local rows = dom.query_all(config.result_selector, fields_for(config), config.result_limit or 24)
   local cards_seen = #rows

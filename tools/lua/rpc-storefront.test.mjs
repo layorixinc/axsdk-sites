@@ -32,9 +32,9 @@ const CONFIG = {
   product_url_prefix: 'https://www.11st.co.kr/products/',
 };
 
-function search(page, args = {}) {
+function search(page, args = {}, config = CONFIG) {
   installRpcStub(lua, page);
-  const value = lua.call('AX_RPC_STOREFRONT.search', CONFIG, { query: '마우스', ...args });
+  const value = lua.call('AX_RPC_STOREFRONT.search', config, { query: '마우스', ...args });
   return { value, ops: page.ops };
 }
 
@@ -157,4 +157,83 @@ test('a row with no id or no price is dropped, not guessed', () => {
   const { value } = search(page);
   assert.deepEqual(value.candidates.map((entry) => entry.product_id), ['7']);
   assert.equal(value.cards_seen, 3, 'what was on the page is reported even when little survives');
+});
+
+// An empty grid and a bot wall look identical to a reader that only counts cards, and the difference
+// decides what the user is told: "this store had nothing" versus "this store wants you to prove you are
+// human". Reporting the first when the second is true is a claim about prices that were never compared,
+// and the multi-store loop uses it to decide whether reading page two is worth a navigation.
+
+const WALLED = {
+  ...CONFIG,
+  blocked_selectors: [{ selector: '#captcha', error: 'access_denied' }],
+  blocked_text: [{ text: '비정상적인 접근', error: 'access_denied' }],
+  blocked_urls: [{ text: '/blocked', error: 'access_denied' }],
+  login_urls: ['/login'],
+  login_selector: '#signin',
+};
+
+test('a captcha element is access_denied, never no_results', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { '#captcha': [{}] } });
+  const { value } = search(page, {}, WALLED);
+  assert.equal(value.next, 'access_denied');
+  assert.equal(value.error, 'access_denied');
+});
+
+test('a block phrase in the body is access_denied', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { body: [{ text: '비정상적인 접근이 감지되었습니다' }] } });
+  assert.equal(search(page, {}, WALLED).value.next, 'access_denied');
+});
+
+test('a landing url that is the block page is access_denied', () => {
+  const page = makePage({ href: 'https://www.google.com/', landsAt: 'https://search.11st.co.kr/blocked', afterNavigate: {} });
+  assert.equal(search(page, {}, WALLED).value.next, 'access_denied');
+});
+
+test('being bounced to a login page is login_required, not an empty store', () => {
+  const page = makePage({ href: 'https://www.google.com/', landsAt: 'https://search.11st.co.kr/login?redirect=1', afterNavigate: {} });
+  const { value } = search(page, {}, WALLED);
+  assert.equal(value.next, 'login_required');
+});
+
+test('a login form on the page is login_required', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { '#signin': [{}] } });
+  assert.equal(search(page, {}, WALLED).value.next, 'login_required');
+});
+
+test('an ordinary empty grid is still no_results', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {} });
+  assert.equal(search(page, {}, WALLED).value.next, 'no_results');
+});
+
+test('a walled store is classified before the grid is read', () => {
+  // Reading first and classifying second costs a query_all on a page that has no grid, and worse, lets a
+  // wall that happens to render one card report `ok`.
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { '#captcha': [{}], 'li.card': [card('1', 'x', '1원')] } });
+  const { value } = search(page, {}, WALLED);
+  assert.equal(value.next, 'access_denied');
+});
+
+test('a site-specific block reason branches on a stable key and reports itself', () => {
+  // Live: naver answered `next: "security_verification_required"` because that is what its config calls
+  // the wall. A branch key is not a message — every site would need its own branch and any flow that did
+  // not enumerate it would fall through `invalidNext` into a generic error, losing the reason entirely.
+  // So the KEY is finite and the REASON rides along.
+  const naverish = {
+    ...CONFIG,
+    blocked_selectors: [{ selector: '#wall', error: 'security_verification_required' }],
+  };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { '#wall': [{}] } });
+  const { value } = search(page, {}, naverish);
+
+  assert.equal(value.next, 'access_denied');
+  assert.equal(value.error, 'security_verification_required');
+});
+
+test('a login wall reports its own reason too', () => {
+  const withReason = { ...CONFIG, login_selector: '#signin' };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { '#signin': [{}] } });
+  const { value } = search(page, {}, withReason);
+  assert.equal(value.next, 'login_required');
+  assert.equal(value.error, 'login_required');
 });

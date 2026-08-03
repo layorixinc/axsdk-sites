@@ -44,7 +44,9 @@ export function makePage(spec) {
     page.navigated = url;
     if (spec.navigationFails) return true;          // accepted, but the document never changes
     page.pollsSinceNavigate = 0;
-    page.pendingHref = url;
+    // A navigation can land somewhere else — a login bounce, a canonical slug rewrite. The reader has to
+    // classify where it ACTUALLY is, not where it aimed.
+    page.pendingHref = spec.landsAt ?? url;
     page.pendingDom = { ...(spec.afterNavigate ?? {}) };
     return true;
   };
@@ -78,7 +80,12 @@ export function installRpcStub(lua, page, { allow } = {}) {
     'dom.get_text': (selector) => {
       page.tick();
       const first = rowsFor(selector)[0];
-      if (!first) throw new Error(`rpc dom.get_text failed: no_element: ${selector}`);
+      // Every document has a body. A page that declares no body row is a page with an empty one, not a
+      // page missing an element — raising there would make a reader look broken for asking.
+      if (!first) {
+        if (selector === 'body') return '';
+        throw new Error(`rpc dom.get_text failed: no_element: ${selector}`);
+      }
       return first.text ?? '';
     },
     'dom.query_all': (selector, fields, limit) => {

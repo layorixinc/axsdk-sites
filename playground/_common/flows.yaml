@@ -296,6 +296,10 @@ flows:
           ok: done
           no_results: empty
           price_unavailable: empty
+          # A store that refuses to be read is not a store with nothing in it. Folding these into
+          # `empty` would make the diagnostic incapable of showing the distinction it exists to prove.
+          access_denied: walled
+          login_required: walled
           error: empty
         fallback: { invalidNext: error, exhaustedNext: error }
       done:
@@ -311,6 +315,12 @@ flows:
         respond: |-
           Reply with exactly this and nothing else:
           RPC SEARCH EMPTY · cards={cards_seen} · href={href}
+      walled:
+        kind: terminal
+        inputSelector: [site, href]
+        respond: |-
+          Reply with exactly this and nothing else:
+          RPC SEARCH WALLED · site={site} · href={href}
 
   rpc_probe:
     goal: Prove that a runtime-side Lua script can drive the browser over RPC.
@@ -473,7 +483,9 @@ flowTools:
       implementation: lua
       modules: ["_common.16_rpc_storefront", "_common.17_rpc_sites"]
       rpc:
-        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all]
+        # `dom.get_text` is for the body scan that tells a bot wall from an empty result page — it runs
+        # only for a site that declares a block phrase, and never as part of reading the grid.
+        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all, dom.get_text]
         opTimeoutMs: 2000
         deadlineMs: 45000
       entry: run

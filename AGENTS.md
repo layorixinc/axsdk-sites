@@ -391,6 +391,26 @@ console (cache-sticky `raw.githubusercontent.com` → **test from the store with
   the PRODUCTION index/_common/site layers into the Playground profile, so the Playground answers with
   production intents and a production bug reproduces there. Use `--root=playground` to exercise the
   Playground's own workspace.
+- **A workspace whose flows declare `execute.modules` MUST be synced from the BUILD output.** The
+  authored `playground/_common/flows.yaml` carries module NAMES; only `dist/playground` (via
+  `npm run build:rpc`) carries the resolved Lua. Syncing `--root=playground` loads a document whose
+  entry function has no module behind it, and the flow answers `RPC SEARCH EMPTY` with a blank `href` in
+  6s — which reads like a site or selector failure, not a delivery one. Sync `--root=dist/playground`.
+- **Package pushes go to `axsdk-sites-sandbox`, never to `browser-extension`.**
+  `POST /axsdk/v2/apps/:appId/package` replaces that app's `flowDocument` and `sitemap`, and
+  `browser-extension`'s are production. The sandbox key lives in `.env` as `AXSDK_SANDBOX_*`. Payload
+  shape differs per delivery path: the package takes `luaModules` as a **name→source map**, the overlay
+  takes either, and the session registry (`POST /axsdk/v2/lua`) takes one `{name, source}` per call
+  because it is an imperative "replace this one".
+- **The Playground harness cannot yet verify an app package in the browser.** It assumes the stored
+  overlay: turn `clientFlows.stored` off (so the package is authoritative) and the extension logs
+  `binding:render-failed` with `hasSites:false`, never attempts a session, and `ax send` returns an
+  empty reply after the full timeout — indistinguishable from a flow that produced nothing. Worse,
+  `playground sync` then blocks forever waiting for a local activation that configuration cannot
+  produce. Recovery: rewrite `axsdk:extension:config` from `.env` with
+  `clientFlows {remoteSites:false, stored:true}`, then `sync --root=dist/playground`. Verifying package
+  delivery end to end needs a package mode in the harness; the platform side already works
+  (push → revision bump, hashes per module).
 - **`run` vs `call`:** prefer durable `run`; `call` is one turn and returns a pending marker for any
   navigating/fetching step.
 - **`ax run` / `ax call` nest the command result under `.value`.** The CLI prints the durable envelope

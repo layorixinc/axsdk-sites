@@ -383,9 +383,18 @@ dom.get_location_href → received, 응답 없음 (문서가 unload 중)
 
 **게이트**: `npm run test:lua` 197개 그대로 통과(파일 위치만 바뀜), `check:flows` 통과.
 
-### Phase 3 — 스토어프론트 어댑터 (2~3일) — 시험용 `appId` 대기
+### Phase 3 — 스토어프론트 어댑터 (2~3일) — **선행: Playground 패키지 모드**
 `60_storefront.lua`(823) + 8개 CONFIG → RPC 툴 1개. 리더 로직은 §4 호환성에 따라 무변경 이식하고,
 바꾸는 것은 **탐색과 대기**뿐이다.
+
+**플랫폼 쪽은 열렸다**(10차): 시험용 앱 `axsdk-sites-sandbox`가 사이트 origin에서 열리고, 패키지
+푸시가 동작한다(revision 13→14, 모듈 2개 22,064 B, 모듈별 sha256, **문서 51.5 → 26.0 KiB**).
+
+막힌 것은 우리 하니스다. Playground는 저장 오버레이를 전제해서, `clientFlows.stored`를 끄고 패키지를
+권위로 삼으면 확장이 `binding:render-failed`(`hasSites:false`)로 세션을 아예 만들지 않고 `ax send`가
+타임아웃까지 빈 응답을 준다 — 플로우가 아무것도 못 만든 것과 구별되지 않는다. `playground sync`는 그
+구성에서 영영 기다린다. **선행 작업**: 패키지 모드(저장 활성화 대기 대신 앱 패키지 revision/hash로
+검증)를 하니스에 넣는다. 그 전까지 패키지 검증은 HTTP 계층까지만이다.
 
 ```lua
 function run(args)

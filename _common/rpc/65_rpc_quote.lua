@@ -495,26 +495,34 @@ end
 
 --- Thumbtack's sentence when a pro cannot take the job. Quoted, never paraphrased: it is the only thing
 --- that tells the user this pro was never an option, and it names what to do next.
-Q.REFUSAL_PHRASES = { "can't do your job", "cannot do your job", "can’t do your job" }
+---
+--- Two wordings, both measured live on the same pro hours apart: "Sorry this pro can't do your job, but we
+--- know other pros who can." and "This pro is currently not available for Handyman." Knowing only the first
+--- meant the second came back as a generic `quote_unavailable` and the user learned nothing.
+---
+--- Each phrase carries how its sentence STARTS, because a fixed window around the match drags in whatever
+--- the page rendered next — `dom.get_text` is textContent, so adjacent blocks arrive with no separator.
+Q.REFUSAL_PHRASES = {
+  { match = "can't do your job", opens = "sorry" },
+  { match = "cannot do your job", opens = "sorry" },
+  { match = "can’t do your job", opens = "sorry" },
+  { match = "currently not available", opens = "this pro" },
+}
 
 function Q.pro_refusal()
-  local body = text_of("body")
-  local text = trim(body)
+  local text = trim(text_of("body"))
   if not text then return nil end
   local lower = text:lower()
   for index = 1, #Q.REFUSAL_PHRASES do
-    local at = lower:find(Q.REFUSAL_PHRASES[index], 1, true)
+    local phrase = Q.REFUSAL_PHRASES[index]
+    local at = lower:find(phrase.match, 1, true)
     if at then
-      -- A fixed window around the phrase dragged in whatever the page rendered next. `dom.get_text` is
-      -- textContent, so adjacent blocks arrive with no separator at all — the cut has to be the
-      -- sentence's own: the site opens it with "Sorry" and closes it with a period.
-      local start = 1
-      local search = 1
+      -- Walk back to the last opening word before the match; the sentence ends at its own period.
+      local start, search = 1, 1
       while true do
-        local found = lower:find("sorry", search, true)
+        local found = lower:find(phrase.opens, search, true)
         if not found or found > at then break end
-        start = found
-        search = found + 1
+        start, search = found, found + 1
       end
       local stop = text:find(".", at, true) or #text
       return trim(text:sub(start, stop))
@@ -682,9 +690,12 @@ function Q.closed_snapshot()
   })
   local dialog = batched and batched[1] or exists(Q.DIALOG)
   local form = batched and batched[2] or exists(Q.STEP_FORM)
+  -- The surface is read by a person. `dom.get_text` is textContent, and a live card put a whole `<img>`
+  -- tag in it, so the report reached the user as a wall of HTML.
   local text = trim(batched and batched[3] or text_of("main")) or ""
+  text = trim((text:gsub("<[^>]*>", " "))) or ""
   return "dialog=" .. tostring(dialog == true) .. " step_form=" .. tostring(form == true)
-    .. " surface=\"" .. text:sub(1, 200) .. "\""
+    .. " surface=\"" .. text:sub(1, 160) .. "\""
 end
 
 --- Navigates to the pro when needed, opens the dialog, and drives every step it can answer. Returns the
@@ -761,10 +772,19 @@ function Q.request_quote(args)
     local before = #applied
     flow = W.drive_step(Q.ctx(), drive, applied, before)
     if not flow then
-      -- The wizard answers nil when there is no active step. That is the dialog going away under us — a
-      -- different fact from "the step budget ran out", and the only one that names the page's state.
-      return { next = "error", quote_error = "quote_dialog_closed", quote_status = "dialog_closed",
-               quote_steps = steps, quote_message = Q.closed_snapshot() }
+      -- The wizard answers nil when there is no ACTIVE step. That is not the same as the dialog going
+      -- away: measured live, the run stopped with `dialog=true step_form=true` and only the step marker
+      -- missing, between renders. So wait for the next step while the dialog still stands, and only call
+      -- it closed once the dialog itself is gone.
+      if exists(Q.DIALOG) or exists(Q.STEP_FORM) then
+        if wait_for(Q.ACTIVE, 8000) then
+          flow = W.drive_step(Q.ctx(), drive, applied, #applied)
+        end
+      end
+      if not flow then
+        return { next = "error", quote_error = "quote_dialog_closed", quote_status = "dialog_closed",
+                 quote_steps = steps, quote_message = Q.closed_snapshot() }
+      end
     end
     steps = steps + 1
 

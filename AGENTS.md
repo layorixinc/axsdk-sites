@@ -856,3 +856,14 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   platform but absent from the extension's op table; a live probe answered `memory_op_unavailable`. The
   runtime module and its tests are ready, and the flow stays on the durable command — adopting it would
   have taken a working feature away from the user to reach a lower `kind: remote` count.
+- **No ACTIVE step is not the same as no dialog.** The quote wizard answers nil when
+  `[data-test="request-flow-step--active"]` matches nothing, and the driver called that a closed dialog —
+  ending the form five steps in and naming the wrong cause. Measured live: the snapshot read
+  `dialog=true step_form=true` with only the step marker missing, between renders. The driver now waits for
+  the next step while the dialog still stands, and only reports `quote_dialog_closed` once the dialog
+  itself is gone. With that, the form drives six steps and stops on the round-trip budget instead.
+- **Thumbtack has TWO wordings for an unavailable pro**, measured on the same pro hours apart: "Sorry this
+  pro can't do your job, but we know other pros who can." and "This pro is currently not available for
+  Handyman." Knowing only the first made the second a generic `quote_unavailable`, so the user learned
+  nothing. Each phrase now carries how its sentence STARTS, because `dom.get_text` is textContent and a
+  fixed window drags in whatever the page rendered next.

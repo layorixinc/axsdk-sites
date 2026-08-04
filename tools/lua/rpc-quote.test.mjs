@@ -644,3 +644,70 @@ test('an op the client never registered is recognised as permanent', () => {
     assert.ok(tries <= 1, `${op} must be attempted at most once, saw ${tries}`);
   }
 });
+
+test('the other way Thumbtack says a pro is unavailable is also read', () => {
+  // Measured live on a pro that had been quotable an hour earlier: the page now reads "This pro is
+  // currently not available for Handyman". That is a second wording for the same fact, and the phrase list
+  // only knew the first one ("Sorry this pro can't do your job"), so the flow reported a generic
+  // `quote_unavailable` and the user learned nothing about why.
+  const page = quotePage({ cta: 'View details', steps: [] });
+  page.dom.body = [{
+    text: 'RLC Handyman This pro is currently not available for Handyman. We know others who are. '
+      + 'Tell us about your job and we will help you find the right pro.',
+  }];
+  const result = drive(page);
+
+  assert.equal(result.quote_error, 'pro_unavailable');
+  assert.match(result.quote_message, /currently not available for Handyman/);
+});
+
+test('a step that has not rendered yet is waited for, not called a closed dialog', () => {
+  // Measured live: the run stopped with `dialog=true step_form=true` — the dialog and its form were both
+  // still there and only the ACTIVE step marker was missing, between renders. Calling that "the dialog
+  // closed" ended the form five steps in and named the wrong cause.
+  const first = step('What do you need?', { choices: ['Shelf installation'] });
+  const second = finalStep();
+  const page = quotePage({ steps: [first, second] });
+
+  // After the first advance the active step is missing for a few polls, while the dialog stays.
+  let gapped = false;
+  const origin = page.onClick;
+  page.onClick = (selector) => {
+    origin(selector);
+    if (!gapped && selector.includes(ACTIVE) && selector.includes('button')) {
+      gapped = true;
+      const held = page.dom[ACTIVE];
+      delete page.dom[ACTIVE];
+      page.dom['[aria-label="Request Flow Dialog"]'] = [{ text: 'Request a quote' }];
+      page.dom['[data-test="request-flow-step-form"]'] = [{ text: 'step form' }];
+      // Long enough that a couple of retries cannot straddle it: the module has to WAIT.
+      let polls = 0;
+      const tick = page.tick;
+      page.tick = () => { tick(); if (++polls === 12) page.dom[ACTIVE] = held; };
+    }
+  };
+  const result = drive(page);
+
+  assert.notEqual(result.quote_error, 'quote_dialog_closed');
+  assert.ok(result.quote_steps >= 2, `the wizard must carry on, drove ${result.quote_steps}`);
+});
+
+test('a dialog that really is gone is still reported as gone', () => {
+  const page = quotePage({ steps: [step('What do you need?', { choices: ['Shelf installation'] })] });
+  const result = drive(page);
+
+  assert.equal(result.quote_error, 'quote_dialog_closed');
+  assert.match(result.quote_message, /dialog=false/);
+});
+
+test('the snapshot reports text, not markup', () => {
+  // A live card put an `<img>` tag in the surface text and the whole report became a wall of HTML in the
+  // user's reply. The snapshot is read by a person.
+  const page = quotePage({ steps: [] , cta: 'View details' });
+  page.dom.main = [{ text: 'Thumbtack handyman <img src="https://x/y.jpeg" alt=""/> AlorOriz' }];
+  const result = drive(page);
+
+  if (result.quote_message) {
+    assert.ok(!result.quote_message.includes('<img'), `markup must be stripped: ${result.quote_message}`);
+  }
+});

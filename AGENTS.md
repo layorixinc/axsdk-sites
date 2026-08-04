@@ -713,6 +713,14 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **`net.fetch` is TWO implementations under one name, and only one of them is durable.** In the
+  browser/durable Lua path it is wrapped in `durableCapability` (`default-capabilities.ts:1679/1682`,
+  journaled and poll-settled) — which is why `B.zip_from_point` checks `response.reason == "pending"`.
+  The runtime's `net.fetch`, granted by the `net:` block on a tool's `execute`, is NOT that: it is
+  absent from the client op table (`createRpcOpTable` is 15 dom/nav ops, no `net`), and a live call made
+  BOTH ladder fetches — Photon then Census — inside a single tool invocation and returned the ZIP. So a
+  runtime module needs no `pending` guard, and porting durable network code should drop it rather than
+  carry it as dead weight.
 - **The Census names its ZCTA layer with a vintage** — `2020 Census ZIP Code Tabulation Areas`. Match the
   layer key by SUBSTRING (`layers=all`), never the literal: an exact key resolves for one census and then
   stops silently at the next release. The durable ladder already did this; the port copied the lookup

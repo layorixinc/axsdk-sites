@@ -173,9 +173,55 @@ R1이 우리 실수였으므로 R27도 같은 실수일 수 있다고 보고 다
 {"error":"memory_op_unavailable","reason":"rpc memory.get failed: command_unresolved: memory.get"}
 ```
 
-`command_unresolved`는 **클라이언트가 등록한 적 없는 op**이 답하는 문자열입니다(`rpc-ops.ts:276`).
-선언으로 닿을 수 있는 자리가 아닙니다. `memory.*`는 확장의 op 표에 없습니다 — R27-R은 그대로
-열려 있습니다. 되돌렸고, 모듈과 테스트 7개는 op이 오는 날 한 줄로 붙습니다.
+`command_unresolved`는 **클라이언트가 등록한 적 없는 op**이 답하는 문자열입니다 — `executeRpcOp`가
+핸들러를 찾지 못하면 권한 검사 **이전에** 즉시 그렇게 답합니다(`rpc-ops.ts:345`). 선언으로 닿을 수 있는
+자리가 아닙니다. 되돌렸고, 모듈과 테스트 7개는 op이 오는 날 한 줄로 붙습니다.
+
+### 그래서 R1처럼 우리가 놓친 자리가 있는지 SDK 소스를 확인했습니다 — 없습니다. 대신 작습니다
+
+op 표는 `createRpcOpTable`이 만들고(`rpc-ops.ts:184`) 현재 **15개** — dom 13 + nav 2 뿐입니다.
+`memory.*`는 없습니다. 그런데 그 표를 세우는 자리가 이미 메모리를 들고 있습니다:
+
+| 사실 | 위치 |
+|---|---|
+| op 표 생성 | `axsdk.ts:586` (`#startRpcChannel`) |
+| **같은 파일이 이미 import 중** | `axsdk.ts:50` — `GLOBAL_MEMORY_SCOPE, readMemoryScope, setMemoryScopeEntry` |
+| 같은 인스턴스가 스토어 보유 | `axsdk.ts:182`, `:762` — `memoryStore` |
+| 오늘 `AX_get_memory`가 하는 일 | `axhandler.ts:105` — `readMemoryScope(GLOBAL_MEMORY_SCOPE)` 한 줄 |
+| 그 스토어 | `memoryscope.ts:42` — `memoryStore.getState().memory` 동기 읽기 |
+
+즉 **네트워크도 DOM도 비동기도 없는 순수 로컬 읽기**이고, op 핸들러가 놓일 스코프에서 이미 보입니다.
+새 배선·새 컨텍스트 브리지·새 의존성이 필요 없습니다. 오늘 `AX_get_memory`를 답하는 그 함수가 그대로
+`memory.get`의 몸통이 됩니다.
+
+### 두 가지 착지 방법이 있고, 두 번째를 권합니다
+
+**(a) 코어 표에 추가** — `createRpcOpTable`의 리터럴에 4개 엔트리. 모든 호스트에 나갑니다.
+
+**(b) 설정으로 주입** — 이미 있는 확장 지점입니다. `createRpcOpTable`은
+`return { ...table, ...options.ops }`로 끝나고(`rpc-ops.ts:323`), `axsdk.ts:588`이 `lua.rpc.ops`를
+그대로 넘깁니다. 즉 **코어를 건드리지 않고** 확장 설정에서 `memory.*`를 등록할 수 있습니다.
+
+(b)를 권하는 이유는 폭발 반경이 아니라 **R27 자신의 결정과 맞아서**입니다. 메모리를 기기에 남기기로
+한 능력이라면, 그것을 켜는 것도 호스트별 opt-in인 편이 일관됩니다. `page.eval`이 `allowPageEval`로
+opt-in인 것과 같은 모양입니다(`rpc-ops.ts:313`).
+
+### 배치 관련 정정 하나
+
+13차 회신에 "읽기 2종은 `dom.read_many` 배치에 담깁니다"라고 적어 주셨는데, **지금 코드로는 안 됩니다.**
+`BATCHABLE`은 dom 읽기 9종을 하드코딩한 집합이고(`rpc-ops.ts:122`), 주석이 그 의도를 못 박습니다 —
+*"이 목록은 미래의 op이 조용히 배치 가능해지지 못하게 하는 클라이언트 자신의 가드"*. `dom.read_many`는
+배치 항목마다 `BATCHABLE.has(op)`를 확인하고 거부합니다(`:264`).
+
+그러니 읽기를 배치에 태우려면 `memory.get`/`memory.search`를 그 집합에 **명시적으로** 넣어 주셔야
+합니다. 쓰기는 넣지 마십시오 — 같은 주석이 이유를 답니다(부수효과가 섞인 배치는 순서도 원자성도
+정의할 수 없음). 우리도 쓰기 배치는 원하지 않습니다.
+
+### 왕복 비용에 대한 부탁
+
+op 하나가 왕복 1회(측정 ~1s)입니다. 키를 여러 개 읽어야 하는 도구에서 `memory.get`을 N번 부르면
+N초입니다. **`memory.search`가 markdown을 한 번에 돌려주는 형태를 꼭 유지해 주십시오** — 우리 모듈은
+그쪽을 기본 경로로 쓰도록 이미 짜여 있습니다.
 
 ---
 

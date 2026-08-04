@@ -1684,7 +1684,7 @@ flows:
         id: shopping_resolve_store_offer
         description: Validate the chosen integer and comparison snapshot, then copy scoped identity, comparison, and cart approvals.
         inputSelector:
-          - offers
+          - comparison_state
           - choice_index
           - choice_comparison_id
           - comparison_id
@@ -2717,11 +2717,14 @@ flowTools:
       kind: runtime
       implementation: lua
       # No rpc block: this command never touches the browser, so it is granted no ops.
-      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries", "_common.73_rpc_offers"]
       entry: run
       lua: |
         function run(args)
-          return AX_RPC_PURE.run("AX_resolve_store_offer", args)
+          -- Through the snapshot, which is the only channel the listing travels on. Reading a separate
+          -- `offers` state field answered `expected array, received null` live, because an empty list is
+          -- carried as absent now — and two channels can disagree about WHICH offers were numbered.
+          return AX_RPC_OFFERS.resolve(args)
         end
     output:
       next: result.next
@@ -2744,9 +2747,10 @@ flowTools:
     parameters:
       type: object
       additionalProperties: false
-      required: [offers, choice_index, choice_comparison_id, comparison_id, identity_id, choice_stage]
+      # `offers` is gone: the listing arrives in the snapshot. What stays required is the number and the
+      # id that gives it meaning.
+      required: [choice_index, choice_comparison_id]
       properties:
-        offers: { type: array, items: { type: object, additionalProperties: true } }
         choice_index: { type: [integer, number] }
         choice_comparison_id: { type: [string, "null"] }
         comparison_id: { type: string, minLength: 1 }

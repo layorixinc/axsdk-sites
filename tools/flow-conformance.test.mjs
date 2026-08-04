@@ -1113,3 +1113,50 @@ test('the comparison window is rendered deterministically, not by a model call',
     'the presenter must select the snapshot, or it has nothing to render',
   );
 });
+
+/** Every production flow layer: the shared base plus each site overlay that has one. */
+function productionFlowLayers() {
+  const root = fileURLToPath(new URL('..', import.meta.url));
+  const sites = readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !entry.name.startsWith('.') && !['node_modules', 'tools', 'dist', 'playground'].includes(entry.name))
+    .map((entry) => `${entry.name}/flows.yaml`)
+    .filter((path) => existsSync(new URL(`../${path}`, import.meta.url)));
+  return ['_common/flows.yaml', ...sites];
+}
+
+/** The module that DEFINES an `AX_RPC_*` global, read from the files rather than a second list. */
+function rpcModuleFor(global) {
+  const root = fileURLToPath(new URL('../_common/rpc', import.meta.url));
+  for (const name of readdirSync(root).filter((file) => file.endsWith('.lua'))) {
+    const source = readFileSync(`${root}/${name}`, 'utf8');
+    if (new RegExp(`^\\s*${global}\\s*=`, 'm').test(source) || new RegExp(`\\b_G\\.${global}\\s*=`).test(source)) {
+      return `_common.${name.replace(/\.lua$/, '')}`;
+    }
+  }
+  return null;
+}
+
+test('every tool declares the modules its Lua actually calls', () => {
+  // `AX_RPC_OFFERS.resolve` was wired into a tool whose `modules:` list did not include
+  // `_common.73_rpc_offers`, so live it read `attempt to index a nil value (global 'AX_RPC_OFFERS')` —
+  // one turn before a cart approval, and the user got a re-ask about which product they meant. The
+  // module list and the script are two statements of the same fact, and only one of them runs.
+  const missing = [];
+
+  for (const layer of ['_common/flows.yaml', ...productionFlowLayers().slice(1)]) {
+    const doc = parseFlow(layer);
+    for (const [toolId, tool] of Object.entries(doc.flowTools ?? {})) {
+      const execute = tool?.execute;
+      const source = execute?.lua;
+      if (typeof source !== 'string') continue;
+      const declared = new Set(execute.modules ?? []);
+      for (const global of new Set(source.match(/\bAX_RPC_[A-Z_]+/g) ?? [])) {
+        const owner = rpcModuleFor(global);
+        // A global no module defines is a different bug, and `rpcModuleFor` reports it as such.
+        if (owner && !declared.has(owner)) missing.push(`${layer} ${toolId}: calls ${global}, missing ${owner}`);
+      }
+    }
+  }
+
+  assert.deepEqual(missing, [], `undeclared modules:\n  ${missing.join('\n  ')}`);
+});

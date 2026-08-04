@@ -2885,21 +2885,10 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "offers",
         "choice_index",
-        "choice_comparison_id",
-        "comparison_id",
-        "identity_id",
-        "choice_stage"
+        "choice_comparison_id"
       ],
       "properties": {
-        "offers": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
         "choice_index": {
           "type": [
             "integer",

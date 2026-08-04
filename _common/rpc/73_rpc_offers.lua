@@ -186,3 +186,37 @@ function O.refine(args)
     view_total = result.view_total,
   }
 end
+
+--- Resolves the number the user typed, against the listing they were reading.
+---
+--- The pick is the last step before a cart mutation, and it was reading its offers from a separate state
+--- field: live, `offers: Invalid input: expected array, received null`, because an empty list travels as
+--- absent now while the listing itself lives in the snapshot. Two channels for one comparison can
+--- disagree about WHICH offers were numbered, and a wrong number here adds the wrong product.
+function O.resolve(args)
+  args = type(args) == "table" and args or {}
+  local snapshot = restore(args.comparison_state)
+  if not snapshot then
+    return { next = "error", ok = false, error = "comparison_unreadable" }
+  end
+  -- The id is what makes a number mean something. A number from another listing must fail here rather
+  -- than select whatever happens to sit at that position now.
+  local chosen = args.choice_comparison_id
+  if type(chosen) == "string" and chosen ~= "" and chosen ~= snapshot.comparison_id then
+    return { next = "error", ok = false, error = "stale_comparison" }
+  end
+
+  local call = {}
+  for key, value in pairs(args) do call[key] = value end
+  call.offers = snapshot.offers
+  call.all_offers = snapshot.all_offers or snapshot.offers
+  call.identity_id = snapshot.identity_id or call.identity_id
+  call.comparison_id = snapshot.comparison_id
+  call.choice_comparison_id = snapshot.comparison_id
+
+  local result = AX_resolve_store_offer(call)
+  if type(result) ~= "table" then
+    return { next = "error", ok = false, error = "resolve_failed" }
+  end
+  return result
+end

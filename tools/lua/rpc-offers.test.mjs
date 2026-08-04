@@ -217,3 +217,48 @@ test('the presenter shows the window once, then hands the reply on', () => {
   assert.equal(answered.next, 'answer', 'once asked, the reply belongs to the next node');
   assert.equal(answered.question, undefined, 'asking twice would replace the listing the user is reading');
 });
+
+test('a chosen number resolves from the snapshot, not from a separate list', () => {
+  // The pick is the last step before a cart mutation, and it was reading `offers` from its own state
+  // field: live, `offers: Invalid input: expected array, received null`, because an empty list is carried
+  // as absent now and the listing itself lives in the snapshot. One channel for the comparison or the two
+  // can disagree about WHICH offers were numbered — and a wrong number here adds the wrong product.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  first.close();
+
+  const later = runtime();
+  const picked = later.call('AX_RPC_OFFERS.resolve', {
+    identity_id: 'identity-1',
+    identity_status: 'locked',
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    choice_comparison_id: ranked.comparison_id,
+    choice_index: 1,
+    choice_stage: 'asked',
+  });
+  later.close();
+
+  assert.equal(picked.error, undefined, `resolve failed: ${picked.error}`);
+  assert.ok(picked.selected_offer, 'the pick must name an offer');
+});
+
+test('a number from a listing the user is no longer reading is refused', () => {
+  // The comparison id is what makes a number mean something. Resolving against a different listing hands
+  // the user a product they never saw, one turn before the cart.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  first.close();
+
+  const later = runtime();
+  const wrong = later.call('AX_RPC_OFFERS.resolve', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    choice_comparison_id: 'cmp-somethingelse',
+    choice_index: 1,
+  });
+  later.close();
+
+  assert.ok(wrong.error, 'a stale number must not resolve');
+  assert.equal(wrong.selected_offer, undefined);
+});

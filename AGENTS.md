@@ -715,6 +715,19 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   stores, screened, judged, verified and issued an id ended in the generic failure terminal. A command
   picks its own branch and the adapter PASSES IT THROUGH; `check:flows` now refuses any runtime tool
   whose literal `next` is not a branch its node routes.
+- **One channel for the listing, or two can disagree about which offers were numbered.** The pick read
+  `offers` from its own state field while the listing lived in the snapshot; live it answered
+  `offers: Invalid input: expected array, received null`, because an empty list travels as absent now.
+  `AX_RPC_OFFERS.resolve` restores the snapshot, checks the comparison id, and only then resolves the
+  number — the last step before a cart mutation is not a place for two sources of truth.
+- **A tool's `modules:` list and its Lua are two statements of the same fact, and only one of them runs.**
+  `AX_RPC_OFFERS.resolve` was wired into a tool that never declared `_common.73_rpc_offers`:
+  `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
+  re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
+  files that DEFINE it and fails on any tool that calls one it did not declare.
+- **Picking a number IS the approval turn** — `resolve_offer` routes `add` straight to the mutation.
+  Live-verified end to end on 11st (window #3 = the offer added, same id and price). Anyone exercising
+  the select path on a real account is adding to a real cart; use `cancel` to walk the gate instead.
 - **A node that used to be model-called carries model-shaped wiring, and every piece of it must move.**
   Turning the presenter into an `action_contract` was not enough: its output still read
   `next: tool.args.next` — the MODEL`s argument — so a contract answered `undefined` and every

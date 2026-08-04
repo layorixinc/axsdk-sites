@@ -713,6 +713,23 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **`ax sync` turns the remote site loader OFF, so anything it does not deliver is simply ABSENT — with no
+  error.** The site record it leaves is a stub (`sitemapMd: 0`, `flowsYaml: 0`, `scripts: 0`, `errors: []`)
+  because nothing was ever fetched. Lua and flows are delivered; the sitemap was not, so
+  `sitemap.search_site` answered from its documented fallback — the app's site INDEX — and the
+  bluemoonsoft flow resolved every request to lines about other sites and navigated home. Sync now
+  delivers `<site>/sitemap.md` too. When a stored-mode feature reads empty, ask what sync ships before
+  suspecting the client.
+- **A gate that never checks references passes a broken reference forever.** `check:flows` was 89/89 green
+  while every request on bluemoonsoft.com answered `references missing action: open_site` — the
+  navigation port replaced the shared tool with per-flow entries and the site OVERLAY, which owns its flow
+  wholesale so no base fix reaches it, kept the old name. Site overlays are where this hides. Every
+  `run:`/`id:` in every flow file is now pinned against the defined tools.
+- **The params table in the implementation doc is the WIRE shape; the Lua binding is POSITIONAL.**
+  `memory.set_bulk(entries)`, not `memory.set_bulk({ entries = ... })`; `sitemap.search_site(regex, limit)`,
+  not a params table. `docs/rpc_lua_authoring.md` §4 is the signature that matters. We sent the wire shape
+  twice and got `bad_params` both times — `memory.get(key)`/`search(regex)` happen to be positional
+  already, which is exactly what hid the other two.
 - **`net.fetch` is TWO implementations under one name, and only one of them is durable.** In the
   browser/durable Lua path it is wrapped in `durableCapability` (`default-capabilities.ts:1679/1682`,
   journaled and poll-settled) — which is why `B.zip_from_point` checks `response.reason == "pending"`.

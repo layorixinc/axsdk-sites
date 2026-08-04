@@ -592,6 +592,8 @@ export async function reloadExtension(cdpUrl, options, { url, waitForRuntime = t
 //            `stored-lua:` / `stored-lua:<domain>` (not remote `<site>/scripts/*`).
 //   - Flows: read raw `_common/flows.yaml` (":") + `<site>/flows.yaml` (":"+domain) -> `axsdk:flows`;
 //            "Use remote sites flows" OFF + "Use saved flows" ON (clientFlows {remoteSites:false, stored:true}).
+// The extension owns the sites store; sync publishes the local index into it and fills each record's
+// `sitemapMd`, which stored mode otherwise leaves empty because the remote site loader never runs.
 export const SITES_STATE_KEY = 'axsdk:sites';
 export const LUA_STATE_KEY = 'axsdk:lua';
 export const FLOWS_STATE_KEY = 'axsdk:flows';
@@ -816,18 +818,48 @@ export async function syncStore(session, { site, build = true, reload = true } =
   }
   await waitForLuaRuntime(session.page, session.options);
   const domain = (await siteDomain(session)) || slug;
+  // Every published site's sitemap.md. Stored mode turns the remote site loader OFF, so the site record
+  // the extension keeps is a stub — `scripts: 0`, `flowsYaml: 0`, `sitemapMd: 0`, and no errors, because
+  // nothing tried to fetch. Lua and flows are delivered here instead; the sitemap was not, and
+  // `sitemap.search_site` then answered from the app's site INDEX (its documented fallback), so the
+  // bluemoonsoft flow resolved every request to lines about other sites and navigated home. Measured
+  // live: `currentSitemap` 0 bytes while `index.indexMd` held 1507.
+  const sitemaps = {};
+  for (const s of siteSlugs) {
+    const md = await readMaybe(join(repoRoot, s, 'sitemap.md'));
+    if (md && md.trim()) sitemaps[s] = md;
+  }
   // Write flows + lua stores (ALL sites) and pin remote OFF / stored ON — from the content-script context.
-  const writeStores = () => callInAxContext(session.page, session.options, `async function(lua, flows, luaKey, flowsKey, cfgKey) {
+  const writeStores = () => callInAxContext(session.page, session.options, `async function(lua, flows, sitemaps, here, luaKey, flowsKey, cfgKey, sitesKey) {
     if (typeof chrome === 'undefined' || !chrome.storage || !chrome.storage.local) {
       throw new Error('chrome.storage.local unavailable in this context');
     }
     await chrome.storage.local.set({ [flowsKey]: JSON.stringify({ state: { flows }, version: 0 }) });
     await chrome.storage.local.set({ [luaKey]: JSON.stringify({ state: { lua }, version: 0 }) });
+    // MERGE into the sites store: the extension owns those records and only the sitemap is ours to fill.
+    let sitemapKeys = [];
+    const rawSites = (await chrome.storage.local.get(sitesKey))?.[sitesKey];
+    const parsedSites = typeof rawSites === 'string' ? JSON.parse(rawSites) : rawSites;
+    if (parsedSites?.state?.sites) {
+      const state = parsedSites.state;
+      for (const [slug, markdown] of Object.entries(sitemaps)) {
+        if (!state.sites[slug]) continue;
+        state.sites[slug] = { ...state.sites[slug], sitemapMd: markdown };
+        sitemapKeys.push(slug);
+      }
+      if (state.currentSite && sitemaps[state.currentSite.domain]) {
+        state.currentSite = { ...state.currentSite, sitemapMd: sitemaps[state.currentSite.domain] };
+        state.currentSitemap = sitemaps[state.currentSite.domain];
+      } else if (sitemaps[here]) {
+        state.currentSitemap = sitemaps[here];
+      }
+      await chrome.storage.local.set({ [sitesKey]: JSON.stringify(parsedSites) });
+    }
     const got = await chrome.storage.local.get(cfgKey);
     const cfg = (got && got[cfgKey] && typeof got[cfgKey] === 'object') ? got[cfgKey] : {};
     await chrome.storage.local.set({ [cfgKey]: { ...cfg, remoteLuaEnabled: false, remoteSiteFlowsEnabled: false, storedFlowsEnabled: true } });
-    return { luaKeys: Object.keys(lua), flowsKeys: Object.keys(flows), hadConfig: Boolean(got && got[cfgKey]) };
-  }`, [lua, flows, LUA_STATE_KEY, FLOWS_STATE_KEY, EXTENSION_CONFIG_KEY]);
+    return { luaKeys: Object.keys(lua), flowsKeys: Object.keys(flows), sitemapKeys, hadConfig: Boolean(got && got[cfgKey]) };
+  }`, [lua, flows, sitemaps, domain, LUA_STATE_KEY, FLOWS_STATE_KEY, EXTENSION_CONFIG_KEY, SITES_STATE_KEY]);
 
   let written;
   let reclaimed = null;
@@ -862,6 +894,7 @@ export async function syncStore(session, { site, build = true, reload = true } =
     site: slug,
     domain,
     luaStoreKeys: written.luaKeys,
+    sitemapKeys: written.sitemapKeys,
     flowsStoreKeys: written.flowsKeys,
     remoteLuaDisabled: true,
     remoteFlowsDisabled: true,

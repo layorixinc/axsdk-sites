@@ -61,14 +61,32 @@ function S.search(args)
   if err then
     return { next = "error", ok = false, error = err, reason = why }
   end
-  -- No matches is an answer: the page is not listed, and the caller navigates to a known entry point
-  -- instead. Sending it down the error branch would make "not listed" look like "could not look".
   local chunks = type(result) == "table" and result.chunks or nil
   local total = type(result) == "table" and tonumber(result.total) or nil
+  local source = type(result) == "table" and result.source or nil
+
+  -- WHICH document answered decides whether this is an answer at all. When the site's sitemap is not
+  -- loaded the client falls back to the app's own site index, and those lines look like site lines —
+  -- measured live on bluemoonsoft, the hits were other sites' directory entries and the flow navigated
+  -- to the home page as though it had found the page. `none` means neither document was there, which
+  -- used to be indistinguishable from the index matching nothing. Both are refusals, and neither is
+  -- "this site has no such page". A client that predates the field says nothing, and is trusted.
+  if source == "index" or source == "none" then
+    return {
+      next = "error", ok = false, error = "site_sitemap_missing", source = source,
+      -- Carried on purpose: these lines are the evidence for the refusal.
+      chunks = type(chunks) == "table" and chunks or {},
+      total = total or 0,
+    }
+  end
+
+  -- No matches is an answer: the page is not listed, and the caller navigates to a known entry point
+  -- instead. Sending it down the error branch would make "not listed" look like "could not look".
   return {
     next = "go",
     ok = true,
     chunks = type(chunks) == "table" and chunks or {},
     total = total or 0,
+    source = source,
   }
 end

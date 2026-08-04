@@ -110,3 +110,59 @@ test('a transient refusal is retried once before it is called an answer', () => 
   assert.equal(attempts, 2);
   assert.deepEqual(result.chunks, ['/quote']);
 });
+
+test('an answer from the app index is not passed off as the site\'s sitemap', () => {
+  // The op now says WHICH document answered. It matters because when the site's sitemap is not loaded
+  // the client falls back to the app's own site index, whose lines look alike — measured live on
+  // bluemoonsoft, where the hits were "- [thumbtack](https://www.thumbtack.com): ..." and the flow
+  // navigated to the home page as if nothing had gone wrong. That is the failure R26 was refused for.
+  const lua = load({
+    sitemap: {
+      search_site: () => ({
+        chunks: ['- [thumbtack](https://www.thumbtack.com): ...'],
+        total: 1,
+        source: 'index',
+      }),
+    },
+  });
+  const result = lua.call('AX_RPC_SITEMAP.search', { regex: 'quote' });
+  lua.close();
+
+  assert.equal(result.next, 'error');
+  assert.equal(result.error, 'site_sitemap_missing');
+  // The lines are still reported: they say WHY the answer is being refused.
+  assert.equal(result.source, 'index');
+});
+
+test('neither document loaded is its own answer, not an empty site', () => {
+  // `none` exists because "nothing is loaded" used to look identical to "the index matched zero lines".
+  const lua = load({ sitemap: { search_site: () => ({ chunks: [], total: 0, source: 'none' }) } });
+  const result = lua.call('AX_RPC_SITEMAP.search', { regex: 'quote' });
+  lua.close();
+
+  assert.equal(result.error, 'site_sitemap_missing');
+  assert.equal(result.source, 'none');
+});
+
+test('a real site answer carries its source through', () => {
+  const lua = load({
+    sitemap: { search_site: () => ({ chunks: ['/quote'], total: 1, source: 'site' }) },
+  });
+  const result = lua.call('AX_RPC_SITEMAP.search', { regex: 'quote' });
+  lua.close();
+
+  assert.equal(result.next, 'go');
+  assert.equal(result.source, 'site');
+  assert.deepEqual(result.chunks, ['/quote']);
+});
+
+test('a client that predates the source field is still trusted', () => {
+  // An older client answers without `source`. Refusing those would break the tool against a client that
+  // is doing nothing wrong; the field is an improvement, not a precondition.
+  const lua = load({ sitemap: { search_site: () => ({ chunks: ['/quote'], total: 1 }) } });
+  const result = lua.call('AX_RPC_SITEMAP.search', { regex: 'quote' });
+  lua.close();
+
+  assert.equal(result.next, 'go');
+  assert.deepEqual(result.chunks, ['/quote']);
+});

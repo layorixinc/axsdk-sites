@@ -710,6 +710,12 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **A node`s state snapshot and its tool`s arguments are not the same thing — check BOTH.** `localState`
+  showed `query`/`tried_queries` populated at an `action_contract`, and a probe inside the tool printed
+  `q=nil tried=nil`. In the SAME `input:` block, `item`/`context`/`page` arrived and the two scalars the
+  loop updates did not. Read `parts[].debug.localState` from `getChatStore()` for the state, and print
+  from inside the tool for the arguments; believing either alone sends you to the wrong file. Open with
+  the runtime as `RPC_LUA_RUNTIME_REQUESTS_15.md`.
 - **An accumulator must record what was actually DONE, from wherever that survived.** Multi-store
   discovery burned its entire subflow node budget re-asking one store the same question:
   `{"next":"retry_query","query":"로지텍 무선 마우스","tried_queries":""}`, forever, ending in

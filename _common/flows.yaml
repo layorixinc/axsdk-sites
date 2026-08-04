@@ -2081,11 +2081,15 @@ flowTools:
         resultSchema:
           type: object
           additionalProperties: true
-          required: [site, candidates]
+          # `candidates` is NOT required: a store that found nothing is a normal outcome and the parent
+          # records it as `no_results`. An empty Lua table encodes as an OBJECT, so publishing one failed
+          # validation and turned "no matches" into a schema error; the script omits it instead, and
+          # absent against a non-required array passes.
+          required: [site]
           properties:
             site: { type: string }
             query: { type: string }
-            candidates: { type: array, items: { type: object, additionalProperties: true } }
+            candidates: { type: [array, "null"], items: { type: object, additionalProperties: true } }
             error: { type: [string, "null"] }
         budget:
           maxNodes: 20
@@ -2235,11 +2239,15 @@ flowTools:
         resultSchema:
           type: object
           additionalProperties: true
-          required: [site, candidates]
+          # `candidates` is NOT required: a store that found nothing is a normal outcome and the parent
+          # records it as `no_results`. An empty Lua table encodes as an OBJECT, so publishing one failed
+          # validation and turned "no matches" into a schema error; the script omits it instead, and
+          # absent against a non-required array passes.
+          required: [site]
           properties:
             site: { type: string }
             query: { type: string }
-            candidates: { type: array, items: { type: object, additionalProperties: true } }
+            candidates: { type: [array, "null"], items: { type: object, additionalProperties: true } }
             error: { type: [string, "null"] }
         budget:
           maxNodes: 20
@@ -2391,7 +2399,10 @@ flowTools:
         end
     output:
       next: done
-      store_result: result
+      # `result` is the script's ENVELOPE — `{next, store_result}`. Publishing it put `site` and
+      # `candidates` one level below where `resultFrom: store_result` looks, and every store failed the
+      # fan-out schema with `site: expected string, received undefined`.
+      store_result: result.store_result
     parameters:
       type: object
       additionalProperties: false

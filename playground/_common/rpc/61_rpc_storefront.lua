@@ -592,7 +592,10 @@ function S.search(config, args)
   __refused = 0
   args = type(args) == "table" and args or {}
   local query = non_empty(args.query)
-  if not query then return { next = "error", error = "query_required" } end
+  -- Every outcome names its store. `flow.map` validates each item result against `required: [site]`
+  -- and the normalizer refuses without one, so an error that omits it becomes a schema violation instead
+  -- of the fact it was reporting — live, two stores failed discovery that way.
+  if not query then return { next = "error", error = "query_required", site = config.site } end
 
   -- The channel can still be attaching — measured live as `rpc_timeout` on this exact read, moments
   -- after an extension reload, three turns in a row. One refused read is not a page problem, and
@@ -605,20 +608,20 @@ function S.search(config, args)
     ok, from = pcall(dom.get_location_href)
     if ok then break end
   end
-  if not ok then return { next = "error", error = "rpc_unavailable" } end
+  if not ok then return { next = "error", error = "rpc_unavailable", site = config.site } end
   local target = S.search_url(config, query, tonumber(args.page))
-  if not target then return { next = "error", error = "search_url_unavailable" } end
+  if not target then return { next = "error", error = "search_url_unavailable", site = config.site } end
   if not already_showing(config, from, query) then
     -- CAUGHT, not retried: a navigation that already fired would move the page twice. A raise here is the
     -- channel, not the site, and it used to take the whole store down with it.
     local moved = pcall(function() return nav.navigate(target) end)
-    if not moved then return { next = "error", error = "rpc_unavailable" } end
+    if not moved then return { next = "error", error = "rpc_unavailable", site = config.site } end
     -- href first. A document that is still alive answers a selector check from the OLD page, so an
     -- element probe here is a false positive waiting to happen.
     if not nav.wait_for_navigation(from, { timeout = 8000, interval = 200 }) then
       -- A channel that answered nothing is not a site that would not move.
-      if __refused > 0 then return { next = "error", error = "rpc_unavailable" } end
-      return { next = "error", error = "navigation_stuck", href = dom.get_location_href() }
+      if __refused > 0 then return { next = "error", error = "rpc_unavailable", site = config.site } end
+      return { next = "error", error = "navigation_stuck", site = config.site, href = dom.get_location_href() }
     end
   end
 
@@ -702,6 +705,18 @@ end
 ---
 --- There is no `navigating` answer. The durable adapter had one because a navigation destroyed its
 --- context and the flow had to call it again; this script keeps its own stack across the reload.
+--- An EMPTY candidate list must not cross as `{}`. `flow.map` validates the item result against
+--- `candidates: [array, "null"]` and an empty Lua table encodes as an OBJECT, so a store that simply
+--- found nothing failed the schema instead of reporting that it found nothing. Absent is the encoding
+--- that cannot be mistaken, and the caller already reads `candidates or {}`.
+local function without_empty_candidates(result)
+  if type(result) == "table" then
+    local inner = type(result.store_result) == "table" and result.store_result or result
+    if type(inner.candidates) == "table" and #inner.candidates == 0 then inner.candidates = nil end
+  end
+  return result
+end
+
 function S.run_store_search(args)
   args = type(args) == "table" and args or {}
   local item = type(args.item) == "table" and args.item or {}
@@ -743,7 +758,7 @@ function S.run_store_search(args)
   local branch = result.next
   local status = (branch == "ok") and "candidates" or (result.error or branch)
 
-  return {
+  return without_empty_candidates({
     next = "done",
     store_result = {
       site = result.site,
@@ -757,7 +772,7 @@ function S.run_store_search(args)
       has_more = result.has_more,
       pagination_supported = result.pagination_supported,
     },
-  }
+  })
 end
 
 --- The site whose store is showing at `href`, or nil when no ported store claims that host.
@@ -788,7 +803,7 @@ end
 function S.run_open_site_search(args)
   args = type(args) == "table" and args or {}
   local ok, href = pcall(dom.get_location_href)
-  if not ok then return { next = "error", error = "rpc_unavailable" } end
+  if not ok then return { next = "error", error = "rpc_unavailable", site = config.site } end
 
   local site = S.site_for_url(href)
   if not site then

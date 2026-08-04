@@ -171,3 +171,39 @@ test('a retry records the wording it just tried, even when nobody echoed it', ()
     assert.notEqual(value.query, '로지텍 무선 마우스', 'a retry must ask something new');
   }
 });
+
+test('the store result a fan-out reads is not wrapped in another one', () => {
+  // `flow.map` takes its per-item result from `resultFrom: store_result` and validates it against
+  //   required: [site, candidates]
+  // Live, every store failed that check:
+  //   "site: expected string, received undefined; candidates: expected array, received object"
+  // because the value was WRAPPED: `{next, store_result: {next, store_result: {site, candidates}}}`. The
+  // site was two levels down. The same nesting already cost a diagnosis when the collector could not find
+  // the query it had just searched.
+  const value = lua.call('AX_RPC_PURE.normalize_store_result', {
+    item: { site: '11st' },
+    context: CONTEXT,
+    store_result: { site: '11st', status: 'candidates', candidates: [{ product_id: '1', name: '로지텍 M185', price: 10000 }] },
+  });
+
+  const published = value.store_result ?? {};
+  assert.equal(published.site, '11st', `site must be at the top of the published result: ${JSON.stringify(published).slice(0, 120)}`);
+  assert.equal(published.store_result, undefined, 'a result wrapped in a result fails the fan-out schema');
+});
+
+test('a store that found nothing publishes no candidates rather than an empty object', () => {
+  // `candidates` is declared `type: array`. An empty Lua table encodes as `{}` — an OBJECT — so a store
+  // with no matches failed validation instead of reporting honestly that it found none.
+  const value = lua.call('AX_RPC_PURE.normalize_store_result', {
+    item: { site: '11st' },
+    context: CONTEXT,
+    store_result: { site: '11st', status: 'no_results', candidates: [] },
+  });
+
+  const published = value.store_result ?? {};
+  assert.equal(published.site, '11st');
+  assert.ok(
+    published.candidates === undefined || Array.isArray(published.candidates),
+    `an empty list must not be an object, got ${JSON.stringify(published.candidates)}`,
+  );
+});

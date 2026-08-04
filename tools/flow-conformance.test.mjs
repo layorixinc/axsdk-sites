@@ -1034,3 +1034,23 @@ test('every state field a runtime tool reads is declared in its parameters', () 
     `these tools read state their schema never declares, so it arrives nil:\n  ${[...new Set(missing)].join('\n  ')}`,
   );
 });
+
+test('a fan-out publishes the store result, not the envelope around it', () => {
+  // `flow.map` reads each item's result from `resultFrom: store_result` and validates it against
+  //   required: [site]
+  // Live, both stores failed with `site: expected string, received undefined`, and the reason was one
+  // word in a mapping: `store_result: result` publishes the SCRIPT'S WHOLE RETURN — `{next, store_result}`
+  // — so the fields the schema wants sat one level down. The searcher publishes `result.store_result` and
+  // is fine; the normalizer published `result`.
+  const common = parseFlow('_common/flows.yaml');
+  const wrong = [];
+  for (const [name, tool] of Object.entries(common.flowTools ?? {})) {
+    if (tool?.execute?.kind !== 'runtime') continue;
+    if (tool.output?.store_result === 'result') wrong.push(name);
+  }
+
+  assert.deepEqual(
+    wrong, [],
+    `these publish the envelope instead of the store result:\n  ${wrong.join('\n  ')}`,
+  );
+});

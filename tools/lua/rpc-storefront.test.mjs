@@ -1004,3 +1004,22 @@ test('the Amazon title selector cannot reach a heading outside the anchor', () =
     assert.match(part.trim(), /^a[.\s]/, `"${part.trim()}" would match a heading outside the anchor`);
   }
 });
+
+test('every outcome names the store it came from', () => {
+  // `flow.map` validates each item result against `required: [site]`, and the normalizer refuses without
+  // one (`missing_site`). Live, both stores failed discovery with
+  //   "site: Invalid input: expected string, received undefined"
+  // because the search's ERROR returns carried no site — a store that could not be reached became a
+  // schema violation instead of a store that could not be reached. The caller knows which store it asked
+  // about only from this field.
+  const cases = [
+    ['no query', makePage({ href: 'https://x/' }), {}, { ...CONFIG }, { query: '' }],
+    ['navigation refused', makePage({ href: 'https://www.google.com/', refuseOps: ['nav.navigate'] }), {}, CONFIG, {}],
+    ['navigation stuck', makePage({ href: 'https://www.google.com/', navigationFails: true }), {}, CONFIG, {}],
+  ];
+  for (const [label, page, , config, args] of cases) {
+    installRpcStub(lua, page);
+    const value = lua.call('AX_RPC_STOREFRONT.search', config, { query: '마우스', ...args });
+    assert.equal(value.site, config.site, `${label}: the outcome must name its store, got ${JSON.stringify(value).slice(0, 110)}`);
+  }
+});

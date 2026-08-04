@@ -710,6 +710,16 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **`output: <field>: result` publishes the script`s ENVELOPE, not its payload.** `flow.map` reads each
+  item from `resultFrom: store_result` and validates `required: [site]`; the normalizer mapped
+  `store_result: result`, so what arrived was `{next, store_result}` and `site` sat one level down. Both
+  stores failed discovery with `site: expected string, received undefined` — one word in one mapping.
+  `check:flows` now refuses `store_result: result` on any runtime tool.
+- **An empty list must be ABSENT at every boundary that validates it, not just the first one you find.**
+  Same encoding trap in three places: `collected`, the normalizer`s `candidates`, and the searcher`s.
+  Fixing one moved the failure to the next. And an error return must still name its store — `required:
+  [site]` means a store that could not be reached has to say WHICH store, or it becomes a schema
+  violation instead of the fact it was reporting.
 - **A runtime tool is projected by `parameters.properties`; `input:` is for REMOTE tools and is now a
   compile error on a runtime one.** Undeclared state is DROPPED before the script sees it — that is why
   `localState` showed `query`/`tried_queries` while the tool printed nil, and why discovery re-asked one

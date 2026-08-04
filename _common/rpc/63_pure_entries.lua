@@ -41,6 +41,14 @@ function P.normalize_store_result(args)
     result = args.store_result,
   })
 
+  -- `flow.map` validates this against `resultSchema`, where `candidates` is declared `type: array`. An
+  -- empty Lua table encodes as an OBJECT, so a store that found nothing failed validation with
+  -- `candidates: expected array, received object` and the fan-out recorded a schema error instead of the
+  -- honest answer, "this store had no matches". Absent is the encoding that cannot be mistaken.
+  if type(result) == "table" and type(result.candidates) == "table" and #result.candidates == 0 then
+    result.candidates = nil
+  end
+
   return { next = "done", store_result = result }
 end
 

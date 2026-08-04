@@ -109,7 +109,11 @@ function AX_collect_store_page(args)
   end
 
   local store_result = copy_table(result)
-  store_result.candidates = collected
+  -- An empty Lua table encodes as a JSON OBJECT, and the fan-out validates each task result against
+  -- `candidates: [array, "null"]`. Live, every run: walmart searched three wordings, found nothing, and
+  -- came back `result does not satisfy task.resultSchema: candidates: Invalid input` — reported as a
+  -- technical failure rather than as a store with no matches, so every comparison was single-store.
+  store_result.candidates = #collected > 0 and collected or nil
   store_result.total_count = #collected
   store_result.pages_read = page
   store_result.page = page
@@ -157,7 +161,7 @@ function AX_collect_store_page(args)
           query = wording,
           tried_queries = attempted,
           stop_reason = "retry_query",
-          collected = collected,
+          collected = #collected > 0 and collected or nil,
           collected_count = #collected,
           store_result = store_result
         }
@@ -173,7 +177,7 @@ function AX_collect_store_page(args)
     query = active_query,
     tried_queries = attempted,
     stop_reason = decision.reason,
-    collected = collected,
+    collected = #collected > 0 and collected or nil,
     collected_count = #collected,
     store_result = store_result
   }

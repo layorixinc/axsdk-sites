@@ -725,6 +725,14 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
   re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
   files that DEFINE it and fails on any tool that calls one it did not declare.
+- **A field the script COMPUTES and the flow never publishes is a field the script did not compute.**
+  The presenter answered `page`/`select`/`refine` with the payload that gives the branch meaning — which
+  page, which number, which words — and the tool published only `next`. Six fields vanished in silence.
+  `check:flows` now reads the keys the Lua returns and fails any it cannot find in `output`.
+- **The empty list crossed a FOURTH boundary, and it cost every multi-store comparison in the session.**
+  A store that found nothing returned `candidates = {}`, the fan-out's `task.resultSchema` rejected it, and
+  walmart was reported as `result_schema` — a technical failure — instead of "검색 결과 없음". Every
+  comparison was silently single-store. Absent at EVERY boundary; there is no last one.
 - **The node that PAUSES is the only node that sees the user's new message.** Live, twice: the user typed
   "취소" and the offer was ADDED TO CART, because the model gate downstream re-sent the previous turn's
   "3번". `currentUserText: active_node_only` hands an `action_unit` the text of the turn IT was active for.

@@ -2554,6 +2554,15 @@ flowTools:
       view_page: result.view_page
       view_pages: result.view_pages
       view_total: result.view_total
+      # The branch payload. `page`/`select`/`refine` mean nothing without which page, which number, which
+      # words — published only `next`, the refiner was told to page with nothing to page with and the
+      # resolver was told to select with no index.
+      comparison_id: result.comparison_id
+      page_command: result.page_command
+      page_number: result.page_number
+      refine_request: result.refine_request
+      choice_index: result.choice_index
+      choice_comparison_id: result.choice_comparison_id
     parameters:
       type: object
       additionalProperties: false

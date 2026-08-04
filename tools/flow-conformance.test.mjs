@@ -1294,3 +1294,32 @@ test('every field a contract node selects is one its tool declares', () => {
 
   assert.deepEqual(dropped, [], `state selected but dropped:\n  ${dropped.join('\n  ')}`);
 });
+
+/** The keys a Lua function hands back, read from the `return { ... }` tables in its body. */
+function returnedKeys(file, functionName) {
+  const source = readFileSync(fileURLToPath(new URL(`../${file}`, import.meta.url)), 'utf8');
+  const start = source.indexOf(`function ${functionName}(`);
+  if (start < 0) return [];
+  const end = source.indexOf('\nend', start);
+  const body = source.slice(start, end < 0 ? undefined : end);
+  const keys = new Set();
+  for (const table of body.matchAll(/return\s*\{([^}]*)\}/g)) {
+    for (const key of table[1].matchAll(/(\w+)\s*=/g)) keys.add(key[1]);
+  }
+  return [...keys];
+}
+
+test('a branch value the presenter computes actually reaches the next node', () => {
+  // `AX_RPC_OFFERS.present` reads the reply and answers `page`/`select`/`refine` WITH the payload that
+  // makes the branch mean something — which page, which number, which words. The tool published only
+  // `next`, so `browse_offers` was told to page and given nothing to page with, and `resolve_offer` was
+  // told to select with no index. A field a script computes and the flow never publishes is a field the
+  // script did not compute.
+  const common = parseFlow('_common/flows.yaml');
+  const published = new Set(Object.keys(common.flowTools.present_store_offers.output ?? {}));
+  // `ok` is the script's own success flag and no node routes on it.
+  const computed = returnedKeys('_common/rpc/73_rpc_offers.lua', 'O.present').filter((key) => key !== 'ok');
+
+  const lost = computed.filter((key) => !published.has(key));
+  assert.deepEqual(lost, [], `computed but never published: ${lost.join(', ')}`);
+});

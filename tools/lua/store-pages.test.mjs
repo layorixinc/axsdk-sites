@@ -404,3 +404,25 @@ test('a structured attribute nobody can parse yields no id at all', () => {
 test('a card with neither a link nor a usable attribute is dropped, not guessed', () => {
   assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, 'https://action.adoffice.11st.co.kr/act/click/v1/landing?clickData=abc', null), null);
 });
+
+test('a store that found nothing returns no candidates key at all', () => {
+  // An empty Lua table encodes as a JSON OBJECT, and the fan-out validates each task result against
+  // `candidates: [array, "null"]`. Live, every run: walmart searched three wordings, found nothing, and
+  // came back `result does not satisfy task.resultSchema: candidates: Invalid input` — so the store was
+  // reported as a technical failure rather than as a store with no matches, and every comparison in the
+  // session was single-store.
+  //
+  // This is the fourth boundary this same empty list has crossed. It is absent or it is a defect.
+  const empty = lua.call('AX_collect_store_page', {
+    site: 'walmart',
+    query: 'nothing matches this',
+    store_result: { site: 'walmart', status: 'candidates', candidates: [], error: 'no_results' },
+    page: 1,
+  });
+
+  assert.equal(empty.collected, undefined, 'no matches means no list, not an empty one');
+  assert.equal(
+    empty.store_result?.candidates, undefined,
+    'the nested result is validated too — an empty list has to be absent at every boundary, not the first one found',
+  );
+});

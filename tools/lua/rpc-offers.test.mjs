@@ -345,3 +345,50 @@ test('a run where every store answered publishes no failures list at all', () =>
 
   assert.equal(verified.failures, undefined, 'no failures means no list, not an empty one');
 });
+
+/** More offers than one window holds, so paging has somewhere to go. */
+const MANY = Array.from({ length: 8 }, (unused, index) => ({
+  site: index % 2 === 0 ? 'amazon' : 'walmart',
+  product_id: `P${index}`, id: `P${index}`,
+  name: `Logitech M185 Mouse variant ${index}`,
+  price: 10 + index, currency: 'USD', price_base: 10 + index, base_currency: 'USD',
+  shipping_cost: 0, shipping_base: 0, total_base: 10 + index, cost_complete: true,
+}));
+
+test('"다음" turns the page, and the second window holds different rows', () => {
+  // Paging is a branch of the presenter now, so the whole trip is: read the reply, hand `page_command` to
+  // the refiner, and render what comes back. A window that answers "page" but returns the same rows is
+  // indistinguishable from one that ignored the request.
+  const build = runtime();
+  const ranked = build.call('AX_RPC_OFFERS.rank', { verified_offers: MANY });
+  build.close();
+
+  const first = runtime();
+  const window1 = first.call('AX_RPC_OFFERS.present', { comparison_state: ranked.comparison_state });
+  first.close();
+  assert.equal(window1.view_pages > 1, true, `the fixture must span pages, got ${window1.view_pages}`);
+
+  const reading = runtime();
+  const asked = reading.call('AX_RPC_OFFERS.present', {
+    comparison_state: ranked.comparison_state,
+    choice_stage: 'asked',
+    requestText: '다음',
+  });
+  reading.close();
+  assert.equal(asked.next, 'page');
+  assert.equal(asked.page_command, 'next');
+
+  const turning = runtime();
+  const window2 = turning.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    page_command: asked.page_command,
+    view_page: window1.view_page,
+  });
+  turning.close();
+
+  assert.equal(window2.next, 'ask');
+  assert.equal(window2.view_page, 2, 'the second page must actually be the second page');
+  assert.notEqual(window2.question, window1.question, 'a page that renders the same rows never moved');
+  assert.equal(window2.comparison_id, ranked.comparison_id, 'paging keeps the listing, so the numbers keep meaning');
+});

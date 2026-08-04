@@ -1987,13 +1987,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_prepare_product_identity", args)
         end
-    input:
-      product_category: tool.args.product_category
-      requested_brand: tool.args.requested_brand
-      requested_model: tool.args.requested_model
-      hard_constraints: tool.args.hard_constraints
-      soft_preferences: tool.args.soft_preferences
-      stores: tool.args.stores
     output:
       next: result.next
       identity_status: result.identity_status
@@ -2040,16 +2033,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_lock_product_identity", args)
         end
-    input:
-      identity_kind: tool.args.identity_kind
-      identity_name: tool.args.identity_name
-      identity_brand: tool.args.identity_brand
-      identity_model: tool.args.identity_model
-      product_category: tool.args.product_category
-      canonical_query: tool.args.canonical_query
-      hard_constraints: tool.args.hard_constraints
-      soft_preferences: tool.args.soft_preferences
-      source_refs: tool.args.identity_source_refs
     output:
       next: result.next
       identity_status: result.identity_status
@@ -2148,14 +2131,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_build_product_options", args)
         end
-    input:
-      results: tool.args.discovery_results
-      query: tool.args.discovery_query
-      product_category: tool.args.product_category
-      requested_brand: tool.args.requested_brand
-      hard_constraints: tool.args.hard_constraints
-      soft_preferences: tool.args.soft_preferences
-      max_options: 6
     output:
       next: result.next
       product_options: result.options
@@ -2211,14 +2186,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_resolve_product_option", args)
         end
-    input:
-      options: tool.args.product_options
-      options_version: tool.args.options_version
-      choice_index: tool.args.product_choice_index
-      choice_id: tool.args.product_choice_id
-      choice_options_version: tool.args.choice_options_version
-      hard_constraints: tool.args.hard_constraints
-      soft_preferences: tool.args.soft_preferences
     output:
       next: result.next
       selection_error: result.error
@@ -2328,18 +2295,6 @@ flowTools:
         function run(args)
           return AX_RPC_STOREFRONT.run_store_search(args)
         end
-    input:
-      site: tool.args.item.site
-      # The collector may hand back the wording this store's own listings use; until then the shared query stands.
-      query: { if: [{ var: tool.args.query }, { var: tool.args.query }, { var: tool.args.context.query }] }
-      quantity: tool.args.context.quantity
-      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
-      requested_brand: tool.args.context.requested_brand
-      identity_brand: tool.args.context.identity_brand
-      identity_model: tool.args.context.identity_model
-      product_category: tool.args.context.product_category
-      hard_constraints: tool.args.context.locked_hard_constraints
-      page: tool.args.page
     output:
       # No `navigating`: the script keeps its own stack across the reload, so there is nothing to resume.
       next: result.next
@@ -2365,6 +2320,11 @@ flowTools:
             query: { type: string }
             quantity: { type: [integer, number] }
         page: { type: [integer, number] }
+        # The wording to search. The collector answers the NEXT wording to try and the flow writes it
+        # here; UNDECLARED, it was dropped at the boundary, so every retry re-asked the original question
+        # until the subflow's node budget was gone. Nullable and not required: the first pass has none and
+        # the script falls back to `context.query`.
+        query: { type: [string, "null"] }
 
   shopping_collect_store_page:
     description: Merge one read result page into this store's accumulated candidates and decide whether another page is worth a navigation.
@@ -2378,23 +2338,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.collect_store_page(args)
         end
-    input:
-      result: tool.args.store_result
-      collected: tool.args.collected
-      page: tool.args.page
-      site: tool.args.item.site
-      # From STATE for the same reason as the accumulator below. The tool answers the NEXT wording to try
-      # and the flow writes it to `query`; reading it back from the model's arguments instead meant the
-      # model kept relaying the ORIGINAL wording, so every pass re-asked the first question and the
-      # suggested retry was never actually tried.
-      query: tool.args.query
-      # From STATE, not from the model's arguments. Traced live: the retry asked a new wording each time
-      # but `tried_queries` never grew past the first, because the accumulator only arrived when the model
-      # remembered to relay it — and an accumulator the caller may forget is an accumulator that resets.
-      # One store then burned the whole subflow node budget and discovery produced no options at all.
-      tried_queries: tool.args.tried_queries
-      context: tool.args.context
-      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
     output:
       next: result.next
       page: result.page
@@ -2424,6 +2367,15 @@ flowTools:
         store_result: { type: object, additionalProperties: true }
         collected: { type: [array, "null"], items: { type: object, additionalProperties: true } }
         page: { type: [integer, number] }
+        # The retry loop's two scalars. UNDECLARED IS DROPPED: the runtime projects an action_contract's
+        # arguments through this schema, so a field missing here never reaches the script no matter what
+        # state holds. Traced live — `localState` showed both set while a probe inside the tool printed
+        # nil, and discovery re-asked one store the same question until its node budget was gone.
+        #
+        # Nullable and NOT required, because the first pass carries null: `null` against `{type: string}`
+        # is REJECTED, while `null` against a nullable type passes as nil and an absent key passes too.
+        query: { type: [string, "null"] }
+        tried_queries: { type: [string, "null"] }
 
   shopping_normalize_store_result:
     description: Apply common relevance, provenance, FX, and landed-cost normalization to one ready site adapter result.
@@ -2437,18 +2389,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.normalize_store_result(args)
         end
-    input:
-      site: tool.args.item.site
-      query: tool.args.context.query
-      quantity: tool.args.context.quantity
-      purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }
-      requested_brand: tool.args.context.requested_brand
-      identity_brand: tool.args.context.identity_brand
-      identity_model: tool.args.context.identity_model
-      product_category: tool.args.context.product_category
-      brand_aliases: tool.args.context.brand_aliases
-      hard_constraints: tool.args.context.locked_hard_constraints
-      result: tool.args.store_result
     output:
       next: done
       store_result: result
@@ -2484,11 +2424,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_build_offer_screening", args)
         end
-    input:
-      store_results: tool.args.store_results
-      identity_brand: tool.args.identity_brand
-      identity_model: tool.args.identity_model
-      product_category: tool.args.product_category
     output:
       next: result.next
       screening_text: result.screening_text
@@ -2534,10 +2469,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_apply_offer_screening", args)
         end
-    input:
-      store_results: tool.args.store_results
-      screening_ids: tool.args.screening_ids
-      keep: tool.args.screening_keep
     output:
       next: result.next
       store_results: result.store_results
@@ -2564,14 +2495,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_verify_product_offers", args)
         end
-    input:
-      results: tool.args.store_results
-      identity_id: tool.args.identity_id
-      identity_kind: tool.args.identity_kind
-      identity_brand: tool.args.identity_brand
-      identity_model: tool.args.identity_model
-      product_category: tool.args.product_category
-      hard_constraints: tool.args.locked_hard_constraints
     output:
       next: result.next
       verified_offers: result.verified_offers
@@ -2608,12 +2531,6 @@ flowTools:
         function run(args)
           return AX_RPC_OFFERS.rank(args)
         end
-    input:
-      verified_offers: tool.args.verified_offers
-      failures: tool.args.failures
-      identity_id: tool.args.identity_id
-      quantity: tool.args.quantity
-      screened_out: tool.args.screened_out
     output:
       next: result.next
       offers: result.offers
@@ -2661,9 +2578,6 @@ flowTools:
         function run(args)
           return AX_RPC_OFFERS.present(args)
         end
-    input:
-      comparison_id: tool.args.comparison_id
-      comparison_state: global.comparison_state
     output:
       next: { if: [{ var: result.error }, "error", { var: tool.args.next }] }
       question: result.question
@@ -2680,6 +2594,10 @@ flowTools:
         next: { type: string, enum: [ask] }
         choice_stage: { type: string, enum: [asked] }
         comparison_id: { type: string, minLength: 1 }
+        # The listing itself, carried between turns. Declared because UNDECLARED IS DROPPED — the runtime
+        # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
+        # tool is a compile error. Nullable and not required: the first pass has no listing yet.
+        comparison_state: { type: [string, "null"] }
 
   shopping_refine_store_offers:
     description: Move the comparison window, or filter and sort the listing, from the user's own words.
@@ -2698,20 +2616,6 @@ flowTools:
         function run(args)
           return AX_RPC_OFFERS.refine(args)
         end
-    input:
-      comparison_id: tool.args.comparison_id
-      # The snapshot supersedes the offer tables the model used to relay: an empty Lua table encodes as
-      # `{}` and a schema expecting an array rejects it, which a scalar cannot do.
-      comparison_state: global.comparison_state
-      offers: tool.args.offers
-      all_offers: tool.args.all_offers
-      failures: tool.args.failures
-      identity_id: tool.args.identity_id
-      view_page: tool.args.view_page
-      view_sort: tool.args.view_sort
-      page_command: tool.args.page_command
-      page_number: tool.args.page_number
-      refine_request: tool.args.refine_request
     output:
       next: result.next
       # A refinement that reissues the listing MUST write the new snapshot back; leaving the old one in
@@ -2742,6 +2646,10 @@ flowTools:
       required: [comparison_id]
       properties:
         comparison_id: { type: string, minLength: 1 }
+        # The listing itself, carried between turns. Declared because UNDECLARED IS DROPPED — the runtime
+        # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
+        # tool is a compile error. Nullable and not required: the first pass has no listing yet.
+        comparison_state: { type: [string, "null"] }
         offers: { type: [array, "null"], items: { type: object, additionalProperties: true } }
         all_offers: { type: [array, "null"], items: { type: object, additionalProperties: true } }
         failures: { type: [array, "null"], items: { type: object, additionalProperties: true } }
@@ -2781,14 +2689,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_resolve_store_offer", args)
         end
-    input:
-      offers: tool.args.offers
-      choice_index: tool.args.choice_index
-      choice_comparison_id: tool.args.choice_comparison_id
-      comparison_id: tool.args.comparison_id
-      identity_id: tool.args.identity_id
-      choice_stage: tool.args.choice_stage
-      quantity: tool.args.quantity
     output:
       next: result.next
       selection_error: result.error
@@ -2816,6 +2716,10 @@ flowTools:
         choice_index: { type: [integer, number] }
         choice_comparison_id: { type: [string, "null"] }
         comparison_id: { type: string, minLength: 1 }
+        # The listing itself, carried between turns. Declared because UNDECLARED IS DROPPED — the runtime
+        # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
+        # tool is a compile error. Nullable and not required: the first pass has no listing yet.
+        comparison_state: { type: [string, "null"] }
         identity_id: { type: string, minLength: 1 }
         choice_stage: { type: string, enum: [asked] }
         quantity: { type: [integer, number] }
@@ -2865,6 +2769,10 @@ flowTools:
         expected_identity_model: { type: [string, "null"] }
         identity_id: { type: string, minLength: 1 }
         comparison_id: { type: string, minLength: 1 }
+        # The listing itself, carried between turns. Declared because UNDECLARED IS DROPPED — the runtime
+        # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
+        # tool is a compile error. Nullable and not required: the first pass has no listing yet.
+        comparison_state: { type: [string, "null"] }
         identity_approval: { type: string, enum: [locked_product_identity] }
         comparison_approval: { type: string, enum: [current_comparison] }
         cart_approval: { type: string, enum: [user_selected_compared_offer] }
@@ -3016,8 +2924,6 @@ flowTools:
         function run(args)
           return AX_RPC_MEMORY.get(args)
         end
-    input:
-      key: tool.args.key
     output:
       next: { if: [{ var: result.error }, "error", "report"] }
       memory_result: result
@@ -3043,8 +2949,6 @@ flowTools:
         function run(args)
           return AX_RPC_MEMORY.search(args)
         end
-    input:
-      regex: tool.args.regex
     output:
       next: { if: [{ var: result.ok }, "report", "error"] }
       memory_result: result
@@ -3070,8 +2974,6 @@ flowTools:
         function run(args)
           return AX_RPC_MEMORY.search(args)
         end
-    input:
-      regex: tool.args.regex
     output:
       next:
         if:
@@ -3119,8 +3021,6 @@ flowTools:
         function run(args)
           return AX_RPC_MEMORY.delete(args)
         end
-    input:
-      keys: tool.args.delete_keys
     output:
       next: { if: [{ var: result.ok }, "report", "error"] }
       memory_result: result
@@ -3154,8 +3054,6 @@ flowTools:
         function run(args)
           return AX_RPC_MEMORY.set_bulk(args)
         end
-    input:
-      memory: tool.args.memory
     output:
       next: { if: [{ var: result.ok }, "report", "error"] }
       memory_result: result
@@ -3610,8 +3508,6 @@ flowTools:
         function run(args)
           return AX_RPC_STOREFRONT.run_open_site_search(args)
         end
-    input:
-      query: tool.args.query
     output:
       # The script already chose its branch; deriving one from `result.error` here overrode it and sent
       # an unported store to `next_product` instead of to the durable sibling.
@@ -3853,9 +3749,6 @@ flowTools:
         function run(args)
           return AX_RPC_THUMBTACK.search_service(args)
         end
-    input:
-      query: tool.args.service_query
-      zip_code: tool.args.zip_code
     output:
       # The script picks its own branch. Deriving one from `result.status` here overrode it and sent a
       # finished search back into the node that had just run it.
@@ -4292,14 +4185,6 @@ flowTools:
         function run(args)
           return AX_RPC_PURE.run("AX_browse_service_candidates", args)
         end
-    input:
-      request_text: tool.args.requestText
-      candidates: tool.args.candidates
-      refine_request: tool.args.refine_request
-      page_command: tool.args.page_command
-      page_number: tool.args.page_number
-      choice_numbers: tool.args.choice_numbers
-      page: tool.args.view_page
     output:
       next: result.next
       shortlist: result.shortlist

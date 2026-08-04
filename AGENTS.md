@@ -710,6 +710,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **A runtime tool is projected by `parameters.properties`; `input:` is for REMOTE tools and is now a
+  compile error on a runtime one.** Undeclared state is DROPPED before the script sees it — that is why
+  `localState` showed `query`/`tried_queries` while the tool printed nil, and why discovery re-asked one
+  store the same question until its node budget was gone. Nested paths are the SCRIPT`s job (`args.item.site`);
+  declare the carrier. An accumulator must be nullable and NOT required: `null` against `{type: string}`
+  is rejected, `null` against a nullable type passes as nil, and an absent key passes too. All 22
+  `input:` blocks were vestigial — every script already read raw state names.
 - **A node`s state snapshot and its tool`s arguments are not the same thing — check BOTH.** `localState`
   showed `query`/`tried_queries` populated at an `action_contract`, and a probe inside the tool printed
   `q=nil tried=nil`. In the SAME `input:` block, `item`/`context`/`page` arrived and the two scalars the

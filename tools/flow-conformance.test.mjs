@@ -78,7 +78,12 @@ test('thumbtack shortlisting ranks from site data, never from the model', () => 
   assert.equal(commonFlow.flowTools.refine_candidates, undefined);
   assert.equal(quote.nodes.confirm_quote.next.refine, 'browse_candidates');
   assert.equal(quote.nodes.quotes_done.next.more, 'browse_candidates');
-  assert.equal(commonFlow.flowTools.browse_service_candidates.input.request_text, 'tool.args.requestText');
+  // Projection moved: a runtime tool receives the flow-state fields its PARAMETERS declare, and an
+  // `input:` block on one is a compile error. The script reads `requestText` under its own name.
+  assert.ok(
+    commonFlow.flowTools.browse_service_candidates.parameters.properties.requestText,
+    'the shortlist must be able to read the reply the user just typed',
+  );
   assert.equal(commonFlow.flowTools.browse_service_candidates.output.question, 'result.question');
   // Live: a window sorted by reviews was shown, the user picked 1 and 2, and the selection resolved
   // against the DEFAULT ranking because the criterion had been cleared — they got #4 and #5.
@@ -152,13 +157,16 @@ test('multi-store shopping discovers and locks product identity before ranking',
   // The verdict must land on the key apply reads: a passthrough that wrote `keep` made every row survive
   // while the model had rejected two of them, and the fail-open path made it look intentional.
   assert.equal(common.flowTools.screen_store_offers.output.screening_keep, 'tool.args.keep');
-  assert.equal(common.flowTools.shopping_apply_offer_screening.input.keep, 'tool.args.screening_keep');
+  assert.ok(
+    common.flowTools.shopping_apply_offer_screening.parameters.properties.screening_keep,
+    'the screening decision must be declared, or it is dropped before the script sees it',
+  );
   assert.equal(common.flowTools.shopping_apply_offer_screening.output.screened_out, 'result.screened_out');
   assert.ok(nodes.normalize_rank.inputSelector.includes('screened_out'), 'the window must be able to say what was removed');
   // Selecting a key is not passing it: every one of these tools declares additionalProperties:false, so a
   // key missing from properties is dropped silently at the boundary and the window loses the sentence.
   assert.ok(common.flowTools.shopping_rank_store_offers.parameters.properties.screened_out);
-  assert.equal(common.flowTools.shopping_rank_store_offers.input.screened_out, 'tool.args.screened_out');
+  assert.ok(common.flowTools.shopping_rank_store_offers.parameters.properties.screened_out, 'screened_out must be declared to reach the script');
   assert.equal(nodes.verify_offers.id, 'shopping_verify_product_offers');
   assert.equal(nodes.verify_offers.next.done, 'normalize_rank');
   // The search used to branch `navigating` into a re-invoke node. A runtime script keeps its stack
@@ -177,7 +185,10 @@ test('multi-store shopping discovers and locks product identity before ranking',
   // has to be paged in the next, and `state: session` is keyed by (session, TOOL), so `rank` had no
   // channel to `present`. Flow state is that channel, carrying one scalar no model node selects.
   assert.equal(common.flowTools.present_store_offers.execute.kind, 'runtime');
-  assert.equal(common.flowTools.present_store_offers.input.comparison_state, 'global.comparison_state');
+  assert.ok(
+    common.flowTools.present_store_offers.parameters.properties.comparison_state,
+    'the snapshot must be a declared property; undeclared state is dropped before the script sees it',
+  );
   assert.equal(common.flowTools.present_store_offers.output.question, 'result.question');
   assert.equal(common.flowTools.shopping_present_store_offers, undefined);
   assert.equal(Object.hasOwn(common.flowTools.choose_store_offer.parameters.properties, 'choice_stage'), false);
@@ -199,13 +210,9 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(nodes.browse_offers.next.research, 'collect_request');
   assert.ok(nodes.browse_offers.inputSelector.includes('offers'),
     'the deterministic browsing node reads the listing from state; only the model prompt must stay free of it');
-  assert.equal(common.flowTools.shopping_refine_store_offers.input.offers, 'tool.args.offers');
+  assert.ok(common.flowTools.shopping_refine_store_offers.parameters.properties.offers, 'offers must be declared to reach the script');
   assert.equal(common.flowTools.shopping_refine_store_offers.output.all_offers, 'result.all_offers');
   assert.equal(common.flowTools.shopping_refine_store_offers.execute.kind, 'runtime');
-  assert.equal(
-    common.flowTools.shopping_refine_store_offers.input.comparison_state, 'global.comparison_state',
-    'a refinement reads the listing from the snapshot, not from tables the model relays',
-  );
   assert.equal(
     common.flowTools.shopping_refine_store_offers.output.comparison_state, 'result.comparison_state',
     'a reissued listing must be written back, or the next turn pages the one before it',
@@ -249,7 +256,7 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(common.flows.shopping_search_one_store.nodes.search_other_wording.next.done, 'normalize');
   assert.equal(common.flowTools.shopping_collect_store_page.output.query, 'result.query');
   assert.equal(common.flowTools.shopping_collect_store_page.output.tried_queries, 'result.tried_queries');
-  assert.equal(common.flowTools.shopping_search_one_store.input.query.if[0].var, 'tool.args.query');
+  assert.ok(common.flowTools.shopping_search_one_store.parameters.properties.query, 'query must be declared to reach the script');
   for (const key of ['query', 'tried_queries']) {
     assert.ok(Object.hasOwn(common.flows.shopping_search_one_store.state, key), `worker state must include ${key}`);
   }
@@ -273,11 +280,13 @@ test('multi-store shopping discovers and locks product identity before ranking',
     assert.ok(common.flowTools.shopping_search_stores.parameters.properties[key], `search map must accept ${key}`);
     assert.ok(common.flowTools.shopping_discover_products.parameters.properties[key], `discovery map must accept ${key}`);
   }
-  assert.equal(common.flowTools.shopping_normalize_store_result.input.brand_aliases, 'tool.args.context.brand_aliases');
+  // `brand_aliases` rides inside `context`. The runtime projects TOP-LEVEL properties only, and nested
+  // extraction belongs to the script — so what has to be declared is the object that carries it.
+  assert.ok(common.flowTools.shopping_normalize_store_result.parameters.properties.context);
   assert.equal(common.flowTools.shopping_collect_store_page.output.collected, 'result.collected');
   assert.equal(common.flowTools.shopping_collect_store_page.output.page, 'result.page');
   assert.equal(common.flowTools.shopping_collect_store_page.output.store_result, 'result.store_result');
-  assert.equal(common.flowTools.shopping_search_one_store.input.page, 'tool.args.page');
+  assert.ok(common.flowTools.shopping_search_one_store.parameters.properties.page, 'page must be declared to reach the script');
   for (const key of ['page', 'collected']) {
     assert.ok(Object.hasOwn(common.flows.shopping_search_one_store.state, key), `worker state must include ${key}`);
   }
@@ -978,5 +987,50 @@ test('no Lua ships that nothing can reach', () => {
   assert.deepEqual(
     dead.map((file) => file.id), [],
     `unreachable Lua:\n  ${dead.map((file) => `${file.id} (${file.lines}L)`).join('\n  ')}`,
+  );
+});
+
+test('a runtime tool never declares input:, because the runtime refuses it', () => {
+  // The runtime compiles this document, and an `input:` on a runtime implementation is now a COMPILE
+  // ERROR — the whole flow stops loading:
+  //   "flowTools.<name>.input is only applied to remote tools, so it would be silently ignored here;
+  //    a runtime implementation receives the flow-state fields its parameters schema declares"
+  // It was always ignored; the error only made that visible. Projection is `parameters.properties`, and
+  // ours read raw state names already, which is why the blocks were vestigial.
+  const common = parseFlow('_common/flows.yaml');
+  const offenders = Object.entries(common.flowTools ?? {})
+    .filter(([, tool]) => tool?.execute?.kind === 'runtime' && tool.input)
+    .map(([name]) => name);
+
+  assert.deepEqual(offenders, [], `runtime tools still declaring input:\n  ${offenders.join('\n  ')}`);
+});
+
+test('every state field a runtime tool reads is declared in its parameters', () => {
+  // The runtime projects an `action_contract`'s arguments through `parameters.properties`. A field the
+  // schema does not declare is DROPPED — it never reaches the script — and `input:` is not a second
+  // projection: it applies to remote adapters only and is silently ignored on a runtime tool.
+  //
+  // Traced live: `localState` showed `query` and `tried_queries` set at the node while a probe inside the
+  // tool printed `q=nil tried=nil`, and multi-store discovery re-asked one store the same question until
+  // `subflow node budget exhausted`. `item`, `context` and `page` arrived because they happen to be
+  // declared; the two the loop updates were not.
+  //
+  // So the `input:` blocks are the inventory of what each tool needs, and every root they name must be a
+  // declared property. An accumulator must NOT be `required` — the first pass carries null.
+  const common = parseFlow('_common/flows.yaml');
+  const missing = [];
+  for (const [name, tool] of Object.entries(common.flowTools ?? {})) {
+    if (tool?.execute?.kind !== 'runtime' || !tool.input) continue;
+    const declared = new Set(Object.keys(tool.parameters?.properties ?? {}));
+    for (const path of Object.values(tool.input)) {
+      if (typeof path !== 'string') continue;
+      const root = /^tool\.args\.([A-Za-z0-9_]+)/.exec(path)?.[1];
+      if (root && !declared.has(root)) missing.push(`${name}.${root}`);
+    }
+  }
+
+  assert.deepEqual(
+    [...new Set(missing)], [],
+    `these tools read state their schema never declares, so it arrives nil:\n  ${[...new Set(missing)].join('\n  ')}`,
   );
 });

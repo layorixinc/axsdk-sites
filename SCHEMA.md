@@ -1799,6 +1799,12 @@
         "comparison_id": {
           "type": "string",
           "minLength": 1
+        },
+        "comparison_state": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }
@@ -2110,6 +2116,12 @@
           "type": "string",
           "minLength": 1
         },
+        "comparison_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "identity_approval": {
           "type": "string",
           "enum": [
@@ -2347,6 +2359,18 @@
           "type": [
             "integer",
             "number"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tried_queries": {
+          "type": [
+            "string",
+            "null"
           ]
         }
       }
@@ -2711,6 +2735,12 @@
           "type": "string",
           "minLength": 1
         },
+        "comparison_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "offers": {
           "type": [
             "array",
@@ -2887,6 +2917,12 @@
           "type": "string",
           "minLength": 1
         },
+        "comparison_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "identity_id": {
           "type": "string",
           "minLength": 1
@@ -2971,6 +3007,12 @@
           "type": [
             "integer",
             "number"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
           ]
         }
       }

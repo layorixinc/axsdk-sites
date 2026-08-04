@@ -82,6 +82,18 @@ end
 
 local function infer_model(value)
   local text = clean(value)
+  -- A LEADING bracket is merchandising, not the product. Korean storefronts put one on nearly every
+  -- title, and the first token carrying both letters and digits was being read out of it: measured live,
+  -- "[11Pay3%포인트] 로지텍 코리아 정품 리프트 LIFT 버티컬 …" was offered to the user as model `11Pay3`,
+  -- a points promotion. The choice then locks onto a product that does not exist and the comparison finds
+  -- nothing. Only LEADING brackets are stripped, so "(국내정품) 로지텍코리아 M170 …" still resolves to M170.
+  local stripped = text
+  for _ = 1, 3 do
+    local rest = stripped:match("^%s*%b[]%s*(.*)$") or stripped:match("^%s*%b()%s*(.*)$")
+    if not rest or rest == "" then break end
+    stripped = rest
+  end
+  if stripped ~= "" then text = stripped end
   for token in text:gmatch("[%w%-]+") do
     local normalized = token:lower()
     local has_letter = token:match("%a") ~= nil

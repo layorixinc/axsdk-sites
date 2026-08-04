@@ -710,6 +710,15 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **A LEADING bracket in a storefront title is merchandising, not the product.** `infer_model` took the
+  first token carrying both letters and digits, so `[11Pay3%포인트] 로지텍 … LIFT …` was offered to the
+  user as model `11Pay3` — a points promotion. The choice then locks onto a product that does not exist.
+  Only LEADING brackets are stripped, so `(국내정품) 로지텍코리아 M170 …` still resolves to M170, and a
+  listing that names no model is reported as one — `identity_confidence: low` — rather than invented.
+- **Honesty can cost a gate point, and that is the gate being wrong.** Discovery went 10/14 to 9/14
+  because the scenario picks option 1 and the system now correctly refuses to compare a listing with no
+  model. The builder already orders model-bearing options first (verified); the live list order is the
+  MODEL`s rendering of them.
 - **`output: <field>: result` publishes the script`s ENVELOPE, not its payload.** `flow.map` reads each
   item from `resultFrom: store_result` and validates `required: [site]`; the normalizer mapped
   `store_result: result`, so what arrived was `{next, store_result}` and `site` sat one level down. Both

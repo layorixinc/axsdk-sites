@@ -112,7 +112,14 @@ function O.rank(args)
   }
 end
 
---- Pages the listing a previous turn built.
+--- Pages the listing a previous turn built, and pauses on it.
+---
+--- Two passes, the shape the Thumbtack shortlist already uses. The first renders the window and PAUSES
+--- on it; the turn that answers arrives with `choice_stage = "asked"` and this steps aside so the reply
+--- can be interpreted. Without the second pass the node re-asks its own question forever; without the
+--- first, a model would have to relay a listing it cannot be handed — `present_store_offers` used to sit
+--- in `allowedTools` and answered `comparison_unreadable`, because a model-called tool cannot reach flow
+--- state and the snapshot lives there.
 function O.present(args)
   args = type(args) == "table" and args or {}
   local snapshot = restore(args.comparison_state)
@@ -127,7 +134,13 @@ function O.present(args)
     -- they never saw.
     return { next = "error", ok = false, error = "stale_comparison" }
   end
-  return present_current(snapshot, tonumber(args.view_page) or 1)
+  if args.choice_stage == "asked" then
+    -- Already on screen. Re-rendering would replace the listing the user is reading mid-answer.
+    return { next = "answer", ok = true, comparison_id = snapshot.comparison_id }
+  end
+  local shown = present_current(snapshot, tonumber(args.view_page) or 1)
+  shown.choice_stage = "asked"
+  return shown
 end
 
 --- Filters or sorts, which changes WHICH offers are listed — so the listing is reissued.

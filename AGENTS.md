@@ -715,6 +715,12 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   stores, screened, judged, verified and issued an id ended in the generic failure terminal. A command
   picks its own branch and the adapter PASSES IT THROUGH; `check:flows` now refuses any runtime tool
   whose literal `next` is not a branch its node routes.
+- **A node that used to be model-called carries model-shaped wiring, and every piece of it must move.**
+  Turning the presenter into an `action_contract` was not enough: its output still read
+  `next: tool.args.next` — the MODEL`s argument — so a contract answered `undefined` and every
+  comparison routed to lost. Its `required: [next, choice_stage, comparison_id]` was model-shaped too,
+  and a required key that flow state does not carry is REJECTED before the script runs. Output mapping,
+  required list and property types all follow the node kind.
 - **A model-called tool cannot be handed flow state, and that is what blocks the comparison window.**
   `present_store_offers` sits in `allowedTools`, so its arguments are the MODEL's — the snapshot in
   flow state never reaches it and it answers `comparison_unreadable`. The presentation has to become

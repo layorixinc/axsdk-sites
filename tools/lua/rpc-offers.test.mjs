@@ -188,3 +188,32 @@ test('ranking answers in the branch vocabulary its node routes', () => {
     `\`${ranked.next}\` is not a branch the node routes`,
   );
 });
+
+test('the presenter shows the window once, then hands the reply on', () => {
+  // The deterministic shape the Thumbtack shortlist already uses: render, PAUSE on the window, and on the
+  // turn that answers it, step aside so the reply can be interpreted. Without the second pass the node
+  // would re-render its own question forever; without the first, the model would have to relay a listing
+  // it cannot be given.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  const shown = first.call('AX_RPC_OFFERS.present', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+  });
+  first.close();
+
+  assert.equal(shown.next, 'ask', 'the first pass pauses on the window');
+  assert.match(shown.question ?? '', /M185/);
+  assert.equal(shown.choice_stage, 'asked', 'the pass must record that it has asked');
+
+  const later = runtime();
+  const answered = later.call('AX_RPC_OFFERS.present', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    choice_stage: 'asked',
+  });
+  later.close();
+
+  assert.equal(answered.next, 'answer', 'once asked, the reply belongs to the next node');
+  assert.equal(answered.question, undefined, 'asking twice would replace the listing the user is reading');
+});

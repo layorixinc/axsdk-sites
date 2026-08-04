@@ -174,8 +174,11 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.ok(!common.flows.shopping_search_one_store.nodes.search.next.unsupported_site,
     'every store is ported; nothing should still route to a durable reader');
   assert.equal(common.flows.shopping_search_one_store.nodes.search.next.done, 'normalize');
-  assert.equal(nodes.normalize_rank.next.done, 'choose_offer');
-  assert.deepEqual(nodes.choose_offer.allowedTools, ['present_store_offers', 'choose_store_offer']);
+  // Ranking hands to the deterministic presenter, which renders the window and pauses on it; the model
+  // gate only interprets the answer, and has no tool for presenting because it could never feed one.
+  assert.equal(nodes.normalize_rank.next.done, 'present_offers');
+  assert.equal(nodes.present_offers.next.answer, 'choose_offer');
+  assert.deepEqual(nodes.choose_offer.allowedTools, ['choose_store_offer']);
   assert.ok(!nodes.choose_offer.inputSelector.includes('comparison_text'));
   assert.ok(!nodes.choose_offer.inputSelector.includes('offers'), 'offer approval must not inject the full ranked-offer payload into the model prompt');
   assert.ok(!nodes.choose_offer.inputSelector.includes('ambiguous_offers'));
@@ -1080,4 +1083,33 @@ test('a runtime tool never answers a branch its node cannot route', () => {
   }
 
   assert.deepEqual(wrong, [], `branches no node routes:\n  ${wrong.join('\n  ')}`);
+});
+
+test('the comparison window is rendered deterministically, not by a model call', () => {
+  // `present_store_offers` sat in `allowedTools`, so its arguments were the MODEL's — and a model-called
+  // tool cannot be handed flow state. The snapshot lives there by design, so the tool answered
+  // `comparison_unreadable` after two live store searches had already built the comparison.
+  //
+  // Same shape as the Thumbtack shortlist, which has no model node in its loop at all: a contract node
+  // reads the snapshot through `inputSelector`, renders, and pauses on its own window.
+  const common = parseFlow('_common/flows.yaml');
+
+  for (const [flowId, flow] of Object.entries(common.flows ?? {})) {
+    for (const [nodeId, node] of Object.entries(flow?.nodes ?? {})) {
+      assert.ok(
+        !(node?.allowedTools ?? []).includes('present_store_offers'),
+        `${flowId}.${nodeId} lets a model call the presentation, which cannot reach the snapshot`,
+      );
+    }
+  }
+
+  const presenter = Object.entries(common.flows?.shopping_multi_store_total_cost?.nodes ?? {})
+    .find(([, node]) => node?.id === 'present_store_offers');
+  assert.ok(presenter, 'a deterministic node must render the comparison');
+  const [, node] = presenter;
+  assert.equal(node.kind, 'action_contract');
+  assert.ok(
+    (node.inputSelector ?? []).includes('comparison_state'),
+    'the presenter must select the snapshot, or it has nothing to render',
+  );
 });

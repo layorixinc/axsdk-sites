@@ -1558,12 +1558,32 @@ flows:
           - quantity
           - screened_out
         next:
-          done: choose_offer
-          partial: choose_offer
+          done: present_offers
+          partial: present_offers
           empty: no_results
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
+
+      # Deterministic, and it has to be: the snapshot lives in flow state, and a model-called tool is
+      # handed the MODEL's arguments — `present_store_offers` used to sit in `allowedTools` and answered
+      # `comparison_unreadable` after two live store searches had already built the comparison. Same shape
+      # as the Thumbtack shortlist, which has no model node in its loop at all: render, pause on the
+      # window, and step aside on the turn that answers it.
+      present_offers:
+        kind: action_contract
+        id: present_store_offers
+        description: Render the current comparison window from the snapshot and pause on it.
+        inputSelector:
+          - comparison_id
+          - comparison_state
+          - choice_stage
+          - view_page
+        next:
+          ask: present_offers
+          answer: choose_offer
+          error: comparison_lost
+        fallback: { invalidNext: error, exhaustedNext: error }
 
       choose_offer:
         kind: action_unit
@@ -1586,17 +1606,15 @@ flows:
           - view_page
           - view_pages
           - view_total
-        allowedTools: [present_store_offers, choose_store_offer]
+        allowedTools: [choose_store_offer]
         prompt: |-
           You are the approval gate for a live shopping-cart mutation.
 
-          FIRST call (`choice_stage` empty): call present_store_offers exactly once with next="ask",
-          choice_stage="asked", and comparison_id=<current comparison_id>. The tool retrieves the
-          deterministic, numbered comparison verbatim from the current comparison snapshot. Never
-          call choose_store_offer on this first presentation.
+          The numbered comparison is ALREADY on screen — a deterministic node rendered it from the
+          snapshot and paused on it, so you never present anything yourself and there is no tool for it.
+          Your only job is the user's answer to that window.
 
-          FOLLOW-UP (`choice_stage`="asked"): call choose_store_offer exactly once using only the
-          user's current answer to the presented comparison.
+          Call choose_store_offer exactly once using only the user's current answer.
           - clear cancellation -> next="cancel".
           - "recommended", "best", "cheapest", "first", or explicit approval of the recommended offer
             -> next="select", choice_index=1, choice_comparison_id=<current comparison_id>.
@@ -2590,9 +2608,12 @@ flowTools:
           return AX_RPC_OFFERS.present(args)
         end
     output:
-      next: { if: [{ var: result.error }, "error", { var: tool.args.next }] }
+      # The SCRIPT picks the branch now: `ask` on the pass that renders and pauses, `answer` on the one
+      # that steps aside for the reply. This used to read `tool.args.next` — the model's argument — and a
+      # contract node has no model, so it answered `undefined` and every comparison routed to lost.
+      next: result.next
       question: result.question
-      choice_stage: tool.args.choice_stage
+      choice_stage: result.choice_stage
       error: result.error
       view_page: result.view_page
       view_pages: result.view_pages
@@ -2600,11 +2621,13 @@ flowTools:
     parameters:
       type: object
       additionalProperties: false
-      required: [next, choice_stage, comparison_id]
+      # Nothing is required: this is projected from flow state, and the first pass has no `choice_stage`
+      # at all. A `required` key that state does not carry is REJECTED before the script runs.
+      required: []
       properties:
-        next: { type: string, enum: [ask] }
-        choice_stage: { type: string, enum: [asked] }
-        comparison_id: { type: string, minLength: 1 }
+        choice_stage: { type: [string, "null"] }
+        comparison_id: { type: [string, "null"] }
+        view_page: { type: [integer, number, "null"] }
         # The listing itself, carried between turns. Declared because UNDECLARED IS DROPPED — the runtime
         # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
         # tool is a compile error. Nullable and not required: the first pass has no listing yet.

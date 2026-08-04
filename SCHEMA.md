@@ -1778,27 +1778,26 @@
     "parameters": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "next",
-        "choice_stage",
-        "comparison_id"
-      ],
+      "required": [],
       "properties": {
-        "next": {
-          "type": "string",
-          "enum": [
-            "ask"
-          ]
-        },
         "choice_stage": {
-          "type": "string",
-          "enum": [
-            "asked"
+          "type": [
+            "string",
+            "null"
           ]
         },
         "comparison_id": {
-          "type": "string",
-          "minLength": 1
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view_page": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
         },
         "comparison_state": {
           "type": [

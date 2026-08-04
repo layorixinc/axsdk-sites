@@ -34,7 +34,7 @@ after(() => lua.close());
 const ACTIVE = '[data-test="request-flow-step--active"]';
 // Mirrors the module. A test that moves this must put it back, or every later test runs on a budget it
 // never chose — and the flow's own `deadlineMs` is what it has to stay under, which conformance pins.
-const TIME_BUDGET_MS = 100000;
+const TIME_BUDGET_MS = 90000;
 const PRO_URL = 'https://www.thumbtack.com/ca/san-francisco/house-cleaning/maxima/service/583813840609927168';
 
 /** One request-flow step, expressed the way the page renders it. */
@@ -826,4 +826,129 @@ test('a long form is no longer stopped by an op count the deadline never needed'
 
   assert.equal(result.next, 'submit', `stopped early: ${result.quote_error ?? result.quote_status}`);
   assert.ok(page.ops.length > 95, `the old cap must no longer bind, spent ${page.ops.length}`);
+});
+
+test('a wizard that stops reports the question it stopped on', () => {
+  // Live, twice: the wizard drove four steps once and eight the next, then the dialog went away and the
+  // report was the pro's PROFILE text — "Elmer Deleon Painting ... Select a service Handyman Interior
+  // Painting ...". That says where the browser ended up and nothing about where the WIZARD was, so the
+  // failure cannot be diagnosed without re-running it and watching. The answers are already tracked; they
+  // just never reached the report.
+  const page = quotePage({
+    steps: [
+      step('What kind of help?', { choices: ['Painting'] }),
+      step('How large is the job?', { choices: ['A full day'] }),
+    ],
+  });
+  // After the second step the site drops the dialog instead of showing another step.
+  const result = drive(page);
+
+  assert.equal(result.quote_status, 'dialog_closed');
+  // What it answered, so the next question is "why did THAT end the flow" and not "what happened".
+  assert.match(result.quote_answered ?? '', /Painting/);
+  assert.match(result.quote_answered ?? '', /A full day/);
+  // And the last question it saw, which the surface text cannot supply once the step is gone.
+  assert.match(result.quote_last_step ?? '', /How large is the job/);
+});
+
+test('a blank surface is a page in transition, not a closed dialog', () => {
+  // The diagnosis the trail bought us. Live, after answering five steps:
+  //   dialog=false step_form=false surface=""
+  //   last question: "How often do you want the house cleaned? ..."
+  // An empty surface is not a dismissed dialog — a dismissed dialog leaves the pro's PROFILE behind, and
+  // an earlier run reported exactly that text. Nothing at all means the document is between renders, and
+  // calling that "closed" abandons a form that was still going.
+  assert.equal(lua.call('AX_RPC_QUOTE.classify_absence', true, false, 'anything'), 'standing');
+  assert.equal(lua.call('AX_RPC_QUOTE.classify_absence', false, true, ''), 'standing');
+  assert.equal(lua.call('AX_RPC_QUOTE.classify_absence', false, false, ''), 'transitional');
+  assert.equal(lua.call('AX_RPC_QUOTE.classify_absence', false, false, '   '), 'transitional');
+  // A real surface with no dialog is the dismissal we already reported correctly.
+  assert.equal(
+    lua.call('AX_RPC_QUOTE.classify_absence', false, false, 'Elmer Deleon Painting Select a service'),
+    'closed',
+  );
+});
+
+test('a transition is waited out before the form is abandoned', () => {
+  // Waiting costs a `rpc.sleep`, not round trips, so re-checking is nearly free — which is exactly why
+  // giving up on the first blank read is indefensible now.
+  const page = quotePage({ steps: [step('How often?', { choices: ['Just once'] })] });
+  const result = drive(page);
+
+  assert.equal(result.quote_status, 'dialog_closed');
+  assert.ok(
+    page.sleeps.length >= 2,
+    `a transition must be waited out before giving up, slept ${page.sleeps.length} times`,
+  );
+});
+
+test('waiting for a step to come back is bounded by the budget, not by three', () => {
+  // Live: the wizard answered bedrooms and bathrooms, the next step did not render, and it gave up after
+  // three attempts — about twenty-four seconds against a hundred-second budget. Checked straight after,
+  // the dialog was open on "What kind of cleaning do you need?" with Next and Back. An arbitrary attempt
+  // count is the same proxy we just removed from the budget itself: the deadline already says when to
+  // stop, and waiting now costs a host sleep rather than round trips.
+  const page = quotePage({ steps: [step('How many bathrooms?', { choices: ['1 bathroom'] })] });
+  const result = drive(page);
+
+  // Reported, not just done: a stop that says how long it waited is the difference between "gave up at
+  // once" and "waited and the page never came back", and the live report could not tell those apart.
+  assert.ok(
+    (result.quote_absence_waits ?? 0) > 3,
+    `an ample budget must outlast three attempts, waited ${result.quote_absence_waits}`,
+  );
+
+  // And an exhausted budget still stops promptly — the budget is what bounds it now.
+  const short = quotePage({ steps: [step('How many bathrooms?', { choices: ['1 bathroom'] })] });
+  short.clockMs = 0;
+  lua.define('AX_RPC_QUOTE.TIME_BUDGET_MS = 1');
+  let brief;
+  try {
+    brief = drive(short);
+  } finally {
+    lua.define(`AX_RPC_QUOTE.TIME_BUDGET_MS = ${TIME_BUDGET_MS}`);
+  }
+  assert.ok((brief.quote_absence_waits ?? 0) <= 1, `spent budget must stop at once, waited ${brief.quote_absence_waits}`);
+});
+
+test('a wait is never started that the remaining budget cannot finish', () => {
+  // The first attempt derived the cap from the WHOLE budget — twelve eight-second waits — and ignored the
+  // thirty seconds already spent driving. Live, the tool was killed by the platform:
+  //   "lua rpc execution deadline exceeded while waiting"
+  // which is exactly the sentence the budget exists to replace. What bounds a wait is the time LEFT, so
+  // the rule is a function of the remainder and is pinned here rather than inferred from a stub whose
+  // waits cost nothing.
+  // Waiting may take at most a SHARE of what is left. Live, with the whole remainder available, twelve
+  // eight-second waits consumed the budget that driving needed and the platform killed the call twice —
+  // `deadline exceeded while waiting`, then `before dom.read_many`. A step that has not come back after a
+  // third of the remaining time is not coming back inside this invocation.
+  assert.equal(lua.call('AX_RPC_QUOTE.wait_allowance', 100000), 5);
+  assert.equal(lua.call('AX_RPC_QUOTE.wait_allowance', 60000), 3);
+  assert.equal(lua.call('AX_RPC_QUOTE.wait_allowance', 20000), 1);
+  // No room for even one wait: starting it would be the kill we are avoiding.
+  assert.equal(lua.call('AX_RPC_QUOTE.wait_allowance', 5000), 0);
+  assert.equal(lua.call('AX_RPC_QUOTE.wait_allowance', -1), 0);
+  // No host clock: fall back to the count we have already run in production rather than guess bigger.
+  assert.equal(lua.call('AX_RPC_QUOTE.wait_allowance'), 3);
+});
+
+test('a stop says whether it had a clock to budget with', () => {
+  // Two live runs were killed by the platform after the budget became time-based, and the report cannot
+  // say why: with no `rpc.now` every time decision silently falls back to counting round trips, waits
+  // fall back to three, and `pace` goes back to buying latency with reads. Those are the same symptoms as
+  // a budget that is simply too large, and guessing between them costs a three-minute live run each time.
+  const page = quotePage({ steps: [step('How much help?', { choices: ['A full day'] }), finalStep()] });
+  const result = drive(page);
+  assert.equal(result.quote_clock, true);
+
+  const blind = quotePage({ steps: [step('How much help?', { choices: ['A full day'] }), finalStep()] });
+  installRpcStub(lua, blind);
+  lua.define('rpc.now = nil');
+  let without;
+  try {
+    without = lua.call('AX_RPC_THUMBTACK.request_quote', QUOTE_ARGS);
+  } finally {
+    lua.define('rpc.now = function() return 0 end');
+  }
+  assert.equal(without.quote_clock, false);
 });

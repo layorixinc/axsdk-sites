@@ -65,7 +65,7 @@ end
 --- op happens to cost today. Kept under the flow's declared `deadlineMs` by enough margin to return an
 --- answer rather than be killed while composing one; `check:flows` pins the two against each other,
 --- because a constant that must agree with a number in another file is a constant that drifts.
-Q.TIME_BUDGET_MS = 100000
+Q.TIME_BUDGET_MS = 90000
 
 --- Round trips spent. No longer the budget — still reported, because "how many trips did that take" is
 --- the first question about a slow run, and it is what makes a batch's saving visible.
@@ -86,6 +86,13 @@ end
 --- itself rather than being killed. The fallback keeps the original 95 on purpose: without a clock we are
 --- guessing again, and the safe guess is the one we have already run.
 Q.OP_BUDGET = 95
+--- Milliseconds left, or nil when the host has no clock.
+local function remaining_ms()
+  local now = clock()
+  if not now or not Q.started_at then return nil end
+  return Q.TIME_BUDGET_MS - (now - Q.started_at)
+end
+
 local function over_budget()
   local now = clock()
   if not now or not Q.started_at then return Q.spent >= Q.OP_BUDGET end
@@ -709,8 +716,67 @@ function Q.stall_snapshot()
     .. "] step_form=" .. tostring(has_form == true)
 end
 
---- What the page shows once the active step is gone: whether the dialog frame is still there, and what the
---- surface says. One batched round trip when the client has it.
+--- What the wizard answered, newest last, as one line.
+---
+--- Live twice, the report for a dialog that vanished was the pro's PROFILE text — where the browser ended
+--- up, nothing about where the WIZARD was. The answers were tracked the whole time and simply never
+--- reached the caller, so diagnosing meant re-running and watching. A scalar, because a table of records
+--- would have to survive tool-output validation and nobody reads it anyway.
+function Q.answered(applied)
+  if type(applied) ~= "table" then return nil end
+  local parts = {}
+  for index = 1, #applied do
+    local entry = applied[index]
+    local value = entry and entry.value
+    if type(value) == "string" and value ~= "" then
+      parts[#parts + 1] = value .. (entry.ok == true and "" or "(refused)")
+    end
+  end
+  if #parts == 0 then return nil end
+  local line = table.concat(parts, " | ")
+  return #line > 300 and (line:sub(1, 300) .. "…") or line
+end
+
+--- How many 8s waits fit in the time that is LEFT.
+---
+--- Deriving this from the whole budget ignored the seconds already spent driving, and the platform killed
+--- the tool mid-wait with `lua rpc execution deadline exceeded while waiting` — the sentence the budget
+--- exists to replace. Never start a wait the remainder cannot finish.
+---
+--- Without a host clock there is no remainder to divide, so it falls back to the count that has already
+--- run in production rather than guessing a larger one.
+Q.WAIT_MS = 8000
+--- Waiting may take at most this SHARE of the time left. Handing it the whole remainder let twelve waits
+--- eat the budget that driving needed, and the platform killed the call twice — once `while waiting`,
+--- once `before dom.read_many`. A step that has not returned after a third of the remaining time is not
+--- returning inside this invocation, and the seconds are worth more to the steps that can still run.
+Q.WAIT_SHARE = 0.4
+function Q.wait_allowance(remaining)
+  local left = tonumber(remaining)
+  if not left then return 3 end
+  local share = left * Q.WAIT_SHARE
+  if share < Q.WAIT_MS then return 0 end
+  return math.floor(share / Q.WAIT_MS)
+end
+
+--- Why the active step is missing: `standing` | `transitional` | `closed`.
+---
+--- Pure, so the rule is testable without a page. Measured live, two different endings arrive as the same
+--- pair of false flags:
+---   dialog=false step_form=false surface="Elmer Deleon Painting ... Select a service ..."  -- dismissed
+---   dialog=false step_form=false surface=""                                                -- mid-render
+--- A dismissed dialog leaves the pro's profile behind. NOTHING at all means the document is between
+--- renders, and calling that closed abandons a form that was still going — six steps in, on "How often
+--- do you want the house cleaned?".
+function Q.classify_absence(dialog, form, surface)
+  if dialog == true or form == true then return "standing" end
+  local text = type(surface) == "string" and surface:gsub("%s+", "") or ""
+  if text == "" then return "transitional" end
+  return "closed"
+end
+
+--- What the page shows once the active step is gone: whether the dialog frame is still there, and what
+--- the surface says. One batched round trip when the client has it.
 function Q.closed_snapshot()
   local batched = read_many({
     { op = "dom.exists", params = { selector = Q.DIALOG } },
@@ -792,6 +858,13 @@ function Q.request_quote(args)
   wait_for(Q.ACTIVE .. ' button', 8000)
 
   local applied = {}
+  -- The last question the wizard SAW. Once the step is gone the surface cannot supply it, and that is
+  -- exactly when someone needs it: a report of the pro's profile text says where the browser ended up,
+  -- never where the wizard was.
+  local last_step = nil
+  -- How many times a missing step was waited out. Reported, because "gave up at once" and "waited and
+  -- the page never came back" are different failures that read identically without it.
+  local waits = 0
   local steps, stalled, flow = 0, 0, nil
   while steps < Q.MAX_STEPS do
     if over_budget() then
@@ -805,54 +878,84 @@ function Q.request_quote(args)
       local advance = W.classify_advance(Q.read_buttons())
       if advance and advance.reached_submit_step then
         return { next = "submit", quote_status = "at_submit_step", quote_reached_submit = true,
-                 quote_advance_reason = "budget_spent_at_submit", quote_steps = steps }
+                 quote_advance_reason = "budget_spent_at_submit", quote_steps = steps, quote_clock = clock() ~= nil }
       end
       -- Genuinely short: say so, with what was driven and what the form looks like now, instead of
       -- letting the platform kill the call.
       return { next = "error", quote_error = "quote_budget_spent", quote_status = "budget_spent",
-               quote_steps = steps, quote_advance_reason = flow and flow.advance_reason or nil,
+               quote_steps = steps, quote_clock = clock() ~= nil, quote_advance_reason = flow and flow.advance_reason or nil,
+               quote_answered = Q.answered(applied), quote_last_step = last_step,
                quote_message = Q.stall_snapshot() }
     end
     local before = #applied
     flow = W.drive_step(Q.ctx(), drive, applied, before)
     if not flow then
-      -- The wizard answers nil when there is no ACTIVE step. That is not the same as the dialog going
-      -- away: measured live, the run stopped with `dialog=true step_form=true` and only the step marker
-      -- missing, between renders. So wait for the next step while the dialog still stands.
-      local standing = exists(Q.DIALOG) or exists(Q.STEP_FORM)
-      if standing then
-        if wait_for(Q.ACTIVE, 8000) then
-          flow = W.drive_step(Q.ctx(), drive, applied, #applied)
+      -- The wizard answers nil when there is no ACTIVE step, and there are THREE reasons for that, not
+      -- two. `classify_absence` names them; the fix for each is different.
+      -- Bounded by the BUDGET, not by a count. Three attempts was the same kind of proxy the budget
+      -- itself used to be: live, the wizard gave up after roughly twenty-four seconds with a
+      -- hundred-second budget, and the dialog was open on the next question when checked straight after.
+      -- The deadline already knows when to stop, and a wait now costs a host sleep rather than round
+      -- trips, so there is nothing left for an arbitrary cap to protect.
+      -- DERIVED from what is left, not from the whole budget and not from a number someone picked. Three
+      -- attempts stopped the wizard twenty-four seconds into a hundred-second budget while the dialog sat
+      -- open on the next question; the whole budget, in turn, queued more waiting than the deadline had
+      -- room for and the platform killed the call mid-wait.
+      local max_waits = Q.wait_allowance(remaining_ms())
+      while waits < max_waits and not over_budget() do
+        waits = waits + 1
+        local why = Q.classify_absence(exists(Q.DIALOG), exists(Q.STEP_FORM), text_of("main"))
+        if why == "standing" then
+          -- The frame is there and only the step marker is missing, between renders.
+          if wait_for(Q.ACTIVE, 8000) then
+            flow = W.drive_step(Q.ctx(), drive, applied, #applied)
+          end
+        elseif why == "transitional" then
+          -- Nothing on the page at all: the document is mid-render. Measured live at step six, on "How
+          -- often do you want the house cleaned?" — reported as a closed dialog, which abandoned a form
+          -- that was still going. Waiting costs a host sleep, not round trips, so re-checking is nearly
+          -- free and giving up on the first blank read is indefensible.
+          pace(700)
+          if exists(Q.ACTIVE) then
+            flow = W.drive_step(Q.ctx(), drive, applied, #applied)
+          end
         end
-        -- It may have closed while we waited; the wait is seconds long and the site owns the dialog.
-        standing = exists(Q.DIALOG) or exists(Q.STEP_FORM)
+        if flow or why == "closed" then break end
       end
       if not flow then
-        -- Only a dialog that is actually GONE is reported as closed. Measured live on a handyman pro:
-        -- this answered `dialog_closed` while printing `dialog=true step_form=true` and a "Select a
-        -- service" picker beside it — a status contradicting its own evidence, which sends the operator
-        -- hunting for a dismissal that never happened. What that pro shows is a surface the wizard has no
-        -- step for; naming it that way is the difference between a bug report and a feature request.
-        local closed = not standing
+        -- Only a dialog that is actually GONE, with a real surface behind it, is reported as closed.
+        -- Measured live on a handyman pro: this answered `dialog_closed` while printing
+        -- `dialog=true step_form=true` and a "Select a service" picker beside it — a status contradicting
+        -- its own evidence, which sends the operator hunting for a dismissal that never happened. What
+        -- that pro shows is a surface the wizard has no step for; naming it that way is the difference
+        -- between a bug report and a feature request.
+        local why = Q.classify_absence(exists(Q.DIALOG), exists(Q.STEP_FORM), text_of("main"))
+        local closed = why ~= "standing"
         return { next = "error",
                  quote_error = closed and "quote_dialog_closed" or "quote_no_active_step",
                  quote_status = closed and "dialog_closed" or "no_active_step",
-                 quote_steps = steps, quote_message = Q.closed_snapshot() }
+                 quote_steps = steps, quote_clock = clock() ~= nil, quote_answered = Q.answered(applied), quote_last_step = last_step,
+                 quote_absence_waits = waits, quote_message = Q.closed_snapshot() }
       end
     end
     steps = steps + 1
+    -- `before_text` is the step as it read BEFORE this pass answered it — the question, not the next
+    -- screen. The wizard has always returned it; nothing consumed it.
+    if type(flow.before_text) == "string" and flow.before_text ~= "" then
+      last_step = trim(flow.before_text)
+    end
 
     if flow.request_error then
       return { next = "error", quote_error = flow.request_error.error, quote_status = "request_flow_error",
                quote_message = flow.request_error.message, quote_retry_field = flow.request_error.retry_field,
-               quote_steps = steps }
+               quote_steps = steps, quote_clock = clock() ~= nil }
     end
     -- Reaching the submit step is the goal. `missing_answer` hands off too, because a required step this
     -- cannot answer will not answer itself on a retry. `advance_button_not_found` does NOT: that is
     -- structural or early, and treating it as arrival reported an untouched form as ready to send.
     if flow.reached_submit_step or flow.advance_reason == "missing_answer" then
       return { next = "submit", quote_status = "at_submit_step", quote_reached_submit = flow.reached_submit_step == true,
-               quote_advance_reason = flow.advance_reason, quote_steps = steps }
+               quote_advance_reason = flow.advance_reason, quote_steps = steps, quote_clock = clock() ~= nil }
     end
     if flow.advanced then
       stalled = 0
@@ -867,14 +970,14 @@ function Q.request_quote(args)
       stalled = stalled + 1
       if stalled >= Q.MAX_STALLED then
         return { next = "error", quote_error = "quote_stalled", quote_status = "stalled",
-                 quote_advance_reason = flow.advance_reason, quote_steps = steps,
+                 quote_advance_reason = flow.advance_reason, quote_steps = steps, quote_clock = clock() ~= nil,
                  quote_message = Q.stall_snapshot() }
       end
     end
   end
 
   return { next = "error", quote_error = "quote_steps_exhausted", quote_status = "exhausted",
-           quote_advance_reason = flow and flow.advance_reason or nil, quote_steps = steps }
+           quote_advance_reason = flow and flow.advance_reason or nil, quote_steps = steps, quote_clock = clock() ~= nil }
 end
 
 --- Sends the request. Separate from driving the form on purpose: this click contacts a real person, so it

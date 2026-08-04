@@ -413,6 +413,8 @@ flows:
       quote_advance_reason: null
       quote_reached_submit: null
       quote_error: null
+      quote_last_step: null
+      quote_answered: null
       quote_submit_status: null
       quote_submit_message: null
       quote_submit_error: null
@@ -743,6 +745,8 @@ flows:
           - quote_results
           - quote_error
           - quote_message
+          - quote_last_step
+          - quote_answered
           - quote_reached_submit
           - quote_answer_status
           - quote_status
@@ -4085,8 +4089,15 @@ flowTools:
             -- our error code instead read as our failure and invited a retry that could never work.
             outcome = "Thumbtack: \"" .. tostring(open_msg or "this pro cannot do the job") .. "\""
           elseif open_err then
+            -- Where the WIZARD was, not just where the browser ended up. Two live failures reported the
+            -- pro's profile text and nothing about the form, so the run had to be repeated to learn
+            -- anything. The last question and the answers given are what make the next question askable.
+            local where = nz(args.quote_last_step)
+            local said = nz(args.quote_answered)
             outcome = "FAILED to open/answer (" .. tostring(open_err)
               .. (open_msg and (": " .. tostring(open_msg)) or "") .. ")"
+              .. (where and (" last question: \"" .. tostring(where) .. "\"") or "")
+              .. (said and (" answered: " .. tostring(said)) or "")
           elseif submit_msg then
             outcome = "Submitted -> Thumbtack error popover: \"" .. tostring(submit_msg) .. "\""
           elseif submit_status == "submitted" then
@@ -4137,6 +4148,8 @@ flowTools:
         quote_status: { type: [string, "null"] }
         quote_advance_reason: { type: [string, "null"] }
         quote_message: { type: [string, "null"] }
+        quote_last_step: { type: [string, "null"] }
+        quote_answered: { type: [string, "null"] }
         quote_submit_status: { type: [string, "null"] }
         quote_submit_message: { type: [string, "null"] }
         quote_submit_error: { type: [string, "null"] }
@@ -4314,6 +4327,10 @@ flowTools:
       quote_status: result.quote_status
       quote_error: result.quote_error
       quote_message: result.quote_message
+      quote_last_step: result.quote_last_step
+      quote_absence_waits: result.quote_absence_waits
+      quote_clock: result.quote_clock
+      quote_answered: result.quote_answered
       quote_advance_reason: result.quote_advance_reason
       # How many steps the single call drove. Without it a refusal cannot say whether the form was walked
       # or never started, which is the first thing anyone asks of one.

@@ -713,6 +713,23 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **A stop must say WHERE the wizard was, not where the browser ended up.** Two live quote failures
+  reported the pro's profile text and nothing else; the answers were tracked all along and never left
+  the module. `quote_answered` (the trail) plus `quote_last_step` (`flow.before_text`, which the wizard
+  always returned and nothing consumed) turned the next run into a diagnosis instead of a repeat.
+- **`dialog=false step_form=false surface=""` is a page mid-render, NOT a dismissed dialog.** A dismissed
+  dialog leaves the pro's profile behind — an earlier run reported exactly that text. Nothing at all
+  means the document is between renders, and calling it closed abandoned a form six steps in.
+  `Q.classify_absence` names the three cases (`standing` / `transitional` / `closed`) as a pure rule.
+- **Waiting for a missing step may take only a SHARE of the time left (`Q.WAIT_SHARE`), never the whole
+  remainder.** Bounding it by the whole budget let twelve 8s waits eat what driving needed and the
+  platform killed the call twice — `deadline exceeded while waiting`, then `before dom.read_many`, which
+  are the very sentences the budget exists to replace. Deriving the cap from the WHOLE budget also
+  ignores the seconds already spent: the allowance is a function of the REMAINDER.
+- **Confirm a host primitive by CALLING it, through a tool that can still answer.** A tool killed by the
+  deadline returns a raw platform string and no fields, so its telemetry cannot tell you whether the
+  clock existed. A throwaway probe on the fast ZIP tool answered `clock=true sleep=true rpc=table` in
+  one run and ended the guessing — remove it before commit.
 - **The host has `rpc.now()` and `rpc.sleep(ms)` — no round trip, no `maxCalls`.** Our quote module's own
   comment asserted the opposite ("there is no wait op: the runtime's vocabulary is reads and writes") and
   paid for every pause with up to two `dom.exists` reads issued for their latency alone. At a measured

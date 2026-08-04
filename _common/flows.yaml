@@ -3663,6 +3663,11 @@ flowTools:
 
   resolve_zip:
     description: Resolve a US ZIP code from an address string.
+    # STAYS REMOTE until R1 lands. The runtime module is written and tested
+    # (`_common/rpc/71_rpc_zip.lua`), and its two cheap rungs — an explicit ZIP and a ZIP inside the
+    # address — need no network at all. But the geocode rung does, and a live call answered
+    # `zip_geocode_unavailable`: the runtime has no `net` capability. The durable command reaches a
+    # geocoder from the BROWSER, so wiring this would lose "San Francisco, CA".
     execute: { kind: remote, tool: AX_resolve_zip }
     input:
       address: tool.args.address

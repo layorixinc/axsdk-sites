@@ -117,11 +117,49 @@ Thumbtack 견적 폼 라이브 비교:
 
 ---
 
+## R1 — 다시 확인했습니다. 아직입니다 (측정)
+
+문서가 아니라 호출로 확인했습니다. `_common/rpc/71_rpc_zip.lua`를 만들어 `resolve_zip`을 런타임으로
+붙이고 라이브에서 도시 이름을 넣었습니다:
+
+```
+collect_request | {"zip_status":"resolve_failed","error":"zip_geocode_unavailable"}
+```
+
+`net` capability가 런타임에 없습니다. 되돌렸습니다 — durable 명령은 같은 주소를 지금도 풉니다:
+
+```
+AX_resolve_zip {"address":"San Francisco, CA"} -> {"zip_code":"94102","source":"geocode_zcta"}
+```
+
+브라우저에는 `net.fetch`가 있고(`default-capabilities.ts:1681`, `durableCapability`로 감싸인 채)
+런타임에는 없습니다. 그래서 붙여 두면 "San Francisco, CA" 같은 도시-only 입력이 **퇴행합니다.**
+
+**모듈은 준비돼 있습니다.** 사다리의 앞 두 칸(명시 ZIP, 주소에 박힌 ZIP)은 **네트워크가 필요 없어서**
+지금 런타임에서도 동작하고, 테스트 8개가 있습니다. R1이 오는 날 `execute` 블록만 바꾸면 됩니다.
+
+### 그리고 대안 소유자가 있습니다
+
+R1을 "런타임 호스트 프리미티브"로 설계한 것은 그쪽 확정이고 우리도 동의했습니다(왕복 0). 다만 그것이
+**인프라 egress 승인**에 걸려 있는 동안, 같은 능력이 **클라이언트 op**으로도 올 수 있습니다 —
+`fetchFromLua`가 이미 SDK에 있고, `dom.read_many`를 노출한 것과 같은 종류의 작업입니다.
+
+| 경로 | 소유 | 대가 | 승인 |
+|---|---|---|---|
+| 런타임 호스트 프리미티브 (현 R1) | 백엔드/인프라 | 왕복 0 | **egress 승인 필요** |
+| 클라이언트 op `net.fetch` | SDK | 왕복 1회 | 승인 불필요 — 능력이 이미 있음 |
+
+차이는 성능이 아니라 **누구의 IP로 나가느냐**입니다. 서버면 플랫폼 IP, 클라이언트면 사용자 IP로
+지오코더에 요청이 갑니다. 메모리를 기기에 남긴 R27의 판단과 같은 결의 **제품 결정**이라 우리가 단독으로
+고르지 않습니다 — 어느 쪽이든 알려주시면 그대로 붙입니다.
+
+---
+
 ## 남는 차단
 
 - **R1** `net.fetch` — ZIP 지오코딩 + FX
 - **R26-R** 런타임에서 사이트별 사이트맵 접근 (이 문서)
 - **R27-R** 메모리 op의 클라이언트 구현 (이 문서)
 
-게이트: `test:lua` **381** · `check:flows` **89** · `test:playground` 47 ·
-`test:commerce` 24/24 + 17/17. `kind: remote` **11 선언 / 고유 9종**.
+게이트: `test:lua` **393** · `check:flows` **89** · `test:playground` 47 ·
+`test:commerce` 24/24 + 17/17. `kind: remote` **12 선언 / 고유 9종**.

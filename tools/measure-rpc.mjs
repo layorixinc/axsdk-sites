@@ -92,6 +92,19 @@ try {
           max: sorted[sorted.length - 1],
         };
       };
+      // Which ops dominate. Reducing round trips means knowing WHICH ones to fold, and a list of the
+      // first twelve says nothing about a run of ninety-five.
+      const byOp = {};
+      for (const entry of frames) {
+        const key = entry.op ?? 'unknown';
+        byOp[key] = byOp[key] ?? { n: 0, totalMs: 0 };
+        byOp[key].n += 1;
+        byOp[key].totalMs += entry.durationMs;
+      }
+      const histogram = Object.entries(byOp)
+        .sort(([, left], [, right]) => right.n - left.n)
+        .map(([op, entry]) => `${op} x${entry.n} (${Math.round(entry.totalMs / 1000)}s)`);
+
       console.log(JSON.stringify({
         capturedEvents: raw.total,
         rpcFrames: frames.length,
@@ -99,7 +112,7 @@ try {
         durationMs: stat(frames.map((entry) => entry.durationMs)),
         // Answer-to-next-frame. Transport and runtime, everything that is not our op.
         gapMs: stat(gaps),
-        ops: frames.slice(0, 12).map((entry) => `${entry.op}:${entry.durationMs}ms`),
+        byOp: histogram,
       }, null, 1));
     }
   }

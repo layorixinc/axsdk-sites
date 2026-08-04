@@ -713,6 +713,16 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **Profile before optimising: `npm run measure:rpc` gives a per-op histogram of a live turn.** For the
+  quote wizard it read `dom.exists x37 (21s)` out of 95 frames — a quarter of the deadline spent asking
+  "is there a step?" one round trip at a time, right next to a batch that was already being issued and
+  covered only the three `query_all` reads. Folding the step's presence and text into the same
+  `read_many` took `dom.get_text` from 13 to 4 and per-step cost from 15.8 frames to 14.0; the run then
+  drove nine steps where six had been typical.
+- **A per-step cache must be invalidated by the click that ENDS the step.** Folding presence and text
+  into the batch broke advancement detection instantly: the wizard compares the step text before and
+  after the click, and a cached "before" made every step look stalled. It had been latent — the cache
+  held only option lists, which nothing re-read after a click.
 - **A stop must say WHERE the wizard was, not where the browser ended up.** Two live quote failures
   reported the pro's profile text and nothing else; the answers were tracked all along and never left
   the module. `quote_answered` (the trail) plus `quote_last_step` (`flow.before_text`, which the wizard

@@ -459,20 +459,32 @@ end
 --- invalidates it.
 function Q.ctx()
   local cache = {}
-  local function invalidate() cache.options, cache.controls, cache.buttons = nil, nil, nil end
+  local function invalidate()
+    cache.options, cache.controls, cache.buttons = nil, nil, nil
+    cache.active, cache.text, cache.filled = nil, nil, nil
+  end
 
   --- The option list, the free controls and the buttons all describe the SAME instant, and the wizard asks
   --- for them three or four times per pass. One batch fills all three for one call; without the op each
   --- one is read on demand exactly as before.
   local function fill()
-    if cache.options ~= nil then return end
+    if cache.filled then return end
+    cache.filled = true
+    -- Whether the step is THERE and what it SAYS describe the same instant as its options, and both ops
+    -- are batchable. Measured on a live turn: 95 frames, `dom.exists` 37 of them — 21 seconds of a 90s
+    -- budget spent asking "is there a step?" one round trip at a time, next to a batch that was already
+    -- being issued.
     local answers = read_many({
+      { op = "dom.exists", params = { selector = Q.ACTIVE } },
+      { op = "dom.get_text", params = { selector = Q.ACTIVE } },
       { op = "dom.query_all", params = { selector = Q.OPTION_SELECTOR, fields = Q.OPTION_FIELDS, limit = 160 } },
       { op = "dom.query_all", params = { selector = Q.CONTROL_SELECTOR, fields = Q.CONTROL_FIELDS, limit = 160 } },
       { op = "dom.query_all", params = { selector = Q.ACTIVE .. ' button', fields = Q.BUTTON_FIELDS, limit = 20 } },
     })
     if answers then
-      cache.options, cache.controls, cache.buttons = answers[1] or {}, answers[2] or {}, answers[3] or {}
+      cache.active = answers[1]
+      cache.text = answers[2]
+      cache.options, cache.controls, cache.buttons = answers[3] or {}, answers[4] or {}, answers[5] or {}
     end
   end
   local function options()
@@ -491,9 +503,19 @@ function Q.ctx()
     return cache.buttons
   end
   return {
-    active_exists = function() return exists(Q.ACTIVE) end,
+    active_exists = function()
+      fill()
+      -- Only ask separately when the batch could not answer — a client without `read_many` still works,
+      -- exactly as before.
+      if cache.active == nil then return exists(Q.ACTIVE) end
+      return cache.active == true
+    end,
     read_error = function() return Q.read_error() end,
-    current_text = function() return trim(text_of(Q.ACTIVE)) end,
+    current_text = function()
+      fill()
+      if cache.text == nil then return trim(text_of(Q.ACTIVE)) end
+      return trim(cache.text)
+    end,
     read_options = options,
     select_option = function(value)
       -- Read the list FIRST, then drop the cache: invalidating before the read just re-fetched it.
@@ -523,7 +545,13 @@ function Q.ctx()
     advance_click = function(decision)
       local selector = Q.ACTIVE .. ' button:not([aria-label])'
       if decision.kind == "skip" then selector = selector .. ':not([title])' end
-      return click(selector) == true
+      local clicked = click(selector) == true
+      -- The click is what MOVES the step, so everything read about the old one is now stale. This did not
+      -- matter while the batch held only option lists — nothing re-read them after the click. It matters
+      -- now that the step's presence and text ride the same cache: advancement is detected by comparing
+      -- the text before and after, and serving the cached "before" made every step look stalled.
+      invalidate()
+      return clicked
     end,
     wait = pace,
   }

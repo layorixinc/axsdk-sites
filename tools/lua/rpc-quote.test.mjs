@@ -952,3 +952,35 @@ test('a stop says whether it had a clock to budget with', () => {
   }
   assert.equal(without.quote_clock, false);
 });
+
+test('a step asks the page once, not once per question about it', () => {
+  // Measured on a live quote turn: 95 frames, and `dom.exists` was 37 of them — 21 seconds of the 90s
+  // budget spent asking "is there a step?" one round trip at a time. The batch already existed and
+  // covered only the three `query_all` reads; the step's presence and its text were still issued alone,
+  // even though they describe the same instant and `dom.exists`/`dom.get_text` are both batchable.
+  const page = quotePage({
+    steps: [step('What kind of help?', { choices: ['Painting'] }), finalStep()],
+  });
+  drive(page);
+
+  const active = page.ops.filter(
+    (entry) => (entry.op === 'dom.exists' || entry.op === 'dom.get_text')
+      && entry.params?.selector === ACTIVE,
+  );
+
+  // Structural: the step's presence rides the batch. Counting alone cannot prove that — a wait polls
+  // `dom.exists` on the same selector, and those are waits, not questions about a step already on screen.
+  const batched = page.ops.filter((entry) => entry.op === 'dom.read_many');
+  const foldsPresence = batched.some((entry) => {
+    const requests = Array.isArray(entry.params?.selector) ? entry.params.selector : [];
+    return requests.some((request) => request?.op === 'dom.exists' && request?.params?.selector === ACTIVE)
+      && requests.some((request) => request?.op === 'dom.get_text' && request?.params?.selector === ACTIVE);
+  });
+  assert.ok(foldsPresence, 'the step batch must carry its own presence and text');
+
+  // And the leftovers are bounded well under the old cost of two per step plus the wizard's re-reads.
+  assert.ok(
+    active.length <= 3,
+    `only waits should still read the step alone, spent ${active.length} round trips`,
+  );
+});

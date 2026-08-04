@@ -22,7 +22,7 @@
 //   node tools/ax.mjs load                                  # auto-detects site from the tab url
 //   node tools/ax.mjs run AX_resolve_zip '{"address":"San Francisco, CA"}'
 //   node tools/ax.mjs run AX_read_page '{"mode":"structure"}'
-//   node tools/ax.mjs --local run AX_search_service '{"query":"house cleaning","zip_code":"94101"}'
+//   node tools/ax.mjs --local run AX_browse_service_candidates '{"criterion":"rating"}'
 
 import { createInterface } from 'node:readline/promises';
 import {

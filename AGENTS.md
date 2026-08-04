@@ -131,13 +131,12 @@ Design rules:
 The extension also ships **default form tools** present on every site: `AX_get_form`, `AX_set_form`,
 `AX_submit_form`, `AX_navigate` (scriptId `axsdk-default-form-tools`).
 
-### `thumbtack/scripts/` (on thumbtack.com)
-`00_common.lua` (`AX_THUMBTACK` + selectors/helpers) + `detect_page` (`AX_detect_page` →
-`{page: home|instant_results|pro_profile|quote_dialog|other, service_id?, zip_code?, keyword_pk?, ready}`),
-`search_service` (`AX_search_service`, two-phase nav), `view_service` (`AX_view_service`),
-`update_search` (`AX_update_search`, results filter), `answer_quote` (`AX_answer_quote`, quote-flow
-step), `open_quote` (`AX_open_quote`, opens dialog, never submits), `submit_quote` (`AX_submit_quote`,
-needs `confirm:true`).
+### `thumbtack/scripts/` — **gone.** Thumbtack runs entirely in the runtime
+Nothing durable is left on thumbtack.com. The page detector, the search, the results filter, the quote
+dialog and the submit are runtime tools in `_common/rpc/64_rpc_thumbtack.lua` + `65_rpc_quote.lua`,
+driven by flow tools declared in `_common/flows.yaml`. The eight durable Lua files and their harnesses
+(4,053 lines) were deleted once nothing reached them; `check:flows` pins the directory empty of Lua so a
+durable command cannot quietly reappear beside its runtime replacement.
 
 ### `amazon/scripts/` (on amazon.com)
 `00_common.lua` + `AX_search_product`, `AX_view_product`, `AX_update_product`, `AX_add_to_cart`,
@@ -230,7 +229,7 @@ npm aliases: `npm run chrome`, `npm run repl`, `npm run ax -- <args>`.
 **Typical loop (edit Lua → see it live):**
 ```bash
 node tools/ax.mjs open thumbtack
-# edit thumbtack/scripts/search_service.lua ...
+# edit _common/rpc/64_rpc_thumbtack.lua ...
 node tools/ax.mjs --local run AX_search_service '{"query":"house cleaning","zip_code":"94101"}'
 ```
 `--local` / `ax load` reads the working copy and injects `_common/scripts/*` then `<site>/scripts/*`
@@ -253,9 +252,8 @@ Flags: `--port`, `--cdp`, `--chrome`, `--profile`, `--extension-id`, `--extensio
 substr>` (pick a tab), `--site=<slug>`, `--store` (build + store-inject before run), `--no-build`,
 `--timeout=<ms>`, `--no-launch`.
 
-> The `ax` CLI is the canonical shared-plumbing path. The heavy E2E runner
-> `thumbtack/scripts/test_thumbtack_lua.mjs` still has its own copy of the CDP primitives and is a
-> candidate to migrate onto `tools/harness/cdp.mjs` later.
+> The `ax` CLI is the canonical shared-plumbing path — the last runner that kept its own copy of the
+> CDP primitives went with the durable Thumbtack layer.
 
 ---
 
@@ -301,14 +299,10 @@ Other tools:
   11st, while `npm run test:commerce:live` retains the Amazon/eBay guarded-cart scenario; add `-- --cancel`
   for its read-only path. Live runners serve local `index.md` to the dedicated dev tab through CDP Fetch
   while Lua and flows come from `ax sync` stored layers with remote sources off.
-- **E2E scenario runner** `thumbtack/scripts/test_thumbtack_lua.mjs` (CDP, port 9224 default):
-  ```bash
-  node thumbtack/scripts/test_thumbtack_lua.mjs --multi-quote --quote-count=2 --submit-quote --max-quote-steps=20 --keep-open
-  node thumbtack/scripts/test_thumbtack_lua.mjs --scenario="handyman|San Francisco, CA" --actual-submit --keep-open
-  ```
-  `--submit-quote` progresses to the final Submit with reserved/fake contact data but **never clicks
-  it**; `--actual-submit` clicks it (only when intentional). Logs each tool call with elapsed/wall
-  time, flags `[SLOW >3s]`. Other `test_*.mjs`/`verify_*.mjs` cover specific units (open-quote
+- **Thumbtack end to end:** drive the real flow with `ax send` and read the outcome. The quote tool
+  reports where it stopped — `quote_steps`, `quote_answered`, `quote_last_step`, `quote_absence_waits`,
+  `quote_clock` — which is what the deleted scenario runner used to be needed for. Reserved data only,
+  and the final Submit is never clicked. Other `test_*.mjs`/`verify_*.mjs` cover specific units (open-quote
   durability, beforeunload, form wizard, detect_page, read_page, resolve_zip, …).
 - **Offline Lua unit tests — `npm run test:lua`** (`tools/lua/*.test.mjs`, fengari devDependency). The
   harness `tools/lua/harness.mjs` loads real repository Lua files into an in-process Lua state (each file

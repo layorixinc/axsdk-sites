@@ -3,7 +3,7 @@
 -- Loaded from _common/scripts (kind:'common') so it is present on EVERY page — including external
 -- pages such as a search engine — and survives the off-domain site-script clear. This is the global
 -- entry that gets the browser onto a target site's home page before a site-specific flow can run
--- (a <site>/scripts/* command like AX_search_service only loads once that site's domain is active).
+-- (a <site>/scripts/* command only loads once that site's domain is active).
 --
 -- Re-entrant by design (see thumbtack/CONTRACT.md §1): every navigation is a full reload that
 -- destroys the Lua context, so AX_open_site detects the current host, acts once, and returns —

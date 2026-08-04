@@ -205,10 +205,10 @@ Set `advance: false` to select/fill the current step without moving forward.
 ### Live multi-service and multi-quote runners
 
 ```bash
-node thumbtack/scripts/test_thumbtack_lua.mjs --multi-service --submit-quote --max-quote-steps=20 --keep-open
-node thumbtack/scripts/test_thumbtack_lua.mjs --multi-quote --quote-count=3 --submit-quote --max-quote-steps=20 --keep-open
+# (removed with the durable layer — drive the flow with `node tools/ax.mjs send "<message>"`)
+# (removed with the durable layer — drive the flow with `node tools/ax.mjs send "<message>"`)
 # Actual submit for one scenario/item (default port 9224):
-node thumbtack/scripts/test_thumbtack_lua.mjs --scenario="handyman|San Francisco, CA" --actual-submit --max-quote-steps=20 --keep-open
+# (removed with the durable layer — drive the flow with `node tools/ax.mjs send "<message>"`)
 ```
 
 Default multi-service scenarios: `house cleaning`, `lawn mowing`, `handyman` in San Francisco.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { parseDocument } from 'yaml';
@@ -936,4 +936,21 @@ test('every advertised tool names a real parameter schema', () => {
     assert.equal(tool.parameters?.type, 'object', `${tool.name} must take an object`);
     assert.ok(tool.description.length > 0, `${tool.name} must say what it does`);
   }
+});
+
+test('thumbtack is fully ported: no durable Lua left behind it', () => {
+  // The quote wizard, the search, the results filter and the page detector all became runtime tools. The
+  // durable scripts they replaced stayed on disk — 4,053 lines across eight Lua files and their harnesses
+  // — advertised by SCHEMA.md, reachable by nothing. Dead code that still looks live is worse than
+  // absent: the next reader has to prove it is unused before touching anything near it, and we just spent
+  // a session doing exactly that.
+  //
+  // Verified before removal: no `_common/rpc/*` module touches the durable `AX_THUMBTACK` global (the
+  // runtime module defines its own `AX_RPC_THUMBTACK`), and `_common/scripts/00_navigate.lua` mentions
+  // `AX_search_service` only in a comment.
+  const directory = new URL('thumbtack/scripts/', root);
+  if (!existsSync(directory)) return;
+
+  const left = readdirSync(directory).filter((name) => name.endsWith('.lua'));
+  assert.deepEqual(left, [], `thumbtack still ships durable Lua: ${left.join(', ')}`);
 });

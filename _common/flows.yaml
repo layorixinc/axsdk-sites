@@ -2915,6 +2915,10 @@ flowTools:
 
   list_memory:
     description: List all saved memory keys.
+    # STAYS REMOTE until the client implements the ops. The runtime module is written and tested
+    # (`_common/rpc/70_rpc_memory.lua`), but `memory.*` is absent from the extension's op table
+    # (`rpc-ops.ts`) and a live probe answered `memory_op_unavailable` — wiring it would take a working
+    # feature away from the user. Wired read-first on purpose, which is how that was learned cheaply.
     execute: { kind: remote, tool: AX_get_memory }
     input: {}
     output:
@@ -3255,6 +3259,12 @@ flowTools:
 
   sitemap_search:
     description: Search the current site's sitemap for pages matching a case-insensitive regex; returns matching lines (each with a path).
+    # STAYS REMOTE, and the reason is the data, not the mechanism. `implementation: sitemap.search`
+    # searches the APP PACKAGE's sitemap — measured live on production, that is the extension's own pages
+    # (`/`, `/settings`, `/help`). `AX_sitemap_search` searches `sitesStore.currentSitemap`, the sitemap of
+    # the SITE the browser is on, which is what a "find me the product page" request needs. Same name,
+    # different data: adopting it returned `sitemap_hits: []` for every bluemoonsoft request and the flow
+    # fell back to /front/main every time, silently. See RPC_LUA_RUNTIME_REQUESTS_14.md.
     execute: { kind: remote, tool: AX_sitemap_search }
     input:
       regex: tool.args.regex
@@ -3769,42 +3779,29 @@ flowTools:
 
   render_service_results:
     description: Render the prepared service-results data with the built-in table widget.
-    execute: { kind: remote, tool: AX_render_widget }
-    input:
-      template_id: table
-      data: tool.args.service_results_table
+    execute:
+      kind: runtime
+      implementation: lua
+      # No round trip: the envelope is built from a table our own Lua already produced. The consumer
+      # re-validates it (`parseWidgetEnvelope` runs the template's zod schema and re-applies its defaults),
+      # so rendering here cannot weaken the shape — what it needs is correct escaping, which is why this
+      # uses the runtime's `json.encode` instead of building JSON by hand.
+      modules: ["_common.69_rpc_widget"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_WIDGET.render({ template_id = "table", data = (args or {}).service_results_table })
+        end
     output:
-      next: present
+      next: result.next
       service_results_widget: result.value
+      error: result.error
     parameters:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [service_results_table]
       properties:
-        service_results_table:
-          type: object
-          additionalProperties: false
-          required: [caption, columns, rows]
-          properties:
-            caption: { type: string, minLength: 1 }
-            columns:
-              type: array
-              minItems: 1
-              items:
-                type: object
-                additionalProperties: false
-                required: [key, label]
-                properties:
-                  key: { type: string, minLength: 1 }
-                  label: { type: string }
-                  align: { type: string, enum: [start, center, end] }
-            rows:
-              type: array
-              minItems: 1
-              items:
-                type: object
-                additionalProperties: true
-
+        service_results_table: { type: object, additionalProperties: true }
   present_service_results:
     description: Present the rendered results widget and ask once for the user's refinement criterion.
     execute:
@@ -3904,43 +3901,30 @@ flowTools:
             additionalProperties: true
 
   render_refined_results:
-    description: Render the prepared refined shortlist with the built-in table widget.
-    execute: { kind: remote, tool: AX_render_widget }
-    input:
-      template_id: table
-      data: tool.args.refined_results_table
+    description: Render the refined shortlist with the built-in table widget.
+    execute:
+      kind: runtime
+      implementation: lua
+      # No round trip: the envelope is built from a table our own Lua already produced. The consumer
+      # re-validates it (`parseWidgetEnvelope` runs the template's zod schema and re-applies its defaults),
+      # so rendering here cannot weaken the shape — what it needs is correct escaping, which is why this
+      # uses the runtime's `json.encode` instead of building JSON by hand.
+      modules: ["_common.69_rpc_widget"]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_WIDGET.render({ template_id = "table", data = (args or {}).refined_results_table })
+        end
     output:
-      next: present
+      next: result.next
       refined_results_widget: result.value
+      error: result.error
     parameters:
       type: object
-      additionalProperties: false
+      additionalProperties: true
       required: [refined_results_table]
       properties:
-        refined_results_table:
-          type: object
-          additionalProperties: false
-          required: [caption, columns, rows]
-          properties:
-            caption: { type: string, minLength: 1 }
-            columns:
-              type: array
-              minItems: 1
-              items:
-                type: object
-                additionalProperties: false
-                required: [key, label]
-                properties:
-                  key: { type: string, minLength: 1 }
-                  label: { type: string }
-                  align: { type: string, enum: [start, center, end] }
-            rows:
-              type: array
-              minItems: 1
-              items:
-                type: object
-                additionalProperties: true
-
+        refined_results_table: { type: object, additionalProperties: true }
   present_refined_results:
     description: Present the rendered refined-shortlist widget and ask once for explicit quote approval.
     execute:

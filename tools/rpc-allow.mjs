@@ -26,6 +26,11 @@ export const OPS = [
   'dom.set_form_field_value',
   'dom.submit_form',
   'page.eval',
+  // Saved memory stays on the device, so it is reached as ops rather than a runtime store.
+  'memory.get',
+  'memory.set_bulk',
+  'memory.search',
+  'memory.delete',
 ];
 
 /** Reads only: a batch that could hide a side effect could not promise order or atomicity. */
@@ -43,7 +48,7 @@ export const COMPOSED = {
   'nav.wait_for_navigation': 'dom.get_location_href',
 };
 
-const CALL = /\b(dom|nav|page)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+const CALL = /\b(dom|nav|page|memory)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
 
 /** Every op a script needs granted: what it calls, with composed helpers resolved to the op they poll. */
 function requiredOps(lua) {

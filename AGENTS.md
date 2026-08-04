@@ -834,3 +834,25 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   (`status: "checkout"`, address and recipient read) while the summary selectors match nothing and the
   place-order button is not present either. That is a reader gap on the newer pipeline, not a failure — and
   it is reported as unknown rather than guessed. Re-survey before claiming the totals are readable.
+- **Same op name, different data — check WHAT it reads before adopting it.**
+  `implementation: sitemap.search` searches the APP PACKAGE's sitemap; `AX_sitemap_search` searches
+  `sitesStore.currentSitemap`, the sitemap of the site the browser is on. Measured on production, the
+  package's sitemap is the extension's own three pages, so adopting the runtime one answered
+  `sitemap_hits: []` for every request while the flow fell back to the home page and looked like it had
+  worked. A silent wrong answer is the worst shape, so `sitemap_search` stays remote until the runtime can
+  reach the SITE's sitemap.
+- **A PLATFORM implementation answers in its own `next` vocabulary; our lua scripts answer in the node's.**
+  Passing `result.next` straight through from `sitemap.search` died live on "final tool result next must be
+  one of: go, error". The two rules are opposite: derive the branch for a platform implementation, pass it
+  through for our own script (deriving there overrules the pass that ran).
+- **Rendering the `ax-widget` envelope in Lua is safe, and our reason for not doing it was wrong.**
+  `parseWidgetEnvelope` re-runs the template's zod schema on receipt, re-applies `withDefaults`, and treats
+  `version` as optional — the shape is gated whoever produces it. What was genuinely missing was escaping,
+  which the runtime's `json.encode` provides. `tools/lua/rpc-widget.test.mjs` imports the SDK's validator
+  from its build rather than reimplementing the rule, so CI checks the envelope the way the client will.
+  One thing the runtime cannot express: a Lua table with no positional entries encodes as `{}`, so an EMPTY
+  list is refused rather than sent as an object the template silently drops.
+- **Wire a new op read-first, and revert if the client cannot answer.** `memory.*` is published by the
+  platform but absent from the extension's op table; a live probe answered `memory_op_unavailable`. The
+  runtime module and its tests are ready, and the flow stays on the durable command — adopting it would
+  have taken a working feature away from the user to reach a lower `kind: remote` count.

@@ -825,3 +825,17 @@ test('the cart module stays free of any way to order', () => {
     'the cart script must not know how to order',
   );
 });
+
+test('the sitemap search stays remote, because it needs the SITE\'s sitemap', () => {
+  // `implementation: sitemap.search` searches the APP PACKAGE's sitemap. Measured live on production that
+  // is the extension's own pages (`/`, `/settings`, `/help`), while `AX_sitemap_search` searches
+  // `sitesStore.currentSitemap` — the sitemap of the site the browser is on, which is what "find me the
+  // product page" needs. Adopting it returned an empty hit list for every request and the flow fell back to
+  // the home page, silently, which is the worst shape a wrong answer can take.
+  const common = parseFlow('_common/flows.yaml');
+  const tool = common.flowTools?.sitemap_search ?? {};
+
+  assert.equal(tool.execute?.kind, 'remote');
+  assert.equal(tool.execute?.tool, 'AX_sitemap_search');
+  assert.equal(tool.output?.sitemap_hits, 'result.chunks');
+});

@@ -2383,7 +2383,15 @@ flowTools:
       collected: tool.args.collected
       page: tool.args.page
       site: tool.args.item.site
+      # From STATE for the same reason as the accumulator below. The tool answers the NEXT wording to try
+      # and the flow writes it to `query`; reading it back from the model's arguments instead meant the
+      # model kept relaying the ORIGINAL wording, so every pass re-asked the first question and the
+      # suggested retry was never actually tried.
       query: tool.args.query
+      # From STATE, not from the model's arguments. Traced live: the retry asked a new wording each time
+      # but `tried_queries` never grew past the first, because the accumulator only arrived when the model
+      # remembered to relay it — and an accumulator the caller may forget is an accumulator that resets.
+      # One store then burned the whole subflow node budget and discovery produced no options at all.
       tried_queries: tool.args.tried_queries
       context: tool.args.context
       purpose: { if: [{ var: tool.args.context.discovery_query }, "discovery", "comparison"] }

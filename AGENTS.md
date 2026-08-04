@@ -710,6 +710,15 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **An accumulator must record what was actually DONE, from wherever that survived.** Multi-store
+  discovery burned its entire subflow node budget re-asking one store the same question:
+  `{"next":"retry_query","query":"로지텍 무선 마우스","tried_queries":""}`, forever, ending in
+  `subflow node budget exhausted` and zero product options. `AX_collect_store_page` grew its tried-list
+  only from `args.query`, which the caller does not always echo, while `result.query` was nil because the
+  normalizer WRAPS the store answer — the store`s own reply sits at `store_result.store_result`. Consult
+  all of them plus `context.query`. **Still open**: the accumulator now records the wording and the retry
+  asks a different one, but state does not carry it back between loop iterations, so the loop still
+  repeats. That last step is flow-engine state propagation, not Lua.
 - **A CSS list matches in DOCUMENT order, so listing a fallback second does not make it second.** Amazon
   search cards carry TWO `h2` elements — brand first, product title second — and `"h2, h2 a"` took the
   brand. Every branded row came back named `Logitech`, and since relevance REQUIRES the model code, a

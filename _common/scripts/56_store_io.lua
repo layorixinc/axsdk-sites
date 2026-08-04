@@ -128,7 +128,16 @@ function AX_collect_store_page(args)
   -- the other wordings the model wrote for this request. A store that DID answer never pays for the extra
   -- navigation, and a blocked store is not retried at all — the wall will not move for a synonym.
   local attempted = non_empty(args.tried_queries) or ""
-  local active_query = non_empty(args.query) or non_empty(result.query)
+  -- What was ACTUALLY searched, from wherever it survived. The caller does not always echo `query`, and
+  -- `result.query` is nil whenever the normalizer wraps the store's answer — its own reply then sits at
+  -- `store_result.store_result`. Traced live: with none of these consulted, `tried_queries` stayed empty,
+  -- the next pass picked the first wording again, and discovery burned its whole node budget re-asking
+  -- one store the same question until the subflow was killed and no product options existed.
+  local nested = type(result.store_result) == "table" and result.store_result or nil
+  local active_query = non_empty(args.query)
+    or non_empty(result.query)
+    or (nested and non_empty(nested.query))
+    or non_empty((args.context or {}).query)
   if active_query and not attempted:find(active_query, 1, true) then
     attempted = attempted == "" and active_query or (attempted .. "|" .. active_query)
   end

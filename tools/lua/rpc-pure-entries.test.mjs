@@ -145,3 +145,29 @@ test('a non-empty accumulator is still a list the schema accepts', () => {
   assert.ok(value.collected, 'a page with rows must be carried');
   assert.ok(Object.values(value.collected).length >= 1);
 });
+
+test('a retry records the wording it just tried, even when nobody echoed it', () => {
+  // The multi-store discovery failure, traced node by node. Every `shopping_collect_store_page` answered
+  //   {"next":"retry_query","query":"로지텍 무선 마우스","tried_queries":""}
+  // — the same wording, forever, until `subflow node budget exhausted` ended discovery with no product
+  // options at all. The accumulator only grew from `args.query`, which the caller does not always echo,
+  // and `result.query` was nil because the normalizer hands the collector a WRAPPED result: the store's
+  // own answer sits at `store_result.store_result`. With nothing recorded, the next pass picked the first
+  // wording again and the loop could not make progress.
+  const value = lua.call('AX_RPC_PURE.collect_store_page', {
+    item: { site: '11st' },
+    context: { query: '로지텍 무선 마우스', query_variants: 'Logitech wireless mouse|로지텍 마우스' },
+    // Wrapped exactly the way the normalizer emits it, and with no `query` argument from the caller.
+    store_result: { next: 'done', store_result: { site: '11st', status: 'no_results', candidates: [], query: '로지텍 무선 마우스' } },
+    collected: null,
+    page: 1,
+  });
+
+  assert.match(
+    String(value.tried_queries ?? ''), /로지텍 무선 마우스/,
+    'the wording just searched must be recorded, or the retry repeats it forever',
+  );
+  if (value.next === 'retry_query') {
+    assert.notEqual(value.query, '로지텍 무선 마우스', 'a retry must ask something new');
+  }
+});

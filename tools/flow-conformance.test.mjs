@@ -7,6 +7,7 @@ import { parseDocument } from 'yaml';
 import { buildRpcFlows } from './build-rpc-flows.mjs';
 import { auditRpcAllow } from './rpc-allow.mjs';
 import { buildSchema } from './build-schema.mjs';
+import { deadLua } from './dead-lua.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -953,4 +954,17 @@ test('thumbtack is fully ported: no durable Lua left behind it', () => {
 
   const left = readdirSync(directory).filter((name) => name.endsWith('.lua'));
   assert.deepEqual(left, [], `thumbtack still ships durable Lua: ${left.join(', ')}`);
+});
+
+test('no Lua ships that nothing can reach', () => {
+  // There are four ways into a Lua file and a check that knows fewer than all of them proposes deletions
+  // that break things. Counting `AX_*` definitions alone called `10_form_wizard.lua` dead while the quote
+  // tool loads it every step; adding runtime modules still called every storefront config dead, because
+  // registration is a load-time SIDE EFFECT nothing references; and the dev CLI is an entry point too —
+  // `ax page` is `AX_read_page`. `deadLua` knows all four, which is what makes its answer actionable.
+  const { dead } = deadLua();
+  assert.deepEqual(
+    dead.map((file) => file.id), [],
+    `unreachable Lua:\n  ${dead.map((file) => `${file.id} (${file.lines}L)`).join('\n  ')}`,
+  );
 });

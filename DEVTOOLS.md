@@ -101,11 +101,8 @@ async function axcall(cmd, args = {}) {
 | Command | Side effect | Example |
 |---|---|---|
 | `AX_search_product` | none | `axrun("AX_search_product", { query: "coffee" })` |
-| `AX_view_product` | nav | `axrun("AX_view_product", { product_id: "B0G4SWN34T" })` |
 | `AX_update_product` | selection | `axrun("AX_update_product", { product_id: "B0…", variations: { Size: "Large" } })` |
 | `AX_add_to_cart` | **adds to cart** | `axrun("AX_add_to_cart", { product_id: "B0G4SWN34T", quantity: 1 })` |
-| `AX_view_cart` | nav | `axrun("AX_view_cart", {})` |
-| `AX_update_cart` | **qty / delete** | `axrun("AX_update_cart", { product_id: "B0…", quantity: 0 })` (`0` = delete) |
 | `AX_checkout` | nav (no order) | `axrun("AX_checkout", {})` |
 
 - Next page: pass the previous result's `cursor` back into `AX_search_product`.

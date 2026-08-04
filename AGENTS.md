@@ -111,7 +111,6 @@ Design rules:
 | file | exposes | notes |
 |---|---|---|
 | `00_base.lua` | `AX_BASE` (no command) | text/css/url utils, value parsers, `read_field`/`read_fields` (selector-first), `require_ready`/`click_verified`, `resolve_zip`, `read_page` |
-| `00_navigate.lua` | `AX_open_site`, `AX_SITE` | re-entrant opener: `{site}`/`{url}` → navigates to a site home, returns `navigating`/`ready` |
 | `10_form_wizard.lua` | `AX_WIZARD` (no command) | pure, DOM-free decision core: option scoring, auto-pick, `classify_advance` (STOPs on submit-like buttons), `drive_step` |
 | `20_echo.lua` | `AX_echo` | diagnostic/echo |
 | `30_resolve_zip.lua` | `AX_resolve_zip` | US ZIP from address/city (ladder in §7) |
@@ -139,9 +138,11 @@ driven by flow tools declared in `_common/flows.yaml`. The eight durable Lua fil
 durable command cannot quietly reappear beside its runtime replacement.
 
 ### `amazon/scripts/` (on amazon.com)
-`00_common.lua` + `AX_search_product`, `AX_view_product`, `AX_update_product`, `AX_add_to_cart`,
-`AX_view_cart`, `AX_update_cart` (qty `0` = delete), `AX_checkout` (stops at checkout, **never places
-an order**; warranty/protection upsell auto-declined).
+`00_common.lua` + `01_storefront_config.lua` (registers with `AX_STOREFRONT`) + `search.lua`
+(`AX_search_product`), `add_to_cart.lua`, `update_product.lua`, `checkout.lua` (`AX_checkout` — stops at
+checkout, **never places an order**; warranty/protection upsell auto-declined, still driven by
+`tools/scenarios/checkout.mjs`). The cart READS went with the port: viewing a cart or a product is
+`_common/rpc/67_rpc_cart.lua` and `68_rpc_checkout.lua` now.
 
 ### `ebay/scripts/` (on ebay.com)
 `00_common.lua` + `AX_search_product`, `AX_add_to_cart`; reads stable search-card fields, item/shipping
@@ -166,8 +167,10 @@ the survivors. Removed rows are counted in the window.
 Cart mutation requires a separate offer-approval turn plus matching identity/comparison approval markers,
 and the storefront re-reads both model identity and price before clicking.
 
-### `bluemoonsoft/scripts/` (on bluemoonsoft.com)
-`form.lua` — company/product/security info + quote-inquiry form read/fill/submit.
+### `bluemoonsoft/scripts/` — **gone.** The flow navigates, it does not fill
+Its `form.lua` overrode the extension's default `AX_get_form`/`AX_set_form`/`AX_submit_form` with
+site-specific selectors, and the bluemoonsoft flow is navigation-only ("Never fills or submits forms").
+Nothing reached it. The defaults apply there now, as on every other site.
 
 ---
 
@@ -707,6 +710,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **There are FOUR ways into a Lua file, and a check that knows fewer proposes deletions that break
+  things** (`npm run dead:lua`). A `kind: remote` flowTool names a durable command; a runtime tool names
+  a module in `modules:`; the dev CLI and scenario runners call commands no flow mentions (`ax page` is
+  `AX_read_page`, `tools/scenarios/checkout.mjs` is `AX_checkout`); and registration is a load-time SIDE
+  EFFECT — a storefront config exists to run `S.register(CONFIG)` and nothing references it. Counting
+  `AX_*` definitions alone called `10_form_wizard.lua` dead while the quote tool loads it every step, and
+  every storefront config dead. Knowing all four took the answer from a wrong 30 files to a real 5.
 - ``SCHEMA.md`` is GENERATED from the flows (`npm run build:schema`), never edited.** A hand-kept mirror
   of a machine-readable source drifts, and this one had: 40 entries against 85 real tools, still
   advertising the whole durable command set the RPC port replaced — `AX_open_quote`, `AX_search_service`,

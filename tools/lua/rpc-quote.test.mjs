@@ -711,3 +711,45 @@ test('the snapshot reports text, not markup', () => {
     assert.ok(!result.quote_message.includes('<img'), `markup must be stripped: ${result.quote_message}`);
   }
 });
+
+test('running out of budget AT the submit step is arrival, not failure', () => {
+  // Measured live: the wizard drove six steps and stopped with
+  //   `buttons[Submit disabled=false; Back disabled=false] step_form=true`
+  // — the LAST screen, which is exactly where this script is required to stop, since sending contacts a
+  // real person. It reported `quote_budget_spent`, and the user was told the pro had FAILED. The budget
+  // check sits at the top of the loop and answers before the arrival check below it can run, so the one
+  // fact the snapshot already carried was thrown away. Arriving and then running out is arrival.
+  const page = quotePage({ steps: [finalStep()] });
+  // Spend the budget before the first step, the way a long form does before its last one.
+  lua.define('AX_RPC_QUOTE.OP_BUDGET = 0');
+  let result;
+  try {
+    result = drive(page);
+  } finally {
+    lua.define('AX_RPC_QUOTE.OP_BUDGET = 95');
+  }
+
+  assert.equal(result.quote_status, 'at_submit_step');
+  assert.equal(result.next, 'submit');
+  assert.notEqual(result.quote_error, 'quote_budget_spent');
+});
+
+test('an open dialog with no active step is not reported as closed', () => {
+  // Measured live on a handyman pro: the run stopped with
+  //   `dialog=true step_form=true surface="... Select a service Handyman Cabinetry Furniture Assembly ..."`
+  // and called it `quote_dialog_closed`. The dialog was open — its own snapshot says so — showing a
+  // service picker that is not a request-flow step. A status that contradicts the evidence printed beside
+  // it sends the operator looking for a dismissal that never happened.
+  const picker = {
+    dom: {
+      '[aria-label="Request Flow Dialog"]': [{ text: 'Select a service Handyman Cabinetry' }],
+      '[data-test="request-flow-step-form"]': [{ text: 'Select a service' }],
+    },
+  };
+  // The live run drove steps and THEN lost the marker, so the fixture must arrive the same way: a real
+  // step first, and the picker only after it advances.
+  const result = drive(quotePage({ steps: [step('How much help?', { choices: ['A full day'] }), picker] }));
+
+  assert.notEqual(result.quote_status, 'dialog_closed');
+  assert.match(result.quote_message ?? '', /dialog=true/);
+});

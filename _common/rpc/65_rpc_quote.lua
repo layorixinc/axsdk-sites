@@ -763,8 +763,20 @@ function Q.request_quote(args)
   local steps, stalled, flow = 0, 0, nil
   while steps < Q.MAX_STEPS do
     if over_budget() then
-      -- Out of round trips before out of steps. Say so, with what was driven and what the form looks like
-      -- now, instead of letting the platform kill the call.
+      -- Out of round trips. Before calling that a failure, ask the page WHERE it stopped: the wizard's
+      -- goal is the submit step, and arriving there and then running out is arrival. Measured live — six
+      -- steps driven, `buttons[Submit disabled=false; Back disabled=false]` on screen — and this returned
+      -- `quote_budget_spent`, so the user was told the pro had FAILED while the form sat finished.
+      -- One read, and only on the way out, so the check cannot itself cost the budget it reports on.
+      -- No label argument: the wizard's own defaults are what drove every step above, and a second
+      -- vocabulary here would let the exit disagree with the loop about what "Submit" means.
+      local advance = W.classify_advance(Q.read_buttons())
+      if advance and advance.reached_submit_step then
+        return { next = "submit", quote_status = "at_submit_step", quote_reached_submit = true,
+                 quote_advance_reason = "budget_spent_at_submit", quote_steps = steps }
+      end
+      -- Genuinely short: say so, with what was driven and what the form looks like now, instead of
+      -- letting the platform kill the call.
       return { next = "error", quote_error = "quote_budget_spent", quote_status = "budget_spent",
                quote_steps = steps, quote_advance_reason = flow and flow.advance_reason or nil,
                quote_message = Q.stall_snapshot() }
@@ -774,15 +786,25 @@ function Q.request_quote(args)
     if not flow then
       -- The wizard answers nil when there is no ACTIVE step. That is not the same as the dialog going
       -- away: measured live, the run stopped with `dialog=true step_form=true` and only the step marker
-      -- missing, between renders. So wait for the next step while the dialog still stands, and only call
-      -- it closed once the dialog itself is gone.
-      if exists(Q.DIALOG) or exists(Q.STEP_FORM) then
+      -- missing, between renders. So wait for the next step while the dialog still stands.
+      local standing = exists(Q.DIALOG) or exists(Q.STEP_FORM)
+      if standing then
         if wait_for(Q.ACTIVE, 8000) then
           flow = W.drive_step(Q.ctx(), drive, applied, #applied)
         end
+        -- It may have closed while we waited; the wait is seconds long and the site owns the dialog.
+        standing = exists(Q.DIALOG) or exists(Q.STEP_FORM)
       end
       if not flow then
-        return { next = "error", quote_error = "quote_dialog_closed", quote_status = "dialog_closed",
+        -- Only a dialog that is actually GONE is reported as closed. Measured live on a handyman pro:
+        -- this answered `dialog_closed` while printing `dialog=true step_form=true` and a "Select a
+        -- service" picker beside it — a status contradicting its own evidence, which sends the operator
+        -- hunting for a dismissal that never happened. What that pro shows is a surface the wizard has no
+        -- step for; naming it that way is the difference between a bug report and a feature request.
+        local closed = not standing
+        return { next = "error",
+                 quote_error = closed and "quote_dialog_closed" or "quote_no_active_step",
+                 quote_status = closed and "dialog_closed" or "no_active_step",
                  quote_steps = steps, quote_message = Q.closed_snapshot() }
       end
     end

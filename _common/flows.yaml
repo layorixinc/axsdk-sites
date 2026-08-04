@@ -1160,6 +1160,7 @@ flows:
       offers: null
       failures: null
       comparison_id: null
+      comparison_state: null
       comparison_approval: null
       comparison_text: null
       store_status: null
@@ -2584,7 +2585,21 @@ flowTools:
 
   shopping_rank_store_offers:
     description: Rank only identity-verified candidates while preserving failures and cost coverage.
-    execute: { kind: remote, tool: AX_rank_store_offers, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
+      rpc:
+        # These three touch no page: ranking, windowing and refinement are arithmetic over a snapshot.
+        # The compiler refuses an empty allow-list, so this names the cheapest read there is and the
+        # script never calls it.
+        allow: [dom.get_location_href]
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.rank(args)
+        end
     input:
       verified_offers: tool.args.verified_offers
       failures: tool.args.failures
@@ -2597,7 +2612,11 @@ flowTools:
       failures: result.failures
       comparison_id: result.comparison_id
       comparison_approval: current_comparison
-      comparison_text: result.comparison_text
+      # The listing itself, as one string. `state: session` in the runtime is keyed by (session, TOOL),
+      # so this is the only channel from the turn that BUILT the comparison to the turn that pages it.
+      # No model node selects it, so it costs nothing in a prompt (`inputSelector` is an allowlist).
+      comparison_state: result.comparison_state
+      comparison_text: result.question
       store_status: result.store_status
       all_offers: result.all_offers
       incomplete_count: result.incomplete_count
@@ -2619,9 +2638,24 @@ flowTools:
 
   present_store_offers:
     description: Retrieve the exact current comparison and force a separate approval turn before selection.
-    execute: { kind: remote, tool: AX_present_store_offers, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
+      rpc:
+        # These three touch no page: ranking, windowing and refinement are arithmetic over a snapshot.
+        # The compiler refuses an empty allow-list, so this names the cheapest read there is and the
+        # script never calls it.
+        allow: [dom.get_location_href]
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.present(args)
+        end
     input:
       comparison_id: tool.args.comparison_id
+      comparison_state: global.comparison_state
     output:
       next: { if: [{ var: result.error }, "error", { var: tool.args.next }] }
       question: result.question
@@ -2641,9 +2675,26 @@ flowTools:
 
   shopping_refine_store_offers:
     description: Move the comparison window, or filter and sort the listing, from the user's own words.
-    execute: { kind: remote, tool: AX_refine_store_offers, timeoutMs: 30000 }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
+      rpc:
+        # These three touch no page: ranking, windowing and refinement are arithmetic over a snapshot.
+        # The compiler refuses an empty allow-list, so this names the cheapest read there is and the
+        # script never calls it.
+        allow: [dom.get_location_href]
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.refine(args)
+        end
     input:
       comparison_id: tool.args.comparison_id
+      # The snapshot supersedes the offer tables the model used to relay: an empty Lua table encodes as
+      # `{}` and a schema expecting an array rejects it, which a scalar cannot do.
+      comparison_state: global.comparison_state
       offers: tool.args.offers
       all_offers: tool.args.all_offers
       failures: tool.args.failures
@@ -2655,6 +2706,9 @@ flowTools:
       refine_request: tool.args.refine_request
     output:
       next: result.next
+      # A refinement that reissues the listing MUST write the new snapshot back; leaving the old one in
+      # state would page a listing the user is no longer looking at.
+      comparison_state: result.comparison_state
       question: result.question
       comparison_id: result.comparison_id
       offers: result.offers

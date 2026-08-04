@@ -710,6 +710,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **A comparison survives a turn in FLOW STATE, as one scalar.** The runtime`s `state: session` is keyed
+  by (session, TOOL), so `rank` has no channel to `present` — which is why those three were the last
+  `kind: remote` tools. `inputSelector` is an allowlist (FLOWS.md §4), so a deterministic node reads the
+  snapshot at zero prompt cost while no model node selects it. It travels as JSON text, not a table: an
+  empty Lua table encodes as `{}` and a schema expecting an array rejects it.
+- **`rank` BUILDS a listing; rendering is what PERSISTS one.** `AX_rank_store_offers` answers
+  `comparison_text` and leaves `C.current_comparison` unset, so a refine on the next turn answered
+  `stale_comparison` against a listing just built. And `AX_refine_store_offers` reads the offers from its
+  ARGUMENTS, not from the module cache — restoring the global is not enough, the snapshot must be handed in.
+- **The flow compiler refuses `rpc.allow: []`.** A tool that touches no page still needs a grant; ours name
+  `dom.get_location_href` and never call it.
 - **There are FOUR ways into a Lua file, and a check that knows fewer proposes deletions that break
   things** (`npm run dead:lua`). A `kind: remote` flowTool names a durable command; a runtime tool names
   a module in `modules:`; the dev CLI and scenario runners call commands no flow mentions (`ax page` is

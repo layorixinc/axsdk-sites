@@ -173,7 +173,11 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.ok(!nodes.choose_offer.inputSelector.includes('ambiguous_offers'));
   assert.ok(!nodes.choose_offer.inputSelector.includes('excluded_offers'));
   assert.equal(nodes.choose_offer.next.ask, 'choose_offer');
-  assert.equal(common.flowTools.present_store_offers.execute.tool, 'AX_present_store_offers');
+  // The last three durable tools are runtime now. What made them the last: the listing built in one turn
+  // has to be paged in the next, and `state: session` is keyed by (session, TOOL), so `rank` had no
+  // channel to `present`. Flow state is that channel, carrying one scalar no model node selects.
+  assert.equal(common.flowTools.present_store_offers.execute.kind, 'runtime');
+  assert.equal(common.flowTools.present_store_offers.input.comparison_state, 'global.comparison_state');
   assert.equal(common.flowTools.present_store_offers.output.question, 'result.question');
   assert.equal(common.flowTools.shopping_present_store_offers, undefined);
   assert.equal(Object.hasOwn(common.flowTools.choose_store_offer.parameters.properties, 'choice_stage'), false);
@@ -197,7 +201,15 @@ test('multi-store shopping discovers and locks product identity before ranking',
     'the deterministic browsing node reads the listing from state; only the model prompt must stay free of it');
   assert.equal(common.flowTools.shopping_refine_store_offers.input.offers, 'tool.args.offers');
   assert.equal(common.flowTools.shopping_refine_store_offers.output.all_offers, 'result.all_offers');
-  assert.equal(common.flowTools.shopping_refine_store_offers.execute.tool, 'AX_refine_store_offers');
+  assert.equal(common.flowTools.shopping_refine_store_offers.execute.kind, 'runtime');
+  assert.equal(
+    common.flowTools.shopping_refine_store_offers.input.comparison_state, 'global.comparison_state',
+    'a refinement reads the listing from the snapshot, not from tables the model relays',
+  );
+  assert.equal(
+    common.flowTools.shopping_refine_store_offers.output.comparison_state, 'result.comparison_state',
+    'a reissued listing must be written back, or the next turn pages the one before it',
+  );
   assert.equal(common.flowTools.shopping_refine_store_offers.output.question, 'result.question');
   assert.equal(common.flowTools.shopping_refine_store_offers.output.comparison_id, 'result.comparison_id');
   // A browsing turn must reopen the presentation gate, otherwise the next approval turn would accept a

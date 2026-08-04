@@ -713,6 +713,15 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- ``SCHEMA.md`` is GENERATED from the flows (`npm run build:schema`), never edited.** A hand-kept mirror
+  of a machine-readable source drifts, and this one had: 40 entries against 85 real tools, still
+  advertising the whole durable command set the RPC port replaced — `AX_open_quote`, `AX_search_service`,
+  `AX_add_to_cart` and twenty more no flow can reach. The tools the model may call ARE the flow tools:
+  `allowedTools` resolves to a `flowTools` entry whose `parameters` is the schema it receives.
+- **A module that does work at import time edits the repo when something imports it.** The first cut of
+  `build-schema.mjs` wrote SCHEMA.md from top-level code, so importing `buildSchema` in a test REWROTE
+  the file and the staleness check then compared it against itself and passed. CLI behaviour belongs
+  behind an `import.meta.url === argv[1]` guard.
 - **Profile before optimising: `npm run measure:rpc` gives a per-op histogram of a live turn.** For the
   quote wizard it read `dom.exists x37 (21s)` out of 95 frames — a quarter of the deadline spent asking
   "is there a step?" one round trip at a time, right next to a batch that was already being issued and

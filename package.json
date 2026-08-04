@@ -24,7 +24,8 @@
     "package:push": "node tools/rpc-package.mjs push",
     "build:rpc:sites": "node tools/build-rpc-sites.mjs && node tools/build-rpc-sites.mjs playground/_common/rpc/17_rpc_sites.lua",
     "measure:rpc": "node tools/measure-rpc.mjs",
-    "probe:client-modules": "node tools/probe-client-modules.mjs"
+    "probe:client-modules": "node tools/probe-client-modules.mjs",
+    "build:schema": "node tools/build-schema.mjs"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

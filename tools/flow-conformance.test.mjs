@@ -6,6 +6,7 @@ import { parseDocument } from 'yaml';
 
 import { buildRpcFlows } from './build-rpc-flows.mjs';
 import { auditRpcAllow } from './rpc-allow.mjs';
+import { buildSchema } from './build-schema.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -907,5 +908,32 @@ test('the quote budget stays under the deadline the flow declares', () => {
       budget <= deadline - 15000,
       `budget ${budget}ms leaves no room under a ${deadline}ms deadline`,
     );
+  }
+});
+
+test('SCHEMA.md is generated from the flows, not maintained beside them', () => {
+  // SCHEMA.md is the list of tools the model may call, and a hand-kept mirror of a machine-readable
+  // source drifts. This one had: 40 entries against 85 real tools, still advertising the entire durable
+  // command set the RPC port replaced — `AX_open_quote`, `AX_search_service`, `AX_add_to_cart` and twenty
+  // more that no flow can reach. Each was a promise to the model about a tool that is not there.
+  //
+  // The tools ARE the flow tools: `allowedTools` resolves to a `flowTools` entry and that entry's
+  // `parameters` is the schema the model receives. So it is derivable, and deriving it is what keeps it
+  // true. Same lesson as `run: open_site` — a document nothing checks is a document nothing maintains.
+  const generated = `${JSON.stringify(buildSchema(), null, 2)}\n`;
+  const current = readFileSync(new URL('SCHEMA.md', root), 'utf8');
+
+  assert.equal(current, generated, 'SCHEMA.md is stale — run `npm run build:schema`');
+});
+
+test('every advertised tool names a real parameter schema', () => {
+  // A generated document can still be empty or shapeless. What the model needs from each entry is a name
+  // it can call and an object schema it can fill.
+  const schema = buildSchema();
+  assert.ok(schema.length > 50, `expected the full tool set, got ${schema.length}`);
+  for (const tool of schema) {
+    assert.match(tool.name, /^[a-z][a-z0-9_]*$/, `tool names are flow-tool ids: ${tool.name}`);
+    assert.equal(tool.parameters?.type, 'object', `${tool.name} must take an object`);
+    assert.ok(tool.description.length > 0, `${tool.name} must say what it does`);
   }
 });

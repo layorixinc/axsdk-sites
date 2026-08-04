@@ -1,685 +1,1336 @@
 [
   {
-    "name": "AX_search_product",
-    "description": "Search products by query on the active representative commerce site. `page` reads a later result page on sites that support one; Amazon also accepts a cursor from a previous result.",
+    "name": "assist_decide",
+    "description": "On arrival at BlueMoonSoft, choose whether to navigate to a requested page or ask the user what they need.",
     "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "query": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "cursor": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "page": {
-          "type": "integer",
-          "minimum": 1
-        }
-      },
+      "type": "object",
+      "additionalProperties": true,
       "required": [
-        "query"
+        "next"
       ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_view_product",
-    "description": "View Amazon product details, variations, selected options, and purchasable form controls by product id.",
-    "parameters": {
-      "additionalProperties": false,
       "properties": {
-        "product_id": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "product_id"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_update_product",
-    "description": "Update Amazon product variation selections and form values before purchase.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "product_id": {
-          "type": "string"
-        },
-        "variations": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "form_values": {
-          "additionalProperties": true,
-          "type": "object"
-        }
-      },
-      "required": [],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_add_to_cart",
-    "description": "Add a product on the active representative commerce site to the cart when that site exposes a safe cart action, optionally applying quantity and a stale-price precondition. Never checks out or places an order.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "product_id": {
-          "type": "string"
-        },
-        "quantity": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "expected_unit_price": {
-          "minimum": 0,
-          "type": "number"
-        },
-        "expected_currency": {
-          "minLength": 3,
-          "type": "string"
-        },
-        "variations": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "form_values": {
-          "additionalProperties": true,
-          "type": "object"
-        }
-      },
-      "required": [
-        "product_id"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_view_cart",
-    "description": "Navigate to the Amazon cart and return the current cart items.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {},
-      "required": [],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_update_cart",
-    "description": "Update the quantity of an Amazon cart item by product id. Set quantity to 0 to delete the item.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "product_id": {
-          "type": "string"
-        },
-        "quantity": {
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "product_id",
-        "quantity"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_checkout",
-    "description": "Navigate to the Amazon cart and proceed to checkout. When the checkout page is reached, returns its data (delivering_to, shipping_address, payment_method, order_summary, place_order_available). Returns status login_required when sign-in is needed; does not place an order.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {},
-      "required": [],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_resolve_zip",
-    "description": "Resolve a US ZIP code from an address string. Site-agnostic: callable on any page (e.g. before navigating to a provider site).",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "address": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "address"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_read_page",
-    "description": "Read the current web page as Markdown so an LLM can understand the on-screen content. Site-agnostic and read-only (never navigates, clicks, or submits). scope is a CSS selector (default body); mode is auto, article (strips nav/ads for content pages), or structure (keeps forms/lists/buttons for interactive surfaces).",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "scope": {
-          "type": "string"
-        },
-        "mode": {
-          "enum": [
-            "auto",
-            "article",
-            "structure"
-          ],
-          "type": "string"
-        },
-        "max_chars": {
-          "type": "number"
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_open_site",
-    "description": "Open a supported site's home page from anywhere, by slug or explicit URL. Re-entrant: returns ready when the current page is already on that site, otherwise fires the navigation and returns navigating so the caller re-invokes on the destination. Never searches, fills, or submits.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "site": {
-          "enum": [
-            "11st",
-            "aliexpress",
-            "amazon",
-            "bluemoonsoft",
-            "coupang",
-            "ebay",
-            "etsy",
-            "gmarket",
-            "naver-shopping",
-            "ssg",
-            "thumbtack",
-            "walmart"
-          ],
-          "type": "string"
-        },
-        "url": {
+        "next": {
           "type": "string",
-          "minLength": 1
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_search_service",
-    "description": "Search Thumbtack services and local pros by query and ZIP code or address.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "query": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "zip_code": {
-          "minLength": 5,
-          "type": "string"
-        },
-        "address": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "cursor": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "filters": {
-          "additionalProperties": true,
-          "type": "object"
-        }
-      },
-      "required": [
-        "query"
-      ],
-      "anyOf": [
-        {
-          "required": [
-            "zip_code"
+          "enum": [
+            "navigate",
+            "ask"
           ]
         },
-        {
-          "required": [
-            "address"
-          ]
-        }
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_view_service",
-    "description": "View a Thumbtack pro profile from a search result URL, including ratings, overview, services, photos, reviews, credentials, FAQs, and available actions.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "service_id": {
-          "minLength": 1,
+        "question": {
           "type": "string"
         },
-        "url": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "url"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_answer_quote",
-    "description": "Answer the active Thumbtack quote step, including contact fields. With auto=true it selects/fills ordinary project steps from user_requirements. It may click Next/Continue or optional-step Skip, refuses send/submit buttons, and returns retryable contact-popup errors.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "answers": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "form_values": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "value": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "selection": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "selections": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "text": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "auto": {
-          "type": "boolean"
-        },
-        "user_requirements": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "contact": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "email": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "first_name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "last_name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "phone": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "zip_code": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "advance": {
-          "type": "boolean"
-        }
-      },
-      "required": [],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_open_quote",
-    "description": "Open or inspect a Thumbtack quote flow from a pro profile URL. Optional step/contact values, including auto=true with user_requirements, may advance through Next/Continue or optional-step Skip; submit/send is never clicked; retryable contact-popup errors are returned.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "service_id": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "url": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "answers": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "form_values": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "value": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "selection": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "selections": {
-          "items": {
-            "minLength": 1,
-            "type": "string"
-          },
-          "type": "array"
-        },
-        "text": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "auto": {
-          "type": "boolean"
-        },
-        "user_requirements": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "contact": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "email": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "first_name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "last_name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "phone": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "zip_code": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "advance": {
-          "type": "boolean"
-        },
-        "submit": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "url"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_submit_quote",
-    "description": "Submit the active Thumbtack quote flow. Requires confirm=true; can fill remaining contact steps; returns quote details and retryable contact-popup errors such as disabled email accounts.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "confirm": {
-          "const": true,
-          "type": "boolean"
-        },
-        "contact": {
-          "additionalProperties": true,
-          "type": "object"
-        },
-        "email": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "first_name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "last_name": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "phone": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "zip_code": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "max_steps": {
-          "minimum": 1,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "confirm"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_update_search",
-    "description": "Change a search filter (service option) on the Thumbtack search-results screen by its visible choice text, then re-read the filters and matching pros.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "value": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "option": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "value"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_echo",
-    "description": "Debug echo. console.log and return the given arguments. Use to verify the tool pipeline or surface values for debugging.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
         "message": {
           "type": "string"
-        },
-        "data": {
-          "additionalProperties": true,
-          "type": "object"
         }
-      },
-      "required": [
-        "message"
-      ],
-      "type": "object"
+      }
     }
   },
   {
-    "name": "AX_playground_durable_checkpoint",
-    "description": "Playground-only diagnostic for a host-registered Lua durable operation. It opens and saves an operation-private checkpoint without browser navigation; returns durable_operation_required when no host grant exists.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "label": {
-          "type": "string"
-        }
-      },
-      "required": [],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_playground_durable_same_origin",
-    "description": "Playground-only durable-operation test. Saves a checkpoint, then performs an explicit same-origin navigation to target_url so a registered operation can prove replay after reload.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "target_url": {
-          "format": "uri",
-          "type": "string"
-        }
-      },
-      "required": [
-        "target_url"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_playground_durable_handoff",
-    "description": "Playground-only portable durable-operation test. After a host grants the command and allowlists target_url's origin, it checkpoints and requests one explicit cross-origin handoff.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "target_url": {
-          "format": "uri",
-          "type": "string"
-        }
-      },
-      "required": [
-        "target_url"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_get_memory",
-    "description": "Read one exact saved memory key. Omit key to list all saved keys.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "key": {
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_search_memory",
-    "description": "Search saved memory by a case-insensitive regex and return matching keys with bounded Markdown.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "regex": {
-          "maxLength": 200,
-          "minLength": 1,
-          "type": "string"
-        }
-      },
-      "required": [
-        "regex"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_set_memory_bulk",
-    "description": "Set final memory values in one call. Non-empty Markdown saves; an empty string deletes the exact key.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "memory": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "minProperties": 1,
-          "type": "object"
-        }
-      },
-      "required": [
-        "memory"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_delete_memory",
-    "description": "Delete one or more exact GLOBAL memory keys. The calling flow must pass only keys the user explicitly selected. Keys are case-sensitive; never trim, translate, normalize, or invent them. Use a one-item array for one deletion.",
+    "name": "browse_service_candidates",
+    "description": "Rank, filter, window, and select searched Thumbtack pros deterministically from the site data.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "keys"
+        "candidates"
       ],
       "properties": {
-        "keys": {
-          "type": "array",
-          "minItems": 1,
-          "maxItems": 200,
-          "uniqueItems": true,
-          "description": "Exact GLOBAL logical memory keys to delete.",
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidates": {
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
-            "type": "string",
-            "minLength": 1
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "refine_request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page_command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "next",
+            "prev",
+            "first",
+            "last",
+            null
+          ]
+        },
+        "page_number": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "choice_numbers": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view_page": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "cancel_quote_request",
+    "description": "Record that the user declined or cancelled the quote request. Nothing is searched, opened, or sent.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "checkout",
+    "description": "Navigate to the cart and open the checkout REVIEW page so the user can read the order total, address and payment method. Never places an order.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
+  {
+    "name": "checkout_decision",
+    "description": "Record the user's checkout approval decision after items are in the cart — proceed to the checkout page (no order placed), finish without checkout, or keep asking.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "checkout",
+            "done"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "checkout_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "checkout_entry",
+    "description": "Route a fresh checkout entry into the site handoff without a remote round trip.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
+  {
+    "name": "choose_delete_keys",
+    "description": "Ask for or resolve one or more exact memory keys to delete.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "question",
+        "delete_keys",
+        "confirmed"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "delete",
+            "cancelled",
+            "error"
+          ]
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "delete_keys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "choose_product_identity",
+    "description": "Ask for, cancel, or record one current grounded product option or an exact user-supplied model.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "select",
+            "model",
+            "cancel"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "product_choice_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_choice_index": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "product_choice_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "choice_options_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "standardized_model",
+            "spec_equivalent",
+            "unique_listing",
+            null
+          ]
+        },
+        "identity_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "canonical_query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "soft_preferences": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "choose_store_offer",
+    "description": "Ask for, cancel, page through, refine, or record a numbered offer from the current comparison snapshot.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "select",
+            "cancel",
+            "page",
+            "refine"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "choice_index": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "choice_comparison_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page_command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "next",
+            "prev",
+            "first",
+            "last",
+            null
+          ]
+        },
+        "page_number": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "refine_request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "collect_quote_contact",
+    "description": "Extract every supplied first name, last name, email, and phone from the complete latest user message, then ask for all still-missing contacts in the user's language. For Korean input ask in Korean, for example \"이름, 성, 이메일, 전화번호를 알려주세요.\"",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "submit_phone",
+        "submit_email",
+        "submit_first_name",
+        "submit_last_name"
+      ],
+      "properties": {
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_phone": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "submit_email": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "submit_first_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "submit_last_name": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "collect_quote_location",
+    "description": "Copy an explicit five-digit token from the complete latest user message as the ZIP; otherwise translate its US city/address to English. \"샌프란시스코에서\" must produce address \"San Francisco, CA\", not a question.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "address",
+        "zip_code"
+      ],
+      "properties": {
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "address": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "zip_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{5}$"
+        }
+      }
+    }
+  },
+  {
+    "name": "collect_quote_location_retry",
+    "description": "Ask for and collect a replacement location after ZIP resolution fails.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "address",
+        "zip_code",
+        "zip_status"
+      ],
+      "properties": {
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "address": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "zip_code": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{5}$"
+        },
+        "zip_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "collect_quote_service",
+    "description": "Scan the complete latest user message for a named service and any work scope or timing before asking. For example, \"핸디맨으로 작은 집 청소, 48시간 내 일회성\" is a complete handyman service stage.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "question",
+        "service_query",
+        "user_requirements"
+      ],
+      "properties": {
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_query": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "user_requirements": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "collect_shopping",
+    "description": "Fill the shopping list (shop_plan — an array of { query, quantity }) and choose the next step (ask the user to clarify, or finish).",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "done"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "shop_plan": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "query": {
+                "type": "string"
+              },
+              "quantity": {
+                "type": [
+                  "integer",
+                  "number"
+                ]
+              }
+            }
+          }
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "collect_total_cost_request",
+    "description": "Capture one product category, optional exact brand/model and constraints, quantity, and two to ten supported commerce sites, or ask for clarification.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "done"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        },
+        "product_category": {
+          "type": "string"
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query_variants": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brand_aliases": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "soft_preferences": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "stores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
           }
         }
       }
     }
   },
   {
-    "name": "AX_prepare_product_identity",
-    "description": "Classify a cross-store request as an exact manufacturer model or a product family that needs grounded discovery, and choose a deterministic frontier of at most three requested stores.",
+    "name": "confirm_quote_decision",
+    "description": "Record the user's approval decision before any quote is requested — proceed, return to refine the selection, or keep asking.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "proceed",
+            "refine",
+            "cancel"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "refine_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_confirm_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "decide",
+    "description": "Select configured intent flows and initial runtime state for the config-runtime planner.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "action",
+        "intents"
+      ],
+      "properties": {
+        "set": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "continue_current",
+            "replace_current",
+            "clarify",
+            "out_of_scope"
+          ]
+        },
+        "intents": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "intent",
+              "segments",
+              "state"
+            ],
+            "properties": {
+              "intent": {
+                "type": "string",
+                "enum": [
+                  "request_service_quote",
+                  "shopping_single_site",
+                  "shopping_multi_store_total_cost",
+                  "bluemoonsoft",
+                  "end_conversation",
+                  "checkout",
+                  "memory"
+                ]
+              },
+              "segments": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "type": "string"
+                }
+              },
+              "state": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "requestText"
+                ],
+                "properties": {
+                  "requestText": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "followup": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "required": [
+                      "type",
+                      "question"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "enum": [
+                          "info_question"
+                        ]
+                      },
+                      "question": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "topic": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "scope": {
+                        "type": "string",
+                        "enum": [
+                          "active_state"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "question": {
+          "type": "string"
+        },
+        "conversationSummary": {
+          "type": "string"
+        },
+        "latestMessageInterpretation": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "delete_memory",
+    "description": "Delete one or more exact GLOBAL memory keys selected by the user.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "delete_keys",
+        "confirmed"
+      ],
+      "properties": {
+        "delete_keys": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "confirmed": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  {
+    "name": "detect_cancellation",
+    "description": "Decide whether the latest message is a standalone refusal rather than a request.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "product_category": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "enter_bluemoonsoft",
+    "description": "Get the browser onto bluemoonsoft before its sitemap search and same-site navigation, and confirm it arrived.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "enter_checkout_site",
+    "description": "Get the browser onto the store before the checkout reads its cart, and confirm it arrived.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "enter_shopping_site",
+    "description": "Get the browser onto the store before the single-site shopping loop searches whichever store is open, and confirm it arrived.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "find_delete_candidates",
+    "description": "Find exact memory key candidates for an explicit category deletion request.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "regex"
+      ],
+      "properties": {
+        "regex": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    }
+  },
+  {
+    "name": "finish_quote_request",
+    "description": "Finish collection after every required quote-request field is present.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {}
+    }
+  },
+  {
+    "name": "followup_decision",
+    "description": "After reporting quote outcomes, choose whether to request more quotes from the current results, start a new service request, or finish — carrying any state reset needed.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "more",
+            "new",
+            "done"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "refine_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refine_selected": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "service_query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_requirements": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_results": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "followup_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "get_memory",
+    "description": "Read one exact saved memory key.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "list_memory",
+    "description": "List all saved memory keys.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  {
+    "name": "navigate_page",
+    "description": "Navigate the current page to a same-site path or URL (a BlueMoonSoft sitemap page), and confirm it landed there.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "link"
+      ],
+      "properties": {
+        "link": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "next_product",
+    "description": "Record the item just processed into shop_results and pick the next item from shop_plan (sets query/quantity, advances shop_index). No LLM, no navigation.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "shop_plan": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "shop_index": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "shop_results": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "add_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "add_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "open_quote",
+    "description": "Open the picked pro's quote request and answer every step it can answer, stopping at the final Submit. Never submits or sends.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "quote_url": {
+          "type": "string"
+        },
+        "quote_target_service_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_requirements": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_first_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_last_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_phone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "zip_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "pick_product",
+    "description": "Pick the first usable search candidate to add to the cart. No LLM, no navigation.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "candidates": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "pick_quote",
+    "description": "Deterministically pick the next candidate pro to open and advance quote_index. No LLM, no navigation.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "candidates": {
+          "type": "array"
+        },
+        "quote_index": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "quote_results": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_reached_submit": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "quote_answer_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_advance_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_last_step": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_answered": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_submit_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_submit_message": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_submit_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "plan_memory",
+    "description": "Plan one explicit memory operation and project its exact arguments into flow state.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "operation"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "list",
+            "get",
+            "search",
+            "find_delete",
+            "delete",
+            "set",
+            "error"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "list",
+            "get",
+            "search",
+            "delete",
+            "set",
+            "delete_candidates"
+          ]
+        },
+        "key": {
           "type": "string",
           "minLength": 1
         },
-        "requested_brand": {
+        "regex": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "maxLength": 200
         },
-        "requested_model": {
-          "type": "string",
-          "minLength": 1
-        },
-        "hard_constraints": {
-          "type": "object"
-        },
-        "soft_preferences": {
-          "type": "object"
-        },
-        "stores": {
+        "delete_keys": {
           "type": "array",
-          "minItems": 2,
-          "maxItems": 10,
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "confirmed": {
+          "type": "boolean"
+        },
+        "memory_entries": {
+          "type": "array",
+          "minItems": 1,
           "items": {
             "type": "object",
+            "additionalProperties": false,
             "required": [
-              "site"
+              "key",
+              "value"
             ],
             "properties": {
-              "site": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
                 "type": "string"
               }
             }
@@ -689,13 +1340,1118 @@
     }
   },
   {
-    "name": "AX_lock_product_identity",
-    "description": "Create a stable product-identity id and fingerprint from an explicit or grounded manufacturer model plus its hard constraints.",
+    "name": "playground_amazon_entry",
+    "description": "Route a fresh Amazon-fixture entry into its first real step without a remote round trip.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
+  {
+    "name": "playground_amazon_search",
+    "description": "Run one read-only Amazon durable-search fixture with its fixed query. It never adds an item to a cart or checks out.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "identity_kind"
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_checkpoint_entry",
+    "description": "Route a fresh checkpoint-diagnostic entry into its first real step without a remote round trip.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
+  {
+    "name": "playground_collect_multi_site_request",
+    "description": "Capture one product search query and two to ten explicitly selected supported commerce sites, or ask for missing scope.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "done"
+          ]
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stores": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_durable_checkpoint",
+    "description": "Run the playground-only durable checkpoint diagnostic. It has no browser side effect and reports whether the host operation grant is available.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_open_mapped_site",
+    "description": "Re-entrantly open one explicitly mapped Playground commerce origin before its site-local product search command runs.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "index",
+        "key",
+        "context"
+      ],
+      "properties": {
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "site"
+          ],
+          "properties": {
+            "site": {
+              "type": "string",
+              "enum": [
+                "amazon",
+                "walmart",
+                "ebay",
+                "aliexpress",
+                "etsy",
+                "coupang",
+                "naver-shopping",
+                "gmarket",
+                "11st",
+                "ssg"
+              ]
+            }
+          }
+        },
+        "index": {
+          "type": "number"
+        },
+        "key": {
+          "type": "string"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_open_site",
+    "description": "Hand off from any current site to one explicitly supported Playground commerce search origin.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site"
+      ],
+      "properties": {
+        "site": {
+          "type": "string",
+          "enum": [
+            "amazon",
+            "walmart",
+            "ebay",
+            "aliexpress",
+            "etsy",
+            "coupang",
+            "naver-shopping",
+            "gmarket",
+            "11st",
+            "ssg"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_query_from_request",
+    "description": "Convert a non-empty shopping request into the Amazon search query without a model call.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestText"
+      ],
+      "properties": {
+        "requestText": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_search_amazon",
+    "description": "Run one read-only replay-safe Amazon product search after the durable Amazon handoff. It never adds an item to a cart or checks out.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_search_one_site",
+    "description": "Run the active site's durable-v2 AX_search_product command after the portable handoff completes.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "index",
+        "key",
+        "context"
+      ],
+      "properties": {
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "site"
+          ],
+          "properties": {
+            "site": {
+              "type": "string",
+              "enum": [
+                "amazon",
+                "walmart",
+                "ebay",
+                "aliexpress",
+                "etsy",
+                "coupang",
+                "naver-shopping",
+                "gmarket",
+                "11st",
+                "ssg"
+              ]
+            }
+          }
+        },
+        "index": {
+          "type": "number"
+        },
+        "key": {
+          "type": "string"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "prepare_memory",
+    "description": "Convert validated key/value entries into one bulk memory map.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memory_entries"
+      ],
+      "properties": {
+        "memory_entries": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "key",
+              "value"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "value": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "prepare_refined_results_table",
+    "description": "Convert the refined Thumbtack shortlist into deterministic built-in table-widget data.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "refine_selected"
+      ],
+      "properties": {
+        "refine_selected": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "prepare_service_results_table",
+    "description": "Convert searched Thumbtack candidates into deterministic built-in table-widget data.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "service_query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidates": {
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "total_count": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "present_refined_results",
+    "description": "Present the rendered refined-shortlist widget and ask once for explicit quote approval.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refined_results_widget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quote_confirm_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "present_service_results",
+    "description": "Present the rendered results widget and ask once for the user's refinement criterion.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "service_results_widget": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "present_store_offers",
+    "description": "Retrieve the exact current comparison and force a separate approval turn before selection.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "choice_stage",
+        "comparison_id"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask"
+          ]
+        },
+        "choice_stage": {
+          "type": "string",
+          "enum": [
+            "asked"
+          ]
+        },
+        "comparison_id": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "refine_products",
+    "description": "Refine the searched products for the current item — ask the user which product / how to narrow, or (after they answer) record the chosen product to add, or skip. The LLM ranks/filters the candidates; this tool captures the decision.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "pick",
+            "skip"
+          ]
+        },
+        "question": {
+          "type": "string"
+        },
+        "shop_refine_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "render_refined_results",
+    "description": "Render the refined shortlist with the built-in table widget.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "refined_results_table"
+      ],
+      "properties": {
+        "refined_results_table": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "render_service_results",
+    "description": "Render the prepared service-results data with the built-in table widget.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "service_results_table"
+      ],
+      "properties": {
+        "service_results_table": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "resolve_zip",
+    "description": "Resolve a US ZIP code from an address string.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address"
+      ],
+      "properties": {
+        "address": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "rpc_navigate_probe",
+    "description": "Navigate and time each stage, to separate a slow script from a slow channel.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "rpc_read_page",
+    "description": "Read the current page heading and location over the RPC channel.",
+    "parameters": {
+      "type": "object",
+      "properties": {}
+    }
+  },
+  {
+    "name": "rpc_storefront_search",
+    "description": "Search one storefront over RPC and return its live candidates.",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "site": {
+          "type": "string"
+        },
+        "query": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "run_checkout",
+    "description": "Open the checkout REVIEW page for the standalone checkout flow so the user can read the order total, address and payment method. Never places an order.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
+  {
+    "name": "screen_store_offers",
+    "description": "Keep the numbered listings that are the requested product itself and drop accessories, parts, bundles, and other models.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "keep"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "done"
+          ]
+        },
+        "keep": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "search_memory",
+    "description": "Search saved memory with one case-insensitive regex and return bounded Markdown.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "regex"
+      ],
+      "properties": {
+        "regex": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        }
+      }
+    }
+  },
+  {
+    "name": "search_service",
+    "description": "Search Thumbtack for local pros matching the service query in the resolved ZIP.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "service_query",
+        "zip_code"
+      ],
+      "properties": {
+        "service_query": {
+          "type": "string"
+        },
+        "zip_code": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "select_pros",
+    "description": "Replace the candidate list with the user-approved shortlist (refine_selected) and reset the quote loop index. No LLM, no navigation.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "refine_selected": {
+          "type": [
+            "array",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "set_memory",
+    "description": "Set final memory values in one call. Non-empty Markdown saves; an empty string deletes.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memory",
+        "confirmed"
+      ],
+      "properties": {
+        "confirmed": {
+          "type": "boolean"
+        },
+        "memory": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Memory key to complete Markdown. A non-empty value saves; an empty value deletes.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_add_selected_store_offer",
+    "description": "Revalidate product identity and price, then add only the explicitly selected current offer. Never checks out or orders.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "site",
+        "product_id",
+        "identity_id",
+        "comparison_id",
+        "identity_approval",
+        "comparison_approval",
+        "cart_approval"
+      ],
+      "properties": {
+        "site": {
+          "type": "string",
+          "enum": [
+            "amazon",
+            "walmart",
+            "ebay",
+            "aliexpress",
+            "etsy",
+            "coupang",
+            "naver-shopping",
+            "gmarket",
+            "11st",
+            "ssg"
+          ]
+        },
+        "product_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "expected_unit_price": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "expected_currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_identity_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "comparison_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_approval": {
+          "type": "string",
+          "enum": [
+            "locked_product_identity"
+          ]
+        },
+        "comparison_approval": {
+          "type": "string",
+          "enum": [
+            "current_comparison"
+          ]
+        },
+        "cart_approval": {
+          "type": "string",
+          "enum": [
+            "user_selected_compared_offer"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_add_to_cart",
+    "description": "Add the picked product to the cart with the requested quantity. Navigates to the product page, revalidates the price, clicks Add to Cart, declines the optional protection plan, and reads the confirmation. Never places an order.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_id"
+      ],
+      "properties": {
+        "product_id": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number",
+            "string"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_apply_offer_screening",
+    "description": "Keep only the judged-relevant listings, apply the per-store comparison cap, and report how many rows were removed.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_results"
+      ],
+      "properties": {
+        "store_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "screening_ids": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "screening_keep": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_build_offer_screening",
+    "description": "Number every live listing across the searched stores into one bounded, id-backed list for a relevance judgement.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_results"
+      ],
+      "properties": {
+        "store_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "identity_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_build_product_options",
+    "description": "Group live discovery evidence into versioned manufacturer-model choices.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery_results",
+        "discovery_query",
+        "product_category"
+      ],
+      "properties": {
+        "discovery_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "discovery_query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "product_category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "soft_preferences": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_collect_store_page",
+    "description": "Merge one read result page into this store's accumulated candidates and decide whether another page is worth a navigation.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "context",
+        "store_result",
+        "page"
+      ],
+      "properties": {
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "site"
+          ],
+          "properties": {
+            "site": {
+              "type": "string",
+              "enum": [
+                "amazon",
+                "walmart",
+                "ebay",
+                "aliexpress",
+                "etsy",
+                "coupang",
+                "naver-shopping",
+                "gmarket",
+                "11st",
+                "ssg"
+              ]
+            }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "quantity": {
+              "type": [
+                "integer",
+                "number"
+              ]
+            }
+          }
+        },
+        "store_result": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "collected": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "page": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_discover_products",
+    "description": "Search at most three deterministic frontier stores for live product-model evidence.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "discovery_sites",
+        "query"
+      ],
+      "properties": {
+        "discovery_sites": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
+          }
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "discovery_query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query_variants": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brand_aliases": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_lock_product_identity",
+    "description": "Lock one exact manufacturer model or grounded identity into a stable comparison snapshot.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "identity_kind",
+        "identity_model",
+        "product_category"
       ],
       "properties": {
         "identity_kind": {
@@ -707,135 +2463,700 @@
           ]
         },
         "identity_name": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "identity_brand": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "identity_model": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "product_category": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "canonical_query": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "hard_constraints": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         },
         "soft_preferences": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         },
-        "source_refs": {
-          "type": "array",
+        "identity_source_refs": {
+          "type": [
+            "array",
+            "null"
+          ],
           "items": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": true
           }
-        },
-        "source_product_id": {
-          "type": "string"
         }
       }
     }
   },
   {
-    "name": "AX_build_product_options",
-    "description": "Group live discovery listings by grounded manufacturer model, preserve source references and sample prices, and issue a versioned option snapshot without merging different models.",
+    "name": "shopping_normalize_store_result",
+    "description": "Apply common relevance, provenance, FX, and landed-cost normalization to one ready site adapter result.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "results"
+        "item",
+        "context",
+        "store_result"
       ],
       "properties": {
-        "results": {
-          "type": "array",
-          "items": {
-            "type": "object"
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "site"
+          ],
+          "properties": {
+            "site": {
+              "type": "string",
+              "enum": [
+                "amazon",
+                "walmart",
+                "ebay",
+                "aliexpress",
+                "etsy",
+                "coupang",
+                "naver-shopping",
+                "gmarket",
+                "11st",
+                "ssg"
+              ]
+            }
           }
         },
-        "query": {
-          "type": "string"
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "quantity": {
+              "type": [
+                "integer",
+                "number"
+              ]
+            }
+          }
         },
-        "product_category": {
-          "type": "string"
-        },
-        "requested_brand": {
-          "type": "string"
-        },
-        "hard_constraints": {
-          "type": "object"
-        },
-        "soft_preferences": {
-          "type": "object"
-        },
-        "max_options": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10
+        "store_result": {
+          "type": "object",
+          "additionalProperties": true
         }
       }
     }
   },
   {
-    "name": "AX_resolve_product_option",
-    "description": "Validate one selection against the current discovery version and lock only a grounded, sufficiently identified product model.",
+    "name": "shopping_prepare_product_identity",
+    "description": "Classify product scope and deterministically select at most three stores for grounded model discovery.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "options",
+        "product_category",
+        "stores"
+      ],
+      "properties": {
+        "product_category": {
+          "type": "string",
+          "minLength": 1
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "soft_preferences": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "stores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_rank_store_offers",
+    "description": "Rank only identity-verified candidates while preserving failures and cost coverage.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verified_offers",
+        "identity_id"
+      ],
+      "properties": {
+        "verified_offers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "failures": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "screened_out": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_refine_store_offers",
+    "description": "Move the comparison window, or filter and sort the listing, from the user's own words.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "comparison_id"
+      ],
+      "properties": {
+        "comparison_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "offers": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "all_offers": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "failures": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "identity_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "view_page": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "view_sort": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page_command": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "next",
+            "prev",
+            "first",
+            "last",
+            null
+          ]
+        },
+        "page_number": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "refine_request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_resolve_product_option",
+    "description": "Resolve one current discovery option and create a locked identity only from its grounded evidence.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_options",
         "options_version",
         "choice_options_version"
       ],
       "properties": {
-        "options": {
+        "product_options": {
           "type": "array",
           "minItems": 1,
           "items": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": true
           }
         },
         "options_version": {
           "type": "string",
           "minLength": 1
         },
-        "choice_index": {
-          "type": "integer",
-          "minimum": 1
+        "product_choice_index": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
         },
-        "choice_id": {
-          "type": "string"
+        "product_choice_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "choice_options_version": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "hard_constraints": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         },
         "soft_preferences": {
-          "type": "object"
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       }
     }
   },
   {
-    "name": "AX_verify_product_offers",
-    "description": "Classify store candidates as exact, ambiguous, or mismatched against one locked product identity and hard-variant snapshot before ranking.",
+    "name": "shopping_resolve_store_offer",
+    "description": "Validate a ranked offer and current comparison snapshot, then emit scoped mutation approvals.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "results",
+        "offers",
+        "choice_index",
+        "choice_comparison_id",
+        "comparison_id",
+        "identity_id",
+        "choice_stage"
+      ],
+      "properties": {
+        "offers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "choice_index": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "choice_comparison_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "comparison_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "choice_stage": {
+          "type": "string",
+          "enum": [
+            "asked"
+          ]
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_search_one_store",
+    "description": "Search one mapped store with a runtime-side script that drives the page over RPC.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "item",
+        "index",
+        "key",
+        "context"
+      ],
+      "properties": {
+        "item": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "site"
+          ],
+          "properties": {
+            "site": {
+              "type": "string",
+              "enum": [
+                "amazon",
+                "walmart",
+                "ebay",
+                "aliexpress",
+                "etsy",
+                "coupang",
+                "naver-shopping",
+                "gmarket",
+                "11st",
+                "ssg"
+              ]
+            }
+          }
+        },
+        "index": {
+          "type": "number"
+        },
+        "key": {
+          "type": "string"
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": [
+            "query"
+          ],
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "quantity": {
+              "type": [
+                "integer",
+                "number"
+              ]
+            }
+          }
+        },
+        "page": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_search_product",
+    "description": "Search the shopping site for the current item's query; returns candidate products.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "query"
+      ],
+      "properties": {
+        "query": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_search_sites",
+    "description": "Serially run the portable store-entry plus replay-safe site search subflow for every selected Playground commerce site.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stores",
+        "query"
+      ],
+      "properties": {
+        "stores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
+          }
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_search_stores",
+    "description": "Run the real store-search subflow for every selected store using the locked canonical product query.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "stores",
+        "query",
+        "identity_id"
+      ],
+      "properties": {
+        "stores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
+          }
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "identity_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_kind": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query_variants": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brand_aliases": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "locked_hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_verify_product_offers",
+    "description": "Classify live offers against the locked model and hard variants before ranking.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_results",
         "identity_id",
         "identity_kind"
       ],
       "properties": {
-        "results": {
+        "store_results": {
           "type": "array",
           "items": {
-            "type": "object"
+            "type": "object",
+            "additionalProperties": true
           }
         },
         "identity_id": {
@@ -851,543 +3172,152 @@
           ]
         },
         "identity_brand": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "identity_model": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "product_category": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "hard_constraints": {
-          "type": "object"
-        }
-      }
-    }
-  },
-  {
-    "name": "AX_search_store_product",
-    "description": "Search one supported representative commerce site for broad discovery or a locked model comparison and return live candidates with product-identity metadata, normalized USD item-plus-shipping cost, FX evidence, or an explicit access/login challenge.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "site": {
-          "enum": [
-            "amazon",
-            "walmart",
-            "ebay",
-            "aliexpress",
-            "etsy",
-            "coupang",
-            "naver-shopping",
-            "gmarket",
-            "11st",
-            "ssg"
+        "locked_hard_constraints": {
+          "type": [
+            "object",
+            "null"
           ],
-          "type": "string"
-        },
-        "query": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "quantity": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "purpose": {
-          "type": "string",
-          "enum": [
-            "discovery",
-            "comparison"
-          ]
-        },
-        "requested_brand": {
-          "type": "string"
-        },
-        "identity_brand": {
-          "type": "string"
-        },
-        "identity_model": {
-          "type": "string"
-        },
-        "product_category": {
-          "type": "string"
-        },
-        "hard_constraints": {
-          "type": "object"
-        }
-      },
-      "required": [
-        "site",
-        "query"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_normalize_store_product_result",
-    "description": "Normalize one current site adapter result with relevance filtering, observed brand/model provenance, FX evidence, and landed item-plus-shipping cost after site readiness and navigation are resolved.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "site",
-        "query",
-        "result"
-      ],
-      "properties": {
-        "site": {
-          "enum": [
-            "amazon",
-            "walmart",
-            "ebay",
-            "aliexpress",
-            "etsy",
-            "coupang",
-            "naver-shopping",
-            "gmarket",
-            "11st",
-            "ssg"
-          ],
-          "type": "string"
-        },
-        "query": {
-          "type": "string",
-          "minLength": 1
-        },
-        "quantity": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "purpose": {
-          "type": "string",
-          "enum": [
-            "discovery",
-            "comparison"
-          ]
-        },
-        "requested_brand": {
-          "type": "string"
-        },
-        "identity_brand": {
-          "type": "string"
-        },
-        "identity_model": {
-          "type": "string"
-        },
-        "product_category": {
-          "type": "string"
-        },
-        "brand_aliases": {
-          "type": "string"
-        },
-        "hard_constraints": {
-          "type": "object"
-        },
-        "result": {
-          "type": "object"
+          "additionalProperties": true
         }
       }
     }
   },
   {
-    "name": "AX_collect_store_page",
-    "description": "Merge one normalized result page into a store's accumulated candidates, re-apply the per-store cap, and report whether another result page — or another wording of the same search — is worth a navigation.",
+    "name": "site_entry",
+    "description": "Route a fresh site-assistant entry into the site handoff without a remote round trip.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {}
+    }
+  },
+  {
+    "name": "sitemap_search",
+    "description": "Search the current site's sitemap for pages matching a case-insensitive regex; returns matching lines (each with a path).",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "result"
+        "regex"
       ],
       "properties": {
-        "result": {
-          "type": "object"
-        },
-        "collected": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "page": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "site": {
+        "regex": {
           "type": "string"
         },
-        "query": {
-          "type": "string"
-        },
-        "query_variants": {
-          "type": "string"
-        },
-        "tried_queries": {
-          "type": "string"
-        },
-        "target": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "max_pages": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "purpose": {
-          "type": "string",
-          "enum": [
-            "comparison",
-            "discovery"
+        "limit": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "submit_quote",
+    "description": "Send the quote request from the final step with the collected contact details, and report the Thumbtack popover or outcome that results.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "zip_code": {
+          "type": [
+            "string",
+            "null"
           ]
         },
-        "remote_used": {
-          "type": "integer",
-          "minimum": 0
-        },
-        "remote_budget": {
-          "type": "integer",
-          "minimum": 0
-        }
-      }
-    }
-  },
-  {
-    "name": "AX_build_offer_screening",
-    "description": "Number every live listing across the searched stores into one bounded, id-backed list so a relevance judgement can name rows without seeing the offer payload.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "store_results"
-      ],
-      "properties": {
-        "store_results": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "identity_brand": {
-          "type": "string"
-        },
-        "identity_model": {
-          "type": "string"
-        },
-        "product_category": {
-          "type": "string"
-        }
-      }
-    }
-  },
-  {
-    "name": "AX_apply_offer_screening",
-    "description": "Keep only the listings a relevance judgement named, apply the per-store comparison cap to what survives, and report how many rows were removed; an absent verdict keeps every row.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "store_results"
-      ],
-      "properties": {
-        "store_results": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "screening_ids": {
-          "type": "string"
-        },
-        "keep": {
-          "type": "string"
-        }
-      }
-    }
-  },
-  {
-    "name": "AX_rank_store_offers",
-    "description": "Deterministically rank identity-verified offers by complete total cost, fold rows without a known total out of the default window, and issue a versioned comparison snapshot with a store-outcome summary.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "results": {
-          "items": {
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "verified_offers": {
-          "items": {
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "failures": {
-          "items": {
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "identity_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "quantity": {
-          "minimum": 1,
-          "type": "integer"
-        }
-      },
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_present_store_offers",
-    "description": "Return the exact deterministic numbered comparison question for the current comparison snapshot and reject stale snapshot identifiers.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "comparison_id"
-      ],
-      "properties": {
-        "comparison_id": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    }
-  },
-  {
-    "name": "AX_refine_store_offers",
-    "description": "Move the comparison window, or filter and sort the listing from the user's own sentence. A window move keeps the comparison snapshot; a change to which offers are listed reissues it. A threshold in a currency the listing does not quote is refused rather than applied.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "comparison_id"
-      ],
-      "properties": {
-        "comparison_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "offers": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "all_offers": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "identity_id": {
-          "type": "string"
-        },
-        "view_page": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "view_sort": {
-          "type": "string",
-          "enum": [
-            "total_asc",
-            "price_asc",
-            "rating_desc",
-            "delivery_asc"
+        "submit_phone": {
+          "type": [
+            "string",
+            "null"
           ]
         },
-        "page_command": {
-          "type": "string",
-          "enum": [
-            "next",
-            "prev",
-            "first",
-            "last"
+        "submit_email": {
+          "type": [
+            "string",
+            "null"
           ]
         },
-        "page_number": {
-          "type": "integer",
-          "minimum": 1
+        "submit_first_name": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "refine_request": {
-          "type": "string"
-        },
-        "failures": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
+        "submit_last_name": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }
   },
   {
-    "name": "AX_resolve_store_offer",
-    "description": "Validate a numbered offer against the current product identity, comparison version, and completed approval turn before returning exact guarded cart-mutation fields.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "offers": {
-          "items": {
-            "type": "object"
-          },
-          "type": "array"
-        },
-        "choice_index": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "choice_stage": {
-          "type": "string",
-          "const": "asked"
-        },
-        "choice_comparison_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "comparison_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "identity_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "quantity": {
-          "minimum": 1,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "offers",
-        "choice_index",
-        "choice_stage",
-        "choice_comparison_id",
-        "comparison_id",
-        "identity_id"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_add_store_product_to_cart",
-    "description": "Navigate to the selected offer, enforce locked-identity, current-comparison, explicit-approval, model, and stale-price preconditions, and add it to the cart when safely supported, without checkout.",
-    "parameters": {
-      "additionalProperties": false,
-      "properties": {
-        "site": {
-          "enum": [
-            "amazon",
-            "walmart",
-            "ebay",
-            "aliexpress",
-            "etsy",
-            "coupang",
-            "naver-shopping",
-            "gmarket",
-            "11st",
-            "ssg"
-          ],
-          "type": "string"
-        },
-        "product_id": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "quantity": {
-          "minimum": 1,
-          "type": "integer"
-        },
-        "expected_unit_price": {
-          "minimum": 0,
-          "type": "number"
-        },
-        "expected_currency": {
-          "minLength": 3,
-          "type": "string"
-        },
-        "expected_identity_model": {
-          "minLength": 1,
-          "type": "string"
-        },
-        "identity_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "comparison_id": {
-          "type": "string",
-          "minLength": 1
-        },
-        "identity_approval": {
-          "const": "locked_product_identity",
-          "type": "string"
-        },
-        "comparison_approval": {
-          "const": "current_comparison",
-          "type": "string"
-        },
-        "cart_approval": {
-          "const": "user_selected_compared_offer",
-          "type": "string"
-        }
-      },
-      "required": [
-        "site",
-        "product_id",
-        "identity_id",
-        "comparison_id",
-        "identity_approval",
-        "comparison_approval",
-        "cart_approval"
-      ],
-      "type": "object"
-    }
-  },
-  {
-    "name": "AX_browse_service_candidates",
-    "description": "Rank, filter, window, and select searched service pros deterministically from the site data. Accepts a criterion sentence, a page move, or the numbers the user picked.",
+    "name": "verify_request",
+    "description": "Check that service_query, user_requirements, a five-digit zip_code, and all four contact fields are present before search. Pure check; no navigation or side effects.",
     "parameters": {
       "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "candidates"
-      ],
+      "additionalProperties": true,
       "properties": {
-        "candidates": {
-          "type": "array",
-          "items": {
-            "type": "object"
-          }
-        },
-        "refine_request": {
-          "type": "string"
-        },
-        "page": {
-          "type": "integer",
-          "minimum": 1
-        },
-        "page_command": {
-          "type": "string",
-          "enum": [
-            "next",
-            "prev",
-            "first",
-            "last"
+        "service_query": {
+          "type": [
+            "string",
+            "null"
           ]
         },
-        "page_number": {
-          "type": "integer",
-          "minimum": 1
+        "user_requirements": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "choice_numbers": {
-          "type": "string"
+        "zip_code": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
-        "page_size": {
-          "type": "integer",
-          "minimum": 1
+        "submit_first_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_last_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_email": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "submit_phone": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

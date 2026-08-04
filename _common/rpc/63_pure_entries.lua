@@ -62,12 +62,21 @@ function P.collect_store_page(args)
     purpose = purpose_of(context),
   })
 
+  -- An EMPTY accumulator must not cross as `{}`. Measured live on the discovery path, twice in one turn:
+  --   `schema rejected value: collected: Invalid input`
+  -- The node declares `[array, "null"]`, an empty Lua table encodes as an OBJECT, and the array-type
+  -- marker is not honoured on an empty list. So the tool wrote `{}` into state, the model relayed it back
+  -- as an argument, and the schema refused it — a store that found nothing stopped the whole comparison.
+  -- `null` is the one encoding that cannot be mistaken, and the schema already allows it.
+  local collected = result.collected
+  if type(collected) == "table" and #collected == 0 then collected = nil end
+
   return {
     next = result.next,
     page = result.page,
     query = result.query,
     tried_queries = result.tried_queries,
-    collected = result.collected,
+    collected = collected,
     page_stop_reason = result.stop_reason,
     store_result = result.store_result,
   }

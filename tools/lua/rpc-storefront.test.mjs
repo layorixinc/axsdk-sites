@@ -940,3 +940,40 @@ test('the single-site search answers in the shape that flow already reads', () =
   assert.ok(Object.values(value.candidates ?? {}).length >= 1, 'candidates must be readable at the top level');
   assert.equal(value.error, undefined);
 });
+
+test('a transient op refusal does not throw away a page already read', () => {
+  // Measured live on the multi-store comparison, after the accumulator fix let the flow get this far:
+  //   shopping_search_one_store | "lua runtime error: ...:606: rpc dom.exists failed: rpc_timeout"
+  // Every `dom.*` in this module is called raw, so one refused op while the channel re-attaches raises
+  // out of the tool and the store is lost — including the candidates already parsed off the page. It is
+  // the same lesson the quote and cart modules learned: a refusal is a fact about the CHANNEL, never
+  // about the page, and the only honest answer is to retry once and then treat it as unknown.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=마우스',
+    dom: { 'li.card': [card('1', '무선 마우스', '10,000원'), card('2', '유선 마우스', '8,000원')] },
+    // Every third op is refused, which is what a re-attaching channel looks like.
+    flakyEvery: 3,
+  });
+  const { value } = search(page);
+
+  assert.ok(value, 'the tool must answer, not raise');
+  assert.notEqual(value.next, undefined);
+  assert.ok(
+    Array.isArray(value.candidates) ? value.candidates.length >= 1 : value.next !== 'ok',
+    `a page that parsed must not be discarded: ${JSON.stringify(value).slice(0, 160)}`,
+  );
+});
+
+test('an unknown paging control is absent, never a claim', () => {
+  // `has_more` is the field that raised. Absent means "could not tell" and the caller treats it as no
+  // more; `false` would claim a check that never happened and stop a page that exists.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=마우스',
+    dom: { 'li.card': [card('1', '무선 마우스', '10,000원')] },
+    refuseOps: ['dom.exists'],
+  });
+  const { value } = search(page, {}, { ...CONFIG, pagination: { next_selector: '.next' } });
+
+  assert.ok(value, 'the tool must answer, not raise');
+  assert.notEqual(value.has_more, false, 'a refused probe must not answer "no more"');
+});

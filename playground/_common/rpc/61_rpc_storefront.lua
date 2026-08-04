@@ -9,6 +9,65 @@
 -- Called with a site CONFIG (data, not code) so one script serves every storefront.
 
 AX_RPC_STOREFRONT = AX_RPC_STOREFRONT or {}
+
+
+--- Every page read, retried ONCE before it is believed.
+---
+--- A refused op is a fact about the CHANNEL, not about the page. Measured live: one `dom.exists` answered
+--- `rpc_timeout` while the channel re-attached, the error raised out of `search`, and the store was lost
+--- along with the candidates already parsed off the page — `shopping_search_one_store` reported a lua
+--- runtime error and the comparison continued without that store. The quote and cart modules learned this
+--- first; this one was still calling `dom.*` raw at every site.
+---
+--- A persistent refusal answers `nil`/`false`, never a fabricated value: "could not tell" has to stay
+--- distinguishable from "checked, and no".
+local __unpack = table.unpack or unpack
+--- Persistent refusals in this invocation. Swallowing a refusal keeps a page-read from throwing away a
+--- store, but it must not turn "the channel never answered" into "the site did not navigate" — those send
+--- the operator to different places. The count is reset per call and the error branches consult it.
+local __refused = 0
+--- Resolved at CALL time, never at load time: modules are loaded before the runtime installs its globals,
+--- so capturing `dom` here caught nil and every op answered "unavailable".
+--- The same tolerance for `nav`, minus the one op that has an EFFECT. `nav.wait_for_navigation` polls
+--- `dom.get_location_href`, so a refusal inside it raised out of the search exactly like a direct read;
+--- `nav.navigate` is excluded because retrying a navigation that already fired would move the page twice.
+local __tolerant_nav = { wait_for_navigation = true, wait_for = true }
+local nav = setmetatable({}, {
+  __index = function(_, name)
+    local real = _G.nav
+    local fn = type(real) == "table" and real[name]
+    if type(fn) ~= "function" then return nil end
+    if not __tolerant_nav[name] then return fn end
+    return function(...)
+      local args = table.pack and table.pack(...) or { n = select("#", ...), ... }
+      local ok, value = pcall(fn, __unpack(args, 1, args.n))
+      if ok then return value end
+      ok, value = pcall(fn, __unpack(args, 1, args.n))
+      if ok then return value end
+      __refused = __refused + 1
+      return nil
+    end
+  end,
+})
+
+local dom = setmetatable({}, {
+  __index = function(_, name)
+    return function(...)
+      local real = _G.dom
+      local fn = type(real) == "table" and real[name]
+      if type(fn) ~= "function" then return nil end
+      -- `select('#', ...)` with an explicit range: `a and b(x) or c(x)` truncates a multi-value return to
+      -- ONE, and every op past its first argument would silently lose its parameters.
+      local args = table.pack and table.pack(...) or { n = select("#", ...), ... }
+      local ok, value = pcall(fn, __unpack(args, 1, args.n))
+      if ok then return value end
+      ok, value = pcall(fn, __unpack(args, 1, args.n))
+      if ok then return value end
+      __refused = __refused + 1
+      return nil
+    end
+  end,
+})
 local S = AX_RPC_STOREFRONT
 
 local function trim(value)
@@ -529,6 +588,8 @@ end
 
 --- Search one storefront and return its candidates. Read-only: no write op is reachable from here.
 function S.search(config, args)
+  -- Per invocation: a refusal from a previous call says nothing about this one.
+  __refused = 0
   args = type(args) == "table" and args or {}
   local query = non_empty(args.query)
   if not query then return { next = "error", error = "query_required" } end
@@ -548,10 +609,15 @@ function S.search(config, args)
   local target = S.search_url(config, query, tonumber(args.page))
   if not target then return { next = "error", error = "search_url_unavailable" } end
   if not already_showing(config, from, query) then
-    nav.navigate(target)
+    -- CAUGHT, not retried: a navigation that already fired would move the page twice. A raise here is the
+    -- channel, not the site, and it used to take the whole store down with it.
+    local moved = pcall(function() return nav.navigate(target) end)
+    if not moved then return { next = "error", error = "rpc_unavailable" } end
     -- href first. A document that is still alive answers a selector check from the OLD page, so an
     -- element probe here is a false positive waiting to happen.
     if not nav.wait_for_navigation(from, { timeout = 8000, interval = 200 }) then
+      -- A channel that answered nothing is not a site that would not move.
+      if __refused > 0 then return { next = "error", error = "rpc_unavailable" } end
       return { next = "error", error = "navigation_stuck", href = dom.get_location_href() }
     end
   end
@@ -579,7 +645,10 @@ function S.search(config, args)
   end
 
   if #candidates == 0 then
-    local rows = dom.query_all(config.result_selector, fields_for(config), config.result_limit or 24)
+    -- A refused read answers nil, and `#nil` raises. Absent is "could not tell", which reads the same as
+    -- an empty grid HERE — the outcome below already separates "no cards" from "cards without prices" —
+    -- but it must not take the tool down with it.
+    local rows = dom.query_all(config.result_selector, fields_for(config), config.result_limit or 24) or {}
     cards_seen = #rows
     local seen = {}
     for index = 1, #rows do
@@ -603,7 +672,11 @@ function S.search(config, args)
   local next_selector = paging and paging.next_selector
   local has_more = nil
   if type(next_selector) == "string" and next_selector ~= "" then
-    has_more = dom.exists(next_selector) == true
+    -- A refused probe answers nil, and `nil == true` is `false` — which would CLAIM there is no next
+    -- page. Absent has to survive the comparison: "could not tell" and "checked, and no" are different
+    -- facts and the caller stops paging on both, but only one of them is a measurement.
+    local probed = dom.exists(next_selector)
+    if probed ~= nil then has_more = probed == true end
   end
 
   local next_value = outcome(cards_seen, #candidates)

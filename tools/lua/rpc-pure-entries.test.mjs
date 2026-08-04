@@ -110,3 +110,38 @@ test('the identity chain keeps its own keys', () => {
   assert.equal(prepared.identity_status, 'exact');
   assert.equal(prepared.identity_model, 'M185');
 });
+
+test('an empty accumulator travels as absent, never as an empty table', () => {
+  // Measured live on the multi-store discovery path, twice in one turn:
+  //   actions.shopping_collect_store_page ... schema rejected value: collected: Invalid input
+  // The node declares `collected: { type: [array, "null"] }`. An empty Lua table encodes as `{}` — an
+  // OBJECT — so the tool wrote `{}` into state, the model relayed it back as an argument, and the schema
+  // refused it. The array-type marker is not honoured on an empty list, and the schema already allows the
+  // one encoding that cannot be mistaken: absent.
+  const value = lua.call('AX_RPC_PURE.collect_store_page', {
+    item: { site: '11st' },
+    context: CONTEXT,
+    // A store that found nothing: the accumulator stays empty and still has to survive the round trip.
+    store_result: { site: '11st', status: 'no_results', candidates: [] },
+    collected: null,
+    page: 1,
+    query: '로지텍 M185 마우스',
+  });
+
+  assert.ok(
+    value.collected === undefined || value.collected === null || Array.isArray(value.collected),
+    `an empty accumulator must not be an object, got ${JSON.stringify(value.collected)}`,
+  );
+});
+
+test('a non-empty accumulator is still a list the schema accepts', () => {
+  // The fix must not turn every accumulator into nothing: a page that DID collect rows has to arrive as a
+  // sequence, or the next page would be merged into an empty one and the earlier stores would vanish.
+  const value = lua.call('AX_RPC_PURE.collect_store_page', {
+    item: { site: '11st' }, context: CONTEXT, store_result: STORE_RESULT, collected: null, page: 1,
+    query: '로지텍 M185 마우스',
+  });
+
+  assert.ok(value.collected, 'a page with rows must be carried');
+  assert.ok(Object.values(value.collected).length >= 1);
+});

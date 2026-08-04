@@ -710,6 +710,16 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **An EMPTY accumulator must cross as absent, not as `{}`.** `shopping_collect_store_page` declares
+  `collected: [array, "null"]`; an empty Lua table encodes as an OBJECT and the array marker is not
+  honoured on an empty list, so a store that found nothing wrote `{}` into state, the model relayed it
+  back as an argument, and the schema refused it — twice in one live turn, stopping the comparison.
+- **Tolerance must not fabricate, and must not swallow a distinction.** Wrapping every `dom.*` in
+  `61_rpc_storefront` stopped one refused op from destroying a store, but it also (a) fed `nil` into
+  `#rows`, (b) turned a refused paging probe into `has_more = false` — a CLAIM — and (c) made a dead
+  channel look like `navigation_stuck`, which blames the site. Count the refusals and consult them, guard
+  the arithmetic, and let absent stay absent. Shadow the global LAZILY: modules load before the runtime
+  installs its globals, so capturing `dom` at load time captures nil.
 - **A comparison survives a turn in FLOW STATE, as one scalar.** The runtime`s `state: session` is keyed
   by (session, TOOL), so `rank` has no channel to `present` — which is why those three were the last
   `kind: remote` tools. `inputSelector` is an allowlist (FLOWS.md §4), so a deterministic node reads the

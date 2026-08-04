@@ -117,49 +117,73 @@ Thumbtack 견적 폼 라이브 비교:
 
 ---
 
-## R1 — 다시 확인했습니다. 아직입니다 (측정)
+## R1 — 우리가 틀렸습니다. `net`은 이미 있고, 지금 동작합니다 (정정)
 
-문서가 아니라 호출로 확인했습니다. `_common/rpc/71_rpc_zip.lua`를 만들어 `resolve_zip`을 런타임으로
-붙이고 라이브에서 도시 이름을 넣었습니다:
+**앞선 이 문서의 R1 측정은 잘못된 결론이었습니다.** 관측 자체는 사실이었지만 원인을 잘못 짚었습니다.
+
+우리는 `rpc.allow: [net.fetch]`로 선언했습니다. `rpc.allow`는 **op 허가**이고 `net`에는 닿지 않습니다.
+그래서 아무것도 부여되지 않은 채 호출됐고, 우리는 그 침묵을 "런타임에 `net`이 없다"로 읽었습니다.
+
+그쪽이 알려준 올바른 형태 — 도구의 `execute`에 붙는 `net:` 블록 — 로 다시 붙였습니다:
+
+```yaml
+execute:
+  kind: runtime
+  implementation: lua
+  net:
+    allow: [photon.komoot.io, geocoding.geo.census.gov]
+    maxCalls: 2
+    timeoutMs: 8000
+```
+
+라이브 결과:
 
 ```
-collect_request | {"zip_status":"resolve_failed","error":"zip_geocode_unavailable"}
+collect_request | {"zip_code":"94102","zip_source":"geocode","zip_status":null}
 ```
 
-`net` capability가 런타임에 없습니다. 되돌렸습니다 — durable 명령은 같은 주소를 지금도 풉니다:
+`resolve_zip`은 이제 **런타임**입니다. `kind: remote`에서 빠졌습니다.
+
+### 우리 쪽에 남아 있던 진짜 버그 하나
+
+올바른 선언으로 바꾼 뒤에도 첫 호출은 `resolve_failed`였습니다. `net`은 살아 있었고 Photon도 좌표를
+돌려줬는데, ZIP만 비어서 왔습니다. Census가 레이어 키에 **연도 접두사**를 붙이기 때문입니다 —
+`2020 Census ZIP Code Tabulation Areas`. 고정 키로 찾으면 한 센서스 동안만 맞고 다음 갱신에서 조용히
+멈춥니다. durable 사다리는 부분 문자열로 맞추고 있었고, 포팅하면서 그 이유를 함께 옮기지 않았습니다.
+부분 문자열 매칭으로 고쳤고 회귀 테스트를 붙였습니다(`rpc-zip` 9개).
+
+### 그래서 클라이언트 op 요청은 철회합니다
+
+직전 문서에서 "클라이언트 op `net.fetch`"를 대안 소유자로 제시했고, 우리 쪽 판단으로는 그것을 진행할
+참이었습니다. **필요 없습니다.** 능력은 이미 요청한 자리에 있고, 없던 것은 우리의 올바른 선언이었습니다.
+SDK에 추가 요청을 넣지 않습니다.
+
+진단 비용을 남깁니다: 거절이 **이유 없이** 오면 "클라이언트가 그 op을 등록한 적 없음"과 "우리가 잘못
+선언함"을 구분할 수 없습니다. 두 경우의 조치가 정반대인데도 그렇습니다. 그래서 우리 모듈들은 이제 원문
+사유를 함께 싣습니다. R27을 이 렌즈로 다시 재보고 아래에 적었습니다.
+
+---
+
+## R27 — 같은 렌즈로 다시 쟀습니다. 이쪽은 선언 문제가 아닙니다
+
+R1이 우리 실수였으므로 R27도 같은 실수일 수 있다고 보고 다시 호출했습니다. 아닙니다. `rpc.allow:
+[memory.get]`으로 붙인 라이브 답:
 
 ```
-AX_resolve_zip {"address":"San Francisco, CA"} -> {"zip_code":"94102","source":"geocode_zcta"}
+{"error":"memory_op_unavailable","reason":"rpc memory.get failed: command_unresolved: memory.get"}
 ```
 
-브라우저에는 `net.fetch`가 있고(`default-capabilities.ts:1681`, `durableCapability`로 감싸인 채)
-런타임에는 없습니다. 그래서 붙여 두면 "San Francisco, CA" 같은 도시-only 입력이 **퇴행합니다.**
-
-**모듈은 준비돼 있습니다.** 사다리의 앞 두 칸(명시 ZIP, 주소에 박힌 ZIP)은 **네트워크가 필요 없어서**
-지금 런타임에서도 동작하고, 테스트 8개가 있습니다. R1이 오는 날 `execute` 블록만 바꾸면 됩니다.
-
-### 그리고 대안 소유자가 있습니다
-
-R1을 "런타임 호스트 프리미티브"로 설계한 것은 그쪽 확정이고 우리도 동의했습니다(왕복 0). 다만 그것이
-**인프라 egress 승인**에 걸려 있는 동안, 같은 능력이 **클라이언트 op**으로도 올 수 있습니다 —
-`fetchFromLua`가 이미 SDK에 있고, `dom.read_many`를 노출한 것과 같은 종류의 작업입니다.
-
-| 경로 | 소유 | 대가 | 승인 |
-|---|---|---|---|
-| 런타임 호스트 프리미티브 (현 R1) | 백엔드/인프라 | 왕복 0 | **egress 승인 필요** |
-| 클라이언트 op `net.fetch` | SDK | 왕복 1회 | 승인 불필요 — 능력이 이미 있음 |
-
-차이는 성능이 아니라 **누구의 IP로 나가느냐**입니다. 서버면 플랫폼 IP, 클라이언트면 사용자 IP로
-지오코더에 요청이 갑니다. 메모리를 기기에 남긴 R27의 판단과 같은 결의 **제품 결정**이라 우리가 단독으로
-고르지 않습니다 — 어느 쪽이든 알려주시면 그대로 붙입니다.
+`command_unresolved`는 **클라이언트가 등록한 적 없는 op**이 답하는 문자열입니다(`rpc-ops.ts:276`).
+선언으로 닿을 수 있는 자리가 아닙니다. `memory.*`는 확장의 op 표에 없습니다 — R27-R은 그대로
+열려 있습니다. 되돌렸고, 모듈과 테스트 7개는 op이 오는 날 한 줄로 붙습니다.
 
 ---
 
 ## 남는 차단
 
-- **R1** `net.fetch` — ZIP 지오코딩 + FX
+- ~~**R1** `net.fetch`~~ — **해소.** 우리 선언 오류였습니다(위). 런타임에서 동작 중.
 - **R26-R** 런타임에서 사이트별 사이트맵 접근 (이 문서)
-- **R27-R** 메모리 op의 클라이언트 구현 (이 문서)
+- **R27-R** 메모리 op의 클라이언트 구현 (재측정 확인, 위)
 
-게이트: `test:lua` **393** · `check:flows` **89** · `test:playground` 47 ·
-`test:commerce` 24/24 + 17/17. `kind: remote` **12 선언 / 고유 9종**.
+게이트: `test:lua` **395** · `check:flows` **89** · `test:playground` 47 ·
+`test:commerce` 24/24 + 17/17. `kind: remote` **고유 8종** — `AX_resolve_zip`이 빠졌습니다.

@@ -85,3 +85,22 @@ test('a geocoder that errors is reported as unreachable, not as no such place', 
 
   assert.equal(result.error, 'zip_geocode_unavailable');
 });
+
+test('the ZCTA layer key is matched by substring, because it carries a vintage', () => {
+  // Measured live: Photon resolved the point and the ZIP still came back empty. The Census response keys
+  // its layer as "2020 Census ZIP Code Tabulation Areas" — the vintage shifts between releases, so an
+  // exact key matches for one census and silently stops matching after the next.
+  const withNet = loadLuaModules(['_common/rpc/71_rpc_zip.lua']);
+  withNet.expose({
+    net: {
+      fetch: (url) => (url.includes('photon')
+        ? { ok: true, status: 200, json: { features: [{ geometry: { coordinates: [-122.42, 37.77] } }] } }
+        : { ok: true, status: 200, json: { result: { geographies: { '2020 Census ZIP Code Tabulation Areas': [{ BASENAME: '94102' }] } } } }),
+    },
+  });
+  const result = withNet.call('AX_RPC_ZIP.resolve', { address: 'San Francisco, CA' });
+  withNet.close();
+
+  assert.equal(result.zip_code, '94102');
+  assert.equal(result.source, 'geocode');
+});

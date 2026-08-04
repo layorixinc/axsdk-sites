@@ -93,3 +93,19 @@ test('an op the client registered but refuses is told apart from one it never ha
   assert.equal(flaky.call('AX_RPC_MEMORY.search', { regex: 'x' }).error, 'memory_unavailable');
   flaky.close();
 });
+
+test('a refusal carries the raw reason, not just a category', () => {
+  // "unavailable" on its own cost a whole round of diagnosis: it could not tell an op the client never
+  // registered from one we failed to DECLARE properly — and we made exactly that mistake once, granting
+  // `net.fetch` through `rpc.allow`, which is for ops and does not reach `net`.
+  const bare = loadLuaModules(['_common/rpc/70_rpc_memory.lua']);
+  assert.match(bare.call('AX_RPC_MEMORY.get', {}).reason, /no memory global/);
+  bare.close();
+
+  const refusing = loadLuaModules(['_common/rpc/70_rpc_memory.lua']);
+  refusing.expose({
+    memory: { get: () => { throw new Error('rpc memory.get failed: command_unresolved: memory.get'); } },
+  });
+  assert.match(refusing.call('AX_RPC_MEMORY.get', {}).reason, /command_unresolved/);
+  refusing.close();
+});

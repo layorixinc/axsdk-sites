@@ -43,39 +43,77 @@ end
 
 --- A GET whose failure is a VALUE, not an exception: an HTTP error is normal operation, and the caller has
 --- to tell it apart from "the capability is not here".
+---
+--- Returns `body, err, shape`. `shape` describes what actually came back — the response's type and its
+--- top-level keys — because a parse that finds nothing looks exactly like a place that does not exist, and
+--- guessing between those costs a live round trip every time.
 local function get(url)
   local ok, response = pcall(net.fetch, url, { method = "GET" })
-  if not ok then return nil, "unreachable" end
-  if type(response) ~= "table" then return nil, "unreachable" end
-  if response.ok == false then return nil, "http_error" end
-  return response.json, nil
+  if not ok then return nil, "unreachable", tostring(response):sub(1, 120) end
+  if type(response) ~= "table" then
+    return nil, "unreachable", "response is " .. type(response)
+  end
+  if response.ok == false then
+    return nil, "http_error", "status " .. tostring(response.status)
+  end
+  local keys = {}
+  for key in pairs(response) do keys[#keys + 1] = tostring(key) end
+  table.sort(keys)
+  local shape = "keys[" .. table.concat(keys, ",") .. "] json=" .. type(response.json)
+  -- Some transports hand the body back as text; decode it when the runtime can.
+  local body = response.json
+  if type(body) ~= "table" and type(response.body) == "string"
+    and type(json) == "table" and type(json.decode) == "function" then
+    local decoded_ok, decoded = pcall(json.decode, response.body)
+    if decoded_ok and type(decoded) == "table" then
+      body = decoded
+      shape = shape .. " decoded=body"
+    end
+  end
+  return body, nil, shape
 end
 
 --- Forward geocode: a point for a place name.
 function Z.point(address)
-  local body, err = get(Z.PHOTON_URL .. "?limit=1&q=" .. url_encode(address))
-  if err then return nil, err end
+  local body, err, shape = get(Z.PHOTON_URL .. "?limit=1&q=" .. url_encode(address))
+  if err then return nil, err, shape end
   local features = type(body) == "table" and body.features or nil
   local first = type(features) == "table" and features[1] or nil
-  if type(first) ~= "table" then return nil, nil end
+  if type(first) ~= "table" then return nil, nil, shape .. " features=" .. type(features) end
   local coordinates = type(first.geometry) == "table" and first.geometry.coordinates or nil
-  if type(coordinates) ~= "table" then return nil, nil end
+  if type(coordinates) ~= "table" then return nil, nil, shape .. " geometry=missing" end
   -- GeoJSON is [lon, lat].
-  return { lon = coordinates[1], lat = coordinates[2] }, nil
+  return { lon = coordinates[1], lat = coordinates[2] }, nil, shape
 end
 
 --- Reverse: the ZIP Code Tabulation Area a point falls in.
+---
+--- `layers=all` and a SUBSTRING match on the layer key, both copied from the durable ladder. The Census
+--- names its layer with a vintage prefix — "2020 Census ZIP Code Tabulation Areas" — which shifts between
+--- releases, so an exact key resolves for one census and then silently stops. Measured live: the point
+--- resolved and the ZIP still came back empty, for exactly this reason.
 function Z.zcta(lat, lon)
-  local url = Z.CENSUS_ZCTA_URL .. "?x=" .. tostring(lon) .. "&y=" .. tostring(lat)
-    .. "&benchmark=Public_AR_Current&vintage=Current_Current&layers=ZIP+Code+Tabulation+Areas&format=json"
-  local body, err = get(url)
-  if err then return nil, err end
+  local y, x = tonumber(lat), tonumber(lon)
+  if not y or not x then return nil, nil, "bad point" end
+  local url = Z.CENSUS_ZCTA_URL .. "?x=" .. tostring(x) .. "&y=" .. tostring(y)
+    .. "&benchmark=Public_AR_Current&vintage=Current_Current&layers=all&format=json"
+  local body, err, shape = get(url)
+  if err then return nil, err, shape end
   local result = type(body) == "table" and body.result or nil
   local geographies = type(result) == "table" and result.geographies or nil
-  local areas = type(geographies) == "table" and geographies["Zip Code Tabulation Areas"] or nil
-  local first = type(areas) == "table" and areas[1] or nil
-  if type(first) ~= "table" then return nil, nil end
-  return Z.extract(first.ZCTA5 or first.GEOID), nil
+  if type(geographies) ~= "table" then
+    return nil, nil, (shape or "") .. " geographies=" .. type(geographies)
+  end
+  for key, layer in pairs(geographies) do
+    if type(key) == "string" and key:lower():find("zip code tabulation", 1, true) and type(layer) == "table" then
+      for index = 1, #layer do
+        local entry = layer[index]
+        local zip = entry and Z.extract(entry.ZCTA5 or entry.BASENAME or entry.NAME)
+        if zip then return zip, nil, shape end
+      end
+    end
+  end
+  return nil, nil, (shape or "") .. " no zcta layer"
 end
 
 --- Resolves a US ZIP from an explicit code, an address that contains one, or a place name.
@@ -96,15 +134,22 @@ function Z.resolve(args)
     return { next = "collect", error = "zip_geocode_unavailable", address = address }
   end
 
-  local point, err = Z.point(address)
-  if err then return { next = "collect", error = "zip_geocode_unavailable", address = address } end
+  local point, err, shape = Z.point(address)
+  if err then
+    return { next = "collect", error = "zip_geocode_unavailable", address = address, observed = shape }
+  end
   if not point or not point.lat or not point.lon then
-    return { next = "collect", error = "resolve_failed", address = address }
+    -- What came back decides whether this is "no such place" or a shape we misread.
+    return { next = "collect", error = "resolve_failed", address = address, observed = shape }
   end
 
-  local zip, zcta_err = Z.zcta(point.lat, point.lon)
-  if zcta_err then return { next = "collect", error = "zip_geocode_unavailable", address = address } end
-  if not zip then return { next = "collect", error = "resolve_failed", address = address } end
+  local zip, zcta_err, zcta_shape = Z.zcta(point.lat, point.lon)
+  if zcta_err then
+    return { next = "collect", error = "zip_geocode_unavailable", address = address, observed = zcta_shape }
+  end
+  if not zip then
+    return { next = "collect", error = "resolve_failed", address = address, observed = zcta_shape }
+  end
 
   return { next = "collect", zip_code = zip, source = "geocode" }
 end

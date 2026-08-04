@@ -17,31 +17,36 @@ local function available()
 end
 
 --- Runs `fn` against the memory op set, or reports that the client has none.
+---
+--- The RAW reason travels with the refusal. "unavailable" on its own cost a whole round of diagnosis: it
+--- could not tell an op the client never registered from one we failed to declare properly, and we made
+--- exactly that mistake once already (`rpc.allow` grants OPS and does not reach `net`).
 local function call(fn)
   if not available() then
-    return nil, "memory_op_unavailable"
+    return nil, "memory_op_unavailable", "no memory global in this runtime"
   end
   local ok, value = pcall(fn)
   if not ok then
+    local raw = tostring(value or "")
+    local text = raw:lower()
     -- `command_unresolved` is what an unregistered op answers; anything else is the store's own failure.
-    local text = tostring(value or ""):lower()
     if text:find("command_unresolved", 1, true) or text:find("op_not_permitted", 1, true) then
-      return nil, "memory_op_unavailable"
+      return nil, "memory_op_unavailable", raw:sub(1, 160)
     end
-    return nil, "memory_unavailable"
+    return nil, "memory_unavailable", raw:sub(1, 160)
   end
-  return value, nil
+  return value, nil, nil
 end
 
 --- Every saved key, or one key's value when `key` is given.
 function Y.get(args)
   args = type(args) == "table" and args or {}
   local key = type(args.key) == "string" and args.key ~= "" and args.key or nil
-  local value, err = call(function()
+  local value, err, why = call(function()
     if key then return memory.get(key) end
     return memory.get()
   end)
-  if err then return { next = "error", ok = false, error = err } end
+  if err then return { next = "error", ok = false, error = err, reason = why } end
   return { next = "report", ok = true, memory_result = value }
 end
 
@@ -49,8 +54,8 @@ function Y.search(args)
   args = type(args) == "table" and args or {}
   local regex = type(args.regex) == "string" and args.regex or ""
   if regex == "" then return { next = "error", ok = false, error = "missing_regex" } end
-  local value, err = call(function() return memory.search(regex) end)
-  if err then return { next = "error", ok = false, error = err } end
+  local value, err, why = call(function() return memory.search(regex) end)
+  if err then return { next = "error", ok = false, error = err, reason = why } end
   return { next = "report", ok = true, memory_result = value }
 end
 
@@ -58,8 +63,8 @@ end
 function Y.set_bulk(args)
   args = type(args) == "table" and args or {}
   if type(args.memory) ~= "table" then return { next = "error", ok = false, error = "missing_memory" } end
-  local value, err = call(function() return memory.set_bulk(args.memory) end)
-  if err then return { next = "error", ok = false, error = err } end
+  local value, err, why = call(function() return memory.set_bulk(args.memory) end)
+  if err then return { next = "error", ok = false, error = err, reason = why } end
   return { next = "report", ok = true, memory_result = value }
 end
 
@@ -69,7 +74,7 @@ function Y.delete(args)
   if type(keys) ~= "table" or #keys == 0 then
     return { next = "error", ok = false, error = "missing_keys" }
   end
-  local value, err = call(function() return memory.delete(keys) end)
-  if err then return { next = "error", ok = false, error = err } end
+  local value, err, why = call(function() return memory.delete(keys) end)
+  if err then return { next = "error", ok = false, error = err, reason = why } end
   return { next = "report", ok = true, memory_result = value }
 end

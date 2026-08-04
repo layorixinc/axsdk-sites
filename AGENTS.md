@@ -705,6 +705,18 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   collapses whitespace (a live card put an `<img>` tag in its response-time text), and
   `V.candidate_summary` drops a "summary" that only repeats the name, rating, and badges the line
   already shows — Thumbtack's card summary is the whole card text.
+- **A capability declared in the wrong place is indistinguishable from a missing one — and we called it
+  missing.** `rpc.allow` grants OPS; network egress is a separate **`net:` block on the tool's
+  `execute`** (`allow` hosts, `maxCalls`, `timeoutMs`). Declaring `net.fetch` in `rpc.allow` granted
+  nothing, the call answered as if the runtime had no `net`, and we published "R1 has not landed". It had.
+  With the right block `resolve_zip` resolves "San Francisco, CA" → `94102` in the runtime, and the
+  planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
+  means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
+  gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **The Census names its ZCTA layer with a vintage** — `2020 Census ZIP Code Tabulation Areas`. Match the
+  layer key by SUBSTRING (`layers=all`), never the literal: an exact key resolves for one census and then
+  stops silently at the next release. The durable ladder already did this; the port copied the lookup
+  without the reason and produced a live `resolve_failed` while the geocoder was answering fine.
 - **`ax` reclaims storage in two steps.** Telemetry first; finished-session `:chat` keys only when
   usage is still over the mark (they were 4.7 MB of a 10.4 MB fill). The ACTIVE chat is never dropped.
 - **eBay search cards are `li.s-card[data-listingid]`.** The `.su-item-card[data-view]` markup it used

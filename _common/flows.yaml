@@ -2915,10 +2915,13 @@ flowTools:
 
   list_memory:
     description: List all saved memory keys.
-    # STAYS REMOTE until the client implements the ops. The runtime module is written and tested
-    # (`_common/rpc/70_rpc_memory.lua`), but `memory.*` is absent from the extension's op table
-    # (`rpc-ops.ts`) and a live probe answered `memory_op_unavailable` — wiring it would take a working
-    # feature away from the user. Wired read-first on purpose, which is how that was learned cheaply.
+    # STAYS REMOTE. Re-verified by calling it after the R1 correction, in case this was the same mistake —
+    # a capability declared in the wrong place rather than a missing one. It is not: with
+    # `rpc.allow: [memory.get]` the live answer was
+    #   `rpc memory.get failed: command_unresolved: memory.get`
+    # and `command_unresolved` is what an op the CLIENT never registered answers. `memory.*` is absent
+    # from the extension's op table; no declaration reaches it. The runtime module is written and tested
+    # (`_common/rpc/70_rpc_memory.lua`) and wires in one line the day the client ships the ops.
     execute: { kind: remote, tool: AX_get_memory }
     input: {}
     output:
@@ -3663,19 +3666,30 @@ flowTools:
 
   resolve_zip:
     description: Resolve a US ZIP code from an address string.
-    # STAYS REMOTE until R1 lands. The runtime module is written and tested
-    # (`_common/rpc/71_rpc_zip.lua`), and its two cheap rungs — an explicit ZIP and a ZIP inside the
-    # address — need no network at all. But the geocode rung does, and a live call answered
-    # `zip_geocode_unavailable`: the runtime has no `net` capability. The durable command reaches a
-    # geocoder from the BROWSER, so wiring this would lose "San Francisco, CA".
-    execute: { kind: remote, tool: AX_resolve_zip }
-    input:
-      address: tool.args.address
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.71_rpc_zip"]
+      # The host allow-list is the grant. `rpc.allow` is for OPS and does not reach `net` — declaring
+      # `net.fetch` there granted nothing, which is why our first probe concluded the capability was
+      # absent. Both hosts the ladder uses are named: Photon for the point, the Census ZCTA reverse for the
+      # ZIP that point falls in.
+      net:
+        allow: [photon.komoot.io, geocoding.geo.census.gov]
+        maxCalls: 2
+        timeoutMs: 8000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_ZIP.resolve(args)
+        end
     output:
       next: collect
       zip_code: result.zip_code
       zip_source: result.source
-      zip_status: { if: [{ var: result.zip_code }, { var: result.status }, "resolve_failed"] }
+      # `observed` is what the geocoder's response actually looked like. A parse that finds nothing is
+      # indistinguishable from a place that does not exist, and guessing between them costs a live run.
+      zip_status: { if: [{ var: result.zip_code }, { var: result.status }, { var: result.observed }] }
       error: result.error
     parameters:
       type: object

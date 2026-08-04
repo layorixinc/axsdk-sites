@@ -31,6 +31,10 @@ const backup = flag('backup', 'tools/.lua-store-backup.json');
 // outright: the turn produced zero parts and nothing ran. So the experiment leaves that layer alone and
 // uses the site key, which their loader reads too ("사이트 레이어가 같은 이름의 공통 모듈을 덮고").
 const storeKey = flag('key', ':thumbtack');
+// The SDK gave module overlays a store of their own (`50a1648`) after our diagnosis: `axsdk:lua` keeps
+// the raw Lua bundles `ax sync` writes, and this one carries JSON `{module: source}`. Same layer rules,
+// same `state.lua` field — so both features can finally hold the same layer at once.
+const store = flag('store', 'axsdk:lua-modules');
 const MODULE = '_common.71_rpc_zip';
 // Answers a value no geocoder would produce, so the source of the answer is never in doubt.
 const OVERRIDE = `AX_RPC_ZIP = AX_RPC_ZIP or {}
@@ -63,25 +67,26 @@ try {
         out[storeKey] = { encoding, bytes: String(value).length };
       }
       return out;
-    }`, ['axsdk:lua']);
+    }`, [store]);
     console.log(JSON.stringify(report, null, 1));
   } else if (command === 'overlay') {
     const saved = await inContext(`async function (key) {
       const got = await chrome.storage.local.get(key);
       return got?.[key] ?? null;
-    }`, ['axsdk:lua']);
-    if (saved === null) throw new Error('no axsdk:lua in the store; run `node tools/ax.mjs sync <site>` first');
-    await writeFile(backup, typeof saved === 'string' ? saved : JSON.stringify(saved), 'utf8');
+    }`, [store]);
+    // The modules store starts empty, which is a legitimate state to restore to.
+    await writeFile(backup, saved === null ? '' : (typeof saved === 'string' ? saved : JSON.stringify(saved)), 'utf8');
 
     const result = await inContext(`async function (key, moduleName, source, which) {
       const got = await chrome.storage.local.get(key);
       const parsed = typeof got?.[key] === 'string' ? JSON.parse(got[key]) : got?.[key];
       const lua = { ...(parsed?.state?.lua ?? {}) };
-      // Their format: the store VALUE is JSON mapping module name to source.
+      // The VALUE is JSON mapping module name to source. In the dedicated store that is the ONLY
+      // encoding, so nothing else is reading it and nothing gets clobbered.
       lua[which] = JSON.stringify({ [moduleName]: source });
       await chrome.storage.local.set({ [key]: JSON.stringify({ state: { lua }, version: 0 }) });
       return { overlaidKey: which, keys: Object.keys(lua) };
-    }`, ['axsdk:lua', MODULE, OVERRIDE, storeKey]);
+    }`, [store, MODULE, OVERRIDE, storeKey]);
     console.log(JSON.stringify(result));
     console.log(`backup written to ${backup}; run \`restore\` (or \`ax sync\`) afterwards`);
   } else if (command === 'restore') {
@@ -89,7 +94,7 @@ try {
     const result = await inContext(`async function (key, value) {
       await chrome.storage.local.set({ [key]: value });
       return { restored: true, bytes: value.length };
-    }`, ['axsdk:lua', saved]);
+    }`, [store, saved]);
     console.log(JSON.stringify(result));
   } else {
     throw new Error(`unknown command "${command}" (inspect | overlay | restore)`);

@@ -54,11 +54,16 @@ test('a delete with no keys deletes nothing', () => {
   assert.equal(calls.length, before, 'nothing may be sent');
 });
 
-test('a write carries the entries through unchanged', () => {
+test('an empty value is a delete, in the same call as the saves', () => {
+  // This test used to assert the table went through UNCHANGED — a shape we invented before the ops
+  // existed, which then passed for weeks while the real client would have answered `bad_params`. The
+  // contract is `{ entries: [{ key, value? }] }`, and leaving `value` out is how a key is removed.
   const result = lua.call('AX_RPC_MEMORY.set_bulk', { memory: { home: 'Seoul', work: '' } });
 
   assert.equal(result.ok, true);
-  assert.deepEqual(calls.at(-1)[1], { home: 'Seoul', work: '' });
+  const sent = calls.at(-1)[1];
+  assert.deepEqual(sent.find((entry) => entry.key === 'home'), { key: 'home', value: 'Seoul' });
+  assert.deepEqual(sent.find((entry) => entry.key === 'work'), { key: 'work' });
 });
 
 test('a client with no memory ops is reported, not crashed into', () => {
@@ -108,4 +113,37 @@ test('a refusal carries the raw reason, not just a category', () => {
   });
   assert.match(refusing.call('AX_RPC_MEMORY.get', {}).reason, /command_unresolved/);
   refusing.close();
+});
+
+test('writes are sent in the shape the client actually accepts', () => {
+  // Twice wrong, twice for the same reason: we read the CLIENT handler (`rpc-ops.ts:331`) and encoded its
+  // params object, `{ entries: [...] }`. But Lua does not build the params object — the binding is
+  // POSITIONAL and the runtime wraps it. `docs/rpc_lua_authoring.md` §4 is the signature that matters:
+  //
+  //   memory | get(key?) · search(regex) · set_bulk(entries) · delete(key)
+  //
+  // Sending the wrapper produced a live `bad_params`, which reads exactly like a broken op. `get` and
+  // `search` were already positional and always worked, which is what hid it.
+  const calls = [];
+  const lua = loadLuaModules(['_common/rpc/70_rpc_memory.lua']);
+  lua.expose({
+    memory: {
+      set_bulk: (entries) => { calls.push(['set_bulk', entries]); return true; },
+      delete: (key) => { calls.push(['delete', key]); return true; },
+    },
+  });
+
+  lua.call('AX_RPC_MEMORY.set_bulk', { memory: { home: 'Seoul' } });
+  // An absent value deletes that key, so a multi-key delete is ONE round trip, not one per key.
+  lua.call('AX_RPC_MEMORY.delete', { keys: ['home', 'work'] });
+  lua.close();
+
+  const written = calls[0][1];
+  assert.ok(Array.isArray(written), `set_bulk takes the array itself, got ${JSON.stringify(written)}`);
+  assert.deepEqual(written, [{ key: 'home', value: 'Seoul' }]);
+
+  const removed = calls.at(-1);
+  assert.equal(removed[0], 'set_bulk', 'a multi-key delete rides set_bulk, in one call');
+  assert.deepEqual(removed[1].map((entry) => entry.key).sort(), ['home', 'work']);
+  assert.ok(removed[1].every((entry) => entry.value === undefined), 'no value means remove');
 });

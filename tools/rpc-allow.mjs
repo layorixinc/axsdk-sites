@@ -31,12 +31,17 @@ export const OPS = [
   'memory.set_bulk',
   'memory.search',
   'memory.delete',
+  // The sitemap of the SITE the tab is on — a different document from the app package's own sitemap,
+  // which is why the runtime-side version of this was withdrawn.
+  'sitemap.search_site',
 ];
 
 /** Reads only: a batch that could hide a side effect could not promise order or atomicity. */
 export const BATCHABLE = new Set([
   'dom.exists', 'dom.get_text', 'dom.get_attr', 'dom.get_innerHTML', 'dom.get_outerHTML',
   'dom.query_all', 'dom.get_location_href', 'dom.get_form_field_names', 'dom.get_form_field_value',
+  // Layer F reads batch too; the writes deliberately do not (`rpc-ops.ts` BATCHABLE, 12 entries).
+  'memory.get', 'memory.search', 'sitemap.search_site',
 ]);
 
 /**
@@ -48,7 +53,7 @@ export const COMPOSED = {
   'nav.wait_for_navigation': 'dom.get_location_href',
 };
 
-const CALL = /\b(dom|nav|page|memory)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+const CALL = /\b(dom|nav|page|memory|sitemap)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
 
 /** Every op a script needs granted: what it calls, with composed helpers resolved to the op they poll. */
 function requiredOps(lua) {

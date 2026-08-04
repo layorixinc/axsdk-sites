@@ -25,9 +25,15 @@ flows:
       requestText: null
       sitemap_hits: null
     nodes:
+      # `id:`, not `run:`. The navigation port replaced the shared `open_site` remote tool with one thin
+      # runtime entry per flow, because a runtime tool is INLINED by the flow that names it and `run:`
+      # resolves only against `kind: remote` actions. This overlay owns the whole `bluemoonsoft` flow, so
+      # the base's corrected node never reaches this site — it kept pointing at a tool that no longer
+      # exists and the document failed to compile: "references missing action: open_site". Every request
+      # on bluemoonsoft.com answered with a flow-configuration error until this line was fixed.
       enter:
-        kind: action
-        run: open_site
+        kind: action_contract
+        id: enter_bluemoonsoft
         inputSelector:
           - site
         next:

@@ -2915,15 +2915,19 @@ flowTools:
 
   list_memory:
     description: List all saved memory keys.
-    # STAYS REMOTE. Re-verified by calling it after the R1 correction, in case this was the same mistake —
-    # a capability declared in the wrong place rather than a missing one. It is not: with
-    # `rpc.allow: [memory.get]` the live answer was
-    #   `rpc memory.get failed: command_unresolved: memory.get`
-    # and `command_unresolved` is what an op the CLIENT never registered answers. `memory.*` is absent
-    # from the extension's op table; no declaration reaches it. The runtime module is written and tested
-    # (`_common/rpc/70_rpc_memory.lua`) and wires in one line the day the client ships the ops.
-    execute: { kind: remote, tool: AX_get_memory }
-    input: {}
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.70_rpc_memory"]
+      rpc:
+        allow: [memory.get]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.get(args)
+        end
     output:
       next: { if: [{ var: result.error }, "error", "report"] }
       memory_result: result
@@ -2933,7 +2937,19 @@ flowTools:
 
   get_memory:
     description: Read one exact saved memory key.
-    execute: { kind: remote, tool: AX_get_memory }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.70_rpc_memory"]
+      rpc:
+        allow: [memory.get]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.get(args)
+        end
     input:
       key: tool.args.key
     output:
@@ -2948,7 +2964,19 @@ flowTools:
 
   search_memory:
     description: Search saved memory with one case-insensitive regex and return bounded Markdown.
-    execute: { kind: remote, tool: AX_search_memory }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.70_rpc_memory"]
+      rpc:
+        allow: [memory.search]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.search(args)
+        end
     input:
       regex: tool.args.regex
     output:
@@ -2963,7 +2991,19 @@ flowTools:
 
   find_delete_candidates:
     description: Find exact memory key candidates for an explicit category deletion request.
-    execute: { kind: remote, tool: AX_search_memory }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.70_rpc_memory"]
+      rpc:
+        allow: [memory.search]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.search(args)
+        end
     input:
       regex: tool.args.regex
     output:
@@ -3000,7 +3040,19 @@ flowTools:
 
   delete_memory:
     description: Delete one or more exact GLOBAL memory keys selected by the user.
-    execute: { kind: remote, tool: AX_delete_memory }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.70_rpc_memory"]
+      rpc:
+        allow: [memory.set_bulk]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.delete(args)
+        end
     input:
       keys: tool.args.delete_keys
     output:
@@ -3023,7 +3075,19 @@ flowTools:
 
   set_memory:
     description: Set final memory values in one call. Non-empty Markdown saves; an empty string deletes.
-    execute: { kind: remote, tool: AX_set_memory_bulk }
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.70_rpc_memory"]
+      rpc:
+        allow: [memory.set_bulk]
+        opTimeoutMs: 2000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.set_bulk(args)
+        end
     input:
       memory: tool.args.memory
     output:
@@ -3262,20 +3326,29 @@ flowTools:
 
   sitemap_search:
     description: Search the current site's sitemap for pages matching a case-insensitive regex; returns matching lines (each with a path).
-    # STAYS REMOTE, and the reason is the data, not the mechanism. `implementation: sitemap.search`
-    # searches the APP PACKAGE's sitemap — measured live on production, that is the extension's own pages
-    # (`/`, `/settings`, `/help`). `AX_sitemap_search` searches `sitesStore.currentSitemap`, the sitemap of
-    # the SITE the browser is on, which is what a "find me the product page" request needs. Same name,
-    # different data: adopting it returned `sitemap_hits: []` for every bluemoonsoft request and the flow
-    # fell back to /front/main every time, silently. See RPC_LUA_RUNTIME_REQUESTS_14.md.
-    execute: { kind: remote, tool: AX_sitemap_search }
-    input:
-      regex: tool.args.regex
-      limit: tool.args.limit
+    # The runtime's own `sitemap.search` reads the APP PACKAGE's sitemap — measured live, the extension's
+    # own `/`, `/settings`, `/help` — so adopting it once returned no hits for every bluemoonsoft request
+    # and the flow fell back to /front/main in silence. `sitemap.search_site` is the CLIENT op that reads
+    # the other document: the sitemap of the domain the tab is on. Same intent, right data.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: ["_common.72_rpc_sitemap"]
+      rpc:
+        allow: [sitemap.search_site]
+        opTimeoutMs: 4000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_SITEMAP.search(args)
+        end
     output:
       next: { if: [{ var: result.error }, "error", "go"] }
       sitemap_hits: result.chunks
-      error: result.error
+      # The raw reason rides along. A category alone cannot separate an op the client never registered
+      # from one we called wrongly, and a live `sitemap_unavailable` said nothing about which.
+      error: { if: [{ var: result.reason }, { var: result.reason }, { var: result.error }] }
     parameters:
       type: object
       additionalProperties: false

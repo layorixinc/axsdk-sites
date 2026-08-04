@@ -55,14 +55,19 @@ test('a tool with no rpc block is not audited', () => {
 
 test('the op vocabulary matches what the server reports', () => {
   // Pinned from a live `GET /axsdk/v2/lua/ops` (version sha256:0bb4bf33418e), then extended by the
-  // platform's 12th reply with `dom.click_text` and `dom.read_many`. D10: the vocabulary is a server fact,
+  // platform's 12th reply with `dom.click_text` and `dom.read_many`, and now by layer F — the four
+  // memory ops plus `sitemap.search_site`, shipped in `a8db22a`. D10: the vocabulary is a server fact,
   // not a document fact — this list is a mirror and the live check is what re-validates it.
-  assert.equal(OPS.length, 22);
+  assert.equal(OPS.length, 23);
   assert.ok(OPS.includes('dom.click_text'));
   assert.ok(OPS.includes('dom.read_many'));
   for (const op of ['memory.get', 'memory.set_bulk', 'memory.search', 'memory.delete']) {
     assert.ok(OPS.includes(op), op);
   }
+  // The SITE's sitemap. `sitemap.search` — the app package's own — is deliberately NOT here: we adopted
+  // that one once and every answer was the extension's own pages.
+  assert.ok(OPS.includes('sitemap.search_site'));
+  assert.ok(!OPS.includes('sitemap.search'), 'the app-package sitemap op is not ours to call');
   assert.deepEqual(COMPOSED['dom.wait_for_selector'], 'dom.exists');
   assert.deepEqual(COMPOSED['nav.wait_for_navigation'], 'dom.get_location_href');
   for (const polled of Object.values(COMPOSED)) assert.ok(OPS.includes(polled), `${polled} must be a real op`);

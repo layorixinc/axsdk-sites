@@ -826,16 +826,59 @@ test('the cart module stays free of any way to order', () => {
   );
 });
 
-test('the sitemap search stays remote, because it needs the SITE\'s sitemap', () => {
-  // `implementation: sitemap.search` searches the APP PACKAGE's sitemap. Measured live on production that
-  // is the extension's own pages (`/`, `/settings`, `/help`), while `AX_sitemap_search` searches
-  // `sitesStore.currentSitemap` — the sitemap of the site the browser is on, which is what "find me the
-  // product page" needs. Adopting it returned an empty hit list for every request and the flow fell back to
-  // the home page, silently, which is the worst shape a wrong answer can take.
+test('the sitemap search reads the SITE\'s sitemap, not the app package\'s', () => {
+  // The runtime's own `implementation: sitemap.search` reads the APP PACKAGE's sitemap. Measured live on
+  // production that is the extension's own pages (`/`, `/settings`, `/help`), so adopting it returned an
+  // empty hit list for every request and the flow fell back to the home page in silence — the worst
+  // shape a wrong answer can take. The tool stayed remote until the CLIENT shipped
+  // `sitemap.search_site`, which reads `sitesStore.currentSitemap`: the sitemap of the domain the tab is
+  // on. Same intent, right document. What this pins is WHICH op, because the names differ by one word.
   const common = parseFlow('_common/flows.yaml');
   const tool = common.flowTools?.sitemap_search ?? {};
 
-  assert.equal(tool.execute?.kind, 'remote');
-  assert.equal(tool.execute?.tool, 'AX_sitemap_search');
+  assert.equal(tool.execute?.kind, 'runtime');
+  assert.deepEqual(tool.execute?.rpc?.allow, ['sitemap.search_site']);
+  assert.ok(
+    !JSON.stringify(tool.execute).includes('"sitemap.search"'),
+    'the app-package sitemap op must not come back',
+  );
   assert.equal(tool.output?.sitemap_hits, 'result.chunks');
+});
+
+test('every node action reference resolves to a tool that exists', () => {
+  // A whole site was dead and every gate was green. The navigation port replaced the shared `open_site`
+  // remote tool with one thin runtime entry per flow, and `bluemoonsoft/flows.yaml` — which owns its
+  // `bluemoonsoft` flow outright, so the base's corrected node never reaches that domain — kept
+  // `run: open_site`. Live, every request on bluemoonsoft.com answered:
+  //
+  //   flows.bluemoonsoft.nodes.enter.run references missing action: open_site
+  //
+  // Nothing here checked references, so the suite passed 89/89 over a document that cannot compile. The
+  // site overlays are exactly where this hides: they replace a flow wholesale, so a base fix skips them.
+  const files = ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml']
+    .filter((path) => existsSync(new URL(path, root)));
+
+  const defined = new Set(Object.keys(parseFlow('_common/flows.yaml').flowTools ?? {}));
+  for (const path of files) {
+    const document = parseFlow(path);
+    for (const name of Object.keys(document.flowTools ?? {})) defined.add(name);
+  }
+
+  const missing = [];
+  for (const path of files) {
+    const document = parseFlow(path);
+    for (const [flowId, flow] of Object.entries(document.flows ?? {})) {
+      for (const [nodeId, node] of Object.entries(flow?.nodes ?? {})) {
+        // `run:` names a shared remote action; `id:` inlines a runtime one. Both must exist.
+        for (const key of ['run', 'id']) {
+          const reference = node?.[key];
+          if (typeof reference === 'string' && !defined.has(reference)) {
+            missing.push(`${path} flows.${flowId}.nodes.${nodeId}.${key} -> ${reference}`);
+          }
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(missing, [], `unresolvable action references:\n${missing.join('\n')}`);
 });

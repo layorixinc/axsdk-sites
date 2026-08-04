@@ -59,22 +59,50 @@ function Y.search(args)
   return { next = "report", ok = true, memory_result = value }
 end
 
---- Writes. A non-empty value saves; an empty string deletes — the contract the flow already states.
+--- Writes. The binding is POSITIONAL — `set_bulk(entries)` per `docs/rpc_lua_authoring.md` §4 — and the
+--- runtime wraps it into the params object the client reads. Passing the wrapper ourselves produced a
+--- live `bad_params`. An ABSENT value deletes that key, so saving and deleting are the same op and a
+--- multi-key delete is ONE round trip. An empty string is a delete too, as the flow tells the user.
+local function write(entries)
+  if #entries == 0 then return nil, "missing_memory", nil end
+  return call(function() return memory.set_bulk(entries) end)
+end
+
 function Y.set_bulk(args)
   args = type(args) == "table" and args or {}
   if type(args.memory) ~= "table" then return { next = "error", ok = false, error = "missing_memory" } end
-  local value, err, why = call(function() return memory.set_bulk(args.memory) end)
+  local entries = {}
+  for key, value in pairs(args.memory) do
+    if type(key) == "string" and key ~= "" then
+      -- Only a non-empty string is a save; anything else means remove, which is `value` left out.
+      if type(value) == "string" and value ~= "" then
+        entries[#entries + 1] = { key = key, value = value }
+      else
+        entries[#entries + 1] = { key = key }
+      end
+    end
+  end
+  local value, err, why = write(entries)
   if err then return { next = "error", ok = false, error = err, reason = why } end
   return { next = "report", ok = true, memory_result = value }
 end
 
+--- `memory.delete(key)` takes a SINGLE key. A list therefore goes through `set_bulk` with the values
+--- left out: same effect, one round trip instead of one per key.
 function Y.delete(args)
   args = type(args) == "table" and args or {}
   local keys = args.keys or args.delete_keys
   if type(keys) ~= "table" or #keys == 0 then
     return { next = "error", ok = false, error = "missing_keys" }
   end
-  local value, err, why = call(function() return memory.delete(keys) end)
-  if err then return { next = "error", ok = false, error = err, reason = why } end
+  local entries = {}
+  for index = 1, #keys do
+    local key = keys[index]
+    if type(key) == "string" and key ~= "" then entries[#entries + 1] = { key = key } end
+  end
+  local value, err, why = write(entries)
+  if err then
+    return { next = "error", ok = false, error = err == "missing_memory" and "missing_keys" or err, reason = why }
+  end
   return { next = "report", ok = true, memory_result = value }
 end

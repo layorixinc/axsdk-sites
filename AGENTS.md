@@ -713,6 +713,19 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **The host has `rpc.now()` and `rpc.sleep(ms)` — no round trip, no `maxCalls`.** Our quote module's own
+  comment asserted the opposite ("there is no wait op: the runtime's vocabulary is reads and writes") and
+  paid for every pause with up to two `dom.exists` reads issued for their latency alone. At a measured
+  ~460ms per op that is a second of the deadline bought at full price, several times per step. Both are
+  listed in `docs/rpc_lua_authoring.md` §4 under host primitives, and the test stub had been exposing
+  them all along — nobody looked.
+- **A round-trip COUNT is a proxy for the deadline, and proxies drift.** `Q.OP_BUDGET = 95` was calibrated
+  on an assumed ~1s per op; the measured median is 461ms, so the wizard stopped with more than half of
+  its 120s unused — `quote_budget_spent` at six steps of a seven-step form. With `rpc.now()` the budget
+  is time (`Q.TIME_BUDGET_MS`), the count survives only as a fallback for a runtime with no clock, and a
+  live run now drives eight steps. Two numbers in two files must agree, so `check:flows` pins the budget
+  under the DRIVING tool's declared `deadlineMs` — and it caught a real mismatch the first time it ran
+  (the submit tool declares 90s, the driver 120s).
 - **`ax sync` turns the remote site loader OFF, so anything it does not deliver is simply ABSENT — with no
   error.** The site record it leaves is a stub (`sitemapMd: 0`, `flowsYaml: 0`, `scripts: 0`, `errors: []`)
   because nothing was ever fetched. Lua and flows are delivered; the sitemap was not, so

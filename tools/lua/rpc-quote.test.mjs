@@ -32,6 +32,9 @@ after(() => lua.close());
 // suite proves it by not helping.
 
 const ACTIVE = '[data-test="request-flow-step--active"]';
+// Mirrors the module. A test that moves this must put it back, or every later test runs on a budget it
+// never chose — and the flow's own `deadlineMs` is what it has to stay under, which conformance pins.
+const TIME_BUDGET_MS = 100000;
 const PRO_URL = 'https://www.thumbtack.com/ca/san-francisco/house-cleaning/maxima/service/583813840609927168';
 
 /** One request-flow step, expressed the way the page renders it. */
@@ -139,18 +142,21 @@ function quotePage({ href = PRO_URL, steps = [], cta = 'Request estimate', ctaAf
   return page;
 }
 
+// Hoisted so a test can install the stub, change the RUNTIME (e.g. remove the host timer), and still
+// issue the identical call. Comparing two runs with different arguments compares two different paths.
+const QUOTE_ARGS = {
+  quote_url: PRO_URL,
+  user_requirements: 'one-time house cleaning',
+  submit_first_name: 'AX',
+  submit_last_name: 'Tester',
+  submit_email: 'thumbtack-test@example.com',
+  submit_phone: '415-555-0123',
+  zip_code: '94101',
+};
+
 const drive = (page, args = {}) => {
   installRpcStub(lua, page);
-  return lua.call('AX_RPC_THUMBTACK.request_quote', {
-    quote_url: PRO_URL,
-    user_requirements: 'one-time house cleaning',
-    submit_first_name: 'AX',
-    submit_last_name: 'Tester',
-    submit_email: 'thumbtack-test@example.com',
-    submit_phone: '415-555-0123',
-    zip_code: '94101',
-    ...args,
-  });
+  return lua.call('AX_RPC_THUMBTACK.request_quote', { ...QUOTE_ARGS, ...args });
 };
 
 const clicks = (page) => page.ops.filter((entry) => entry.op === 'dom.click').map((entry) => entry.params.selector);
@@ -609,13 +615,16 @@ test('a dialog that disappears mid-form is its own answer', () => {
 });
 
 test('a form longer than the budget is reported, not killed', () => {
-  // The platform's ceiling is 120s and an op costs ~1s on the current client, so a long enough form cannot
-  // finish. Being killed mid-run surfaces `lua rpc execution deadline exceeded before dom.exists`, which
-  // tells the user nothing and the operator almost nothing. Stopping first does both.
+  // The platform's ceiling is 120s, so a long enough form cannot finish. Being killed mid-run surfaces
+  // `lua rpc execution deadline exceeded before dom.exists`, which tells the user nothing and the
+  // operator almost nothing. Stopping first does both. The budget is TIME now, so the fixture spends it:
+  // `opCostMs` is the measured worst case (910ms), not a count.
   const many = [];
   for (let index = 0; index < 14; index += 1) many.push(step(`Question ${index}`, { choices: ['A full day', 'Painting'] }));
   many.push(finalStep());
   const page = quotePage({ steps: many });
+  page.clockMs = 0;
+  page.opCostMs = 910;
   const result = drive(page);
 
   assert.equal(result.quote_error, 'quote_budget_spent');
@@ -752,4 +761,69 @@ test('an open dialog with no active step is not reported as closed', () => {
 
   assert.notEqual(result.quote_status, 'dialog_closed');
   assert.match(result.quote_message ?? '', /dialog=true/);
+});
+
+test('a wait sleeps instead of buying latency with round trips', () => {
+  // `pace()` was written on a false premise, stated in its own comment: "there is no wait op: the
+  // runtime's vocabulary is reads and writes". The host has `rpc.sleep(ms)` — no round trip, no
+  // `maxCalls` — and `rpc.now()` beside it. Every pace was two reads spent for their latency alone, at a
+  // measured ~460ms each, on a budget that then stopped the form before it finished.
+  const page = quotePage({ steps: [step('How much help?', { choices: ['A full day'] }), finalStep()] });
+  drive(page);
+
+  assert.ok(page.sleeps.length > 0, 'a wait must go through rpc.sleep');
+
+  // `dom.exists` has legitimate uses, so the proof is comparative: the SAME drive on a runtime with no
+  // host timer must spend more round trips, and the difference is what pacing used to cost. It has to be
+  // the same `drive()` — comparing two runs with different arguments compares two different paths.
+  const fallback = quotePage({ steps: [step('How much help?', { choices: ['A full day'] }), finalStep()] });
+  // The stub is installed first: `installRpcStub` re-exposes `rpc`, so removing the timer before it
+  // would simply be undone.
+  installRpcStub(lua, fallback);
+  lua.define('rpc.sleep = nil');
+  try {
+    lua.call('AX_RPC_THUMBTACK.request_quote', QUOTE_ARGS);
+  } finally {
+    lua.define('rpc.sleep = function() return true end');
+  }
+  assert.equal(fallback.sleeps.length, 0, 'the fallback must not have slept');
+  assert.ok(
+    page.ops.length < fallback.ops.length,
+    `sleeping must cost fewer round trips than pacing: ${page.ops.length} vs ${fallback.ops.length}`,
+  );
+});
+
+test('the budget is time, not a count of round trips', () => {
+  // The count was a proxy for the deadline, calibrated when we believed an op cost ~1s. Measured, the
+  // median is ~0.46s, so 95 round trips is under half of the 120s ceiling and the form stopped with the
+  // deadline half unused. A clock makes the proxy unnecessary: stop when there is no time for another
+  // step, whatever an op happens to cost today.
+  const page = quotePage({ steps: [step('How much help?', { choices: ['A full day'] }), finalStep()] });
+  // Ops and sleeps both advance this clock, so the budget runs out the way it does live.
+  page.clockMs = 0;
+  lua.define(`AX_RPC_QUOTE.TIME_BUDGET_MS = 1`);
+  let result;
+  try {
+    result = drive(page);
+  } finally {
+    lua.define(`AX_RPC_QUOTE.TIME_BUDGET_MS = ${TIME_BUDGET_MS}`);
+  }
+
+  assert.equal(result.quote_error, 'quote_budget_spent');
+  // And it stopped on TIME: nowhere near the old ninety-five.
+  assert.ok(page.ops.length < 40, `must stop on the clock, spent ${page.ops.length} round trips`);
+});
+
+test('a long form is no longer stopped by an op count the deadline never needed', () => {
+  // The same form that ran out at six steps. With time as the budget and a clock that has barely moved,
+  // the wizard must keep going past the old cap rather than stop with the deadline unused.
+  const many = [];
+  for (let index = 0; index < 12; index += 1) many.push(step(`Question ${index}`, { choices: ['A full day'] }));
+  many.push(finalStep());
+  const page = quotePage({ steps: many });
+  page.clockMs = 0;
+  const result = drive(page);
+
+  assert.equal(result.next, 'submit', `stopped early: ${result.quote_error ?? result.quote_status}`);
+  assert.ok(page.ops.length > 95, `the old cap must no longer bind, spent ${page.ops.length}`);
 });

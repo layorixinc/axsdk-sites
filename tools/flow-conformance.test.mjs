@@ -882,3 +882,30 @@ test('every node action reference resolves to a tool that exists', () => {
 
   assert.deepEqual(missing, [], `unresolvable action references:\n${missing.join('\n')}`);
 });
+
+test('the quote budget stays under the deadline the flow declares', () => {
+  // Two numbers in two files that must agree, which is the shape every drift bug here has taken. The
+  // module stops itself on `TIME_BUDGET_MS`; the platform kills the call at the node's `deadlineMs` with
+  // `deadline exceeded before dom.exists`, a sentence that helps nobody. So the budget must be lower —
+  // by enough margin to compose and return an answer, not merely lower by one millisecond.
+  const source = readFileSync(new URL('_common/rpc/65_rpc_quote.lua', root), 'utf8');
+  const budget = Number(/Q\.TIME_BUDGET_MS\s*=\s*(\d+)/.exec(source)?.[1]);
+  assert.ok(Number.isFinite(budget), 'the module must declare a time budget');
+
+  const common = parseFlow('_common/flows.yaml');
+  // Only the tool that RUNS the wizard loop. `submit_quote` loads the same module for a handful of ops
+  // and declares a much shorter deadline (90s); holding the driver's budget against that one would fail
+  // for a tool that never consults it.
+  const deadlines = Object.values(common.flowTools ?? {})
+    .filter((tool) => String(tool.execute?.lua ?? '').includes('request_quote'))
+    .map((tool) => tool.execute?.rpc?.deadlineMs)
+    .filter((value) => typeof value === 'number');
+
+  assert.ok(deadlines.length > 0, 'the driving quote tool must declare its deadline');
+  for (const deadline of deadlines) {
+    assert.ok(
+      budget <= deadline - 15000,
+      `budget ${budget}ms leaves no room under a ${deadline}ms deadline`,
+    );
+  }
+});

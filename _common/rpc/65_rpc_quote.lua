@@ -52,33 +52,62 @@ local function trim(value)
   return B.non_empty(value)
 end
 
---- Round trips spent by this invocation.
+--- What this invocation is allowed to spend, in MILLISECONDS.
 ---
---- The platform's deadline is 120s and it refuses a document that asks for more; an op costs about a second
---- on the current client (their measurement: the second is the client noticing the frame, not transport).
---- So a long enough form CANNOT finish, and being killed mid-run surfaces
---- `deadline exceeded before dom.exists` — a sentence that explains nothing to anyone. Counting is exact,
---- needs no clock, and turns the kill into a report. The batch op collapses several reads into one round
---- trip, so this budget also stops shrinking the moment the client implements it.
-Q.OP_BUDGET = 95
+--- It used to be a count of round trips: 95, chosen when we believed an op cost about a second, so that a
+--- long form would stop and report instead of being killed mid-run with `deadline exceeded before
+--- dom.exists`. The report was the right idea; the number was a PROXY for the deadline and it was
+--- miscalibrated. Measured on the live channel, an op's median is ~460ms and the gap between answers
+--- ~510ms, so ninety-five round trips is under half of the platform's 120s ceiling — the wizard stopped
+--- with most of its deadline unused, six steps into a seven-step form.
+---
+--- `rpc.now()` removes the need to guess. Stop when there is no time left for another step, whatever an
+--- op happens to cost today. Kept under the flow's declared `deadlineMs` by enough margin to return an
+--- answer rather than be killed while composing one; `check:flows` pins the two against each other,
+--- because a constant that must agree with a number in another file is a constant that drifts.
+Q.TIME_BUDGET_MS = 100000
+
+--- Round trips spent. No longer the budget — still reported, because "how many trips did that take" is
+--- the first question about a slow run, and it is what makes a batch's saving visible.
 Q.spent = 0
+Q.started_at = nil
+
+local function clock()
+  return (type(rpc) == "table" and type(rpc.now) == "function") and rpc.now() or nil
+end
 
 local function charge()
   Q.spent = Q.spent + 1
 end
 
+--- True once there is no time for another step.
+---
+--- Falls back to the old count when the host has no clock, so a runtime without `rpc.now` still stops
+--- itself rather than being killed. The fallback keeps the original 95 on purpose: without a clock we are
+--- guessing again, and the safe guess is the one we have already run.
+Q.OP_BUDGET = 95
 local function over_budget()
-  return Q.spent >= Q.OP_BUDGET
+  local now = clock()
+  if not now or not Q.started_at then return Q.spent >= Q.OP_BUDGET end
+  return (now - Q.started_at) >= Q.TIME_BUDGET_MS
 end
 
---- There is no wait op: the runtime's vocabulary is reads and writes. Pacing is therefore a bounded
---- series of real round trips, which is what the durable `dom.wait` cost anyway. Naming it `pace` keeps
---- it from being read as a timer it is not.
+--- Waits without buying the wait with round trips.
+---
+--- This function's own comment used to say "there is no wait op: the runtime's vocabulary is reads and
+--- writes", and paid for a pause with up to two `dom.exists` reads issued for their latency. That was
+--- never true of the HOST: `rpc.sleep(ms)` costs no round trip and no `maxCalls` (it does spend the
+--- deadline, which is now what the budget measures). At a measured ~460ms per op, every pace was about a
+--- second of the deadline bought at full price.
 local function pace(ms)
-  -- Capped at two round trips. At roughly a second each, a "300ms settle" spelled as three reads was
-  -- three seconds of the tool's deadline, several times per step.
-  for _ = 1, math.min(2, math.max(1, math.floor((ms or 200) / 100))) do
-    -- This read exists for its round trip, not its answer, so a refusal is nothing to report.
+  local wait = math.max(50, math.floor(ms or 200))
+  if type(rpc) == "table" and type(rpc.sleep) == "function" then
+    pcall(rpc.sleep, wait)
+    return
+  end
+  -- No host timer: fall back to the old shape rather than not waiting at all, since the callers that
+  -- pace are waiting on the SITE and skipping it would read a page mid-render.
+  for _ = 1, math.min(2, math.max(1, math.floor(wait / 100))) do
     charge()
     pcall(dom.exists, Q.ACTIVE)
   end
@@ -706,6 +735,9 @@ function Q.request_quote(args)
   -- Support is a fact about the client, and the client can be upgraded between turns. Detect it per call.
   Q.unavailable = {}
   Q.spent = 0
+  -- The budget is time from HERE, so it has to be stamped per invocation: a module global survives
+  -- nothing between turns, and a stale start would make the first step look like it had already run out.
+  Q.started_at = clock()
   -- `auto: true` lived in the durable tool's `input:` block, and a runtime lua tool never sees that
   -- block — the same mapping trap that made the search answer `query_required`. Without it the wizard
   -- scores nothing, every step reports `missing_answer`, and the form is handed over on step one.

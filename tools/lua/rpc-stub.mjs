@@ -44,6 +44,16 @@ export function makePage(spec) {
     // one raise reports a page fact it never established — measured live twice, on two different ops.
     flakyEvery: spec.flakyEvery ?? 0,
     opCount: 0,
+    // `rpc.now` / `rpc.sleep` are HOST primitives: no round trip, no `maxCalls`. A test that wants to
+    // watch a time budget expire needs to move time without waiting for it, so the clock is virtual once
+    // `clockMs` is set and every sleep advances it. Left null it is the wall clock, as before.
+    clockMs: spec.clockMs ?? null,
+    // What was slept, in order. A wait that costs round trips instead of a sleep is the defect this
+    // ledger exists to catch: `pace()` used to spend two reads for their latency alone.
+    sleeps: [],
+    // What one round trip costs the virtual clock. Measured on the live channel: median 461ms, max 910.
+    // Zero would make a time budget untestable — the whole point is that ops are what spend it.
+    opCostMs: spec.opCostMs ?? 460,
     // Ops the CLIENT refuses outright — `page.eval` without its opt-in answers `op_not_permitted`.
     refuseOps: spec.refuseOps ?? [],
     // Ops the client never REGISTERED. The platform can ship an op before the extension implements it, and
@@ -228,6 +238,9 @@ export function installRpcStub(lua, page, { allow } = {}) {
     guard(op);
     page.record(op, describe(op, args));
     page.opCount += 1;
+    // A round trip costs TIME, which is what a time budget spends. Only on the virtual clock: against the
+    // wall clock the suite would be measuring node's speed instead of the script's decisions.
+    if (page.clockMs !== null) page.clockMs += page.opCostMs;
     if (page.refuseOps.includes(op)) throw new Error(`rpc ${op} failed: op_not_permitted: ${op}`);
     if (page.unresolvedOps.includes(op)) throw new Error(`rpc ${op} failed: command_unresolved: ${op}`);
     if (page.flakyEvery > 0 && page.opCount % page.flakyEvery === 0) {
@@ -257,9 +270,16 @@ export function installRpcStub(lua, page, { allow } = {}) {
       wait_for_navigation: (from, opts) => poll(() => call('dom.get_location_href') !== from, opts),
     },
     page: { eval: (script) => call('page.eval', script) },
+    // Host primitives. Deliberately NOT routed through `call()`: they cost no round trip and consume no
+    // `maxCalls`, so recording them as ops would hide the very saving they exist for.
     rpc: {
-      now: () => Date.now(),
-      sleep: () => true,
+      now: () => (page.clockMs === null ? Date.now() : page.clockMs),
+      sleep: (ms) => {
+        const slept = Number(ms) || 0;
+        page.sleeps.push(slept);
+        if (page.clockMs !== null) page.clockMs += slept;
+        return true;
+      },
       delivered_to: () => 1,
       fanout: () => ({ executed: 1, declined: 0, silent: 0 }),
     },

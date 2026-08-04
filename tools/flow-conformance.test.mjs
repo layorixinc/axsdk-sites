@@ -130,7 +130,6 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(nodes.resolve_product.id, 'shopping_resolve_product_option');
   assert.equal(nodes.resolve_product.next.lock, 'search_stores');
   assert.equal(nodes.choose_product.messagePolicy?.currentUserText, 'active_node_only');
-  assert.equal(nodes.choose_offer.messagePolicy?.currentUserText, 'active_node_only');
   // Search feeds a two-stage relevance decision before anything is verified or ranked: the deterministic
   // recall list, one model verdict on it, then the cap. Every hop is enforced because a missing one would
   // silently restore token-only filtering (accessories in the comparison) or drop the fail-open path.
@@ -174,16 +173,15 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.ok(!common.flows.shopping_search_one_store.nodes.search.next.unsupported_site,
     'every store is ported; nothing should still route to a durable reader');
   assert.equal(common.flows.shopping_search_one_store.nodes.search.next.done, 'normalize');
-  // Ranking hands to the deterministic presenter, which renders the window and pauses on it; the model
-  // gate only interprets the answer, and has no tool for presenting because it could never feed one.
+  // Ranking hands to the deterministic presenter, which renders the window, pauses on it, and reads the
+  // answer. There is no model node in the loop: one that sat here re-sent the previous turn's "3번" when
+  // the user typed "취소", and the offer went into a real cart.
   assert.equal(nodes.normalize_rank.next.done, 'present_offers');
-  assert.equal(nodes.present_offers.next.answer, 'choose_offer');
-  assert.deepEqual(nodes.choose_offer.allowedTools, ['choose_store_offer']);
-  assert.ok(!nodes.choose_offer.inputSelector.includes('comparison_text'));
-  assert.ok(!nodes.choose_offer.inputSelector.includes('offers'), 'offer approval must not inject the full ranked-offer payload into the model prompt');
-  assert.ok(!nodes.choose_offer.inputSelector.includes('ambiguous_offers'));
-  assert.ok(!nodes.choose_offer.inputSelector.includes('excluded_offers'));
-  assert.equal(nodes.choose_offer.next.ask, 'choose_offer');
+  assert.equal(nodes.present_offers.next.ask, 'present_offers');
+  assert.equal(nodes.present_offers.next.select, 'resolve_offer');
+  for (const dead of ['offers', 'ambiguous_offers', 'excluded_offers', 'comparison_text']) {
+    assert.ok(!nodes.present_offers.inputSelector.includes(dead), `${dead} must not ride into the presenter`);
+  }
   // The last three durable tools are runtime now. What made them the last: the listing built in one turn
   // has to be paged in the next, and `state: session` is keyed by (session, TOOL), so `rank` had no
   // channel to `present`. Flow state is that channel, carrying one scalar no model node selects.
@@ -194,27 +192,25 @@ test('multi-store shopping discovers and locks product identity before ranking',
   );
   assert.equal(common.flowTools.present_store_offers.output.question, 'result.question');
   assert.equal(common.flowTools.shopping_present_store_offers, undefined);
-  assert.equal(Object.hasOwn(common.flowTools.choose_store_offer.parameters.properties, 'choice_stage'), false);
+  // The model-facing gate tool went with the node it served; leaving it declared invites a re-wire.
+  assert.equal(common.flowTools.choose_store_offer, undefined);
 
-  // Browsing a comparison stays inside the two approved tools: paging and refinement travel as
-  // `choose_store_offer` branches into one deterministic node, so no extra tool can reach the approval
-  // turn and no offer payload is injected into the prompt.
-  assert.deepEqual(
-    common.flowTools.choose_store_offer.parameters.properties.next.enum,
-    ['ask', 'select', 'cancel', 'page', 'refine'],
-  );
-  for (const key of ['page_command', 'page_number', 'refine_request']) {
-    assert.ok(Object.hasOwn(common.flowTools.choose_store_offer.parameters.properties, key), `choose_store_offer must accept ${key}`);
-  }
-  assert.equal(nodes.choose_offer.next.page, 'browse_offers');
-  assert.equal(nodes.choose_offer.next.refine, 'browse_offers');
+  // Paging and refinement travel as presenter branches into one deterministic node, so no extra tool can
+  // reach the approval turn and no offer payload is injected into any prompt.
+  assert.equal(nodes.present_offers.next.page, 'browse_offers');
+  assert.equal(nodes.present_offers.next.refine, 'browse_offers');
   assert.equal(nodes.browse_offers.id, 'shopping_refine_store_offers');
-  assert.equal(nodes.browse_offers.next.ask, 'choose_offer');
+  assert.equal(nodes.browse_offers.next.ask, 'present_offers');
   assert.equal(nodes.browse_offers.next.research, 'collect_request');
-  assert.ok(nodes.browse_offers.inputSelector.includes('offers'),
-    'the deterministic browsing node reads the listing from state; only the model prompt must stay free of it');
-  assert.ok(common.flowTools.shopping_refine_store_offers.parameters.properties.offers, 'offers must be declared to reach the script');
-  assert.equal(common.flowTools.shopping_refine_store_offers.output.all_offers, 'result.all_offers');
+  assert.ok(nodes.browse_offers.inputSelector.includes('comparison_state'),
+    'the deterministic browsing node reads the listing from the snapshot, which is the only channel it travels on');
+  // `offers`/`all_offers` were the second channel. No node selects them any more, so publishing them
+  // writes state nothing reads — and a field that looks live is one someone wires a tool to next.
+  for (const tool of ['shopping_rank_store_offers', 'shopping_refine_store_offers']) {
+    for (const dead of ['offers', 'all_offers']) {
+      assert.equal(common.flowTools[tool].output[dead], undefined, `${tool} still publishes ${dead}`);
+    }
+  }
   assert.equal(common.flowTools.shopping_refine_store_offers.execute.kind, 'runtime');
   assert.equal(
     common.flowTools.shopping_refine_store_offers.output.comparison_state, 'result.comparison_state',
@@ -363,10 +359,11 @@ test('store outcomes reach the user, not just the log', () => {
 
   assert.ok(Object.hasOwn(flow.state, 'store_status'));
   assert.equal(common.flowTools.shopping_rank_store_offers.output.store_status, 'result.store_status');
-  assert.equal(common.flowTools.shopping_rank_store_offers.output.all_offers, 'result.all_offers');
-  // The approval prompt may see the one-line status (it is short and actionable) but still never the offers.
-  assert.ok(flow.nodes.choose_offer.inputSelector.includes('store_status'));
-  assert.ok(!flow.nodes.choose_offer.inputSelector.includes('offers'));
+  // `all_offers` used to ride here as a second copy of the listing; the snapshot carries it now.
+  assert.equal(common.flowTools.shopping_rank_store_offers.output.comparison_state, 'result.comparison_state');
+  // The window itself names the failing stores now — the snapshot carries the notes, so every page after
+  // the first says the same thing the first one did. No prompt needs the offers to say it.
+  assert.ok(!flow.nodes.present_offers.inputSelector.includes('offers'));
   for (const terminalName of ['no_results', 'report_cart']) {
     assert.ok(flow.nodes[terminalName].inputSelector.includes('store_status'),
       `${terminalName} must be able to report which stores failed`);
@@ -403,15 +400,19 @@ test('compatibility record is present', () => {
   assert.equal(existsSync(new URL('FLOW_CONFORMANCE.md', root)), true);
 });
 
-test('the approval node cannot narrate work it did not do', () => {
-  // A live turn answered "무료배송만 보여주었습니다" through next="ask" while the listing was untouched.
-  // Only the deterministic tools change the list, so the prompt has to forbid claiming otherwise.
-  const common = parseFlow('_common/flows.yaml');
-  const prompt = common.flows.shopping_multi_store_total_cost.nodes.choose_offer.prompt;
+test('nothing in the comparison loop can narrate work it did not do', () => {
+  // A live turn answered "무료배송만 보여주었습니다" through next="ask" while the listing was untouched, and
+  // the guard for it was a paragraph in a prompt. The prompt is gone: every node in the loop is
+  // deterministic, so the only text the user sees is the window a tool rendered from the snapshot.
+  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
+  const loop = ['present_offers', 'browse_offers', 'resolve_offer'];
 
-  assert.match(prompt, /next="ask" NEVER performs anything/);
-  assert.match(prompt, /next="refine" or next="page"/);
-  assert.match(prompt, /never restate,\s*\n?\s*summarize, or re-order the offers/i);
+  for (const id of loop) {
+    const node = flow.nodes[id];
+    assert.equal(node.kind, 'action_contract', `${id} must not be able to write its own answer`);
+    assert.equal(node.prompt, undefined, `${id} still carries a prompt`);
+    assert.equal(node.allowedTools, undefined, `${id} still lets a model pick a tool`);
+  }
 });
 
 test('the user can decline at the quote approval gate', () => {
@@ -1136,27 +1137,160 @@ function rpcModuleFor(global) {
   return null;
 }
 
-test('every tool declares the modules its Lua actually calls', () => {
+/**
+ * What a module says it needs, read from the guard it raises: every RPC module opens with
+ * `error("_common/scripts/X.lua must be loaded before ...")`. That guard is the dependency list, and it
+ * is the one statement that cannot drift from the code, because the code is what raises it.
+ */
+function moduleDependencies(moduleId) {
+  // A module id names no directory (`_common.73_rpc_offers`), and the files live in two: `rpc/` and
+  // `scripts/`. Guessing one silently returns "no dependencies", which is how this gate passed while the
+  // live comparison was dying on a missing module.
+  const name = moduleId.replace(/^_common\./, '');
+  const file = ['rpc', 'scripts']
+    .map((directory) => fileURLToPath(new URL(`../_common/${directory}/${name}.lua`, import.meta.url)))
+    .find((candidate) => existsSync(candidate));
+  if (!file) return [];
+  const source = readFileSync(file, 'utf8');
+  return [...source.matchAll(/error\("(_common\/[a-z]+\/[\w.]+)\.lua must be loaded before/g)]
+    .map((match) => match[1].replace(/\//g, '.').replace('_common.scripts.', '_common.').replace('_common.rpc.', '_common.'));
+}
+
+test('every tool declares the modules its Lua actually calls, and what those need', () => {
   // `AX_RPC_OFFERS.resolve` was wired into a tool whose `modules:` list did not include
   // `_common.73_rpc_offers`, so live it read `attempt to index a nil value (global 'AX_RPC_OFFERS')` —
-  // one turn before a cart approval, and the user got a re-ask about which product they meant. The
-  // module list and the script are two statements of the same fact, and only one of them runs.
+  // one turn before a cart approval, and the user got a re-ask about which product they meant.
+  //
+  // Then the same gate passed while three tools loaded that module WITHOUT the reply classifier it needs,
+  // and the whole comparison died with `lua module '_common.73_rpc_offers' error`. A dependency of a
+  // dependency is still a dependency: follow the guards the modules themselves raise.
   const missing = [];
 
-  for (const layer of ['_common/flows.yaml', ...productionFlowLayers().slice(1)]) {
+  for (const layer of productionFlowLayers()) {
     const doc = parseFlow(layer);
     for (const [toolId, tool] of Object.entries(doc.flowTools ?? {})) {
       const execute = tool?.execute;
-      const source = execute?.lua;
-      if (typeof source !== 'string') continue;
-      const declared = new Set(execute.modules ?? []);
-      for (const global of new Set(source.match(/\bAX_RPC_[A-Z_]+/g) ?? [])) {
-        const owner = rpcModuleFor(global);
-        // A global no module defines is a different bug, and `rpcModuleFor` reports it as such.
-        if (owner && !declared.has(owner)) missing.push(`${layer} ${toolId}: calls ${global}, missing ${owner}`);
+      const declared = new Set(execute?.modules ?? []);
+      const wanted = new Set();
+
+      if (typeof execute?.lua === 'string') {
+        for (const global of new Set(execute.lua.match(/\bAX_RPC_[A-Z_]+/g) ?? [])) {
+          // A global no module defines is a different bug, and `rpcModuleFor` reports it as such.
+          const owner = rpcModuleFor(global);
+          if (owner) wanted.add(owner);
+        }
+      }
+      for (const declaredModule of declared) wanted.add(declaredModule);
+      for (const moduleId of [...wanted]) for (const need of moduleDependencies(moduleId)) wanted.add(need);
+
+      for (const need of wanted) {
+        if (!declared.has(need)) missing.push(`${layer} ${toolId}: needs ${need}`);
       }
     }
   }
 
   assert.deepEqual(missing, [], `undeclared modules:\n  ${missing.join('\n  ')}`);
+});
+
+test('browsing reads the snapshot and comes back through the one renderer', () => {
+  // Paging and filtering rebuild the window, so they need the listing — and the listing lives in the
+  // snapshot. `offers`/`all_offers` are absent state fields now: selecting them hands the tool nothing.
+  //
+  // And the new window has to reach the user. Routing `ask` at the model gate leaves it with a question
+  // it has no tool to present, which is the same dead end the first pass had. One renderer: browsing
+  // clears `choice_stage`, so the presenter renders the reissued listing and pauses on it.
+  const nodes = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost.nodes;
+  const browse = nodes.browse_offers;
+
+  assert.ok(browse.inputSelector.includes('comparison_state'), 'browsing must read the snapshot');
+  for (const dead of ['offers', 'all_offers']) {
+    assert.ok(!browse.inputSelector.includes(dead), `${dead} is not carried between turns any more`);
+  }
+  assert.equal(browse.next.ask, 'present_offers', 'the reissued window needs the renderer, not the gate');
+
+  // Saying no must work at every gate that can hold the user, and this one holds them on a listing.
+  assert.equal(nodes.present_offers.next.cancel, 'cancelled');
+});
+
+test('the planner names every node that can hold the user on a comparison', () => {
+  // `requestText` is NOT refreshed on a resumed turn unless the planner copies the reply into it, and the
+  // rule that does the copying lists the nodes it applies to BY NAME. Moving the pause to `present_offers`
+  // moved it out of that list: live, "취소" resumed the flow and `choose_offer` re-sent the PREVIOUS turn's
+  // "싼 순서로 보여줘" — the user asked to stop and was shown the listing again.
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const planner = String(common.planner?.rules ?? common.planner?.prompt ?? '');
+  const browsing = planner.slice(planner.indexOf('COMPARISON BROWSING FOLLOW-UP'));
+  assert.ok(planner.includes('COMPARISON BROWSING FOLLOW-UP'), 'the browsing follow-up rule must exist');
+  // A node holds the user exactly when something routes `ask` to it. The flow's ENTRY is exempt: a reply
+  // there is the request itself, and both `continue_current` and `replace_current` set `requestText` from
+  // the message. Every other holder is showing a NUMBERED window, where "3번" reads like a new request
+  // and the planner has to be told otherwise — by name.
+  const holders = new Set();
+  for (const node of Object.values(flow.nodes ?? {})) {
+    if (typeof node?.next?.ask === 'string') holders.add(node.next.ask);
+  }
+  // The flow declares no `entry:` — the first node IS the entry, which is how the runtime reads it.
+  holders.delete(Object.keys(flow.nodes)[0]);
+
+  const unnamed = [...holders].filter((id) => !planner.includes(id));
+  assert.deepEqual(unnamed, [], `the planner cannot refresh the reply for: ${unnamed.join(', ')}`);
+  assert.ok(browsing.includes('present_offers'), 'the presenter is what holds the user on the comparison now');
+});
+
+test('no model node stands between the comparison and the cart', () => {
+  // Live, twice: "취소" added an offer to a real cart, because an `action_unit` in this loop re-sent the
+  // previous turn's "3번". `currentUserText: active_node_only` gives it the text of the turn IT was active
+  // for, and the flow pauses at the deterministic presenter — so the gate never saw the word "취소".
+  //
+  // The Thumbtack shortlist has no model node in its loop for exactly this reason. Neither does this one.
+  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
+  const presenter = flow.nodes.present_offers;
+
+  assert.equal(presenter.kind, 'action_contract');
+  assert.ok(presenter.inputSelector.includes('requestText'), 'the pausing node must read the reply');
+  assert.deepEqual(
+    { select: presenter.next.select, cancel: presenter.next.cancel, page: presenter.next.page, refine: presenter.next.refine },
+    { select: 'resolve_offer', cancel: 'cancelled', page: 'browse_offers', refine: 'browse_offers' },
+  );
+
+  // Reachability, not just absence: a node left in the file but unrouted is still a node someone re-wires.
+  const reachable = new Set(['collect_request']);
+  for (let changed = true; changed; ) {
+    changed = false;
+    for (const [id, node] of Object.entries(flow.nodes)) {
+      if (!reachable.has(id)) continue;
+      for (const target of Object.values(node.next ?? {})) {
+        if (typeof target === 'string' && !reachable.has(target)) { reachable.add(target); changed = true; }
+      }
+    }
+  }
+  assert.ok(!reachable.has('choose_offer'), 'the model gate must be gone from the loop, not merely bypassed');
+});
+
+test('every field a contract node selects is one its tool declares', () => {
+  // Undeclared state is DROPPED: a runtime tool is projected by `parameters.properties`, so a field in
+  // `inputSelector` that the schema never names simply does not arrive. Live, the presenter selected
+  // `requestText` and declared only `choice_stage`/`comparison_id`/`view_page` — the user typed "취소" and
+  // the window came back, because the node was reading a field it had asked for and never received.
+  //
+  // Silent on both sides: the selector looks right, the schema looks right, and nothing errors.
+  const dropped = [];
+
+  for (const layer of productionFlowLayers()) {
+    const doc = parseFlow(layer);
+    for (const [flowId, flow] of Object.entries(doc.flows ?? {})) {
+      for (const [nodeId, node] of Object.entries(flow?.nodes ?? {})) {
+        if (node?.kind !== 'action_contract') continue;
+        const tool = doc.flowTools?.[node.id];
+        const declared = tool?.parameters?.properties;
+        if (!declared) continue;
+        for (const field of node.inputSelector ?? []) {
+          if (!Object.hasOwn(declared, field)) dropped.push(`${layer} ${flowId}.${nodeId}: selects ${field}, ${node.id} never declares it`);
+        }
+      }
+    }
+  }
+
+  assert.deepEqual(dropped, [], `state selected but dropped:\n  ${dropped.join('\n  ')}`);
 });

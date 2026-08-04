@@ -725,6 +725,21 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
   re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
   files that DEFINE it and fails on any tool that calls one it did not declare.
+- **The node that PAUSES is the only node that sees the user's new message.** Live, twice: the user typed
+  "취소" and the offer was ADDED TO CART, because the model gate downstream re-sent the previous turn's
+  "3번". `currentUserText: active_node_only` hands an `action_unit` the text of the turn IT was active for.
+  The comparison loop now has NO model node at all — the presenter renders, pauses, and reads the reply
+  through the same `AX_CANDIDATE_BROWSER.classify_reply` the Thumbtack shortlist uses.
+- **A field selected but not DECLARED is dropped in silence, and both sides look right.** The presenter
+  selected `requestText` and its schema never named it, so "취소" re-rendered the window instead of
+  stopping. `check:flows` now fails any `action_contract` selecting a field its tool does not declare.
+- **A dependency of a dependency is still a dependency.** Three tools loaded `73_rpc_offers` without the
+  classifier it needs and the whole comparison died with `lua module ... error`. The gate reads each
+  module's own `error("... must be loaded before ...")` guard — the one statement that cannot drift.
+- **The window carries the store outcomes, so the SNAPSHOT must carry the notes.** Without them the line
+  naming the store that hit a bot wall survived only the turn that BUILT the listing.
+- **`AX_verify_product_offers` returned an EMPTY list as `{}`** and the next tool died with `failures: Invalid
+  input` — after the search, the screening and the verification had all run. Absent, never empty.
 - **Picking a number IS the approval turn** — `resolve_offer` routes `add` straight to the mutation.
   Live-verified end to end on 11st (window #3 = the offer added, same id and price). Anyone exercising
   the select path on a real account is adding to a real cart; use `cancel` to walk the gate instead.

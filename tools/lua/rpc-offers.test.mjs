@@ -19,9 +19,11 @@ const MODULES = [
   '_common/scripts/00_base.lua',
   '_common/scripts/44_pagination.lua',
   '_common/scripts/45_offer_view.lua',
+  '_common/scripts/46_candidate_browser.lua',
   '_common/scripts/50_commerce_core.lua',
   '_common/scripts/51_relevance.lua',
   '_common/scripts/52_identity.lua',
+  '_common/scripts/53_verify.lua',
   '_common/scripts/54_comparison.lua',
   '_common/scripts/55_offers.lua',
   '_common/rpc/73_rpc_offers.lua',
@@ -189,11 +191,9 @@ test('ranking answers in the branch vocabulary its node routes', () => {
   );
 });
 
-test('the presenter shows the window once, then hands the reply on', () => {
-  // The deterministic shape the Thumbtack shortlist already uses: render, PAUSE on the window, and on the
-  // turn that answers it, step aside so the reply can be interpreted. Without the second pass the node
-  // would re-render its own question forever; without the first, the model would have to relay a listing
-  // it cannot be given.
+test('the presenter renders the window and keeps it up until the user answers', () => {
+  // Render, PAUSE on the window, and hold it. An unanswered turn must not page, select, or re-issue the
+  // listing — the user is still reading the one on screen.
   const first = runtime();
   const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
   const shown = first.call('AX_RPC_OFFERS.present', {
@@ -207,15 +207,15 @@ test('the presenter shows the window once, then hands the reply on', () => {
   assert.equal(shown.choice_stage, 'asked', 'the pass must record that it has asked');
 
   const later = runtime();
-  const answered = later.call('AX_RPC_OFFERS.present', {
+  const waiting = later.call('AX_RPC_OFFERS.present', {
     comparison_state: ranked.comparison_state,
     comparison_id: ranked.comparison_id,
     choice_stage: 'asked',
   });
   later.close();
 
-  assert.equal(answered.next, 'answer', 'once asked, the reply belongs to the next node');
-  assert.equal(answered.question, undefined, 'asking twice would replace the listing the user is reading');
+  assert.equal(waiting.next, 'ask', 'with no answer the same window stands');
+  assert.match(waiting.question ?? '', /M185/);
 });
 
 test('a chosen number resolves from the snapshot, not from a separate list', () => {
@@ -261,4 +261,87 @@ test('a number from a listing the user is no longer reading is refused', () => {
 
   assert.ok(wrong.error, 'a stale number must not resolve');
   assert.equal(wrong.selected_offer, undefined);
+});
+
+test('the node that pauses is the node that reads the answer', () => {
+  // Live, twice: the user typed "취소" and the offer was ADDED TO CART, because the model gate re-sent the
+  // previous turn's "3번". It never saw the new message — `currentUserText: active_node_only` gives it the
+  // text of the turn IT was active for, and the flow now pauses at the presenter. The Thumbtack shortlist
+  // hit this exact failure and answered it by having no model node in the loop at all.
+  //
+  // A cancel that buys something is the worst shape this bug can take, so interpretation lives where the
+  // pause is.
+  const ranked = (() => {
+    const lua = runtime();
+    const out = lua.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+    lua.close();
+    return out;
+  })();
+
+  const answer = (requestText) => {
+    const lua = runtime();
+    const out = lua.call('AX_RPC_OFFERS.present', {
+      comparison_state: ranked.comparison_state,
+      comparison_id: ranked.comparison_id,
+      choice_stage: 'asked',
+      requestText,
+    });
+    lua.close();
+    return out;
+  };
+
+  assert.equal(answer('취소').next, 'cancel', 'a cancel must stop, never select');
+  assert.equal(answer('그만할래').next, 'cancel');
+
+  const picked = answer('3번');
+  assert.equal(picked.next, 'select');
+  assert.equal(picked.choice_index, 3);
+  assert.equal(picked.choice_comparison_id, ranked.comparison_id, 'a pick must name the listing it came from');
+
+  assert.equal(answer('다음').next, 'page');
+  assert.equal(answer('무료배송만').next, 'refine');
+  assert.equal(answer('무료배송만').refine_request, '무료배송만');
+
+  // No reply at all is not an instruction. Guessing here would page or select on a turn the user did not
+  // answer, and the previous listing stands.
+  assert.equal(answer('').next, 'ask');
+});
+
+test('a store that failed is still named in the windows after the first', () => {
+  // Store outcomes are part of the answer: one line naming every store that failed and what the user must
+  // do. The snapshot did not carry `failures`, so the line survived only the turn that BUILT the listing —
+  // page once and the comparison starts looking like every store answered.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', {
+    verified_offers: OFFERS,
+    failures: [{ site: 'naver-shopping', error: 'captcha' }],
+  });
+  first.close();
+
+  assert.match(ranked.question ?? '', /naver|네이버/i, 'the turn that builds it names the failure');
+
+  const later = runtime();
+  const paged = later.call('AX_RPC_OFFERS.present', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+  });
+  later.close();
+
+  assert.match(paged.question ?? '', /naver|네이버/i, 'and so must every window after it');
+});
+
+test('a run where every store answered publishes no failures list at all', () => {
+  // An empty Lua table encodes as a JSON OBJECT, and `failures: { type: [array, "null"] }` rejects it.
+  // Live: every store answered, so the list was empty, and the NEXT tool died with `failures: Invalid
+  // input` — after the search, the screening and the verification had all run. The list must be ABSENT,
+  // and the boundary that publishes it is the one that has to leave it out.
+  const lua = loadLuaModules(MODULES);
+  lua.expose({ json: { encode: (value) => JSON.stringify(value), decode: (text) => JSON.parse(text) } });
+  const verified = lua.call('AX_verify_product_offers', {
+    identity_id: 'identity-1',
+    store_results: [{ key: '11st', status: 'completed', value: { store_result: { site: '11st', status: 'candidates', candidates: OFFERS } } }],
+  });
+  lua.close();
+
+  assert.equal(verified.failures, undefined, 'no failures means no list, not an empty one');
 });

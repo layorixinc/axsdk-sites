@@ -101,12 +101,19 @@ function AX_verify_product_offers(args)
     end
   end
 
+  -- An empty Lua table encodes as a JSON OBJECT, and every schema that types these as arrays rejects it.
+  -- Live: every store answered, so `failures` was empty, and the next tool died with `failures: Invalid
+  -- input` — after the search, the screening and the verification had all already run. Absent, not empty.
+  local function listed(values)
+    return #values > 0 and values or nil
+  end
+
   return {
     next = #verified > 0 and (#failures > 0 and "partial" or "done") or "empty",
     identity_id = identity_id,
-    verified_offers = verified,
-    ambiguous_offers = ambiguous,
-    excluded_offers = excluded,
-    failures = failures
+    verified_offers = listed(verified),
+    ambiguous_offers = listed(ambiguous),
+    excluded_offers = listed(excluded),
+    failures = listed(failures)
   }
 end

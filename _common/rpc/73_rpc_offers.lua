@@ -21,6 +21,13 @@ if not C then
   error("_common/scripts/50_commerce_core.lua must be loaded before 73_rpc_offers.lua")
 end
 
+-- The same deterministic reply reader the Thumbtack shortlist uses. Sharing it is the point: both loops
+-- have to answer "취소" the same way, and one of them is a step away from a cart.
+local N = AX_CANDIDATE_BROWSER
+if not N then
+  error("_common/scripts/46_candidate_browser.lua must be loaded before 73_rpc_offers.lua")
+end
+
 local function codec()
   if type(json) ~= "table" then return nil end
   if type(json.encode) ~= "function" or type(json.decode) ~= "function" then return nil end
@@ -41,6 +48,10 @@ local function encode(snapshot)
     offers = snapshot.offers,
     all_offers = snapshot.all_offers or snapshot.offers,
     refine_request = snapshot.refine_request,
+    -- Store outcomes are part of the answer, and the window is where they ride. `render_comparison` reads
+    -- them from `notes`; left out, the line naming the store that hit a bot wall survived only the turn
+    -- that BUILT the listing — page once and the comparison starts looking like every store answered.
+    notes = snapshot.notes,
   })
   if not ok then return nil end
   return text
@@ -112,14 +123,14 @@ function O.rank(args)
   }
 end
 
---- Pages the listing a previous turn built, and pauses on it.
+--- Renders the listing, pauses on it, and reads the answer — because the node that pauses is the only
+--- node that sees the user's new message.
 ---
---- Two passes, the shape the Thumbtack shortlist already uses. The first renders the window and PAUSES
---- on it; the turn that answers arrives with `choice_stage = "asked"` and this steps aside so the reply
---- can be interpreted. Without the second pass the node re-asks its own question forever; without the
---- first, a model would have to relay a listing it cannot be handed — `present_store_offers` used to sit
---- in `allowedTools` and answered `comparison_unreadable`, because a model-called tool cannot reach flow
---- state and the snapshot lives there.
+--- Live, twice: the user typed "취소" and the offer was ADDED TO CART. The model gate downstream re-sent
+--- the previous turn's "3번"; `currentUserText: active_node_only` hands an `action_unit` the text of the
+--- turn IT was active for, and the flow pauses here. The Thumbtack shortlist hit the same failure and
+--- answered it by keeping no model node in the loop at all. A cancel that buys something is the worst
+--- shape the bug can take, so the interpretation lives with the pause.
 function O.present(args)
   args = type(args) == "table" and args or {}
   local snapshot = restore(args.comparison_state)
@@ -134,10 +145,39 @@ function O.present(args)
     -- they never saw.
     return { next = "error", ok = false, error = "stale_comparison" }
   end
+
   if args.choice_stage == "asked" then
-    -- Already on screen. Re-rendering would replace the listing the user is reading mid-answer.
-    return { next = "answer", ok = true, comparison_id = snapshot.comparison_id }
+    local reply = N.classify_reply(args.requestText)
+    if reply.kind == "cancel" then
+      return { next = "cancel", ok = true, comparison_id = snapshot.comparison_id }
+    end
+    if reply.kind == "page" then
+      return {
+        next = "page", ok = true, comparison_id = snapshot.comparison_id,
+        page_command = reply.page_command, page_number = reply.page_number,
+      }
+    end
+    if reply.kind == "refine" then
+      return {
+        next = "refine", ok = true, comparison_id = snapshot.comparison_id,
+        refine_request = reply.refine_request,
+      }
+    end
+    if reply.kind == "choice" then
+      local numbers = N.parse_choice_numbers(reply.choice_numbers)
+      return {
+        next = "select", ok = true,
+        comparison_id = snapshot.comparison_id,
+        -- The id travels WITH the number: resolving it against another listing hands the user a product
+        -- they never saw, one step before the cart.
+        choice_comparison_id = snapshot.comparison_id,
+        choice_index = numbers[1],
+      }
+    end
+    -- No reply at all is not an instruction. Guessing would page or select on a turn the user did not
+    -- answer, so the same window stands and waits.
   end
+
   local shown = present_current(snapshot, tonumber(args.view_page) or 1)
   shown.choice_stage = "asked"
   return shown

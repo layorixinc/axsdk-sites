@@ -307,71 +307,6 @@
     }
   },
   {
-    "name": "choose_store_offer",
-    "description": "Ask for, cancel, page through, refine, or record a numbered offer from the current comparison snapshot.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": [
-        "next"
-      ],
-      "properties": {
-        "next": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "select",
-            "cancel",
-            "page",
-            "refine"
-          ]
-        },
-        "question": {
-          "type": "string"
-        },
-        "choice_index": {
-          "type": [
-            "integer",
-            "number",
-            "null"
-          ]
-        },
-        "choice_comparison_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "page_command": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "next",
-            "prev",
-            "first",
-            "last",
-            null
-          ]
-        },
-        "page_number": {
-          "type": [
-            "integer",
-            "number",
-            "null"
-          ]
-        },
-        "refine_request": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    }
-  },
-  {
     "name": "collect_quote_contact",
     "description": "Extract every supplied first name, last name, email, and phone from the complete latest user message, then ask for all still-missing contacts in the user's language. For Korean input ask in Korean, for example \"이름, 성, 이메일, 전화번호를 알려주세요.\"",
     "parameters": {
@@ -1780,6 +1715,12 @@
       "additionalProperties": false,
       "required": [],
       "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "choice_stage": {
           "type": [
             "string",

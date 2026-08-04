@@ -86,7 +86,8 @@ planner:
     end_conversation leaves the user unsure whether anything was sent.
 
     COMPARISON BROWSING FOLLOW-UP: if activeFlow=shopping_multi_store_total_cost and activeNode is
-    choose_offer or browse_offers, a numbered comparison is on screen and the latest message is almost
+    present_offers, browse_offers or choose_product, a numbered list is on screen and the
+    latest message is almost
     always the user answering it. Use continue_current with that flow first — and copy the message
     verbatim into segments and state.requestText — for a bare number ("2번", "3"), a page move ("다음",
     "이전", "3페이지", "more"), and ANY narrowing/sorting/unfolding phrase about the SAME product
@@ -1312,7 +1313,6 @@ flows:
         id: shopping_discover_products
         description: Search a bounded subset of the selected real stores for grounded product models before price comparison.
         inputSelector:
-          - stores
           - discovery_sites
           - query
           - quantity
@@ -1567,96 +1567,30 @@ flows:
 
       # Deterministic, and it has to be: the snapshot lives in flow state, and a model-called tool is
       # handed the MODEL's arguments — `present_store_offers` used to sit in `allowedTools` and answered
-      # `comparison_unreadable` after two live store searches had already built the comparison. Same shape
-      # as the Thumbtack shortlist, which has no model node in its loop at all: render, pause on the
-      # window, and step aside on the turn that answers it.
+      # `comparison_unreadable` after two live store searches had already built the comparison.
+      #
+      # It also READS the answer, because the node that pauses is the only node that sees the user's new
+      # message. Live, twice: "취소" added an offer to a real cart, because the model gate downstream
+      # re-sent the previous turn's "3번". The Thumbtack shortlist has no model node in its loop for
+      # exactly this reason; neither does this one.
       present_offers:
         kind: action_contract
         id: present_store_offers
-        description: Render the current comparison window from the snapshot and pause on it.
+        description: Render the current comparison window, pause on it, and read the user's answer.
         inputSelector:
+          - requestText
           - comparison_id
           - comparison_state
           - choice_stage
           - view_page
         next:
           ask: present_offers
-          answer: choose_offer
-          error: comparison_lost
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      choose_offer:
-        kind: action_unit
-        messagePolicy: { currentUserText: active_node_only }
-        description: Present the current verified comparison before mutation, then accept only an explicit current offer number or cancellation.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
-        inputSelector:
-          - requestText
-          - comparison_id
-          - choice_stage
-          - selection_error
-          - refine_error
-          - store_status
-          - view_page
-          - view_pages
-          - view_total
-        allowedTools: [choose_store_offer]
-        prompt: |-
-          You are the approval gate for a live shopping-cart mutation.
-
-          The numbered comparison is ALREADY on screen — a deterministic node rendered it from the
-          snapshot and paused on it, so you never present anything yourself and there is no tool for it.
-          Your only job is the user's answer to that window.
-
-          Call choose_store_offer exactly once using only the user's current answer.
-          - clear cancellation -> next="cancel".
-          - "recommended", "best", "cheapest", "first", or explicit approval of the recommended offer
-            -> next="select", choice_index=1, choice_comparison_id=<current comparison_id>.
-          - a clear numbered offer -> next="select", choice_index=<integer>,
-            choice_comparison_id=<current comparison_id>. The numbers are global across the whole
-            comparison, so a number from an earlier window stays valid until the listing changes.
-          - asking for another window of the same listing ("다음", "이전", "next", "more", "3페이지",
-            "처음", "마지막") -> next="page" with page_command="next"|"prev"|"first"|"last", or
-            page_number=<integer> when the user names a page. Never invent the resulting list.
-          - narrowing, filtering, sorting, or re-searching in the user's own words ("무료배송만",
-            "3만원 이하", "평점 높은 순", "쿠팡 것만", "필터 해제", "M240으로 다시 찾아줘")
-            -> next="refine" with refine_request=<the user's sentence, copied verbatim, untranslated>.
-            Do not interpret it yourself: the deterministic parser decides what it means and rejects
-            what it cannot ground.
-          - otherwise -> next="ask" and request one valid current number, a page move, or cancellation.
-
-          next="ask" NEVER performs anything. It is only for asking a question, so its `question` must not
-          claim that a filter, sort, page move, or selection happened — the deterministic tools are the
-          only thing that can change the list, and a sentence like "무료배송만 보여드렸습니다" after
-          next="ask" is a false report of work that never ran. If the user's message contains ANY
-          narrowing, sorting, or paging intent, you MUST use next="refine" or next="page" instead.
-          The window itself is re-rendered deterministically and shown to the user, so never restate,
-          summarize, or re-order the offers in your own words.
-
-          `view_page`/`view_pages`/`view_total` describe the window the user is looking at, and
-          `store_status` (when present) names the stores that failed. When `refine_error` is set the LAST
-          refinement did not apply: say why in the user's language and ask for different wording, and
-          NEVER resend the same refine_request. "no_matches" means nothing in the listing matched,
-          "price_currency_unknown" means no offer is priced in that currency (name the currency the
-          listing does use), "unparsed" means the condition was not understood. If selection_error is
-          present, state it plainly and ask again. Never emit product IDs, prices, site names,
-          choice_stage, or approval markers through choose_store_offer; the deterministic resolver copies
-          them and rejects selection before a completed presentation turn.
-        next:
-          ask: choose_offer
           select: resolve_offer
           page: browse_offers
           refine: browse_offers
           cancel: cancelled
-          error: error
-          expired: comparison_lost
-        fallback: { invalidNext: error, exhaustedNext: error , maxStalledSteps: 2, stalledNext: expired }
+          error: comparison_lost
+        fallback: { invalidNext: error, exhaustedNext: error }
 
       browse_offers:
         kind: action_contract
@@ -1664,8 +1598,7 @@ flows:
         description: Move the comparison window, or filter and sort the listing, without letting the model rewrite the offers.
         inputSelector:
           - comparison_id
-          - offers
-          - all_offers
+          - comparison_state
           - failures
           - identity_id
           - view_page
@@ -1674,7 +1607,10 @@ flows:
           - page_number
           - refine_request
         next:
-          ask: choose_offer
+          # Back through the one renderer. The gate has no tool to present with, so a window handed to it
+          # is a window the user never sees; browsing clears `choice_stage`, so the presenter renders the
+          # reissued listing and pauses on it.
+          ask: present_offers
           research: collect_request
           error: comparison_lost
         fallback: { invalidNext: ask, exhaustedNext: ask }
@@ -1693,7 +1629,9 @@ flows:
           - quantity
         next:
           add: add_selected_offer
-          invalid: choose_offer
+          # Back to the window itself: the number was not one the listing offers, so the user needs to see
+          # the listing again — not a model asked to explain a refusal it did not make.
+          invalid: present_offers
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -2358,7 +2296,7 @@ flowTools:
       kind: runtime
       implementation: lua
       # No rpc block: these commands never touch the browser, so they are granted no ops at all.
-      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
       entry: run
       lua: |
         function run(args)
@@ -2409,7 +2347,7 @@ flowTools:
       kind: runtime
       implementation: lua
       # No rpc block: these commands never touch the browser, so they are granted no ops at all.
-      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
       entry: run
       lua: |
         function run(args)
@@ -2548,7 +2486,7 @@ flowTools:
     execute:
       kind: runtime
       implementation: lua
-      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
       rpc:
         # These three touch no page: ranking, windowing and refinement are arithmetic over a snapshot.
         # The compiler refuses an empty allow-list, so this names the cheapest read there is and the
@@ -2562,7 +2500,6 @@ flowTools:
         end
     output:
       next: result.next
-      offers: result.offers
       failures: result.failures
       comparison_id: result.comparison_id
       comparison_approval: current_comparison
@@ -2572,7 +2509,6 @@ flowTools:
       comparison_state: result.comparison_state
       comparison_text: result.question
       store_status: result.store_status
-      all_offers: result.all_offers
       incomplete_count: result.incomplete_count
       complete_count: result.complete_count
       base_currency: result.base_currency
@@ -2595,7 +2531,7 @@ flowTools:
     execute:
       kind: runtime
       implementation: lua
-      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
       rpc:
         # These three touch no page: ranking, windowing and refinement are arithmetic over a snapshot.
         # The compiler refuses an empty allow-list, so this names the cheapest read there is and the
@@ -2625,6 +2561,9 @@ flowTools:
       # at all. A `required` key that state does not carry is REJECTED before the script runs.
       required: []
       properties:
+        # The user's answer to the window. Declared because UNDECLARED IS DROPPED: selected but never
+        # declared, "취소" never reached the script and the same listing came back instead of stopping.
+        requestText: { type: [string, "null"] }
         choice_stage: { type: [string, "null"] }
         comparison_id: { type: [string, "null"] }
         view_page: { type: [integer, number, "null"] }
@@ -2638,7 +2577,7 @@ flowTools:
     execute:
       kind: runtime
       implementation: lua
-      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
+      modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.54_comparison", "_common.55_offers", "_common.73_rpc_offers"]
       rpc:
         # These three touch no page: ranking, windowing and refinement are arithmetic over a snapshot.
         # The compiler refuses an empty allow-list, so this names the cheapest read there is and the
@@ -2657,8 +2596,6 @@ flowTools:
       comparison_state: result.comparison_state
       question: result.question
       comparison_id: result.comparison_id
-      offers: result.offers
-      all_offers: result.all_offers
       store_status: result.store_status
       view_sort: result.view_sort
       refine_error: result.refine_error
@@ -2690,23 +2627,6 @@ flowTools:
         identity_id: { type: [string, "null"] }
         view_page: { type: [integer, number, "null"] }
         view_sort: { type: [string, "null"] }
-        page_command: { type: [string, "null"], enum: [next, prev, first, last, null] }
-        page_number: { type: [integer, number, "null"] }
-        refine_request: { type: [string, "null"] }
-
-  choose_store_offer:
-    description: Ask for, cancel, page through, refine, or record a numbered offer from the current comparison snapshot.
-    execute: { kind: runtime, implementation: passthrough }
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: true
-      required: [next]
-      properties:
-        next: { type: string, enum: [ask, select, cancel, page, refine] }
-        question: { type: string }
-        choice_index: { type: [integer, number, "null"] }
-        choice_comparison_id: { type: [string, "null"] }
         page_command: { type: [string, "null"], enum: [next, prev, first, last, null] }
         page_number: { type: [integer, number, "null"] }
         refine_request: { type: [string, "null"] }
@@ -2744,6 +2664,10 @@ flowTools:
       identity_approval: result.identity_approval
       comparison_approval: result.comparison_approval
       cart_approval: result.cart_approval
+      # A refused number must not be read again. The presenter interprets `requestText`, so leaving it in
+      # place would re-select the same invalid number the moment the window comes back.
+      requestText: null
+      choice_index: null
     parameters:
       type: object
       additionalProperties: false

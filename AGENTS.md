@@ -710,6 +710,16 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **A CSS list matches in DOCUMENT order, so listing a fallback second does not make it second.** Amazon
+  search cards carry TWO `h2` elements — brand first, product title second — and `"h2, h2 a"` took the
+  brand. Every branded row came back named `Logitech`, and since relevance REQUIRES the model code, a
+  search for M185 matched nothing and the comparison reported no products. The fix is a selector that
+  cannot reach the wrong element: `"a h2 span, a h2"`, where both alternatives demand the anchor the
+  brand heading does not have. Measure the card before choosing (`evaluatePage` on the live page).
+- **Some contracts cannot be tested against the stub, and a fixture that asserts on its own input is
+  worse than none.** The storefront reader batches ONE `query_all` and takes each field off the returned
+  row, so no stub can express WHICH sub-selector a title came from. The guard that can fail is on the
+  CONFIG — every alternative must require the anchor — and the comment says why the other is absent.
 - **An EMPTY accumulator must cross as absent, not as `{}`.** `shopping_collect_store_page` declares
   `collected: [array, "null"]`; an empty Lua table encodes as an OBJECT and the array marker is not
   honoured on an empty list, so a store that found nothing wrote `{}` into state, the model relayed it

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
+import { readFileSync } from 'node:fs';
+
 import { loadLuaModules } from './harness.mjs';
 import { installRpcStub, makePage } from './rpc-stub.mjs';
 
@@ -976,4 +978,29 @@ test('an unknown paging control is absent, never a claim', () => {
 
   assert.ok(value, 'the tool must answer, not raise');
   assert.notEqual(value.has_more, false, 'a refused probe must not answer "no more"');
+});
+
+// Measured on live Amazon: every search card carries TWO `h2` elements — the brand first, the product
+// title second — and only the title sits inside the card's anchor:
+//   h2s: ["Logitech", "M240 Compact Silent Bluetooth Wireless Mouse - Rose | ..."]
+// The config asked for `"h2, h2 a"`, and a CSS list matches in DOCUMENT order, so the brand won. Every
+// branded row came back named `Logitech` — and relevance REQUIRES the model code, so a search for M185
+// matched nothing and the whole comparison reported no products.
+//
+// There is deliberately no reader-level test for this. The reader batches ONE `query_all` over the card
+// selector and takes each field off the returned row, so a stub cannot express "which sub-selector the
+// row's title came from" — a fixture here would assert on its own input. The contract that can fail is
+// the one below, on the config.
+
+test('the Amazon title selector cannot reach a heading outside the anchor', () => {
+  // A contract on the CONFIG, because the defect was in data, not in code: every alternative has to
+  // require an anchor ancestor, or the brand heading — which is not linked — matches first again.
+  // The registry is a plain global table keyed by slug, not an accessor.
+  const source = readFileSync(new URL('../../_common/rpc/62_rpc_sites.lua', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('RPC_SITES["amazon"]'));
+  const selector = (/result_title_selector\s*=\s*"([^"]+)"/.exec(block) ?? [])[1] ?? '';
+  assert.ok(selector.length > 0, 'amazon must declare a title selector');
+  for (const part of selector.split(',')) {
+    assert.match(part.trim(), /^a[.\s]/, `"${part.trim()}" would match a heading outside the anchor`);
+  }
 });

@@ -52,6 +52,10 @@ local function encode(snapshot)
     -- them from `notes`; left out, the line naming the store that hit a bot wall survived only the turn
     -- that BUILT the listing — page once and the comparison starts looking like every store answered.
     notes = snapshot.notes,
+    -- The window the user reads is ALWAYS rendered from a restore, so anything the build computed and the
+    -- snapshot drops is simply gone. `uniform_currency` picks this when the listing is built; without it
+    -- a Korean shopper comparing Korean stores read "총 USD 10.79" beside "상품가 KRW 12,900".
+    display_currency = snapshot.display_currency,
   })
   if not ok then return nil end
   return text

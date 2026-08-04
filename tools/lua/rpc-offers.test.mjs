@@ -451,3 +451,41 @@ test('a refusal keeps the listing and says why, in the window', () => {
   // The window is the only surface the user reads, so a reason that is not in it never arrives.
   assert.match(refused.question ?? '', /통화/, 'the refusal must explain itself where the user is looking');
 });
+
+test('a listing priced in one currency shows its totals in that currency', () => {
+  // `uniform_currency` already picks it when the listing is built. The snapshot did not carry it, and the
+  // window the user actually reads is always rendered from a RESTORE — so a Korean shopper comparing
+  // Korean stores in Korean got "총 USD 10.79" next to "상품가 KRW 12,900" and had to do the arithmetic
+  // the feature exists to do.
+  const won = [
+    { site: 'ssg', product_id: 'S1', id: 'S1', name: '로지텍 M170 무선마우스', price: 12900, currency: 'KRW',
+      price_base: 9.04, base_currency: 'USD', shipping_cost: 2500, shipping_base: 1.75, total_base: 10.79, cost_complete: true },
+    { site: '11st', product_id: 'E1', id: 'E1', name: '로지텍 M170 정품', price: 16010, currency: 'KRW',
+      price_base: 11.22, base_currency: 'USD', shipping_cost: 3000, shipping_base: 2.1, total_base: 13.32, cost_complete: true },
+  ];
+
+  const build = runtime();
+  const ranked = build.call('AX_RPC_OFFERS.rank', { verified_offers: won });
+  build.close();
+
+  const later = runtime();
+  const shown = later.call('AX_RPC_OFFERS.present', { comparison_state: ranked.comparison_state });
+  later.close();
+
+  assert.match(shown.question ?? '', /총 KRW/, 'the total belongs in the currency the prices are quoted in');
+  assert.doesNotMatch(shown.question ?? '', /총 USD/);
+});
+
+test('a listing spanning currencies keeps the common base', () => {
+  // Mixed prices have no shared currency to be honest in, so the comparison currency stands. Picking one
+  // side's currency would make the other side's rows a conversion the user never asked for.
+  const build = runtime();
+  const ranked = build.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  build.close();
+
+  const later = runtime();
+  const shown = later.call('AX_RPC_OFFERS.present', { comparison_state: ranked.comparison_state });
+  later.close();
+
+  assert.match(shown.question ?? '', /총 USD/);
+});

@@ -725,6 +725,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
   re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
   files that DEFINE it and fails on any tool that calls one it did not declare.
+- **The window the user reads is ALWAYS rendered from a RESTORE**, so anything the build computed and the
+  snapshot drops is simply gone — silently, and only from the second turn onward if you test carelessly.
+  Three fields were lost this way: `notes` (which store failed), `display_currency` (a Korean shopper
+  comparing Korean stores read "총 USD 10.79" beside "상품가 KRW 12,900"), and the branch payload.
+  When a total is shown in the listing's own currency it is an ADDITION, not a conversion round trip:
+  12,900 + 2,500 = KRW 15,400 exactly. Mixed currencies keep the base, because picking one side's
+  currency makes the other side a conversion nobody asked for.
 - **The runtime's `net.fetch` answers `{body, headers, ok, status}` and NEVER a `json` field**, whatever
   `response = "json"` asks for; the durable one does supply `json`. Reading only `json` turns a 200 with a
   perfectly good payload into a silent failure. Measured: `fx_fetch_failed:body=string,headers=table,

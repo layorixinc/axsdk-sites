@@ -1054,3 +1054,30 @@ test('a fan-out publishes the store result, not the envelope around it', () => {
     `these publish the envelope instead of the store result:\n  ${wrong.join('\n  ')}`,
   );
 });
+
+test('a runtime tool never answers a branch its node cannot route', () => {
+  // `invalidNext` is silent until it fires, and then it throws away everything the turn had done. Live:
+  // the comparison was searched across two stores, screened, judged, verified and issued an id — and the
+  // user got "요청을 처리하는 중 문제가 발생했습니다", because the tool answered `ask` where the node
+  // routes `done | partial | empty | error`.
+  //
+  // Only literals are checkable: a tool that passes `result.next` through picks the command's vocabulary,
+  // and that is the arrangement this exists to protect.
+  const common = parseFlow('_common/flows.yaml');
+  const wrong = [];
+  for (const [flowId, flow] of Object.entries(common.flows ?? {})) {
+    for (const [nodeId, node] of Object.entries(flow?.nodes ?? {})) {
+      const tool = node?.id && common.flowTools?.[node.id];
+      if (!tool || tool.execute?.kind !== 'runtime') continue;
+      const branches = new Set(Object.keys(node.next ?? {}));
+      if (branches.size === 0) continue;
+      const literal = typeof tool.output?.next === 'string' && !tool.output.next.startsWith('result.')
+        && !tool.output.next.includes('.') ? tool.output.next : null;
+      if (literal && !branches.has(literal)) {
+        wrong.push(`${flowId}.${nodeId} -> ${node.id} answers "${literal}", routes [${[...branches].join(', ')}]`);
+      }
+    }
+  }
+
+  assert.deepEqual(wrong, [], `branches no node routes:\n  ${wrong.join('\n  ')}`);
+});

@@ -710,6 +710,16 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   planned client-op request was withdrawn. **A refusal must carry its RAW reason**: `command_unresolved`
   means the client never registered the op (re-measured for `memory.*`, still true — that one is a real
   gap), anything else points back at our own declaration. Two opposite fixes behind one word.
+- **`invalidNext` is silent until it throws the whole turn away.** The offers adapter answered `ask`
+  where its node routes `done|partial|empty|error`, so a comparison that had been searched across two
+  stores, screened, judged, verified and issued an id ended in the generic failure terminal. A command
+  picks its own branch and the adapter PASSES IT THROUGH; `check:flows` now refuses any runtime tool
+  whose literal `next` is not a branch its node routes.
+- **A model-called tool cannot be handed flow state, and that is what blocks the comparison window.**
+  `present_store_offers` sits in `allowedTools`, so its arguments are the MODEL's — the snapshot in
+  flow state never reaches it and it answers `comparison_unreadable`. The presentation has to become
+  deterministic (an `action_contract` reading the snapshot via `inputSelector`), which is the
+  recommendation already on record for this trio.
 - **A LEADING bracket in a storefront title is merchandising, not the product.** `infer_model` took the
   first token carrying both letters and digits, so `[11Pay3%포인트] 로지텍 … LIFT …` was offered to the
   user as model `11Pay3` — a points promotion. The choice then locks onto a product that does not exist.

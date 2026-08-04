@@ -170,3 +170,21 @@ test('a runtime without json refuses rather than dropping the comparison', () =>
 
   assert.equal(result.error, 'json_unavailable');
 });
+
+test('ranking answers in the branch vocabulary its node routes', () => {
+  // The node routes `done | partial | empty | error`. The adapter answered `ask`, which no branch names,
+  // so `invalidNext` sent the whole turn to the error terminal — live, after the entire comparison had
+  // been built: both stores searched, screening judged, offers verified, a `comparison_id` issued, and
+  // then "요청을 처리하는 중 문제가 발생했습니다".
+  //
+  // The rule is already settled: a command picks its own `next` and the adapter passes it through. This
+  // one overwrote it with a constant.
+  const lua = runtime();
+  const ranked = lua.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  lua.close();
+
+  assert.ok(
+    ['done', 'partial', 'empty'].includes(ranked.next),
+    `\`${ranked.next}\` is not a branch the node routes`,
+  );
+});

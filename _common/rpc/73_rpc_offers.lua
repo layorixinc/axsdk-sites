@@ -96,7 +96,10 @@ function O.rank(args)
     return { next = "error", ok = false, error = "comparison_unreadable" }
   end
   return {
-    next = "ask",
+    -- The command picks its own branch (`done`/`partial`/`empty`) and the node routes exactly those.
+    -- A constant here answered `ask`, which no branch names, and `invalidNext` threw away a comparison
+    -- that had already been searched, screened, verified and issued an id.
+    next = result.next,
     ok = true,
     comparison_id = result.comparison_id,
     comparison_state = encode(snapshot),

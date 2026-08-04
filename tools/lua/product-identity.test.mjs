@@ -103,10 +103,13 @@ test('an option nobody can compare does not lead the list', () => {
       value: {
         site: '11st',
         candidates: [
-          // Measured live, and this one came back first.
+          // Measured live, in this order — the unmodelled listing came back first.
           { site: '11st', product_id: '1', name: '[11Pay3%포인트] 로지텍 코리아 정품 리프트 LIFT 버티컬 무선 마우스', price: 87440, currency: 'KRW', url: 'https://www.11st.co.kr/products/1' },
           { site: '11st', product_id: '2', name: '로지텍 G304 무선 게이밍 마우스', price: 48420, currency: 'KRW', url: 'https://www.11st.co.kr/products/2' },
           { site: '11st', product_id: '3', name: '로지텍 M170 무선 마우스', price: 12780, currency: 'KRW', url: 'https://www.11st.co.kr/products/3' },
+          { site: '11st', product_id: '4', name: '로지텍 M240 무선 마우스', price: 27760, currency: 'KRW', url: 'https://www.11st.co.kr/products/4' },
+          { site: '11st', product_id: '5', name: '로지텍 M750 무선 마우스', price: 54360, currency: 'KRW', url: 'https://www.11st.co.kr/products/5' },
+          { site: '11st', product_id: '6', name: '[무료배송] 로지텍 정품 무선 마우스 세트', price: 19900, currency: 'KRW', url: 'https://www.11st.co.kr/products/6' },
         ],
       },
     }],

@@ -426,3 +426,35 @@ test('a store that found nothing returns no candidates key at all', () => {
     'the nested result is validated too — an empty list has to be absent at every boundary, not the first one found',
   );
 });
+
+test('FX rates arrive when the runtime hands the payload back as a body string', () => {
+  // Measured live: the runtime's `net.fetch` answers `{body, headers, ok, status}` and never a `json`
+  // field, whatever `response = "json"` asks for. The FX code read `response.json`, so a 200 with a
+  // perfectly good rate table read as `fx_fetch_failed` — no `price_base`, no total, and every row of a
+  // TOTAL-COST comparison printed "총 미확인" with the shipping cost right beside the price.
+  //
+  // `71_rpc_zip.lua` already learned this and decodes the body. One transport, one decoder.
+  const withNet = loadLuaModules([
+    '_common/scripts/00_base.lua',
+    '_common/scripts/44_pagination.lua',
+    '_common/scripts/45_offer_view.lua',
+    ...COMMERCE_LAYER,
+  ]);
+  withNet.expose({
+    json: { encode: (value) => JSON.stringify(value), decode: (text) => JSON.parse(text) },
+    net: {
+      fetch: () => ({
+        ok: true,
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ amount: 1, base: 'USD', date: '2026-08-04', rates: { KRW: 1427.11 } }),
+      }),
+    },
+  });
+
+  const fx = withNet.call('AX_COMMERCE.fetch_fx_rates', ['KRW']);
+  withNet.close();
+
+  assert.equal(fx.error, undefined, `FX failed: ${fx.error}`);
+  assert.equal(Math.round(fx.rates.KRW), 1427);
+});

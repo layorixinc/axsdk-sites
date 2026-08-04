@@ -1323,3 +1323,82 @@ test('a branch value the presenter computes actually reaches the next node', () 
   const lost = computed.filter((key) => !published.has(key));
   assert.deepEqual(lost, [], `computed but never published: ${lost.join(', ')}`);
 });
+
+/** Every module file a tool loads, as source text keyed by module id. */
+function moduleSources(moduleIds) {
+  const sources = new Map();
+  for (const moduleId of moduleIds) {
+    const name = moduleId.replace(/^_common\./, '');
+    const file = ['rpc', 'scripts']
+      .map((directory) => fileURLToPath(new URL(`../_common/${directory}/${name}.lua`, import.meta.url)))
+      .find((candidate) => existsSync(candidate));
+    if (file) sources.set(moduleId, readFileSync(file, 'utf8'));
+  }
+  return sources;
+}
+
+/**
+ * Hosts fetched from a function the tool's entry can actually reach.
+ *
+ * A bare `https://` literal is not evidence — storefront URLs are navigation targets, and granting egress
+ * for those would be wrong. Neither is loading a module: `00_base` ships a geocode fetch behind
+ * `resolve_zip`, and the store tools load it without ever calling that. So: walk names from the entry.
+ */
+function reachableFetchHosts(execute) {
+  const sources = moduleSources(execute.modules ?? []);
+  const reachable = new Set();
+  let frontier = [...(execute.lua ?? '').matchAll(/AX_RPC_[A-Z_]+\.(\w+)\s*\(/g)].map((match) => match[1]);
+
+  while (frontier.length) {
+    const fn = frontier.pop();
+    if (reachable.has(fn)) continue;
+    reachable.add(fn);
+    for (const source of sources.values()) {
+      const start = source.search(new RegExp(`function\\s+(?:[\\w.]+\\.)?${fn}\\s*\\(`));
+      if (start < 0) continue;
+      const end = source.indexOf('\nend', start);
+      const body = source.slice(start, end < 0 ? undefined : end);
+      // Both shapes: `C.fetch_fx_rates(...)` through a module table, and a bare global `AX_collect_...(`.
+      for (const call of body.matchAll(/\b(?:[A-Z][\w]*\.)?(\w+)\s*\(/g)) frontier.push(call[1]);
+    }
+  }
+
+  const hosts = new Set();
+  for (const source of sources.values()) {
+    for (const call of source.matchAll(/\bfetch\(\s*(?:"https:\/\/([\w.-]+)|([\w.]+)\s*\.\.)/g)) {
+      // Which function holds this fetch: the last one opened before it.
+      const before = source.slice(0, call.index);
+      const owner = [...before.matchAll(/function\s+(?:[\w.]+\.)?(\w+)\s*\(/g)].pop();
+      if (!owner || !reachable.has(owner[1])) continue;
+      if (call[1]) { hosts.add(call[1]); continue; }
+      const constant = source.match(new RegExp(`${call[2].replace('.', '\\.')}\\s*=\\s*"https://([\\w.-]+)`));
+      if (constant) hosts.add(constant[1]);
+    }
+  }
+  return [...hosts];
+}
+
+
+
+test('a tool that fetches over the network declares the host it reaches', () => {
+  // `rpc.allow` grants OPS; network egress is a SEPARATE `net:` block on the tool's `execute`, and a
+  // capability declared in the wrong place is indistinguishable from a missing one. Without it the runtime
+  // has no `net` table at all, so the code takes its own "no fetch available" path and says so quietly.
+  //
+  // Live, every offer: `cost_error: "fx_fetch_unavailable"` — no `price_base`, so no total, so a
+  // total-cost comparison that never showed a total. Six rows of "총 미확인" with the shipping cost printed
+  // right next to the price.
+  const common = parseFlow('_common/flows.yaml');
+  const unreachable = [];
+
+  for (const [toolId, tool] of Object.entries(common.flowTools ?? {})) {
+    const execute = tool?.execute;
+    if (execute?.kind !== 'runtime' || typeof execute.lua !== 'string') continue;
+    const allowed = new Set(execute.net?.allow ?? []);
+    for (const host of reachableFetchHosts(execute)) {
+      if (!allowed.has(host)) unreachable.push(`${toolId}: fetches ${host}, not in net.allow`);
+    }
+  }
+
+  assert.deepEqual(unreachable, [], `hosts reached but never granted:\n  ${unreachable.join('\n  ')}`);
+});

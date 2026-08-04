@@ -77,6 +77,24 @@ function B.selector_for_id(id)
 end
 
 -- ── url ────────────────────────────────────────────────────────────────────
+--- The decoded payload of a fetch response, whichever transport answered.
+---
+--- One name, two implementations. Measured live: the RUNTIME's `net.fetch` answers
+--- `{body, headers, ok, status}` and NEVER a `json` field, whatever `response = "json"` asks for; the
+--- durable one does supply `json`. Reading only `json` turns a 200 with a perfectly good payload into a
+--- failure, and the failure is silent — the caller reports "could not fetch" about a request that worked.
+---
+--- Returns nil when the response is missing, an HTTP error, or a body nothing can parse.
+function B.response_json(response)
+  if type(response) ~= "table" or response.ok ~= true then return nil end
+  if type(response.json) == "table" then return response.json end
+  if type(response.body) ~= "string" or type(json) ~= "table" or type(json.decode) ~= "function" then
+    return nil
+  end
+  local ok, decoded = pcall(json.decode, response.body)
+  return ok and type(decoded) == "table" and decoded or nil
+end
+
 function B.url_encode(value)
   local text = tostring(value or "")
   return (text:gsub("([^%w%-_%.~])", function(char)
@@ -319,8 +337,9 @@ function B.geocode_point(query)
   if photon.reason == "pending" then
     return { pending = true }
   end
-  if photon.ok and type(photon.json) == "table" then
-    local features = photon.json.features
+  local photon_body = B.response_json(photon)
+  if photon_body then
+    local features = photon_body.features
     local first = type(features) == "table" and features[1] or nil
     if type(first) == "table" then
       local props = first.properties
@@ -351,8 +370,9 @@ function B.geocode_point(query)
   if nom.reason == "pending" then
     return { pending = true }
   end
-  if nom.ok and type(nom.json) == "table" then
-    local first = nom.json[1]
+  local nom_body = B.response_json(nom)
+  if nom_body then
+    local first = nom_body[1]
     if type(first) == "table" and first.lat and first.lon then
       local zip = type(first.address) == "table" and B.extract_zip(first.address.postcode) or nil
       return { lon = tonumber(first.lon), lat = tonumber(first.lat), zip = zip }
@@ -389,10 +409,11 @@ function B.zip_from_point(lat, lon)
   if response.reason == "pending" then
     return { pending = true }
   end
-  if not response.ok or type(response.json) ~= "table" then
+  local body = B.response_json(response)
+  if not body then
     return nil
   end
-  local geos = response.json.result and response.json.result.geographies
+  local geos = body.result and body.result.geographies
   if type(geos) ~= "table" then
     return nil
   end
@@ -511,9 +532,10 @@ function B.resolve_zip(args)
     }
   end
 
-  local matches = response.json
-    and response.json.result
-    and response.json.result.addressMatches
+  local body = B.response_json(response)
+  local matches = body
+    and body.result
+    and body.result.addressMatches
   local first = matches and matches[1]
   local components = first and first.addressComponents
   local zip = components and components.zip

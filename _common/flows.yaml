@@ -2347,6 +2347,13 @@ flowTools:
       kind: runtime
       implementation: lua
       # No rpc block: these commands never touch the browser, so they are granted no ops at all.
+      # Network egress is SEPARATE from `rpc.allow`, and without this block the runtime has no `net` table
+      # at all — the FX code took its own "no fetch available" path and every offer came back
+      # `cost_error: fx_fetch_unavailable`, so a total-cost comparison never showed a total.
+      net:
+        allow: [api.frankfurter.dev]
+        maxCalls: 2
+        timeoutMs: 8000
       modules: ["_common.00_base", "_common.44_pagination", "_common.45_offer_view", "_common.46_candidate_browser", "_common.50_commerce_core", "_common.51_relevance", "_common.52_identity", "_common.53_verify", "_common.54_comparison", "_common.55_offers", "_common.56_store_io", "_common.63_pure_entries"]
       entry: run
       lua: |

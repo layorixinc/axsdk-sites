@@ -104,3 +104,31 @@ test('the ZCTA layer key is matched by substring, because it carries a vintage',
   assert.equal(result.zip_code, '94102');
   assert.equal(result.source, 'geocode');
 });
+
+test('a runtime response carries its payload as a body string, and the ladder still reads it', () => {
+  // Measured live: the runtime's `net.fetch` answers `{body, headers, ok, status}` and NEVER a `json`
+  // field, whatever `response = "json"` asks for. Every fetch site in this repo checked `response.json`,
+  // so a 200 with a perfectly good payload read as a failure — `fx_fetch_failed`, no `price_base`, and a
+  // total-cost comparison that showed "총 미확인" on every row while the shipping cost sat next to it.
+  //
+  // The old stub handed back `json`, which is the fixture asserting on its own assumption.
+  const runtimeShaped = loadLuaModules(['_common/rpc/71_rpc_zip.lua']);
+  runtimeShaped.expose({
+    json: { encode: (value) => JSON.stringify(value), decode: (text) => JSON.parse(text) },
+    net: {
+      fetch: (url) => ({
+        ok: true,
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+        body: String(url).includes('photon')
+          ? JSON.stringify({ features: [{ geometry: { coordinates: [-122.42, 37.77] }, properties: {} }] })
+          : JSON.stringify({ result: { geographies: { '2020 Census ZIP Code Tabulation Areas': [{ ZCTA5: '94102' }] } } }),
+      }),
+    },
+  });
+
+  const resolved = runtimeShaped.call('AX_RPC_ZIP.resolve', { address: 'San Francisco, CA' });
+  runtimeShaped.close();
+
+  assert.equal(resolved.zip_code, '94102');
+});

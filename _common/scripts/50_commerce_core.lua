@@ -156,14 +156,20 @@ function C.fetch_fx_rates(currencies)
     response = "json",
     timeout = 5000
   })
+  -- One transport, two shapes. Measured live: the runtime's `net.fetch` answers `{body, headers, ok,
+  -- status}` and NEVER a `json` field, whatever `response = "json"` asks for; the durable one does supply
+  -- `json`. Reading only `json` turned a 200 with a perfectly good rate table into `fx_fetch_failed` — no
+  -- `price_base`, no total, and every row of a TOTAL-COST comparison printed "총 미확인" with the shipping
+  -- cost right beside the price. `71_rpc_zip.lua` already learned this.
+  local payload = B.response_json(response)
   if response and response.reason == "pending" then
     return { pending = true, source = C.FX_URL }
   end
-  if not response or response.ok ~= true or type(response.json) ~= "table" then
+  if not payload then
     return { rates = rates, source = C.FX_URL, error = "fx_fetch_failed" }
   end
 
-  local body_rates = response.json.rates
+  local body_rates = payload.rates
   if type(body_rates) == "table" then
     for code, amount in pairs(body_rates) do
       local numeric = tonumber(amount)
@@ -174,7 +180,7 @@ function C.fetch_fx_rates(currencies)
   end
   return {
     rates = rates,
-    date = non_empty(response.json.date),
+    date = non_empty(payload.date),
     source = C.FX_URL
   }
 end

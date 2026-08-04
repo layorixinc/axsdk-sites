@@ -725,6 +725,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
   re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
   files that DEFINE it and fails on any tool that calls one it did not declare.
+- **The runtime's `net.fetch` answers `{body, headers, ok, status}` and NEVER a `json` field**, whatever
+  `response = "json"` asks for; the durable one does supply `json`. Reading only `json` turns a 200 with a
+  perfectly good payload into a silent failure. Measured: `fx_fetch_failed:body=string,headers=table,
+  ok=boolean,status=number`. `B.response_json(response)` is the one decoder; every fetch site uses it.
+- **Network egress is a `net:` block per TOOL, and a tool without one has no `net` table at all.** The FX
+  fetch had none, so cost normalization took its own "no fetch available" path and every offer came back
+  `cost_error: fx_fetch_unavailable` — a TOTAL-COST comparison that never showed a total, for weeks.
+  `check:flows` walks each entry's call graph and requires the hosts it can actually reach.
+- **A live gate must clear the paused node FIRST.** A shopping session left paused on a comparison window
+  treats the next bare number as a SELECTION, and selection is the approval turn. Send `취소` before
+  starting a new live scenario; three cart adds came from skipping that.
 - **A field the script COMPUTES and the flow never publishes is a field the script did not compute.**
   The presenter answered `page`/`select`/`refine` with the payload that gives the branch meaning — which
   page, which number, which words — and the tool published only `next`. Six fields vanished in silence.

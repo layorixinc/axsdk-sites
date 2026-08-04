@@ -392,3 +392,62 @@ test('"다음" turns the page, and the second window holds different rows', () =
   assert.notEqual(window2.question, window1.question, 'a page that renders the same rows never moved');
   assert.equal(window2.comparison_id, ranked.comparison_id, 'paging keeps the listing, so the numbers keep meaning');
 });
+
+test('a filter narrows the listing and reissues it', () => {
+  // Changing WHICH offers are listed changes what the numbers mean, so the listing is reissued. The whole
+  // trip runs through the presenter now: read the words, hand them to the refiner, render what comes back.
+  const build = runtime();
+  const ranked = build.call('AX_RPC_OFFERS.rank', {
+    verified_offers: [
+      { ...MANY[0], shipping_cost: 0, shipping_base: 0 },
+      { ...MANY[1], shipping_cost: 5, shipping_base: 5, total_base: 16 },
+    ],
+  });
+  build.close();
+
+  const reading = runtime();
+  const asked = reading.call('AX_RPC_OFFERS.present', {
+    comparison_state: ranked.comparison_state,
+    choice_stage: 'asked',
+    requestText: '무료배송만',
+  });
+  reading.close();
+  assert.equal(asked.next, 'refine');
+  assert.equal(asked.refine_request, '무료배송만');
+
+  const filtering = runtime();
+  const narrowed = filtering.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: asked.refine_request,
+  });
+  filtering.close();
+
+  assert.equal(narrowed.next, 'ask');
+  assert.equal(narrowed.view_total, 1, 'the paid-shipping offer must be gone');
+  assert.notEqual(narrowed.comparison_id, ranked.comparison_id, 'different offers means a different listing');
+});
+
+test('a refusal keeps the listing and says why, in the window', () => {
+  // "3만원 이하" against a USD-only listing is a claim about prices that were never compared, so the filter
+  // is REFUSED. The previous listing has to STAND — reporting "0건" would be a lie, and routing to an error
+  // would take away the comparison the user is reading over a request they can simply rephrase.
+  const build = runtime();
+  // Every offer priced in USD: there is no rate to infer, so "3만원" is a threshold against prices that
+  // were never compared. (OFFERS carries a KRW row, which would make the filter legitimately applicable.)
+  const ranked = build.call('AX_RPC_OFFERS.rank', { verified_offers: MANY.slice(0, 3) });
+  build.close();
+
+  const refusing = runtime();
+  const refused = refusing.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: '3만원 이하만 보여줘',
+  });
+  refusing.close();
+
+  assert.equal(refused.next, 'ask', 'a refusal is not the loss of the comparison');
+  assert.equal(refused.view_total, 3, 'every offer still stands');
+  // The window is the only surface the user reads, so a reason that is not in it never arrives.
+  assert.match(refused.question ?? '', /통화/, 'the refusal must explain itself where the user is looking');
+});

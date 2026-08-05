@@ -54,6 +54,7 @@ SCHEMA.md                     # LLM tool schemas (name/description/parameters on
 FLOWS.md                      # flow-engine spec / authoring reference
 NAVIGATION.md                 # nav.navigate contract: fired/arrived only (timeOrigin + target gate)
 AUTHORING.md                  # RPC Lua + flows authoring traps: the boundaries a value silently dies at
+RPC_LUA_REFERENCE.md          # RPC ops, module shape, and the smallest complete flow tool
 ```
 
 ---
@@ -528,8 +529,9 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 
 ## 13. Settled decisions & findings (established — don't relitigate)
 
-> Writing Lua or flows? Read **`AUTHORING.md`** first. It is the operational form of this section:
-> the four boundaries a value has to survive, and the gate that catches each one.
+> Writing Lua or flows? Read **`RPC_LUA_REFERENCE.md`** (what you may call, and a worked tool) and
+> **`AUTHORING.md`** (the boundaries a value silently dies at) first. Both are the operational form of
+> this section.
 
 - **Git is ground truth — verify, never trust memory/summaries.** A session summary can misstate the
   repo state (a prior "remembered" set of commits was not on `main`; real HEAD differed). Run

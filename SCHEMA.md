@@ -1284,23 +1284,6 @@
     }
   },
   {
-    "name": "playground_amazon_search",
-    "description": "Run one read-only Amazon durable-search fixture with its fixed query. It never adds an item to a cart or checks out.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "query"
-      ],
-      "properties": {
-        "query": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    }
-  },
-  {
     "name": "playground_checkpoint_entry",
     "description": "Route a fresh checkpoint-diagnostic entry into its first real step without a remote round trip.",
     "parameters": {
@@ -1390,87 +1373,44 @@
     }
   },
   {
-    "name": "playground_open_mapped_site",
-    "description": "Re-entrantly open one explicitly mapped Playground commerce origin before its site-local product search command runs.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "item",
-        "index",
-        "key",
-        "context"
-      ],
-      "properties": {
-        "item": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "site"
-          ],
-          "properties": {
-            "site": {
-              "type": "string",
-              "enum": [
-                "amazon",
-                "walmart",
-                "ebay",
-                "aliexpress",
-                "etsy",
-                "coupang",
-                "naver-shopping",
-                "gmarket",
-                "11st",
-                "ssg"
-              ]
-            }
-          }
-        },
-        "index": {
-          "type": "number"
-        },
-        "key": {
-          "type": "string"
-        },
-        "context": {
-          "type": "object",
-          "additionalProperties": true,
-          "required": [
-            "query"
-          ],
-          "properties": {
-            "query": {
-              "type": "string"
-            }
-          }
-        }
-      }
-    }
-  },
-  {
     "name": "playground_open_site",
     "description": "Hand off from any current site to one explicitly supported Playground commerce search origin.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "site"
-      ],
+      "required": [],
       "properties": {
         "site": {
-          "type": "string",
-          "enum": [
-            "amazon",
-            "walmart",
-            "ebay",
-            "aliexpress",
-            "etsy",
-            "coupang",
-            "naver-shopping",
-            "gmarket",
-            "11st",
-            "ssg"
+          "type": [
+            "string",
+            "null"
           ]
+        },
+        "item": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "index": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       }
     }
@@ -1493,76 +1433,50 @@
     }
   },
   {
-    "name": "playground_search_amazon",
-    "description": "Run one read-only replay-safe Amazon product search after the durable Amazon handoff. It never adds an item to a cart or checks out.",
+    "name": "playground_search_site",
+    "description": "Search one Playground commerce site over RPC. Accepts a flat query or the fan-out worker envelope. Never changes a cart, checkout, or order.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "query"
-      ],
+      "required": [],
       "properties": {
         "query": {
-          "type": "string",
-          "minLength": 1
-        }
-      }
-    }
-  },
-  {
-    "name": "playground_search_one_site",
-    "description": "Run the active site's durable-v2 AX_search_product command after the portable handoff completes.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "item",
-        "index",
-        "key",
-        "context"
-      ],
-      "properties": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "item": {
-          "type": "object",
-          "additionalProperties": false,
-          "required": [
-            "site"
+          "type": [
+            "object",
+            "null"
           ],
-          "properties": {
-            "site": {
-              "type": "string",
-              "enum": [
-                "amazon",
-                "walmart",
-                "ebay",
-                "aliexpress",
-                "etsy",
-                "coupang",
-                "naver-shopping",
-                "gmarket",
-                "11st",
-                "ssg"
-              ]
-            }
-          }
+          "additionalProperties": true
         },
         "index": {
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ]
         },
         "key": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "context": {
-          "type": "object",
-          "additionalProperties": true,
-          "required": [
-            "query"
+          "type": [
+            "object",
+            "null"
           ],
-          "properties": {
-            "query": {
-              "type": "string"
-            }
-          }
+          "additionalProperties": true
         }
       }
     }

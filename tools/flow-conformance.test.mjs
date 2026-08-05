@@ -1442,3 +1442,42 @@ test('no production flow tool executes durably, and the check can say so', () =>
     ['legacy'],
   );
 });
+
+test('the playground has no durable tools left either', () => {
+  // The playground was the last place durable survived, and it was not a clean split: the checkpoint
+  // flow genuinely verified durable state, while three tools still reached `AX_search_product` through
+  // the durable path even though a runtime twin (`rpc_storefront_search`) already sat beside them.
+  //
+  // Two paths doing the same job is the drift this repo keeps paying for, so the playground runs the
+  // same runtime path production does.
+  const doc = parseFlow('playground/_common/flows.yaml');
+  assert.deepEqual(durableTools(doc), []);
+});
+
+test('the playground no longer tells the user about a durable grant', () => {
+  // The terminals explained a failure in terms of `lua.operations` grants for commands that are gone:
+  // "the host must register AX_search_product in lua.operations". A user following that would go looking
+  // for a grant nothing asks for any more, and the goal text still promised a "durable-v2 entry command".
+  //
+  // Wording that survives the mechanism it describes is a wrong answer with a long half-life.
+  // Checked on the parsed document, not the raw text: a comment recording why durable was removed is
+  // history worth keeping, while a `goal`, `description` or `respond` the user reads is a promise.
+  const doc = parseFlow('playground/_common/flows.yaml');
+  const stale = [];
+  const visit = (node, path) => {
+    if (typeof node === 'string') {
+      if (/durable|lua\.operations|AX_search_product|AX_playground_/.test(node)) stale.push(path);
+      return;
+    }
+    if (typeof node !== 'object' || node === null) return;
+    for (const [key, value] of Object.entries(node)) {
+      if (['goal', 'description', 'respond', 'prompt'].includes(key) || typeof value === 'object') {
+        visit(value, `${path}.${key}`);
+      }
+    }
+  };
+  visit(doc.flows ?? {}, 'flows');
+  visit(doc.router ?? {}, 'router');
+
+  assert.deepEqual(stale, [], `playground text still promises durable:\n  ${stale.join('\n  ')}`);
+});

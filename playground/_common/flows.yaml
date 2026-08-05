@@ -12,13 +12,14 @@ router:
   routes:
     - intent: playground_durable_checkpoint
       entry: playground_durable_checkpoint.start
-      description: Run the isolated durable-operation checkpoint diagnostic.
+      description: Run the isolated RPC op-grant checkpoint diagnostic.
       examples:
         - run playground durable checkpoint test
         - durable checkpoint test
     - intent: playground_amazon_search
       entry: playground_amazon_search.start
-      description: Run the stored Amazon durable-search fixture while the Amazon site layer is active.
+      description: Run the stored Amazon RPC search fixture while the Amazon site
+        layer is active.
       examples:
         - run playground Amazon durable search test
         - test the Playground Amazon search
@@ -26,7 +27,8 @@ router:
     - intent: rpc_probe
       priority: 200
       entry: rpc_probe.read
-      description: Read the current page over RPC Lua to prove the runtime-driven browser channel works.
+      description: Read the current page over RPC Lua to prove the runtime-driven
+        browser channel works.
       examples:
         - rpc probe
         - rpc lua 확인
@@ -34,7 +36,8 @@ router:
     - intent: rpc_nav_only
       priority: 220
       entry: rpc_nav_only.go
-      description: Navigate to one URL over RPC and report how long each stage took. Diagnostic only.
+      description: Navigate to one URL over RPC and report how long each stage took.
+        Diagnostic only.
       examples:
         - rpc nav only
         - rpc 이동만
@@ -42,7 +45,8 @@ router:
     - intent: rpc_site_search
       priority: 210
       entry: rpc_site_search.search
-      description: Search one Playground commerce site through the runtime-side RPC Lua storefront.
+      description: Search one Playground commerce site through the runtime-side RPC
+        Lua storefront.
       examples:
         - rpc 검색 11번가 무선 마우스
         - rpc search 11st wireless mouse
@@ -50,7 +54,9 @@ router:
     - intent: playground_multi_site_search
       priority: 140
       entry: playground_multi_site_search.collect
-      description: Search one product across two or more explicitly selected Playground commerce sites through serial portable durable-v2 handoffs. It is read-only and never adds to a cart or checks out.
+      description: Search one product across two or more explicitly selected
+        Playground commerce sites, opening each over RPC in turn. It is
+        read-only and never adds to a cart or checks out.
       examples:
         - wireless trackball mouse를 Amazon과 Walmart에서 찾아줘
         - eBay, Etsy, AliExpress에서 bluetooth keyboard 검색해줘
@@ -59,14 +65,18 @@ router:
     - intent: shopping
       priority: 130
       entry: shopping.collect_query
-      description: Product shopping requests search Amazon only in this isolated Playground. From any current site, use the portable durable-v2 handoff to www.amazon.com before the Amazon search command runs. Never add an item to a cart or place an order.
+      description: Product shopping requests search Amazon only in this isolated
+        Playground. From any current site, navigate to www.amazon.com over RPC
+        before the Amazon search runs. Never add an item to a cart or place an
+        order.
       examples:
         - 무선 트랙볼 마우스 찾아줘
         - buy a wireless trackball mouse
         - compare wireless trackball mice
 flows:
   playground_durable_checkpoint:
-    goal: Verify that the host grants operation-private durable state only to the registered playground checkpoint command.
+    goal: Verify that the host grants this tool the ops it declared, by having a
+      declared op answer.
     state:
       label: flow-checkpoint
     nodes:
@@ -82,7 +92,7 @@ flows:
       run:
         kind: action_contract
         id: playground_durable_checkpoint
-        inputSelector: [label]
+        inputSelector: [ label ]
         next:
           done: done
           grant_required: grant_required
@@ -91,18 +101,24 @@ flows:
       done:
         kind: terminal
         inputSelector: []
-        respond: Durable checkpoint fixture completed. Inspect the tool result for checkpoint phase and revision.
+        respond: Durable checkpoint fixture completed. Inspect the tool result for
+          checkpoint phase and revision.
       grant_required:
         kind: terminal
         inputSelector: []
-        respond: The fixture is loaded, but durable.state is unavailable until the host registers AX_playground_durable_checkpoint as a Lua operation.
+        respond: The fixture is loaded, but the RPC checkpoint could not read the page.
+          Check that the tool's `rpc.allow` grants `dom.get_location_href`.
       error:
         kind: terminal
         inputSelector: []
-        respond: The host rejected this command before the Lua fixture ran. no_durable_context is expected until AX_playground_durable_checkpoint has a lua.operations grant; inspect any different tool error.
+        respond: The host rejected this command before the Lua fixture ran. Read the RAW
+          tool error — `command_unresolved` means the client never registered
+          the op, which needs a different fix from a denied one.
 
   playground_amazon_search:
-    goal: Test replay-safe Amazon result extraction through the stored Amazon site-layer command. This fixture requires the active host to be www.amazon.com.
+    goal: Test replay-safe Amazon result extraction through the stored Amazon
+      site-layer command. This fixture requires the active host to be
+      www.amazon.com.
     state:
       query: wireless trackball mouse
       candidates: null
@@ -121,28 +137,34 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       run:
         kind: action_contract
-        id: playground_amazon_search
-        inputSelector: [query]
+        id: playground_search_site
+        inputSelector: [ query ]
         next:
           done: done
-          grant_required: grant_required
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
       done:
         kind: terminal
         inputSelector: []
-        respond: Amazon durable search fixture completed. Inspect the tool result for query, candidates, total count, cursor, phase, and revision.
+        respond: Amazon RPC search fixture completed. Inspect the tool result for query,
+          candidates, total count and cursor.
       grant_required:
         kind: terminal
         inputSelector: []
-        respond: The Amazon fixture is loaded, but the host must register AX_search_product in lua.operations before its checkpoint can run.
+        respond: The Amazon fixture is loaded, but the RPC checkpoint could not reach
+          the page. Check that the tool's `rpc.allow` grants the ops it calls,
+          and read the raw reason in the tool error.
       error:
         kind: terminal
         inputSelector: []
-        respond: Amazon search did not complete. Run this fixture while stored-lua:amazon is active; captcha_required and login_required are real Amazon access states.
+        respond: Amazon search did not complete. Run this fixture while
+          stored-lua:amazon is active; captcha_required and login_required are
+          real Amazon access states.
 
   shopping:
-    goal: Use the shopping request as an Amazon search query, hand off from the current site to Amazon, then read Amazon search candidates. Never add an item to a cart or place an order.
+    goal: Use the shopping request as an Amazon search query, hand off from the
+      current site to Amazon, then read Amazon search candidates. Never add an
+      item to a cart or place an order.
     state:
       site: amazon
       query: null
@@ -157,7 +179,8 @@ flows:
         id: playground_query_from_request
         inputSelector:
           - requestText
-        description: Preserve the current shopping request as the Amazon search query without an extra model turn.
+        description: Preserve the current shopping request as the Amazon search query
+          without an extra model turn.
         next:
           search: open_amazon
           error: error
@@ -167,17 +190,18 @@ flows:
         id: playground_open_site
         inputSelector:
           - site
-        description: Use the portable durable-v2 operation to hand off to Amazon from the current site.
+        description: Navigate to Amazon over RPC from whatever site is current.
         next:
           search: search_amazon
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
       search_amazon:
         kind: action_contract
-        id: playground_search_amazon
+        id: playground_search_site
         inputSelector:
           - query
-        description: Run the replay-safe Amazon product search after the Amazon site layer is active.
+        description: Run the replay-safe Amazon product search after the Amazon site
+          layer is active.
         next:
           done: done
           error: error
@@ -185,14 +209,20 @@ flows:
       done:
         kind: terminal
         inputSelector: []
-        respond: Amazon search completed. Inspect the tool result for the query, candidates, total count, cursor, phase, and revision.
+        respond: Amazon search completed. Inspect the tool result for the query,
+          candidates, total count, cursor, phase, and revision.
       error:
         kind: terminal
         inputSelector: []
-        respond: Amazon search did not complete. The result may require a durable-operation grant, Amazon access, or a retry after the destination site layer loads.
+        respond: Amazon search did not complete. Check the tool's `rpc.allow`, Amazon
+          access states (captcha_required, login_required), or retry once the
+          destination site layer has loaded.
 
   playground_multi_site_search:
-    goal: Search one user-requested product across two to ten explicitly selected Playground commerce sites. Each store is opened through the portable durable-v2 entry command, then searched through its site-local replay-safe AX_search_product command. Never changes a cart, checkout, or order.
+    goal: Search one user-requested product across two to ten explicitly selected
+      Playground commerce sites. Each store is opened over RPC, then searched
+      through the shared storefront reader. Never changes a cart, checkout, or
+      order.
     state:
       query: null
       stores: null
@@ -202,12 +232,13 @@ flows:
       collect:
         kind: action_unit
         messagePolicy: { currentUserText: active_node_only }
-        description: Extract one product search query and two to ten explicitly requested supported stores, or ask which product/stores to search.
+        description: Extract one product search query and two to ten explicitly
+          requested supported stores, or ask which product/stores to search.
         inputSelector:
           - requestText
           - query
           - stores
-        allowedTools: [playground_collect_multi_site_request]
+        allowedTools: [ playground_collect_multi_site_request ]
         prompt: |-
           Call playground_collect_multi_site_request exactly once.
 
@@ -243,19 +274,23 @@ flows:
       done:
         kind: terminal
         inputSelector: []
-        respond: 다중 사이트 검색을 완료했습니다. 각 사이트의 실제 후보와 접근 오류는 tool result의 store_results에서 확인하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+        respond: 다중 사이트 검색을 완료했습니다. 각 사이트의 실제 후보와 접근 오류는 tool result의 store_results에서
+          확인하세요. 장바구니·결제·주문은 변경하지 않았습니다.
       partial:
         kind: terminal
         inputSelector: []
-        respond: 일부 사이트 검색만 완료했습니다. 성공 후보와 CAPTCHA·로그인·접근 제한 오류는 tool result의 store_results에서 확인하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+        respond: 일부 사이트 검색만 완료했습니다. 성공 후보와 CAPTCHA·로그인·접근 제한 오류는 tool result의
+          store_results에서 확인하세요. 장바구니·결제·주문은 변경하지 않았습니다.
       empty:
         kind: terminal
         inputSelector: []
-        respond: 선택한 사이트에서 읽을 수 있는 후보를 찾지 못했습니다. 더 구체적인 상품명을 입력하거나 다른 사이트를 선택하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+        respond: 선택한 사이트에서 읽을 수 있는 후보를 찾지 못했습니다. 더 구체적인 상품명을 입력하거나 다른 사이트를 선택하세요.
+          장바구니·결제·주문은 변경하지 않았습니다.
       error:
         kind: terminal
         inputSelector: []
-        respond: 다중 사이트 durable 검색을 완료하지 못했습니다. 상품명과 두 개 이상의 지원 사이트를 다시 지정하세요. 장바구니·결제·주문은 변경하지 않았습니다.
+        respond: 다중 사이트 검색을 완료하지 못했습니다. 상품명과 두 개 이상의 지원 사이트를 다시 지정하세요. 장바구니·결제·주문은 변경하지
+          않았습니다.
 
   rpc_nav_only:
     goal: Time each stage of an RPC navigation.
@@ -272,13 +307,14 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       done:
         kind: terminal
-        inputSelector: [stages, href]
+        inputSelector: [ stages, href ]
         respond: |-
           Reply with exactly this and nothing else:
           NAV {stages} · href={href}
 
   rpc_site_search:
-    goal: Search one commerce site with a runtime-side RPC Lua script and report what it found.
+    goal: Search one commerce site with a runtime-side RPC Lua script and report
+      what it found.
     state:
       site: 11st
       query: 무선 마우스
@@ -291,7 +327,7 @@ flows:
         kind: action_contract
         id: rpc_storefront_search
         description: Drive the storefront over RPC.
-        inputSelector: [site, query]
+        inputSelector: [ site, query ]
         next:
           ok: done
           no_results: empty
@@ -304,20 +340,20 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       done:
         kind: terminal
-        inputSelector: [listing, found, cards_seen, href]
+        inputSelector: [ listing, found, cards_seen, href ]
         respond: |-
           Reply with exactly this and nothing else:
           RPC SEARCH OK · found={found} · cards={cards_seen}
           {listing}
       empty:
         kind: terminal
-        inputSelector: [cards_seen, href]
+        inputSelector: [ cards_seen, href ]
         respond: |-
           Reply with exactly this and nothing else:
           RPC SEARCH EMPTY · cards={cards_seen} · href={href}
       walled:
         kind: terminal
-        inputSelector: [site, href]
+        inputSelector: [ site, href ]
         respond: |-
           Reply with exactly this and nothing else:
           RPC SEARCH WALLED · site={site} · href={href}
@@ -340,7 +376,7 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       done:
         kind: terminal
-        inputSelector: [href, heading, documents]
+        inputSelector: [ href, heading, documents ]
         respond: |-
           Reply with exactly this line and nothing else:
           RPC OK · heading={heading} · href={href} · documents={documents}
@@ -350,13 +386,14 @@ flows:
         respond: RPC probe failed.
 
   playground_search_one_site:
-    goal: Open one selected commerce site and return its replay-safe search result to the parent task map without asking the user.
+    goal: Open one selected commerce site and return its replay-safe search result
+      to the parent task map without asking the user.
     state:
       store_result: null
     nodes:
       open:
         kind: action_contract
-        id: playground_open_mapped_site
+        id: playground_open_site
         inputSelector:
           - item
           - index
@@ -368,14 +405,15 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       search:
         kind: action_contract
-        id: playground_search_one_site
+        id: playground_search_site
         inputSelector:
           - item
           - index
           - key
           - context
         next:
-          complete: complete
+          done: complete
+          error: complete
         fallback: { invalidNext: complete, exhaustedNext: complete }
       complete:
         kind: terminal
@@ -383,16 +421,28 @@ flows:
 
 flowTools:
   playground_durable_checkpoint:
-    description: Run the playground-only durable checkpoint diagnostic. It has no browser side effect and reports whether the host operation grant is available.
-    execute: { kind: remote, tool: AX_playground_durable_checkpoint, timeoutMs: 30000 }
-    input:
-      label: tool.args.label
+    description: Run the playground-only durable checkpoint diagnostic. It has no
+      browser side effect and reports whether the host operation grant is
+      available.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.18_rpc_playground" ]
+      rpc:
+        allow: [ nav.navigate, dom.get_location_href ]
+        opTimeoutMs: 4000
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PLAYGROUND.checkpoint(args)
+        end
     output:
       next:
         if:
-          - { "===": [{ var: result.ok }, true] }
+          - { "===": [ { var: result.ok }, true ] }
           - done
-          - { "===": [{ var: result.error }, "durable_operation_required"] }
+          - { "===": [ { var: result.error }, "durable_operation_required" ] }
           - grant_required
           - error
       result: result
@@ -400,57 +450,34 @@ flowTools:
     parameters:
       type: object
       additionalProperties: false
-      required: [label]
+      required: [ label ]
       properties:
         label: { type: string, minLength: 1 }
-
-  playground_amazon_search:
-    description: Run one read-only Amazon durable-search fixture with its fixed query. It never adds an item to a cart or checks out.
-    execute: { kind: remote, tool: AX_search_product, timeoutMs: 90000 }
-    input:
-      query: tool.args.query
-    output:
-      next:
-        if:
-          - { "===": [{ var: result.ok }, true] }
-          - done
-          - { "===": [{ var: result.error }, "durable_operation_required"] }
-          - grant_required
-          - error
-      result: result
-      query: result.query
-      candidates: result.candidates
-      total_count: result.total_count
-      cursor: result.cursor
-      search_error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [query]
-      properties:
-        query: { type: string, minLength: 1 }
 
   # One inline action backs exactly one node — the engine refuses to compile a document that registers
   # the same inline action twice ("inline action duplicates existing action"), so each entry has its own.
   # A router entry's FIRST call cannot be a remote one: the extension executes it and PUTs its result,
   # the engine never consumes it, and the turn dies on the tool deadline. See AGENTS.md §9.
   playground_checkpoint_entry:
-    description: Route a fresh checkpoint-diagnostic entry into its first real step without a remote round trip.
+    description: Route a fresh checkpoint-diagnostic entry into its first real step
+      without a remote round trip.
     execute: { kind: runtime, implementation: lua, lua: 'return { next = "run" }' }
     parameters: { type: object, additionalProperties: true, properties: {} }
 
   playground_amazon_entry:
-    description: Route a fresh Amazon-fixture entry into its first real step without a remote round trip.
+    description: Route a fresh Amazon-fixture entry into its first real step without
+      a remote round trip.
     execute: { kind: runtime, implementation: lua, lua: 'return { next = "run" }' }
     parameters: { type: object, additionalProperties: true, properties: {} }
 
   rpc_navigate_probe:
-    description: Navigate and time each stage, to separate a slow script from a slow channel.
+    description: Navigate and time each stage, to separate a slow script from a slow
+      channel.
     execute:
       kind: runtime
       implementation: lua
       rpc:
-        allow: [nav.navigate, dom.get_location_href, dom.exists]
+        allow: [ nav.navigate, dom.get_location_href, dom.exists ]
         opTimeoutMs: 2000
         deadlineMs: 30000
       entry: run
@@ -481,11 +508,18 @@ flowTools:
     execute:
       kind: runtime
       implementation: lua
-      modules: ["_common.61_rpc_storefront", "_common.17_rpc_sites"]
+      modules: [ "_common.61_rpc_storefront", "_common.17_rpc_sites" ]
       rpc:
         # `dom.get_text` is for the body scan that tells a bot wall from an empty result page — it runs
         # only for a site that declares a block phrase, and never as part of reading the grid.
-        allow: [nav.navigate, dom.get_location_href, dom.exists, dom.query_all, dom.get_text]
+        allow:
+          [
+            nav.navigate,
+            dom.get_location_href,
+            dom.exists,
+            dom.query_all,
+            dom.get_text
+          ]
         opTimeoutMs: 2000
         deadlineMs: 45000
       entry: run
@@ -517,7 +551,7 @@ flowTools:
       kind: runtime
       implementation: lua
       rpc:
-        allow: [dom.get_location_href, dom.exists, dom.get_text, dom.query_all]
+        allow: [ dom.get_location_href, dom.exists, dom.get_text, dom.query_all ]
         opTimeoutMs: 5000
         deadlineMs: 20000
       entry: run
@@ -539,7 +573,8 @@ flowTools:
       properties: {}
 
   playground_query_from_request:
-    description: Convert a non-empty shopping request into the Amazon search query without a model call.
+    description: Convert a non-empty shopping request into the Amazon search query
+      without a model call.
     execute:
       kind: runtime
       implementation: lua
@@ -550,69 +585,100 @@ flowTools:
     parameters:
       type: object
       additionalProperties: false
-      required: [requestText]
+      required: [ requestText ]
       properties:
         requestText: { type: string, minLength: 1 }
 
   playground_open_site:
-    description: Hand off from any current site to one explicitly supported Playground commerce search origin.
-    execute: { kind: remote, tool: AX_playground_open_site, timeoutMs: 90000 }
-    input:
-      site: tool.args.site
+    description: Hand off from any current site to one explicitly supported
+      Playground commerce search origin.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.17_rpc_sites", "_common.18_rpc_playground" ]
+      rpc:
+        allow: [ nav.navigate, dom.get_location_href ]
+        opTimeoutMs: 4000
+        deadlineMs: 90000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PLAYGROUND.open_site(args)
+        end
     output:
-      next: { if: [{ var: result.error }, "error", "search"] }
+      next: { if: [ { var: result.error }, "error", "search" ] }
       open_site_status: result.status
       error: result.error
     parameters:
       type: object
       additionalProperties: false
-      required: [site]
+      required: []
       properties:
-        site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
-
-  playground_search_amazon:
-    description: Run one read-only replay-safe Amazon product search after the durable Amazon handoff. It never adds an item to a cart or checks out.
-    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
-    input:
-      query: tool.args.query
-    output:
-      next: { if: [{ "===": [{ var: result.ok }, true] }, "done", "error"] }
-      query: result.query
-      candidates: result.candidates
-      total_count: result.total_count
-      cursor: result.cursor
-      search_error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [query]
-      properties:
-        query: { type: string, minLength: 1 }
+        site:
+          type:
+            - string
+            - "null"
+        item:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        index:
+          type:
+            - number
+            - "null"
+        key:
+          type:
+            - string
+            - "null"
+        context:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
 
   playground_collect_multi_site_request:
-    description: Capture one product search query and two to ten explicitly selected supported commerce sites, or ask for missing scope.
+    description: Capture one product search query and two to ten explicitly selected
+      supported commerce sites, or ask for missing scope.
     execute: { kind: runtime, implementation: passthrough }
     output: tool.args
     parameters:
       type: object
       additionalProperties: false
-      required: [next]
+      required: [ next ]
       properties:
-        next: { type: string, enum: [ask, done] }
-        question: { type: [string, "null"] }
-        query: { type: [string, "null"] }
+        next: { type: string, enum: [ ask, done ] }
+        question: { type: [ string, "null" ] }
+        query: { type: [ string, "null" ] }
         stores:
-          type: [array, "null"]
+          type: [ array, "null" ]
           maxItems: 10
           items:
             type: object
             additionalProperties: false
-            required: [site]
+            required: [ site ]
             properties:
-              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+              site:
+                {
+                  type: string,
+                  enum:
+                    [
+                      amazon,
+                      walmart,
+                      ebay,
+                      aliexpress,
+                      etsy,
+                      coupang,
+                      naver-shopping,
+                      gmarket,
+                      11st,
+                      ssg
+                    ]
+                }
 
   shopping_search_sites:
-    description: Serially run the portable store-entry plus replay-safe site search subflow for every selected Playground commerce site.
+    description: Serially run the portable store-entry plus replay-safe site search
+      subflow for every selected Playground commerce site.
     execute:
       kind: runtime
       implementation: flow.map
@@ -627,12 +693,12 @@ flowTools:
         resultSchema:
           type: object
           additionalProperties: true
-          required: [site, candidates]
+          required: [ site, candidates ]
           properties:
             site: { type: string }
-            query: { type: [string, "null"] }
+            query: { type: [ string, "null" ] }
             candidates: { type: array, items: { type: object, additionalProperties: true } }
-            error: { type: [string, "null"] }
+            error: { type: [ string, "null" ] }
         budget:
           maxNodes: 4
           maxModelCalls: 0
@@ -645,7 +711,7 @@ flowTools:
     parameters:
       type: object
       additionalProperties: false
-      required: [stores, query]
+      required: [ stores, query ]
       properties:
         stores:
           type: array
@@ -654,64 +720,88 @@ flowTools:
           items:
             type: object
             additionalProperties: false
-            required: [site]
+            required: [ site ]
             properties:
-              site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
+              site:
+                {
+                  type: string,
+                  enum:
+                    [
+                      amazon,
+                      walmart,
+                      ebay,
+                      aliexpress,
+                      etsy,
+                      coupang,
+                      naver-shopping,
+                      gmarket,
+                      11st,
+                      ssg
+                    ]
+                }
         query: { type: string, minLength: 1 }
-
-  playground_open_mapped_site:
-    description: Re-entrantly open one explicitly mapped Playground commerce origin before its site-local product search command runs.
-    execute: { kind: remote, tool: AX_playground_open_site, timeoutMs: 90000 }
-    input:
-      site: tool.args.item.site
+  playground_search_site:
+    description: Search one Playground commerce site over RPC. Accepts a flat query
+      or the fan-out worker envelope. Never changes a cart, checkout, or order.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        - _common.61_rpc_storefront
+        - _common.17_rpc_sites
+        - _common.18_rpc_playground
+        - _common.19_rpc_playground_search
+      rpc:
+        allow:
+          - nav.navigate
+          - dom.get_location_href
+          - dom.exists
+          - dom.query_all
+          - dom.get_text
+        opTimeoutMs: 4000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PLAYGROUND_SEARCH.search(args)
+        end
     output:
-      next: { if: [{ var: result.error }, "error", "search"] }
-      open_site_status: result.status
-      error: result.error
+      next: result.next
+      site: result.site
+      query: result.query
+      candidates: result.candidates
+      total_count: result.total_count
+      cursor: result.cursor
+      search_error: result.search_error
+      store_result: result.store_result
     parameters:
       type: object
       additionalProperties: false
-      required: [item, index, key, context]
+      required: []
       properties:
+        query:
+          type:
+            - string
+            - "null"
+        site:
+          type:
+            - string
+            - "null"
         item:
-          type: object
-          additionalProperties: false
-          required: [site]
-          properties:
-            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
-        index: { type: number }
-        key: { type: string }
-        context:
-          type: object
+          type:
+            - object
+            - "null"
           additionalProperties: true
-          required: [query]
-          properties:
-            query: { type: string }
-
-  playground_search_one_site:
-    description: Run the active site's durable-v2 AX_search_product command after the portable handoff completes.
-    execute: { kind: remote, tool: AX_search_product, timeoutMs: 120000 }
-    input:
-      query: tool.args.context.query
-    output:
-      next: complete
-      store_result: result
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [item, index, key, context]
-      properties:
-        item:
-          type: object
-          additionalProperties: false
-          required: [site]
-          properties:
-            site: { type: string, enum: [amazon, walmart, ebay, aliexpress, etsy, coupang, naver-shopping, gmarket, 11st, ssg] }
-        index: { type: number }
-        key: { type: string }
+        index:
+          type:
+            - number
+            - "null"
+        key:
+          type:
+            - string
+            - "null"
         context:
-          type: object
+          type:
+            - object
+            - "null"
           additionalProperties: true
-          required: [query]
-          properties:
-            query: { type: string }

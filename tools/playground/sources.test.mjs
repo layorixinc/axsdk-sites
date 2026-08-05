@@ -199,8 +199,14 @@ test('loads the checked-in isolated playground fixture', async () => {
     'playground_multi_site_search.collect',
   );
   assert.equal(commonFlow.flows.playground_amazon_search.state.query, 'wireless trackball mouse');
-  assert.equal(commonFlow.flowTools.playground_amazon_search.execute.tool, 'AX_search_product');
-  assert.deepEqual(commonFlow.flowTools.playground_amazon_search.parameters.required, ['query']);
+  // Was `execute.tool: AX_search_product` — the durable command. Three search tools that differed only
+  // in the argument shape they accepted are now ONE: `clientFlows` inlines every declared module PER
+  // TOOL against a 256 KiB ceiling, so a duplicated tool is a duplicated reader.
+  const search = commonFlow.flowTools.playground_search_site;
+  assert.equal(search.execute.kind, 'runtime');
+  assert.match(search.execute.lua, /AX_RPC_PLAYGROUND_SEARCH\.search/);
+  assert.deepEqual(search.parameters.required, [], 'it serves a flat caller and a worker envelope');
+  assert.equal(commonFlow.flows.playground_amazon_search.nodes.run.id, 'playground_search_site');
   assert.equal(commonFlow.flows.playground_multi_site_search.nodes.search_stores.id, 'shopping_search_sites');
   assert.equal(commonFlow.flowTools.shopping_search_sites.execute.implementation, 'flow.map');
   assert.equal(commonFlow.flowTools.shopping_search_sites.execute.flow, 'playground_search_one_site');
@@ -210,8 +216,10 @@ test('loads the checked-in isolated playground fixture', async () => {
   assert.equal(shoppingRoute?.entry, 'shopping.collect_query');
   assert.equal(commonFlow.flows.shopping.state.site, 'amazon');
   assert.equal(commonFlow.flows.shopping.nodes.open_amazon.id, 'playground_open_site');
-  assert.equal(commonFlow.flows.shopping.nodes.search_amazon.id, 'playground_search_amazon');
-  assert.equal(commonFlow.flowTools.playground_open_site.execute.tool, 'AX_playground_open_site');
-  assert.deepEqual(commonFlow.flowTools.playground_open_site.parameters.properties.site.enum, commerceSites);
-  assert.equal(commonFlow.flowTools.playground_search_amazon.execute.tool, 'AX_search_product');
+  assert.equal(commonFlow.flows.shopping.nodes.search_amazon.id, 'playground_search_site');
+  // Was `execute.tool: AX_playground_open_site` — the durable handoff. It navigates over RPC now, and
+  // accepts both the flat `site` and the worker's `item.site` so one tool serves both callers.
+  assert.equal(commonFlow.flowTools.playground_open_site.execute.kind, 'runtime');
+  assert.match(commonFlow.flowTools.playground_open_site.execute.lua, /AX_RPC_PLAYGROUND\.open_site/);
+  assert.deepEqual(commonFlow.flowTools.playground_open_site.parameters.required, []);
 });

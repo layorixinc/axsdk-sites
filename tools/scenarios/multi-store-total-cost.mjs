@@ -220,7 +220,14 @@ async function main() {
     check(checks, 'agentic task map searched every selected store', requestedSites.every(site => outcomeSites.has(site)), [...outcomeSites].join(','));
     check(checks, 'live adapter results produce ranked offers', offerSites.size >= 1, [...offerSites].join(','));
     check(checks, 'comparison is bounded and numbered', numberedCount >= 1 && numberedCount <= 6, `offers=${numberedCount}`);
-    check(checks, 'comparison asks before mutation', Boolean(findTool(compare, 'choose_offer'))
+    // The gate named `choose_offer`, a model node that no longer exists: the comparison loop is
+    // deterministic now, because an `action_unit` here re-sent the previous turn's "3번" when the user
+    // typed "취소" and the offer went into a real cart. What has to hold is the BEHAVIOUR — the window
+    // paused on its own question, and nothing was added — so that is what is checked, plus the pause
+    // itself, which the old assertion could not see.
+    const presented = findTool(compare, 'present_store_offers');
+    check(checks, 'comparison asks before mutation', Boolean(presented)
+      && presented?.output?.next === 'ask'
       && /numbered offer|offer number|번호|cancel/i.test(reply)
       && !findTool(compare, 'shopping_add_selected_store_offer'));
     console.log(`COMPARE  ${String(compare.reply || '').replace(/\s+/g, ' ').slice(0, 500)}`);

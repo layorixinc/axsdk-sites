@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   CdpClient, attachAfterExtensionReload, closePageOnFailure, isQuotaError, prepareReloadedPage, prunableDebugKeys,
   disposableChatKeys, reclaimPlan, shouldPruneDebugStorage,
+  resetSession,
 } from './cdp.mjs';
 
 // A dev profile accumulates per-session chat and SSE telemetry until chrome.storage.local is full, and
@@ -218,4 +219,48 @@ test('reclaim escalates to finished chats only when telemetry was not enough', (
   assert.equal(reclaimPlan(quota * 0.9, quota), 'telemetry');
   assert.equal(reclaimPlan(quota * 0.9, quota, quota * 0.85), 'chats', 'still above the mark after telemetry');
   assert.equal(reclaimPlan(quota * 0.9, quota, quota * 0.4), 'telemetry', 'telemetry freed enough');
+});
+
+// Three unintended cart adds came from the same shape: a shopping session left PAUSED on a comparison
+// window treats the next bare number as a SELECTION, and a selection is the approval turn. The workaround
+// was to send "취소" first, which works only while cancel works — and cancel was itself broken for a while.
+//
+// So the harness gets a way to start clean. The browser call is injected, because what this has to get
+// right is WHAT it clears, not how it reaches the page.
+
+/** A fake AX context that records the script it was handed and answers like the real store would. */
+function fakeContext(answer = {}) {
+  const calls = [];
+  const call = async (page, options, script, args) => {
+    calls.push({ script, args });
+    return { sessionId: 'session-new', clearedMessages: 4, ...answer };
+  };
+  return { call, calls };
+}
+
+test('a reset mints a new session and leaves nothing of the old turn behind', async () => {
+  // A paused flow survives in three places at once. Clearing the messages but not the session state
+  // leaves the node still paused; clearing both but not the deferred calls leaves a durable step that
+  // resumes into a conversation that no longer exists.
+  const { call, calls } = fakeContext();
+  const result = await resetSession({ page: {}, options: {} }, { call });
+
+  assert.equal(calls.length, 1, 'one round trip: a reset that half-lands is worse than none');
+  const script = calls[0].script;
+  for (const required of ['setMessages', 'clearSessionState', 'setDeferredCalls', 'setSession']) {
+    assert.match(script, new RegExp(required), `a reset must call ${required}`);
+  }
+  assert.equal(result.sessionId, 'session-new', 'the caller has to be able to see it worked');
+});
+
+test('a reset reports what it could not do rather than claiming success', async () => {
+  // The AX context answers null when the extension is still reconnecting — after `reload-ext`, exactly
+  // when a test script is most likely to call this. Saying "reset" then would send the next scenario into
+  // whatever gate was still open.
+  const call = async () => null;
+  await assert.rejects(
+    () => resetSession({ page: {}, options: {} }, { call }),
+    /chat store/i,
+    'an unreachable store is an error, not a quiet no-op',
+  );
 });

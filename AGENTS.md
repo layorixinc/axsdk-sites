@@ -725,6 +725,19 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
   re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
   files that DEFINE it and fails on any tool that calls one it did not declare.
+- **Two statements of one rule drift, and the drift is invisible.** There are TWO shipping parsers —
+  `S.parse_shipping` in `60_storefront.lua` and a private one in `61_rpc_storefront.lua`, which is what
+  production runs. A fix for "배송비무료" landed in the other copy, every test passed, and the live path
+  stayed broken. Until one is deleted they are pinned to answer identically.
+- **A selector is only ever validated against the live page.** 11st's cards render
+  `dd.c-card-item__price-delivery` with an `sr-only` label glued to the value ("배송비무료"); the config asked
+  for `.c-card-item__delivery`, which exists nowhere. A selector matching nothing reads as "this store
+  says nothing about shipping", so 11st rows arrived with unknown totals and were folded out of the very
+  comparison they were searched for. Measured: of 6 cards, exactly ONE states shipping at all — the other
+  five genuinely say nothing, and guessing zero there would make 11st look like the cheapest store.
+- **`ax reset` starts a clean conversation** (messages + session state + deferred calls + a new session id).
+  A paused flow lives in all three; clearing only the messages leaves the node paused. Use it instead of
+  `취소` before a live scenario — the cancel workaround only works while cancel itself works.
 - **The window the user reads is ALWAYS rendered from a RESTORE**, so anything the build computed and the
   snapshot drops is simply gone — silently, and only from the second turn onward if you test carelessly.
   Three fields were lost this way: `notes` (which store failed), `display_currency` (a Korean shopper

@@ -19,7 +19,15 @@ local CONFIG = {
   result_title_selector = '.c-card-item__name dd, img[alt]',
   result_image_selector = 'img[alt]',
   result_price_selector = '.c-card-item__price .value, .c-card-item__lowest .value',
-  result_shipping_selector = '.c-card-item__delivery, .c-card-item__shipping',
+  -- Measured on the live search page (logged-in dev profile, "로지텍 M170"): 6 result cards, and exactly
+  -- ONE carries a shipping cell —
+  -- `<dd class="c-card-item__price-delivery"><span class="sr-only">배송비</span><span class="value">무료</span></dd>`.
+  -- The old `.c-card-item__delivery` / `.c-card-item__shipping` exist nowhere on the card, so even that
+  -- one row read as "this store says nothing about shipping".
+  --
+  -- The other five state no shipping at all: that is the page, not a selector gap, and those rows keep an
+  -- unknown total on purpose. Guessing zero there would make 11st look like the cheapest store on screen.
+  result_shipping_selector = '.c-card-item__price-delivery, .c-card-item__price-delivery .value',
   result_rating_selector = '.c-starrate, [aria-label*="평점"]',
   result_reviews_selector = '.c-starrate, [data-review-count]',
   result_delivery_selector = '.c-card-item__delivery, .c-card-item__shipping',

@@ -332,17 +332,29 @@ local function parse_shipping(text, fallback_currency, from_row_text)
   if not first then return nil, non_empty(fallback_currency) end
 
   local fragment = value:sub(first, first + 60)
-  if from_row_text then
-    -- `원` is a suffix and so is absent from the prefix marks, but a fee written "2,500원" in the row
-    -- text is exactly as stated as one written "$3.00".
-    local marked = fragment:find("원", 1, true) ~= nil
-    for index = 1, #CURRENCY_MARKS do
-      if fragment:find(CURRENCY_MARKS[index][1], 1, true) then marked = true break end
+  local fragment_lowered = fragment:lower()
+  local amount, currency = parse_money(fragment, fallback_currency)
+
+  if amount and amount > 0 then
+    if from_row_text then
+      -- `원` is a suffix and so is absent from the prefix marks, but a fee written "2,500원" in the row
+      -- text is exactly as stated as one written "$3.00".
+      local marked = fragment:find("원", 1, true) ~= nil
+      for index = 1, #CURRENCY_MARKS do
+        if fragment:find(CURRENCY_MARKS[index][1], 1, true) then marked = true break end
+      end
+      if not marked then return nil, non_empty(fallback_currency) end
     end
-    if not marked then return nil, non_empty(fallback_currency) end
+    return amount, currency
   end
 
-  local amount, currency = parse_money(fragment, fallback_currency)
+  -- The label can be glued to its value: 11st renders `<span class="sr-only">배송비</span><span
+  -- class="value">무료</span>`, so the cell reads "배송비무료" with no separator and no phrase above matches.
+  -- Judging the FRAGMENT after the marker covers every spacing, and a stated fee already won just above,
+  -- so conditional copy like "3,000원 이상 무료" still reports the number rather than free.
+  if fragment_lowered:find("무료", 1, true) or fragment_lowered:find("free", 1, true) then
+    return 0, non_empty(fallback_currency)
+  end
   if not amount then return nil, non_empty(fallback_currency) end
   return amount, currency
 end

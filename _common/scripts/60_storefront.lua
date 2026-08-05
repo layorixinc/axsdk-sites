@@ -210,6 +210,14 @@ function S.parse_shipping(value, fallback_currency)
     local paid_fragment = text:sub(first, first + 60)
     local paid_amount, paid_currency = S.parse_money(paid_fragment, fallback)
     if paid_amount and paid_amount > 0 then return paid_amount, paid_currency or fallback, paid_fragment end
+    -- The label can be glued to its value: 11st renders `<span class="sr-only">배송비</span><span
+    -- class="value">무료</span>`, so the cell's text is "배송비무료" with no separator and no literal in the
+    -- list below matches it. Judging the FRAGMENT that follows the marker covers every spacing, and the
+    -- paid check above already claimed conditional copy like "3,000원 이상 무료".
+    local fragment_lowered = paid_fragment:lower()
+    if fragment_lowered:find("무료", 1, true) or fragment_lowered:find("free", 1, true) then
+      return 0, fallback, paid_fragment
+    end
   end
 
   if lowered:find("free shipping", 1, true)

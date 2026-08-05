@@ -906,8 +906,40 @@ export async function syncStore(session, { site, build = true, reload = true } =
   };
 }
 
+// Start a clean conversation, so the next scenario does not walk into whatever gate was left open.
+//
+// A paused flow survives in three places at once: the messages, the session state the node resumed from,
+// and any deferred call still journalled. Clearing only the messages leaves the node paused; clearing
+// both but not the deferred calls leaves a durable step that resumes into a conversation that is gone.
+//
+// This matters beyond tidiness — a shopping session paused on a comparison window reads the next bare
+// number as a SELECTION, and a selection is the approval turn that mutates a real cart.
+export async function resetSession(session, { call = callInAxContext } = {}) {
+  const result = await call(session.page, session.options, `function() {
+    const s = globalThis._AXSDK || globalThis.AXSDK;
+    const chat = s && s.getChatStore && s.getChatStore();
+    if (!chat) return null;
+    const st = chat.getState();
+    const before = (st.messages || []).length;
+    const id = 'ax-' + Date.now().toString(36);
+    if (st.setMessages) st.setMessages([]);
+    if (st.clearSessionState) st.clearSessionState();
+    if (st.setDeferredCalls) st.setDeferredCalls([]);
+    if (st.setSession) st.setSession({ id, status: 'idle', title: '', time: Date.now() });
+    return { sessionId: id, clearedMessages: before };
+  }`);
+  if (!result) {
+    // The AX context answers null while the extension is reconnecting — right after `reload-ext`, which
+    // is exactly when a script calls this. Reporting success there sends the next scenario into the open
+    // gate it was trying to avoid.
+    throw new Error('reset failed: the chat store is not reachable (extension still reconnecting?)');
+  }
+  return result;
+}
+
 // Read a compact chat-store snapshot (status + last message parts). Re-finds the AXSDK context per
 // call, so polling with it tolerates the flow's mid-turn page navigations.
+
 export async function readChat(session) {
   return callInAxContext(session.page, session.options, `function() {
     const s = globalThis._AXSDK || globalThis.AXSDK;

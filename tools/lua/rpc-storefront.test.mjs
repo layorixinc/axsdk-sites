@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
 import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
 import { loadLuaModules } from './harness.mjs';
 import { installRpcStub, makePage } from './rpc-stub.mjs';
@@ -1022,4 +1023,52 @@ test('every outcome names the store it came from', () => {
     const value = lua.call('AX_RPC_STOREFRONT.search', config, { query: '마우스', ...args });
     assert.equal(value.site, config.site, `${label}: the outcome must name its store, got ${JSON.stringify(value).slice(0, 110)}`);
   }
+});
+
+test('the 11st card shipping element is the one the live page actually renders', () => {
+  // Measured on https://search.11st.co.kr/pc/total-search today:
+  //   <dd class="c-card-item__price-delivery"><span class="sr-only">배송비</span><span class="value">무료</span></dd>
+  // The config asked for `.c-card-item__delivery, .c-card-item__shipping`, which do not exist on the card.
+  // Nothing failed: a selector that matches nothing reads as "this store says nothing about shipping", so
+  // every 11st row arrived with an unknown total and was folded out of the comparison window. The store
+  // was in the listing and absent from the answer.
+  //
+  // Word-based design-system classes, so §10 allows them; a selector is only ever validated against the
+  // live page, which is why the measurement is recorded here.
+  const config = readFileSync(fileURLToPath(new URL('../../11st/scripts/00_common.lua', import.meta.url)), 'utf8');
+  const selector = config.match(/result_shipping_selector\s*=\s*'([^']+)'/)?.[1] ?? '';
+
+  assert.match(selector, /c-card-item__price-delivery/, 'the selector must name the element the card renders');
+});
+
+test('a shipping cell whose label is glued to its value still reads as a cost', () => {
+  // The label is an `sr-only` span inside the same cell, so the element's text is "배송비무료" with no
+  // separator — free shipping has to survive that, and an unlabelled delivery promise must stay unknown.
+  assert.equal(costOf({ shipping_text: '배송비무료' }).shipping_cost, 0);
+  assert.equal(costOf({ shipping_text: '배송비2,500원' }).shipping_cost, 2500);
+  assert.equal(costOf({ shipping_text: '배송정보오늘출발(13시까지 주문시)' }).shipping_cost, undefined);
+});
+
+test('the two shipping parsers answer the same question the same way', () => {
+  // There are two: `S.parse_shipping` in `60_storefront.lua` and a private `parse_shipping` in
+  // `61_rpc_storefront.lua`, and the RPC one is what production runs. A fix for "배송비무료" landed in the
+  // other copy and every test still passed while the live path stayed broken.
+  //
+  // Two statements of one rule drift, and the drift is invisible until a store's rows quietly stop having
+  // totals. Until one of them is deleted, they answer together.
+  const durable = loadLuaModules(['_common/scripts/00_base.lua', '_common/scripts/60_storefront.lua']);
+  const cases = [
+    ['배송비무료', 0], ['배송비 무료', 0], ['무료배송', 0],
+    ['배송비2,500원', 2500], ['배송비 2,500원', 2500],
+    ['배송정보오늘출발(13시까지 주문시)', undefined],
+    ['Free shipping', 0], ['Shipping $3.00', 3],
+  ];
+
+  // A direct call marshals Lua nil as null; an absent object field reads as undefined. Same answer.
+  const answered = (value) => (value === null ? undefined : value);
+  for (const [text, expected] of cases) {
+    assert.equal(answered(durable.call('AX_STOREFRONT.parse_shipping', text, 'KRW')), expected, `60_storefront on ${text}`);
+    assert.equal(answered(costOf({ shipping_text: text }).shipping_cost), expected, `61_rpc_storefront on ${text}`);
+  }
+  durable.close();
 });

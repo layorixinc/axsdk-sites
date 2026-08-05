@@ -93,8 +93,11 @@ planner:
     "이전", "3페이지", "more"), and ANY narrowing/sorting/unfolding phrase about the SAME product
     ("무료배송만", "3만원 이하만 보여줘", "평점 높은 순", "쿠팡 것만", "미확인 포함", "필터 해제").
     Those read like new shopping requests but they are answers: replacing the flow throws away the
-    comparison the user is looking at and its numbering. Use replace_current only when the message names
-    a DIFFERENT product or a different task (a service quote, checkout, memory, farewell).
+    comparison the user is looking at and its numbering. NEVER ask for clarification while that listing is
+    on screen — asking "어떤 제품을 비교하고 싶으신가요?" discards it exactly as replacing it would.
+    The decidable test: if the message names no product and no other task, it is an ANSWER, whatever else
+    it looks like. Use replace_current only when the message names a DIFFERENT product or a different task
+    (a service quote, checkout, memory, farewell).
 
     Also set conversationSummary (brief running summary) and latestMessageInterpretation (your reading of the latest message).
 

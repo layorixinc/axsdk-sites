@@ -28,7 +28,7 @@ import { createInterface } from 'node:readline/promises';
 import {
   DEFAULTS, SITE_HOME, resolveOptions, ensureChrome, attachActive, listTargets,
   openPage, navigate, evaluatePage, run, call, loadLocal, listCommands, status, currentUrl, syncSitesIndex,
-  syncStore, sendMessage, reloadExtension,
+  syncStore, sendMessage, reloadExtension, resetSession,
 } from './harness/cdp.mjs';
 
 const USAGE = `ax — daily driver for the AXSDK live harness
@@ -45,6 +45,8 @@ Commands:
   page                  Print the current url + a quick AX_read_page situational read.
   ls                    lua.listCommands() for the current site.
   status                lua.status() (enabled + loaded scripts).
+  reset                 Start a clean conversation: clears messages, session state and deferred calls.
+                        A paused shopping flow reads a bare number as a SELECTION, which is the cart gate.
   send "<text>"         Drive the flow ENGINE: send a user message, wait for the turn, print the reply + tool parts.
   repl                  Interactive loop (type "AX_cmd {json}"; ".help" for meta-commands).
 
@@ -230,6 +232,10 @@ async function main() {
       out({ reloaded: res.reloaded, url: res.url });
       return;
     }
+    case 'reset':
+      // Start a clean conversation. A paused shopping flow reads the next bare number as a SELECTION,
+      // and a selection is the approval turn — three unintended cart adds came from stepping into one.
+      return withSession(options, async session => out(await resetSession(session)));
     case 'send':
       return withSession(options, async session => out(await sendMessage(session, rest.join(' '), { timeoutMs: options.timeout || 180000 })));
     case 'load':

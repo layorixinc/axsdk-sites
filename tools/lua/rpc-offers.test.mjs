@@ -489,3 +489,49 @@ test('a listing spanning currencies keeps the common base', () => {
 
   assert.match(shown.question ?? '', /총 USD/);
 });
+
+/** A listing where some rows have a known total and some do not — which is the normal live shape. */
+const MIXED_COMPLETENESS = [
+  { site: 'ssg', product_id: 'S1', id: 'S1', name: '로지텍 M170 무선마우스', price: 12900, currency: 'KRW',
+    price_base: 9.04, base_currency: 'USD', shipping_cost: 2500, shipping_base: 1.75, total_base: 10.79, cost_complete: true },
+  { site: '11st', product_id: 'E1', id: 'E1', name: '로지텍 무선 마우스 M170', price: 18770, currency: 'KRW',
+    price_base: 13.15, base_currency: 'USD', cost_complete: false },
+  { site: '11st', product_id: 'E2', id: 'E2', name: '로지텍정품 M170 무선 광 마우스', price: 14740, currency: 'KRW',
+    price_base: 10.33, base_currency: 'USD', cost_complete: false },
+];
+
+test('"미확인 포함" shows the rows the window folded away', () => {
+  // Rows without a known total are folded out and counted, and the window says so — every live comparison
+  // so far ended with "배송비/총액 미확인 3건은 접었습니다 — '미확인 포함'이라고 하면 함께 보여드려요".
+  // An instruction the window prints is a promise; if the phrase does not reach the parser the window is
+  // advertising a way out that does not exist.
+  const build = runtime();
+  const ranked = build.call('AX_RPC_OFFERS.rank', { verified_offers: MIXED_COMPLETENESS });
+  build.close();
+
+  const folded = runtime();
+  const first = folded.call('AX_RPC_OFFERS.present', { comparison_state: ranked.comparison_state });
+  folded.close();
+  assert.equal(first.view_total, 1, 'only the row with a known total is listed');
+  assert.match(first.question ?? '', /접었습니다/);
+
+  const reading = runtime();
+  const asked = reading.call('AX_RPC_OFFERS.present', {
+    comparison_state: ranked.comparison_state,
+    choice_stage: 'asked',
+    requestText: '미확인 포함',
+  });
+  reading.close();
+  assert.equal(asked.next, 'refine', 'the phrase is a refinement, not a new search');
+
+  const unfolded = runtime();
+  const all = unfolded.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: asked.refine_request,
+  });
+  unfolded.close();
+
+  assert.equal(all.next, 'ask');
+  assert.equal(all.view_total, 3, 'every row is listed once the user asks for them');
+});

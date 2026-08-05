@@ -1402,3 +1402,18 @@ test('a tool that fetches over the network declares the host it reaches', () => 
 
   assert.deepEqual(unreachable, [], `hosts reached but never granted:\n  ${unreachable.join('\n  ')}`);
 });
+
+test('the planner may not ask what to compare while a comparison is on screen', () => {
+  // Live: "미확인 포함" — a phrase the rule already lists by name, printed by the window itself as the way
+  // to unfold rows — came back as "어떤 제품을 비교하고 싶으신가요?". The rule told the planner to continue
+  // the flow but never told it not to CLARIFY, and clarifying throws the listing away just as replacing it
+  // does. A window that advertises a way out has to have one.
+  //
+  // This gate can only check that the instruction is present; whether the model obeys is measured live.
+  const doc = parseFlow('_common/flows.yaml');
+  const planner = String(doc.planner?.rules ?? doc.planner?.prompt ?? '');
+  const rule = planner.slice(planner.indexOf('COMPARISON BROWSING FOLLOW-UP'));
+
+  assert.match(rule, /never ask for clarification/i, 'the rule must forbid the failure that actually happened');
+  assert.match(rule, /names no product/i, 'and give the planner a decidable test, not a list of examples');
+});

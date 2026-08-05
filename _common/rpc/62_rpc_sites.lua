@@ -24,7 +24,7 @@ RPC_SITES["11st"] = {
   result_title_selector = ".c-card-item__name dd, img[alt]",
   result_image_selector = "img[alt]",
   result_price_selector = ".c-card-item__price .value, .c-card-item__lowest .value",
-  result_shipping_selector = ".c-card-item__delivery, .c-card-item__shipping",
+  result_shipping_selector = ".c-card-item__price-delivery, .c-card-item__price-delivery .value",
   result_rating_selector = ".c-starrate, [aria-label*=\"평점\"]",
   result_reviews_selector = ".c-starrate, [data-review-count]",
   result_delivery_selector = ".c-card-item__delivery, .c-card-item__shipping",
@@ -188,11 +188,6 @@ RPC_SITES["amazon"] = {
   result_ready_selector = "[data-component-type=\"s-search-result\"][data-asin], .s-no-results-result, #authportal-main-section, #ap_email, #ap_password, form[action*=\"validateCaptcha\"]",
   result_id_attr = "data-asin",
   result_url_selector = "h2 a, a.a-link-normal.s-no-outline, a[href*=\"/dp/\"], a[href*=\"/gp/product/\"]",
-  -- Measured live: a card carries TWO headings — the brand first, the product title second — and only
-  -- the title sits inside the card's anchor. A CSS list matches in DOCUMENT order, so `"h2, h2 a"` took
-  -- the brand and every branded row came back named "Logitech". Relevance REQUIRES the model code, so a
-  -- search for M185 then matched nothing and the comparison reported no products at all. Both
-  -- alternatives here demand an anchor ancestor, which the brand heading does not have.
   result_title_selector = "a h2 span, a h2",
   result_image_selector = "img.s-image",
   result_price_selector = ".a-price .a-offscreen",

@@ -80,3 +80,25 @@ test('mirroring is what makes them equal, not luck', () => {
     writeFileSync(join(repoRoot, PLAYGROUND_READER), production);
   }
 });
+
+test('the committed module is what the generator produces right now', () => {
+  // Every other test here serializes in memory and compares to the adapters, so a STALE file on disk
+  // passes them all. Measured: the 11st shipping selector was fixed in the adapter, `62_rpc_sites.lua`
+  // still carried the old one, and the production RPC path — which reads `RPC_SITES`, not the adapter —
+  // kept using it. The fix was committed, gated, live-tested and never once in effect.
+  //
+  // `build:rpc` does not run this generator (`build:rpc:sites` is separate), so nothing regenerates it by
+  // accident either. Same lesson as `build:schema --check`: a generated artifact that is committed needs
+  // a check that it is current, or it is just a stale copy with a comment claiming otherwise.
+  const generated = serializeSites(configs);
+
+  // The generator's two outputs — the default target and the playground mirror it is invoked with.
+  for (const target of ['_common/rpc/62_rpc_sites.lua', 'playground/_common/rpc/17_rpc_sites.lua']) {
+    const committed = readFileSync(join(repoRoot, target), 'utf8');
+    assert.equal(
+      committed.replace(/\r\n/g, '\n').trim(),
+      generated.replace(/\r\n/g, '\n').trim(),
+      `${target} is stale — run \`npm run build:rpc:sites\``,
+    );
+  }
+});

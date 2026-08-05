@@ -19,7 +19,7 @@
     "ax": "node tools/ax.mjs",
     "chrome": "node tools/ax.mjs chrome",
     "repl": "node tools/ax.mjs repl",
-    "build:rpc": "node tools/build-rpc-flows.mjs playground",
+    "build:rpc": "npm run build:rpc:sites && node tools/build-rpc-flows.mjs playground",
     "package:verify": "node tools/rpc-package.mjs verify",
     "package:push": "node tools/rpc-package.mjs push",
     "build:rpc:sites": "node tools/build-rpc-sites.mjs && node tools/build-rpc-sites.mjs playground/_common/rpc/17_rpc_sites.lua",

@@ -238,19 +238,25 @@ function fakeContext(answer = {}) {
   return { call, calls };
 }
 
-test('a reset mints a new session and leaves nothing of the old turn behind', async () => {
+test('a reset clears the turn and lets the SDK issue the next session itself', async () => {
   // A paused flow survives in three places at once. Clearing the messages but not the session state
   // leaves the node still paused; clearing both but not the deferred calls leaves a durable step that
   // resumes into a conversation that no longer exists.
+  //
+  // And the id is NOT ours to write. Session ids are server-issued (`ses_fcfc0b85c001dX2ijM3ohXlk4h`);
+  // the first version of this minted `ax-<base36>` and every following `send` came back EMPTY — a
+  // 928-second timeout against a session the backend had never heard of. Closing the session is the
+  // whole request; the SDK opens a real one on the next message.
   const { call, calls } = fakeContext();
   const result = await resetSession({ page: {}, options: {} }, { call });
 
   assert.equal(calls.length, 1, 'one round trip: a reset that half-lands is worse than none');
   const script = calls[0].script;
-  for (const required of ['setMessages', 'clearSessionState', 'setDeferredCalls', 'setSession']) {
+  for (const required of ['setMessages', 'clearSessionState', 'setDeferredCalls', 'setSessionClosed']) {
     assert.match(script, new RegExp(required), `a reset must call ${required}`);
   }
-  assert.equal(result.sessionId, 'session-new', 'the caller has to be able to see it worked');
+  assert.doesNotMatch(script, /Date\.now\(\)\.toString|'ax-'/, 'a client-invented session id is not a session');
+  assert.equal(result.clearedMessages, 4, 'the caller has to be able to see it worked');
 });
 
 test('a reset reports what it could not do rather than claiming success', async () => {
@@ -263,4 +269,25 @@ test('a reset reports what it could not do rather than claiming success', async 
     /chat store/i,
     'an unreachable store is an error, not a quiet no-op',
   );
+});
+
+test('a reset reports messages that survived it instead of claiming a clean slate', async () => {
+  // `setMessages([])` does not always stick: the session's persisted chat rehydrates, and the next
+  // `sendMessage` — which settles by watching the message COUNT grow — saw the old count, decided the
+  // turn was already over, and returned the PREVIOUS turn's reply. Measured: a fresh comparison request
+  // came back as the answer to "안녕".
+  //
+  // The clear is best-effort against a store that reloads. Saying how many are left is what lets the
+  // caller tell "clean" from "looked clean".
+  // Asserting on a value the fake was told to return would test the fake. What has to be true is that the
+  // SCRIPT re-reads the store AFTER mutating it, so the number is observed rather than assumed.
+  const { call, calls } = fakeContext({ clearedMessages: 6, remaining: 2 });
+  const result = await resetSession({ page: {}, options: {} }, { call });
+  const script = calls[0].script;
+
+  const cleared = script.indexOf('setMessages');
+  const reread = script.lastIndexOf('chat.getState()');
+  assert.ok(reread > cleared, 'the count must be read back after the clear, not before it');
+  assert.match(script, /remaining/, 'and reported under a name the caller can act on');
+  assert.equal(result.remaining, 2, 'a reset that did not fully land has to say so');
 });

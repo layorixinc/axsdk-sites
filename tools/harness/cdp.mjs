@@ -921,12 +921,19 @@ export async function resetSession(session, { call = callInAxContext } = {}) {
     if (!chat) return null;
     const st = chat.getState();
     const before = (st.messages || []).length;
-    const id = 'ax-' + Date.now().toString(36);
+    const previous = (st.session && st.session.id) || null;
     if (st.setMessages) st.setMessages([]);
     if (st.clearSessionState) st.clearSessionState();
     if (st.setDeferredCalls) st.setDeferredCalls([]);
-    if (st.setSession) st.setSession({ id, status: 'idle', title: '', time: Date.now() });
-    return { sessionId: id, clearedMessages: before };
+    // The id is NOT ours to write — session ids are server-issued (ses_...). Minting one made every
+    // following send come back EMPTY against a session the backend had never heard of. Close it and let
+    // the SDK open a real one on the next message.
+    if (st.setSessionClosed) st.setSessionClosed(true);
+    // Best-effort against a store that reloads: the session's persisted chat can rehydrate right past a
+    // clear, and sendMessage settles by watching the message COUNT grow — so a stale count made it
+    // return the PREVIOUS turn's reply to a brand-new request. Read back what actually survived.
+    const remaining = (chat.getState().messages || []).length;
+    return { closedSession: previous, clearedMessages: before, remaining: remaining };
   }`);
   if (!result) {
     // The AX context answers null while the extension is reconnecting — right after `reload-ext`, which

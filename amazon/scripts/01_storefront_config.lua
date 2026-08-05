@@ -34,7 +34,15 @@ local CONFIG = {
   -- The ASIN sits on the row itself, so no selector is needed beside the attribute name.
   result_id_attr = "data-asin",
   result_url_selector = 'h2 a, a.a-link-normal.s-no-outline, a[href*="/dp/"], a[href*="/gp/product/"]',
-  result_title_selector = "h2, h2 a",
+  -- Measured live: a card carries TWO headings — the brand first, the product title second — and only
+  -- the title sits inside the card's anchor. A CSS list matches in DOCUMENT order, so `"h2, h2 a"` took
+  -- the brand and every branded row came back named "Logitech". Relevance REQUIRES the model code, so a
+  -- search for M185 then matched nothing and the comparison reported no products at all. Both
+  -- alternatives here demand an anchor ancestor, which the brand heading does not have.
+  --
+  -- This fix once lived in `_common/rpc/62_rpc_sites.lua`, which is GENERATED and says so at the top:
+  -- regenerating erased it. The adapter is the source; the generated reader is a copy.
+  result_title_selector = "a h2 span, a h2",
   result_image_selector = "img.s-image",
   result_price_selector = ".a-price .a-offscreen",
   result_shipping_selector = '[data-cy="delivery-block"], [data-cy="delivery-recipe"]',

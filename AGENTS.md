@@ -725,6 +725,23 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `attempt to index a nil value (global 'AX_RPC_OFFERS')`, one turn before a cart approval, and the user got a
   re-ask about which product they meant. `check:flows` now derives each `AX_RPC_*` global from the
   files that DEFINE it and fails on any tool that calls one it did not declare.
+- **`_common/rpc/62_rpc_sites.lua` is GENERATED from the site adapters and was NOT checked for staleness.**
+  Its own tests serialize in memory and compare to the adapters, so a stale file on disk passed all of
+  them. Both directions had drifted: the 11st shipping fix sat in the adapter and never reached
+  production (which reads `RPC_SITES`, not the adapter), and the Amazon title fix had been hand-edited
+  INTO the generated file — under its own "do not edit" header — so regenerating erased it. The adapter
+  is the source. `build:rpc` now runs `build:rpc:sites` first, and `check:flows` compares the committed
+  file to what the generator produces now.
+- **There are TWO storefront stacks, and they serve different callers.** RPC flows go through
+  `61_rpc_storefront` + `62_rpc_sites`; the stored-Lua site layer gives each site a local
+  `AX_search_product`/`AX_add_to_cart` through `60_storefront`. `60_storefront` is in NO flow tool's
+  `modules:` but is still live for the site layer the all-site sweep exercises — check BOTH before
+  calling either one dead.
+- **A session id is server-issued (`ses_...`) and not ours to write.** `ax reset` first minted `ax-<base36>`,
+  and every following send came back EMPTY — a 928-second timeout against a session the backend had
+  never heard of. Close the session instead and let the SDK open a real one. The clear is also
+  best-effort: persisted chat rehydrates past `setMessages([])`, and `sendMessage` settles on the message
+  COUNT, so a stale count returned the PREVIOUS turn's reply to a new request. `reset` reports `remaining`.
 - **Two statements of one rule drift, and the drift is invisible.** There are TWO shipping parsers —
   `S.parse_shipping` in `60_storefront.lua` and a private one in `61_rpc_storefront.lua`, which is what
   production runs. A fix for "배송비무료" landed in the other copy, every test passed, and the live path

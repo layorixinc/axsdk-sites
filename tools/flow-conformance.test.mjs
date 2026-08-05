@@ -1417,3 +1417,28 @@ test('the planner may not ask what to compare while a comparison is on screen', 
   assert.match(rule, /never ask for clarification/i, 'the rule must forbid the failure that actually happened');
   assert.match(rule, /names no product/i, 'and give the planner a decidable test, not a list of examples');
 });
+
+/** Tools in a flow document that would execute through the durable path. */
+function durableTools(doc) {
+  return Object.entries(doc.flowTools ?? {})
+    .filter(([, tool]) => tool?.execute?.kind === 'remote')
+    .map(([id]) => id);
+}
+
+test('no production flow tool executes durably, and the check can say so', () => {
+  // Durable execution is gone from production on purpose: a cross-nav resume measured 12–21s, and every
+  // page tool is re-entrant instead. This locks it — the entry-only check above would let a remote tool
+  // in one hop later, which is exactly where they used to live.
+  //
+  // Playground keeps three deliberately (`AX_playground_durable_checkpoint`, `AX_playground_open_site`,
+  // `AX_search_product`): it is the durable-vs-runtime demo, and that is the whole point of it.
+  for (const layer of productionFlowLayers()) {
+    assert.deepEqual(durableTools(parseFlow(layer)), [], `${layer} still executes durably`);
+  }
+
+  // A check that cannot fail is not a check: prove this one flags a remote tool before trusting the pass.
+  assert.deepEqual(
+    durableTools({ flowTools: { legacy: { execute: { kind: 'remote', tool: 'AX_legacy' } } } }),
+    ['legacy'],
+  );
+});

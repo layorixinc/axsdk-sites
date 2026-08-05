@@ -156,35 +156,18 @@ test('loads the checked-in isolated playground fixture', async () => {
     { hostname: 'www.walmart.com', domain: 'walmart' },
   ]);
   assert.deepEqual(Object.keys(workspace.flows), [':', ':example']);
-  assert.deepEqual(Object.keys(workspace.lua), [':', ...[...commerceSites, 'example'].sort().map((site) => `:${site}`)]);
+  // The site Lua layer is two pings now. Every site's `AX_search_product` existed to expose the durable
+  // storefront, and the flows read the RPC storefront instead — so the layer that remains is exactly the
+  // one the CLI uses to prove common and site Lua actually loaded.
+  assert.deepEqual(Object.keys(workspace.lua), [':', ':example']);
   assert.equal(workspace.sites.state.index.source, 'local');
   assert.deepEqual(workspace.sites.state.sites, {});
   const commonLua = workspace.lua[':'];
-  const amazonLua = workspace.lua[':amazon'];
-  assert.match(amazonLua, /\bAX_search_product\b/);
-  assert.match(commonLua, /\bAX_playground_open_site\b/);
-  assert.match(commonLua, /\bAX_PLAYGROUND_DURABLE\b/);
-  assert.match(commonLua, /\bAX_PLAYGROUND_COMMERCE\b/);
-  assert.match(commonLua, /\bAX_PLAYGROUND_STOREFRONT\b/);
-  assert.ok(
-    commonLua.indexOf('_common/scripts/05_durable.lua')
-      < commonLua.indexOf('_common/scripts/06_commerce_sites.lua'),
-    'durable helper must load before the shared commerce map',
-  );
-  assert.ok(
-    commonLua.indexOf('_common/scripts/06_commerce_sites.lua')
-      < commonLua.indexOf('_common/scripts/15_storefront.lua'),
-    'commerce map must load before the storefront search core',
-  );
-  assert.ok(
-    commonLua.indexOf('_common/scripts/15_storefront.lua')
-      < commonLua.indexOf('_common/scripts/20_open_site.lua'),
-    'storefront core must load before the portable opener',
-  );
-  for (const site of commerceSites) {
-    assert.match(workspace.lua[`:${site}`], /\bAX_search_product\b/, `${site} must expose a product search command`);
+  assert.match(commonLua, /\bAX_playground_common_ping\b/);
+  assert.match(workspace.lua[':example'], /\bAX_playground_site_ping\b/);
+  for (const gone of ['AX_playground_open_site', 'AX_PLAYGROUND_DURABLE', 'AX_PLAYGROUND_COMMERCE', 'AX_PLAYGROUND_STOREFRONT', 'AX_search_product']) {
+    assert.doesNotMatch(commonLua, new RegExp(`\\b${gone}\\b`), `${gone} is durable and must not ship`);
   }
-  assert.match(amazonLua, /\bAX_PLAYGROUND_DURABLE\b/);
   const commonFlow = YAML.parse(workspace.flows[':']);
   // The entry is an in-engine hop; the remote fixture runs one node later, because a router entry's
   // remote call is executed by the extension and never consumed by the engine.
@@ -199,14 +182,20 @@ test('loads the checked-in isolated playground fixture', async () => {
     'playground_multi_site_search.collect',
   );
   assert.equal(commonFlow.flows.playground_amazon_search.state.query, 'wireless trackball mouse');
-  // Was `execute.tool: AX_search_product` — the durable command. Three search tools that differed only
-  // in the argument shape they accepted are now ONE: `clientFlows` inlines every declared module PER
-  // TOOL against a 256 KiB ceiling, so a duplicated tool is a duplicated reader.
-  const search = commonFlow.flowTools.playground_search_site;
-  assert.equal(search.execute.kind, 'runtime');
-  assert.match(search.execute.lua, /AX_RPC_PLAYGROUND_SEARCH\.search/);
-  assert.deepEqual(search.parameters.required, [], 'it serves a flat caller and a worker envelope');
-  assert.equal(commonFlow.flows.playground_amazon_search.nodes.run.id, 'playground_search_site');
+  // Was `execute.tool: AX_search_product` — the durable command. A runtime tool is INLINED by the flow
+  // that names it and one inline action backs exactly one node, so a shared id across flows fails the
+  // whole document with `inline action duplicates existing action` — measured live. One thin entry per
+  // flow, all delegating to the same module.
+  for (const id of ['playground_search_amazon_fixture', 'playground_search_shopping', 'playground_search_worker']) {
+    const search = commonFlow.flowTools[id];
+    assert.equal(search.execute.kind, 'runtime', `${id} must be runtime`);
+    assert.match(search.execute.lua, /AX_RPC_PLAYGROUND_SEARCH\.search/);
+    assert.deepEqual(search.parameters.required, [], 'it serves a flat caller and a worker envelope');
+  }
+  assert.equal(commonFlow.flows.playground_amazon_search.nodes.run.id, 'playground_search_amazon_fixture');
+  // The opener hops are gone: the search navigates to its own URL, so opening the store first was a page
+  // load spent for nothing — the same thing production learned when it deleted its openers.
+  assert.equal(commonFlow.flows.shopping.nodes.open_amazon, undefined);
   assert.equal(commonFlow.flows.playground_multi_site_search.nodes.search_stores.id, 'shopping_search_sites');
   assert.equal(commonFlow.flowTools.shopping_search_sites.execute.implementation, 'flow.map');
   assert.equal(commonFlow.flowTools.shopping_search_sites.execute.flow, 'playground_search_one_site');
@@ -215,11 +204,9 @@ test('loads the checked-in isolated playground fixture', async () => {
   const shoppingRoute = commonFlow.router.routes.find((route) => route.intent === 'shopping');
   assert.equal(shoppingRoute?.entry, 'shopping.collect_query');
   assert.equal(commonFlow.flows.shopping.state.site, 'amazon');
-  assert.equal(commonFlow.flows.shopping.nodes.open_amazon.id, 'playground_open_site');
-  assert.equal(commonFlow.flows.shopping.nodes.search_amazon.id, 'playground_search_site');
-  // Was `execute.tool: AX_playground_open_site` — the durable handoff. It navigates over RPC now, and
-  // accepts both the flat `site` and the worker's `item.site` so one tool serves both callers.
-  assert.equal(commonFlow.flowTools.playground_open_site.execute.kind, 'runtime');
-  assert.match(commonFlow.flowTools.playground_open_site.execute.lua, /AX_RPC_PLAYGROUND\.open_site/);
-  assert.deepEqual(commonFlow.flowTools.playground_open_site.parameters.required, []);
+  assert.equal(commonFlow.flows.shopping.nodes.search_amazon.id, 'playground_search_shopping');
+  assert.equal(commonFlow.flows.shopping.nodes.collect_query.next.search, 'search_amazon');
+  // The durable handoff (`AX_playground_open_site`) is gone entirely rather than ported: the search
+  // navigates to its own URL, so the opener was a page load spent for nothing.
+  assert.equal(commonFlow.flowTools.playground_open_site, undefined);
 });

@@ -98,29 +98,14 @@ test('creates one canonical local-source write while preserving unrelated extens
   });
 });
 
-test('grants portable cross-origin handoff to every mapped commerce search origin', () => {
-  const opener = PLAYGROUND_LUA_OPERATIONS.find((operation) => operation.command === 'AX_playground_open_site');
-  assert.deepEqual(opener, {
-    command: 'AX_playground_open_site',
-    portable: true,
-    allowedOrigins: [
-      'https://search.11st.co.kr',
-      'https://ko.aliexpress.com',
-      'https://www.amazon.com',
-      'https://www.coupang.com',
-      'https://www.ebay.com',
-      'https://www.etsy.com',
-      'https://www.gmarket.co.kr',
-      'https://search.shopping.naver.com',
-      'https://www.ssg.com',
-      'https://www.walmart.com',
-    ],
-    checkpointMaxBytes: 8 * 1024,
-  });
-  assert.equal(
-    PLAYGROUND_LUA_OPERATIONS.find((operation) => operation.command === 'AX_search_product')?.portable,
-    undefined,
-  );
+test('the profile requests no durable operation grant at all', () => {
+  // Was: "grants portable cross-origin handoff to every mapped commerce search origin" — a
+  // `lua.operations` grant per durable command, including a portable cross-origin one for the handoff.
+  //
+  // Every one of those commands is gone. The flows navigate and search over RPC, where the capability is
+  // `rpc.allow` on the tool, so the profile no longer asks the host for durable state it cannot use — and
+  // a cross-origin grant that nothing needs is the kind nobody re-reads before it matters.
+  assert.deepEqual(PLAYGROUND_LUA_OPERATIONS, []);
 });
 
 test('verifies canonical storage and effective runtime source policy', () => {

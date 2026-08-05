@@ -1373,13 +1373,36 @@
     }
   },
   {
-    "name": "playground_open_site",
-    "description": "Hand off from any current site to one explicitly supported Playground commerce search origin.",
+    "name": "playground_query_from_request",
+    "description": "Convert a non-empty shopping request into the Amazon search query without a model call.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestText"
+      ],
+      "properties": {
+        "requestText": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
+    "name": "playground_search_amazon_fixture",
+    "description": "Search one Playground commerce site over RPC. Accepts a flat query or the fan-out worker envelope. Never changes a cart, checkout, or order.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [],
       "properties": {
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "site": {
           "type": [
             "string",
@@ -1416,24 +1439,56 @@
     }
   },
   {
-    "name": "playground_query_from_request",
-    "description": "Convert a non-empty shopping request into the Amazon search query without a model call.",
+    "name": "playground_search_shopping",
+    "description": "Search one Playground commerce site over RPC. Accepts a flat query or the fan-out worker envelope. Never changes a cart, checkout, or order.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
-      "required": [
-        "requestText"
-      ],
+      "required": [],
       "properties": {
-        "requestText": {
-          "type": "string",
-          "minLength": 1
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "item": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "index": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "context": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       }
     }
   },
   {
-    "name": "playground_search_site",
+    "name": "playground_search_worker",
     "description": "Search one Playground commerce site over RPC. Accepts a flat query or the fan-out worker envelope. Never changes a cart, checkout, or order.",
     "parameters": {
       "type": "object",
@@ -1772,21 +1827,6 @@
     "parameters": {
       "type": "object",
       "properties": {}
-    }
-  },
-  {
-    "name": "rpc_storefront_search",
-    "description": "Search one storefront over RPC and return its live candidates.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "site": {
-          "type": "string"
-        },
-        "query": {
-          "type": "string"
-        }
-      }
     }
   },
   {

@@ -222,3 +222,83 @@ test('discovery finds runtime modules in rpc/ as well as scripts/', () => {
   assert.equal(found['_common.61_reader'], '_common/rpc/61_reader.lua');
   assert.equal(found['_common.00_base'], '_common/scripts/00_base.lua');
 });
+
+test('a tool is refused when its inlined Lua passes the per-tool ceiling', () => {
+  // The builder checked each MODULE against 64 KiB and the whole DOCUMENT against 256 KiB, and nothing
+  // checked the thing the runtime actually rejects: the tool's concatenated `execute.lua`.
+  //
+  // Measured live on the playground — `flow document failed to compile: adapters.adapters
+  // .rpc_storefront_search.execute.lua exceeds 65536 bytes`. Two modules of 38.3 and 27.0 KiB, each
+  // legal alone, and the document under its ceiling. Every playground turn answered "플로우 설정을
+  // 불러오지 못했습니다" and no gate here said a word.
+  const root = mkdtempSync(join(tmpdir(), 'rpc-ceiling-'));
+  try {
+    mkdirSync(join(root, '_common', 'rpc'), { recursive: true });
+    // Comment-only padding: it must NOT rescue the tool by accident — the builder strips comments, so
+    // the body has to be genuine code to exceed the ceiling.
+    const bulk = Array.from({ length: 2200 }, (unused, i) => `local pad_${i} = "${'x'.repeat(24)}"`).join('\n');
+    writeFileSync(join(root, '_common', 'rpc', '90_bulk.lua'), `AX_BULK = AX_BULK or {}\n${bulk}\n`);
+    writeFileSync(join(root, '_common', 'flows.yaml'), [
+      'flowTools:',
+      '  bulky:',
+      '    execute:',
+      '      kind: runtime',
+      '      implementation: lua',
+      '      modules: ["_common.90_bulk"]',
+      '      entry: run',
+      '      lua: |',
+      '        function run() return { next = "done" } end',
+      '',
+    ].join('\n'));
+
+    assert.throws(
+      () => buildRpcFlows({ root, modulePaths: discoverModules(root) }),
+      /bulky.*exceeds|exceeds.*65536/,
+      'the build must refuse what the runtime will reject',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('inlining drops comments and blank lines, and keeps the code', () => {
+  // Stripping is what buys the room: `61_rpc_storefront` is 38.3 KiB with 16.5 KiB of comments. Sources
+  // stay authored with the reasoning that makes them reviewable; the wire form does not carry it.
+  const root = mkdtempSync(join(tmpdir(), 'rpc-strip-'));
+  try {
+    mkdirSync(join(root, '_common', 'rpc'), { recursive: true });
+    writeFileSync(join(root, '_common', 'rpc', '90_small.lua'), [
+      '--- A doc comment that costs bytes on the wire.',
+      'AX_SMALL = AX_SMALL or {}',
+      '',
+      'function AX_SMALL.answer()',
+      '  -- an inline reason',
+      '  return "the dash -- inside a string survives"',
+      'end',
+      '',
+    ].join('\n'));
+    writeFileSync(join(root, '_common', 'flows.yaml'), [
+      'flowTools:',
+      '  small:',
+      '    execute:',
+      '      kind: runtime',
+      '      implementation: lua',
+      '      modules: ["_common.90_small"]',
+      '      entry: run',
+      '      lua: |',
+      '        function run() return AX_SMALL.answer() end',
+      '',
+    ].join('\n'));
+
+    const built = buildRpcFlows({ root, modulePaths: discoverModules(root) });
+    const emitted = parse(built['_common/flows.yaml']).flowTools.small.execute.lua;
+
+    assert.doesNotMatch(emitted, /A doc comment that costs bytes/);
+    assert.doesNotMatch(emitted, /an inline reason/);
+    assert.match(emitted, /function AX_SMALL\.answer\(\)/);
+    // A `--` inside a string is not a comment, and a stripper that cannot tell would change behaviour.
+    assert.match(emitted, /the dash -- inside a string survives/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -1466,7 +1466,9 @@ test('the playground no longer tells the user about a durable grant', () => {
   const stale = [];
   const visit = (node, path) => {
     if (typeof node === 'string') {
-      if (/durable|lua\.operations|AX_search_product|AX_playground_/.test(node)) stale.push(path);
+      // Case-insensitive: "Durable checkpoint fixture completed" slipped past a case-sensitive pattern
+      // and shipped as the terminal the user reads.
+      if (/durable|lua\.operations|AX_search_product|AX_playground_/i.test(node)) stale.push(path);
       return;
     }
     if (typeof node !== 'object' || node === null) return;
@@ -1480,4 +1482,50 @@ test('the playground no longer tells the user about a durable grant', () => {
   visit(doc.router ?? {}, 'router');
 
   assert.deepEqual(stale, [], `playground text still promises durable:\n  ${stale.join('\n  ')}`);
+});
+
+test('the playground ships no durable command and asks for no durable grant', () => {
+  // The flows stopped executing durably first; the command layer behind them kept shipping. A command
+  // nothing calls is not harmless here — `PLAYGROUND_LUA_OPERATIONS` writes a `lua.operations` GRANT for
+  // each one into the extension config, so the profile kept requesting durable capabilities for a
+  // mechanism no flow reaches.
+  //
+  // The two pings stay: they are how the CLI proves the common and site Lua layers actually loaded, and
+  // neither touches durable.
+  const scripts = fileURLToPath(new URL('../playground/_common/scripts', import.meta.url));
+  const shipped = [];
+  for (const name of readdirSync(scripts).filter((file) => file.endsWith('.lua'))) {
+    const source = readFileSync(`${scripts}/${name}`, 'utf8');
+    for (const [, command] of source.matchAll(/^function (AX_[A-Za-z0-9_]+)\(/gm)) shipped.push(command);
+  }
+  assert.deepEqual(shipped.sort(), ['AX_playground_common_ping']);
+
+  const durableGrants = readFileSync(fileURLToPath(new URL('../tools/playground/store.mjs', import.meta.url)), 'utf8')
+    .match(/PLAYGROUND_LUA_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\)/)?.[1] ?? '';
+  assert.equal(durableGrants.trim(), '', 'a durable grant for a mechanism no flow reaches is a grant nobody audits');
+});
+
+test('a fallback names a branch its node declares, not a node', () => {
+  // `invalidNext`/`exhaustedNext`/`stalledNext` take a BRANCH KEY, and the resemblance to a node name is
+  // the trap: the worker routed `next: { complete: complete }`, so `invalidNext: complete` read fine —
+  // until the branches became `done`/`error` and the whole document stopped compiling with
+  // `actions.playground_search_worker.fallback references undeclared next: complete`.
+  //
+  // A whole-document compile failure answers EVERY intent with "플로우 설정을 불러오지 못했습니다", so
+  // this is worth catching before a live turn does.
+  const broken = [];
+  for (const layer of productionFlowLayers().concat(['playground/_common/flows.yaml'])) {
+    const doc = parseFlow(layer);
+    for (const [flowId, flow] of Object.entries(doc.flows ?? {})) {
+      for (const [nodeId, node] of Object.entries(flow?.nodes ?? {})) {
+        for (const key of ['invalidNext', 'exhaustedNext', 'stalledNext']) {
+          const branch = node?.fallback?.[key];
+          if (branch && !(node.next ?? {})[branch]) {
+            broken.push(`${layer} ${flowId}.${nodeId}.${key} -> ${branch}`);
+          }
+        }
+      }
+    }
+  }
+  assert.deepEqual(broken, [], `fallbacks naming undeclared branches:\n  ${broken.join('\n  ')}`);
 });

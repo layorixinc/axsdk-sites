@@ -15,43 +15,13 @@ export const WIDGETS_STATE_KEY = 'axsdk:widgets';
 export const EXTENSION_CONFIG_KEY = 'axsdk:extension:config';
 export const PLAYGROUND_STATE_KEY = 'axsdk:playground';
 
-export const PLAYGROUND_LUA_OPERATIONS = Object.freeze([
-  Object.freeze({
-    command: 'AX_playground_durable_checkpoint',
-    checkpointMaxBytes: 8 * 1024,
-  }),
-  Object.freeze({
-    command: 'AX_playground_durable_same_origin',
-    checkpointMaxBytes: 8 * 1024,
-  }),
-  Object.freeze({
-    command: 'AX_playground_durable_handoff',
-    portable: true,
-    allowedOrigins: Object.freeze(['https://axsdk.ai']),
-    checkpointMaxBytes: 8 * 1024,
-  }),
-  Object.freeze({
-    command: 'AX_playground_open_site',
-    portable: true,
-    allowedOrigins: Object.freeze([
-      'https://search.11st.co.kr',
-      'https://ko.aliexpress.com',
-      'https://www.amazon.com',
-      'https://www.coupang.com',
-      'https://www.ebay.com',
-      'https://www.etsy.com',
-      'https://www.gmarket.co.kr',
-      'https://search.shopping.naver.com',
-      'https://www.ssg.com',
-      'https://www.walmart.com',
-    ]),
-    checkpointMaxBytes: 8 * 1024,
-  }),
-  Object.freeze({
-    command: 'AX_search_product',
-    checkpointMaxBytes: 64 * 1024,
-  }),
-]);
+// The playground granted a `lua.operations` capability per durable command. Every one of those commands
+// is gone — the flows run over RPC, where the capability is `rpc.allow` on the tool itself — so the
+// profile no longer asks the host for durable state it will never use.
+//
+// Kept as an empty list rather than deleted: it is the shape the config writer and its canonical-storage
+// assertions read, and an absent key and an empty grant are different facts about the profile.
+export const PLAYGROUND_LUA_OPERATIONS = Object.freeze([]);
 
 const STORAGE_KEYS = [
   SITES_STATE_KEY,

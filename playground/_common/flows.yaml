@@ -42,15 +42,6 @@ router:
         - rpc nav only
         - rpc 이동만
 
-    - intent: rpc_site_search
-      priority: 210
-      entry: rpc_site_search.search
-      description: Search one Playground commerce site through the runtime-side RPC
-        Lua storefront.
-      examples:
-        - rpc 검색 11번가 무선 마우스
-        - rpc search 11st wireless mouse
-
     - intent: playground_multi_site_search
       priority: 140
       entry: playground_multi_site_search.collect
@@ -101,8 +92,8 @@ flows:
       done:
         kind: terminal
         inputSelector: []
-        respond: Durable checkpoint fixture completed. Inspect the tool result for
-          checkpoint phase and revision.
+        respond: "RPC checkpoint passed: the declared op answered. Inspect the tool
+          result for the label and the page it read."
       grant_required:
         kind: terminal
         inputSelector: []
@@ -137,7 +128,7 @@ flows:
         fallback: { invalidNext: error, exhaustedNext: error }
       run:
         kind: action_contract
-        id: playground_search_site
+        id: playground_search_amazon_fixture
         inputSelector: [ query ]
         next:
           done: done
@@ -182,22 +173,12 @@ flows:
         description: Preserve the current shopping request as the Amazon search query
           without an extra model turn.
         next:
-          search: open_amazon
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-      open_amazon:
-        kind: action_contract
-        id: playground_open_site
-        inputSelector:
-          - site
-        description: Navigate to Amazon over RPC from whatever site is current.
-        next:
           search: search_amazon
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
       search_amazon:
         kind: action_contract
-        id: playground_search_site
+        id: playground_search_shopping
         inputSelector:
           - query
         description: Run the replay-safe Amazon product search after the Amazon site
@@ -312,52 +293,6 @@ flows:
           Reply with exactly this and nothing else:
           NAV {stages} · href={href}
 
-  rpc_site_search:
-    goal: Search one commerce site with a runtime-side RPC Lua script and report
-      what it found.
-    state:
-      site: 11st
-      query: 무선 마우스
-      listing: null
-      found: null
-      cards_seen: null
-      href: null
-    nodes:
-      search:
-        kind: action_contract
-        id: rpc_storefront_search
-        description: Drive the storefront over RPC.
-        inputSelector: [ site, query ]
-        next:
-          ok: done
-          no_results: empty
-          price_unavailable: empty
-          # A store that refuses to be read is not a store with nothing in it. Folding these into
-          # `empty` would make the diagnostic incapable of showing the distinction it exists to prove.
-          access_denied: walled
-          login_required: walled
-          error: empty
-        fallback: { invalidNext: error, exhaustedNext: error }
-      done:
-        kind: terminal
-        inputSelector: [ listing, found, cards_seen, href ]
-        respond: |-
-          Reply with exactly this and nothing else:
-          RPC SEARCH OK · found={found} · cards={cards_seen}
-          {listing}
-      empty:
-        kind: terminal
-        inputSelector: [ cards_seen, href ]
-        respond: |-
-          Reply with exactly this and nothing else:
-          RPC SEARCH EMPTY · cards={cards_seen} · href={href}
-      walled:
-        kind: terminal
-        inputSelector: [ site, href ]
-        respond: |-
-          Reply with exactly this and nothing else:
-          RPC SEARCH WALLED · site={site} · href={href}
-
   rpc_probe:
     goal: Prove that a runtime-side Lua script can drive the browser over RPC.
     state:
@@ -386,26 +321,14 @@ flows:
         respond: RPC probe failed.
 
   playground_search_one_site:
-    goal: Open one selected commerce site and return its replay-safe search result
-      to the parent task map without asking the user.
+    goal: Search one selected commerce site over RPC and return its result to the
+      parent task map without asking the user.
     state:
       store_result: null
     nodes:
-      open:
-        kind: action_contract
-        id: playground_open_site
-        inputSelector:
-          - item
-          - index
-          - key
-          - context
-        next:
-          search: search
-          error: complete
-        fallback: { invalidNext: error, exhaustedNext: error }
       search:
         kind: action_contract
-        id: playground_search_site
+        id: playground_search_worker
         inputSelector:
           - item
           - index
@@ -414,7 +337,9 @@ flows:
         next:
           done: complete
           error: complete
-        fallback: { invalidNext: complete, exhaustedNext: complete }
+        fallback:
+          invalidNext: error
+          exhaustedNext: error
       complete:
         kind: terminal
         inputSelector: []
@@ -503,48 +428,6 @@ flowTools:
       type: object
       properties: {}
 
-  rpc_storefront_search:
-    description: Search one storefront over RPC and return its live candidates.
-    execute:
-      kind: runtime
-      implementation: lua
-      modules: [ "_common.61_rpc_storefront", "_common.17_rpc_sites" ]
-      rpc:
-        # `dom.get_text` is for the body scan that tells a bot wall from an empty result page — it runs
-        # only for a site that declares a block phrase, and never as part of reading the grid.
-        allow:
-          [
-            nav.navigate,
-            dom.get_location_href,
-            dom.exists,
-            dom.query_all,
-            dom.get_text
-          ]
-        opTimeoutMs: 2000
-        deadlineMs: 45000
-      entry: run
-      lua: |
-        function run(args)
-          local site = tostring(args.site or "11st")
-          local config = RPC_SITES[site]
-          if not config then return { next = "error", error = "unsupported_site", site = site } end
-          local result = AX_RPC_STOREFRONT.search(config, { query = args.query })
-          -- The window the user sees is built here, not by the model: it relays words and numbers.
-          local lines = {}
-          for index = 1, math.min(#result.candidates, 5) do
-            local c = result.candidates[index]
-            lines[#lines + 1] = string.format("%d. %s · %s %s", index, c.name, c.currency, tostring(c.price))
-          end
-          result.listing = table.concat(lines, "\n")
-          result.found = #result.candidates
-          return result
-        end
-    parameters:
-      type: object
-      properties:
-        site: { type: string }
-        query: { type: string }
-
   rpc_read_page:
     description: Read the current page heading and location over the RPC channel.
     execute:
@@ -588,54 +471,6 @@ flowTools:
       required: [ requestText ]
       properties:
         requestText: { type: string, minLength: 1 }
-
-  playground_open_site:
-    description: Hand off from any current site to one explicitly supported
-      Playground commerce search origin.
-    execute:
-      kind: runtime
-      implementation: lua
-      modules: [ "_common.17_rpc_sites", "_common.18_rpc_playground" ]
-      rpc:
-        allow: [ nav.navigate, dom.get_location_href ]
-        opTimeoutMs: 4000
-        deadlineMs: 90000
-      entry: run
-      lua: |
-        function run(args)
-          return AX_RPC_PLAYGROUND.open_site(args)
-        end
-    output:
-      next: { if: [ { var: result.error }, "error", "search" ] }
-      open_site_status: result.status
-      error: result.error
-    parameters:
-      type: object
-      additionalProperties: false
-      required: []
-      properties:
-        site:
-          type:
-            - string
-            - "null"
-        item:
-          type:
-            - object
-            - "null"
-          additionalProperties: true
-        index:
-          type:
-            - number
-            - "null"
-        key:
-          type:
-            - string
-            - "null"
-        context:
-          type:
-            - object
-            - "null"
-          additionalProperties: true
 
   playground_collect_multi_site_request:
     description: Capture one product search query and two to ten explicitly selected
@@ -740,7 +575,137 @@ flowTools:
                     ]
                 }
         query: { type: string, minLength: 1 }
-  playground_search_site:
+  playground_search_amazon_fixture:
+    description: Search one Playground commerce site over RPC. Accepts a flat query
+      or the fan-out worker envelope. Never changes a cart, checkout, or order.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        - _common.61_rpc_storefront
+        - _common.17_rpc_sites
+        - _common.18_rpc_playground
+        - _common.19_rpc_playground_search
+      rpc:
+        allow:
+          - nav.navigate
+          - dom.get_location_href
+          - dom.exists
+          - dom.query_all
+          - dom.get_text
+        opTimeoutMs: 4000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PLAYGROUND_SEARCH.search(args)
+        end
+    output:
+      next: result.next
+      site: result.site
+      query: result.query
+      candidates: result.candidates
+      total_count: result.total_count
+      cursor: result.cursor
+      search_error: result.search_error
+      store_result: result.store_result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        query:
+          type:
+            - string
+            - "null"
+        site:
+          type:
+            - string
+            - "null"
+        item:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        index:
+          type:
+            - number
+            - "null"
+        key:
+          type:
+            - string
+            - "null"
+        context:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+  playground_search_shopping:
+    description: Search one Playground commerce site over RPC. Accepts a flat query
+      or the fan-out worker envelope. Never changes a cart, checkout, or order.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        - _common.61_rpc_storefront
+        - _common.17_rpc_sites
+        - _common.18_rpc_playground
+        - _common.19_rpc_playground_search
+      rpc:
+        allow:
+          - nav.navigate
+          - dom.get_location_href
+          - dom.exists
+          - dom.query_all
+          - dom.get_text
+        opTimeoutMs: 4000
+        deadlineMs: 120000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PLAYGROUND_SEARCH.search(args)
+        end
+    output:
+      next: result.next
+      site: result.site
+      query: result.query
+      candidates: result.candidates
+      total_count: result.total_count
+      cursor: result.cursor
+      search_error: result.search_error
+      store_result: result.store_result
+    parameters:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        query:
+          type:
+            - string
+            - "null"
+        site:
+          type:
+            - string
+            - "null"
+        item:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+        index:
+          type:
+            - number
+            - "null"
+        key:
+          type:
+            - string
+            - "null"
+        context:
+          type:
+            - object
+            - "null"
+          additionalProperties: true
+  playground_search_worker:
     description: Search one Playground commerce site over RPC. Accepts a flat query
       or the fan-out worker envelope. Never changes a cart, checkout, or order.
     execute:

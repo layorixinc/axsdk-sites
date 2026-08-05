@@ -53,6 +53,23 @@ export const MODULE_CEILING = 64 * 1024;
 export const MODULE_DISCIPLINE = 48 * 1024;
 
 /**
+ * The wire form of a module: code only.
+ *
+ * These files are heavily commented on purpose — the reasoning is what makes them reviewable — and the
+ * runtime never reads it. `61_rpc_storefront` is 38.3 KiB with 16.5 KiB of comment, which is the
+ * difference between fitting the 64 KiB per-tool ceiling and failing to compile.
+ *
+ * Only WHOLE-LINE comments go. A trailing `--` may sit inside a string (`"the dash -- inside"`), and a
+ * stripper that cannot tell the two apart would change behaviour to save bytes.
+ */
+export function stripForWire(source) {
+  return String(source)
+    .split('\n')
+    .filter((line) => line.trim() !== '' && !line.trimStart().startsWith('--'))
+    .join('\n');
+}
+
+/**
  * Reads every `flows.yaml` under `root` and resolves the declared modules, returning the emitted
  * documents keyed by their relative path plus a `__report` of what the result costs.
  *
@@ -88,12 +105,22 @@ export function buildRpcFlows({ root, modulePaths, delivery = 'inline' }) {
         // Each module keeps its own chunk boundary in a comment so a runtime stack trace is traceable
         // back to a file. The runtime compiles them separately under registry delivery; inlined they
         // share one chunk, which is why every module must stay under the 200-locals ceiling on its own.
-        if (inline) chunks.push(`-- >>> module ${name} (${path})\n${body.trimEnd()}\n-- <<< module ${name}`);
+        if (inline) chunks.push(`-- >>> module ${name} (${path})\n${stripForWire(body)}\n-- <<< module ${name}`);
       }
 
       report.tools += 1;
       if (!inline) continue;
-      doc.setIn(['flowTools', toolName, 'execute', 'lua'], `${chunks.join('\n\n')}\n\n${tool.execute.lua ?? ''}`);
+      const lua = `${chunks.join('\n\n')}\n\n${tool.execute.lua ?? ''}`;
+      // The runtime rejects a TOOL over 64 KiB, not a module — measured live as `flow document failed to
+      // compile: ... .execute.lua exceeds 65536 bytes`, from two modules that were each legal alone
+      // inside a document that was under its own ceiling. Every turn answered with a compile failure.
+      const bytes = Buffer.byteLength(lua, 'utf8');
+      if (bytes > MODULE_CEILING) {
+        // Same wording the runtime uses, so a search for the live failure lands on the build that could
+        // have prevented it.
+        throw new Error(`tool '${toolName}' execute.lua exceeds ${MODULE_CEILING} bytes (${bytes})`);
+      }
+      doc.setIn(['flowTools', toolName, 'execute', 'lua'], lua);
       doc.deleteIn(['flowTools', toolName, 'execute', 'modules']);
     }
 

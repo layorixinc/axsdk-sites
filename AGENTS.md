@@ -55,6 +55,7 @@ FLOWS.md                      # flow-engine spec / authoring reference
 NAVIGATION.md                 # nav.navigate contract: fired/arrived only (timeOrigin + target gate)
 AUTHORING.md                  # RPC Lua + flows authoring traps: the boundaries a value silently dies at
 RPC_LUA_REFERENCE.md          # RPC ops, module shape, and the smallest complete flow tool
+FLOWS_IMPROVEMENTS.md         # measured authoring review of both flow documents + ordered proposals
 ```
 
 ---

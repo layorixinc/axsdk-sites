@@ -88,7 +88,7 @@
 |---|---|
 | 소명 문안 | 권한별 justification 필드. 부실하면 반려·재문의로 심사가 길어진다 |
 | 설치 경고 | "모든 웹사이트의 데이터를 읽고 변경" — 정책 문제가 아니라 **설치 전환율** 문제 |
-| 심사 시간 | 광범위 권한은 수동 심사 확률을 높인다 **[INFERENCE]** |
+| 심사 시간 | 정책 문서가 **명시**한다 — *"Reviews may take longer for extensions that request broad host permissions"*. 추정이 아니다 |
 | 결합 위험 | **광범위 권한 + 원격으로 받아 해석하는 코드**의 조합이 P0-1이 겨냥하는 바로 그 패턴으로 보인다. 각각은 넘어가도 함께면 눈에 띈다 |
 
 **실제로 날카로운 항목은 host_permissions가 아니라 MAIN world다.** `page-content.js`가 모든 사이트에

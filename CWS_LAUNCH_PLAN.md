@@ -17,7 +17,7 @@
 
 ---
 
-## P0 — 심사 차단 요인 (하나뿐이다)
+## P0 — 심사 차단 요인 (정책 원문 대조 결과 3건)
 
 ### P0-1. 원격 코드 실행 제거 · **EXT + SITES**
 
@@ -27,19 +27,40 @@
 - 그 Lua를 **번들된 인터프리터(fengari, `dist/content.js`에 포함)**로 실행한다.
 - 플로우도 `clientFlows` / `remoteSites` 경로로 원격 수신된다.
 
-**[확인필요·INFERENCE]** MV3는 원격 호스팅 코드를 금지한다. 데이터·설정은 허용되지만, 제어 흐름을
-가진 스크립트를 내려받아 해석·실행하는 것은 **코드**로 읽힐 가능성이 높다. 우리 Lua는 반복문·DOM
-조작·분기를 가진 로직이다. 이 항목이 심사에서 어떻게 판정되는지가 출시 일정 전체를 좌우한다.
+**정책 원문이 이 구조를 이름으로 지목한다.** 추정이 아니다
+([Additional Requirements for Manifest V3](https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements),
+2024-04-03):
+
+> 1. …The extension may reference and load data and other information sources that are external to the
+>    extension, but **these external resources must not contain any logic.** Some common violations include:
+>    …
+>    3. **Building an interpreter to run complex commands fetched from a remote source, even if those
+>       commands are fetched as data**
+
+우리 구조가 정확히 그 문장이다: 번들된 Lua 인터프리터 + 원격에서 받는 Lua.
+
+**면제 조항은 우리에게 적용되지 않는다.** 허용되는 원격 실행은 Debugger API와 User Scripts API 둘뿐이고,
+샌드박스 컨텍스트 예외는 "**확장 API로부터 격리된**" 코드에 한한다 — 우리 Lua는 `dom`·`nav` 옵을 통해
+확장 API를 부른다.
+
+**같은 문서가 합법 경로도 명시한다**(§3.2):
+
+> Fetching a remote configuration file for A/B testing or determining enabled features, **where all logic
+> for the functionality is contained within the extension package**
+
+즉 **로직은 번들, 데이터는 원격**이면 된다. 이것이 설계 방향을 정한다.
 
 **해야 할 일**
 
-1. **SITES** — `npm run build:lua`가 이미 `dist/_common.lua` + 사이트별 번들을 만든다. 이것을 확장
-   패키지에 포함할 수 있는 형태(버전·체크섬 포함)로 산출하는 릴리스 스크립트.
-2. **EXT** — 패키지 내 번들을 1순위 소스로 읽고, 원격 fetch는 **기본 OFF**. 개발 프로필에서만 켜지는
-   경로로 격리(현재 `ax sync`가 쓰는 stored 경로가 이미 그 모양).
-3. **EXT** — 원격에서 계속 받아도 되는 것과 아닌 것을 분리: 사이트 **인덱스·사이트맵·설정 값**은 데이터,
-   Lua·flows는 코드로 취급.
-4. **BIZ** — 위 해석을 CWS 정책에 대조해 확정. 필요하면 심사 제출 전 사전 문의.
+1. **SITES** — 로직과 데이터를 가른다.
+   - **번들해야 하는 것(로직)**: `_common/rpc/*.lua`, `_common/scripts/*.lua`, 사이트 어댑터, 그리고
+     **flows 문서** — flowTool마다 `execute.lua`가 들어 있으므로 flows도 로직이다.
+   - **원격으로 남길 수 있는 것(데이터)**: 사이트 인덱스, 사이트맵, 그리고 **선택자 테이블**.
+     단 `62_rpc_sites.lua`는 지금 Lua 파일이라 그대로는 원격에 둘 수 없다 — **JSON으로 바꿔야** 데이터가
+     된다. 이번 세션에만 선택자를 3개(11번가 배송비·아마존 제목·이베이 카드) 고쳤으니,
+     **가장 자주 바뀌는 부분을 심사 없이 갱신할 수 있는지가 여기서 갈린다.** **[확인필요]**
+2. **EXT** — 패키지 내 번들이 1순위, 원격 fetch는 제거하거나 개발 빌드로 격리.
+3. **BIZ** — 선택자 테이블을 원격 데이터로 두는 것이 §3.2 범위인지 One Stop Support에 사전 문의.
 
 **완료 판정** 확장을 인터넷 없이 설치·실행했을 때 지원 사이트에서 검색·비교가 동작한다.
 
@@ -86,6 +107,53 @@
 
 ---
 
+### P0-3. 단일 목적(single purpose) 확정 · **BIZ + EXT**
+
+조사에서 새로 드러난 항목이다. 초판에는 없었다.
+
+[Quality guidelines](https://developer.chrome.com/docs/webstore/program-policies/quality-guidelines) §1:
+
+> An extension must have **a single purpose that is narrow and easy to understand.** Don't create an
+> extension that requires users to accept **bundles of unrelated functionality.** …Toolbars that provide a
+> broad array of functionality or entry points into services are better delivered as separate extensions
+
+현재 확장이 담고 있는 것: 멀티스토어 비교 · 단일 사이트 쇼핑 · 체크아웃 검토 · **서비스 견적(Thumbtack)**
+· **메모리** · **bluemoonsoft 사이트 탐색**.
+
+쇼핑 계열은 하나의 목적으로 묶인다. 견적·메모리·특정 고객사 사이트 탐색은 **묶음으로 보일 소지**가 있다.
+
+그리고 이 결정이 데이터 정책과 맞물린다 — 2026-08-01 시행 [Limited Use](https://developer.chrome.com/docs/webstore/program-policies/limited-use)
+개정으로 **수집 데이터는 "공시된 단일 목적에 엄격히 필요한" 것이어야** 한다. 목적을 넓게 쓰면 "엄격히
+필요"를 방어하기 어려워지고, 좁게 쓰면 일부 플로우가 목적 밖이 된다. **양쪽을 동시에 만족시킬 수는 없다.**
+
+**해야 할 일**
+
+1. **BIZ** — 단일 목적 문장을 확정한다(예: "지원 쇼핑몰에서 배송비 포함 총액을 비교하고 사용자가 고른
+   상품으로 이동시키는 어시스턴트").
+2. **EXT+SITES** — 그 목적 밖 플로우를 분리 출시할지, 초기 릴리스에서 뺄지 결정.
+3. **BIZ** — 데이터 수집 항목을 그 목적 기준으로 재정리.
+
+**완료 판정** 단일 목적 문장 하나와, 각 플로우가 그 안에 있는지 없는지의 표.
+
+### P0-4. 2026-08-01 개정 정책 대응 · **BIZ + EXT**
+
+**이미 시행 중이다**(공고 2026-07-01, 시행 2026-08-01, 오늘 2026-08-06).
+출처: [CWS policy updates](https://developer.chrome.com/blog/cws-policy-updates-2026)
+
+| 개정 | 우리에게 |
+|---|---|
+| **Limited Use** — 수집 데이터가 공시된 단일 목적에 **엄격히 필요**해야 | P0-3과 함께 결정 |
+| **Disclosure** — **모든** 데이터 수집을 명시 공시. 단일 목적과 밀접한지 무관. 설치 후 처리 방침이 바뀌면 **선제 고지** | 페이지 내용을 읽어 백엔드·LLM에 보내는 것을 전부 공시. 모델 공급자 변경도 고지 대상 |
+| **Malicious and Prohibited** — **AI 서비스의 안전장치·이용 제한·보호 조치를 우회하도록 설계된 확장 금지** | 우리는 CAPTCHA·봇월을 **우회하지 않고 구조화된 상태로 표면화**한다. 네이버쇼핑이 `access_denied`로 답하는 것이 그 증거다 — 소명 자료로 그대로 쓸 수 있다 |
+
+**해야 할 일**
+
+1. **BIZ** — 데이터 공시 문안을 개정 기준으로 작성(설치 전·리스팅·확장 UI).
+2. **EXT** — 실제 전송 데이터와 공시 문안을 대조.
+3. **SITES** — 봇월 비우회 정책이 코드에 남아 있는지 확인(현재 그러함). 소명 자료로 정리.
+
+---
+
 ## P1 — 제출에 필요한 산출물
 
 ### P1-1. 매니페스트·메타데이터 정리 · **EXT + DESIGN**
@@ -116,7 +184,9 @@
 
 ### P1-4. 어필리에이트 고지 3곳 · **BIZ + SITES + DESIGN**
 
-CWS Affiliate Ads 정책은 **리스팅 · UI · 설치 전 고지** 세 곳을 요구한다.
+[Affiliate Ads](https://developer.chrome.com/docs/webstore/program-policies/affiliate-ads) (2025-03-11)
+§1은 **리스팅 · UI · 설치 전** 세 곳을 요구하고, §3은 "**각각의** 제휴 코드·링크·쿠키 삽입 전에 관련
+사용자 행동이 필요하다"고 못박는다 — 우리 설계의 "픽 1건당 링크 1건"이 정확히 그 요구다.
 
 | 위치 | 담당 | 현황 |
 |---|---|---|
@@ -176,7 +246,9 @@ CWS Affiliate Ads 정책은 **리스팅 · UI · 설치 전 고지** 세 곳을 
 
 ```mermaid
 graph LR
-  P01[P0-1 원격 코드 제거] --> SUB[제출]
+  P01[P0-1 원격 코드 · 정책 원문 확정] --> SUB[제출]
+  P03[P0-3 단일 목적] --> SUB
+  P04[P0-4 2026-08 개정 대응] --> SUB
   P10[P1-0 권한 소명] --> SUB
   P11[P1-1 메타데이터] --> SUB
   P12[P1-2 리스팅] --> SUB
@@ -185,8 +257,9 @@ graph LR
   P15[P1-5 제휴 서버] -.출시 후여도 무방.-> SUB
 ```
 
-**차단 요인은 P0-1 하나다.** 원격 코드 판정에 따라 확장의 로딩 구조와 릴리스 절차가 달라지므로,
-이것이 정해지기 전 패키징 관련 작업은 재작업 대상이다.
+**차단 요인은 P0-1·P0-3·P0-4 세 건이다.** P0-1은 정책 원문이 우리 구조를 이름으로 지목하므로
+해석의 여지가 없고, 로딩 구조와 릴리스 절차를 바꾸므로 패키징 관련 작업의 선행 조건이다. P0-3(단일 목적)은
+어떤 플로우를 출시에 포함할지를 정하므로 리스팅·공시 문안 전체의 선행 조건이다.
 
 권한(P1-0)은 차단 요인이 아니라 **소명과 전환율의 문제**다. 다만 MAIN world 주입 범위를 바꾸기로 하면
 콘텐츠 스크립트 주입 방식이 달라지므로 라이브 게이트를 다시 돌려야 한다.

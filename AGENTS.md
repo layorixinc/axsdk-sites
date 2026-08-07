@@ -56,6 +56,10 @@ NAVIGATION.md                 # nav.navigate contract: fired/arrived only (timeO
 AUTHORING.md                  # RPC Lua + flows authoring traps: the boundaries a value silently dies at
 RPC_LUA_REFERENCE.md          # RPC ops, module shape, and the smallest complete flow tool
 FLOWS_IMPROVEMENTS.md         # measured authoring review of both flow documents + ordered proposals
+CWS_LAUNCH_PLAN.md            # Chrome Web Store launch blockers + owners, quoted from current policy
+AFFILIATE_DESIGN.md           # M1 affiliate: the link-first design and the gates that keep it compliant
+SITE_DATA_SPLIT_DESIGN.md     # selectors as remote DATA so a store fix does not need a review
+COMPETITIVE_RESEARCH.md       # agentic extensions measured from their store listings
 ```
 
 ---

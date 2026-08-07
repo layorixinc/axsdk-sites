@@ -1529,3 +1529,90 @@ test('a fallback names a branch its node declares, not a node', () => {
   }
   assert.deepEqual(broken, [], `fallbacks naming undeclared branches:\n  ${broken.join('\n  ')}`);
 });
+
+/** The affiliate program a site config declares, read from the generated site data. */
+function affiliatePrograms() {
+  const source = readFileSync(fileURLToPath(new URL('../_common/rpc/62_rpc_sites.lua', import.meta.url)), 'utf8');
+  const found = {};
+  let site = null;
+  for (const line of source.split('\n')) {
+    const header = line.match(/^RPC_SITES\["([\w-]+)"\]/);
+    if (header) { site = header[1]; continue; }
+    const program = line.match(/^\s*program = "([\w-]+)"/);
+    if (program && site) found[site] = program[1];
+  }
+  return found;
+}
+
+test('only a site with a real program carries one, and never amazon', () => {
+  // Amazon's Operating Agreement forbids Special Links in client-side software (browser extensions
+  // included, with an Approved Mobile App carve-out). Its offers still appear in the comparison — they
+  // just must never be monetised from the extension, and the way to guarantee that is to make it
+  // impossible to declare rather than remembering not to.
+  //
+  // Naver Shopping is excluded for a different reason: its adapter answers `access_denied` by design,
+  // so there is no listing to link to.
+  const programs = affiliatePrograms();
+
+  assert.equal(programs.amazon, undefined, 'an Amazon affiliate link may not exist in the extension');
+  assert.equal(programs['naver-shopping'], undefined, 'a bot-walled store has no offer to monetise');
+  assert.deepEqual(Object.keys(programs).sort(), ['coupang'], 'PoC monetises Coupang only');
+  for (const [site, program] of Object.entries(programs)) {
+    assert.equal(program, 'coupang', `${site} declares an unknown program: ${program}`);
+  }
+});
+
+test('the affiliate tool cannot navigate, and reaches only our own server', () => {
+  // Two policy rules made structural instead of remembered. Coupang forbids forced redirects, so the
+  // tool is granted no `nav.*` and therefore cannot move the tab at all. And the signing keys live
+  // server-side, so the extension's only egress is our conversion endpoint — a key in the bundle is a
+  // key anyone can lift and earn on.
+  const tool = parseFlow('_common/flows.yaml').flowTools.shopping_affiliate_link;
+
+  for (const op of tool.execute.rpc.allow) {
+    assert.doesNotMatch(op, /^nav\./, `a link tool granted ${op} can force a redirect`);
+  }
+  assert.deepEqual(tool.execute.net.allow, ['api.axsdk.ai'], 'the extension never calls an affiliate API directly');
+  assert.equal(tool.execute.net.maxCalls, 1);
+});
+
+test('an affiliate link is only reachable after the user picked an offer', () => {
+  // CWS requires the link to follow a user action and to attach to a direct benefit at that moment. The
+  // action is the number typed at the comparison window, so every path into the tool must pass the
+  // presenter's `select` branch — reachability, not a comment saying so.
+  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
+  const holder = Object.entries(flow.nodes).find(([, n]) => n.id === 'shopping_affiliate_link');
+  assert.ok(holder, 'the affiliate node must exist');
+  const [affiliateNode] = holder;
+
+  const feeders = Object.entries(flow.nodes)
+    .filter(([, n]) => Object.values(n.next ?? {}).includes(affiliateNode))
+    .map(([id]) => id);
+  assert.deepEqual(feeders, ['resolve_offer'], 'only the resolved pick may reach it');
+  assert.equal(flow.nodes.present_offers.next.select, 'resolve_offer');
+});
+
+test('the terminal cannot show a link without its disclosure', () => {
+  // A link without the disclosure is the violation. The Lua produces the two together, and the terminal
+  // that renders them is instructed to print the disclosure verbatim — checked here because the wording
+  // is the only place a reviewer would otherwise have to trust.
+  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
+  const terminal = flow.nodes.report_link;
+
+  assert.equal(terminal.kind, 'terminal');
+  assert.ok(terminal.inputSelector.includes('affiliate_disclosure'));
+  assert.match(terminal.respond, /disclosure/i);
+  assert.match(terminal.respond, /verbatim/i);
+  // It must never claim a purchase: the user opens the link themselves and buys on the store.
+  assert.match(terminal.respond, /Never claim anything was purchased/i);
+});
+
+test('a store with no program still reaches the cart path it had before', () => {
+  // Nine of the ten stores are not monetisable. The affiliate hop must be transparent for them, or this
+  // feature quietly removes a working one.
+  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
+  const node = Object.values(flow.nodes).find((n) => n.id === 'shopping_affiliate_link');
+
+  assert.equal(node.next.no_program, 'add_selected_offer');
+  assert.equal(node.fallback.invalidNext, 'no_program', 'an unexpected answer must not strand the pick');
+});

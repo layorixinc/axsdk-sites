@@ -2061,6 +2061,42 @@
     }
   },
   {
+    "name": "shopping_affiliate_link",
+    "description": "Convert the selected offer into its affiliate deep link. Never navigates; the user opens the link.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "comparison_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "comparison_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "selected_offer": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "shopping_apply_offer_screening",
     "description": "Keep only the judged-relevant listings, apply the per-store comparison cap, and report how many rows were removed.",
     "parameters": {

@@ -726,3 +726,45 @@ test('an ordinary completed tool does not resolve an unfinished turn', async () 
   await assert.rejects(() => session.send('go', { timeoutMs: 400 }), /Timed out/);
   await session.close();
 });
+
+// ── provision: false — drive what the PACKAGE installed ──────────────────────
+//
+// M1 needs a turn driven against stores the extension wrote from its own `workspace-bundle.json`, and any
+// write from here would be proving this driver instead. Measured while establishing that: with the stores
+// cleared and the extension reloaded, it repopulated all five itself and recorded the artifact's digest —
+// but every route to a SESSION went through provisioning, so the end-to-end half stayed unproven.
+//
+// The workspace is not even read in this mode: reading it is how a run gets a digest to write, and a
+// workspace that fails to load must not stop a session that was never going to use it.
+test('provision false writes neither the settings nor the stores', async () => {
+  const fake = fakeExtension();
+
+  const session = await openSession(fake, { provision: false });
+
+  assert.equal(fake.calls.writeConfig.length, 0, 'the config the package forced must stand');
+  assert.equal(fake.calls.writeWorkspaceStores.length, 0, 'the layers the package installed must stand');
+  assert.ok(session.sessionId, 'a session is still started');
+  await session.close();
+});
+
+test('provision false still installs the build and starts a session', async () => {
+  // The build has to be there — that is what carries the artifact — and a session is the whole point.
+  const fake = fakeExtension();
+
+  const session = await openSession(fake, { provision: false });
+
+  assert.ok(session.extensionId, 'the build is installed — it is what carries the artifact');
+  assert.ok(session.workspace.root, 'the root is still reported, for the banner');
+  await session.close();
+});
+
+test('the default still provisions', async () => {
+  // Nothing about the normal path changes: omitting the flag writes both, as every scenario relies on.
+  const fake = fakeExtension();
+
+  const session = await openSession(fake);
+
+  assert.equal(fake.calls.writeConfig.length, 1);
+  assert.equal(fake.calls.writeWorkspaceStores.length, 1);
+  await session.close();
+});

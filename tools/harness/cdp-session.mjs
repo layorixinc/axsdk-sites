@@ -161,12 +161,17 @@ export async function openCdpSession(options = {}, lib = undefined) {
     url = DEFAULT_URL,
     port = DEFAULT_PORT,
     reuse = true,
+    provision = true,
   } = options ?? {};
   const sdk = lib ?? await realLibrary();
 
   // Read before Chrome is touched: a workspace that does not load is worth reporting before a
-  // browser is on screen configured for it.
-  const loaded = await sdk.loadWorkspace(workspaceRoot);
+  // browser is on screen configured for it. Not read at all when not provisioning — reading it is how a
+  // run gets a digest to write, and a workspace that fails to load must not stop a session that was
+  // never going to use it.
+  const loaded = provision
+    ? await sdk.loadWorkspace(workspaceRoot)
+    : { root: workspaceRoot, digest: '', domains: [] };
 
   const { cdp } = await sdk.launchChrome({
     profileName: sdk.profileName, profileRoot: sdk.profileRoot, port,
@@ -174,10 +179,17 @@ export async function openCdpSession(options = {}, lib = undefined) {
   const { extensionId, options: optionsPage, installed } = await sdk.ensureExtension(cdp, sdk.extensionDir);
   const optionsSession = optionsPage.sessionId;
 
-  const found = credentials(sdk, loaded.root);
-  const config = { ...sdk.harnessConfig(found, process.env, { local: true }), credentialsFrom: found.from };
-  const settings = await sdk.writeConfig(cdp, optionsSession, config, { overwrite: true });
-  const stores = await sdk.writeWorkspaceStores(cdp, optionsSession, sdk.storeEnvelopes(loaded));
+  // `provision: false` drives what the PACKAGE installed. M1 needs a turn against stores the extension
+  // wrote from its own `workspace-bundle.json`, and a write from here would prove this driver instead.
+  // The build is still installed, because that is what carries the artifact.
+  let settings = 'unchanged';
+  let stores = 'unchanged';
+  if (provision) {
+    const found = credentials(sdk, loaded.root);
+    const config = { ...sdk.harnessConfig(found, process.env, { local: true }), credentialsFrom: found.from };
+    settings = await sdk.writeConfig(cdp, optionsSession, config, { overwrite: true });
+    stores = await sdk.writeWorkspaceStores(cdp, optionsSession, sdk.storeEnvelopes(loaded));
+  }
 
   // Only what those steps killed: an install or a write restarts the host, and the sessions it
   // ended are debris the next start would otherwise claim conversations back from.

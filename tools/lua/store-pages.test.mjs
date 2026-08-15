@@ -536,3 +536,73 @@ test('FX rates arrive when the runtime hands the payload back as a body string',
   assert.equal(fx.error, undefined, `FX failed: ${fx.error}`);
   assert.equal(Math.round(fx.rates.KRW), 1427);
 });
+
+// ── a store result may not say "candidates" and carry none ────────────────────
+//
+// Measured live on etsy: 24 cards read, relevance kept nothing, and the store result came back
+//   {"site":"etsy","status":"candidates","candidates":{},"total_count":0,"stop_reason":"no_more_pages"}
+// with no error field at all. The sweep's classifier reads the candidate list, then the error, and
+// answered `unknown` — which is reserved for a reader that could not say. "Found nothing relevant" is
+// `no_results`, and §13 already fixes that distinction: an empty page is not a failed store, and cards
+// found but unpriced is `price_unavailable`, not `no_results`. A status that contradicts its own payload
+// makes every one of those distinctions unreadable downstream.
+test('a page whose candidates were all filtered reports no_results, not candidates', () => {
+  const collected = lua.call('AX_collect_store_page', {
+    collected: null,
+    page: 1,
+    remote_used: 2,
+    remote_budget: 10,
+    // What a reader answers after relevance emptied a full page: it SAW cards and kept none.
+    result: {
+      site: 'etsy',
+      query: 'M185',
+      status: 'candidates',
+      candidates: [],
+      cards_seen: 24,
+      has_more: false,
+      page: 1,
+    },
+  });
+
+  const store = collected.store_result;
+  assert.equal(store.total_count, 0);
+  assert.equal(store.error, 'no_results', 'the outcome has to be nameable by the caller');
+  assert.notEqual(store.status, 'candidates', 'a status may not contradict an empty payload');
+});
+
+test('a page error survives as the outcome when nothing was collected', () => {
+  // §13: cards found but none priced is its own answer. The page error must win over the generic
+  // no_results, because the two mean different things to the user.
+  const collected = lua.call('AX_collect_store_page', {
+    collected: null,
+    page: 1,
+    remote_used: 2,
+    remote_budget: 10,
+    result: {
+      site: 'walmart',
+      query: 'M185',
+      status: 'price_unavailable',
+      error: 'price_unavailable',
+      candidates: [],
+      cards_seen: 24,
+      has_more: false,
+      page: 1,
+    },
+  });
+
+  assert.equal(collected.store_result.error, 'price_unavailable');
+  assert.equal(collected.store_result.status, 'price_unavailable');
+});
+
+test('a page that DID collect keeps its candidates status', () => {
+  const collected = lua.call('AX_collect_store_page', {
+    collected: null,
+    page: 1,
+    remote_used: 2,
+    remote_budget: 10,
+    result: { site: 'coupang', query: 'M185', status: 'candidates', candidates: [candidate('a')], has_more: false, page: 1 },
+  });
+
+  assert.equal(collected.store_result.status, 'candidates');
+  assert.equal(collected.store_result.error, undefined);
+});

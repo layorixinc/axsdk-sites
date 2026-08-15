@@ -125,6 +125,12 @@ function AX_collect_store_page(args)
   if #collected == 0 then
     -- With nothing collected the page error IS the store's outcome; downstream ranking reports it.
     store_result.error = page_error or "no_results"
+    -- And the status has to say the same thing. It arrives copied from the last page the reader answered,
+    -- so a page that SAW cards and kept none came back `status = "candidates"` beside an empty list.
+    -- Measured live on etsy — 24 cards seen, total_count 0 — and the sweep classified it `unknown`, the
+    -- label reserved for a reader that could not say, instead of "found nothing relevant". A status that
+    -- contradicts its own payload makes every downstream distinction unreadable.
+    store_result.status = store_result.error
   end
 
   -- A store that answered nothing may simply have been asked in the wrong language: a Korean store lists

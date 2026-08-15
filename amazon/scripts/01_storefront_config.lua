@@ -10,27 +10,28 @@
 --- instead of two: the guard that stops a wrong-model or higher-price add is then exercised by every store
 --- rather than living twice with one copy untested.
 ---
---- `AX_AMAZON` keeps the product-view read, the cart page read and the checkout: those are not part of
---- this port, and the selectors below are its own, moved rather than rewritten.
-local M = AX_AMAZON
-if not M then
-  error("amazon/scripts/00_common.lua must be loaded before 01_storefront_config.lua")
-end
+--- Config-only storefront declaration: read by tools/build-rpc-sites.mjs into the generated
+--- _common/rpc/62_rpc_sites.lua, which the RPC reader (_common/rpc/61_rpc_storefront.lua) serves in
+--- production. This file loads in a bare Lua state and must depend on nothing.
+AX_SITE_CONFIGS = AX_SITE_CONFIGS or {}
 
-local S = AX_STOREFRONT
-if not S then
-  error("_common/scripts/60_storefront.lua must be loaded before amazon/scripts/01_storefront_config.lua")
-end
+-- Selectors that appear in more than one config value are composed here, so a fix cannot land in one
+-- copy and miss the others. The generator executes this file and reads the finished table, so the
+-- composition happens exactly once, at read time.
+local LOGIN_SELECTOR = '#authportal-main-section, #ap_email, #ap_password'
+local RESULT_SELECTOR = '[data-component-type="s-search-result"][data-asin]'
+local ADD_TO_CART_CONFIRM_SELECTOR = '#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin]'
+local ATTACH_PANE_SELECTOR = '#attach-warranty-pane:not(.aok-hidden)'
 
 local CONFIG = {
   site = "amazon",
   home_url = "https://www.amazon.com/",
   hosts = { "www.amazon.com", "amazon.com" },
-  search_url = M.AMAZON_SEARCH_NAVIGATION_URL,
+  search_url = "https://www.amazon.com/s",
   search_param = "k",
   search_path_marker = "/s",
-  result_selector = M.RESULT_SELECTOR,
-  result_ready_selector = M.RESULT_READY_SELECTOR,
+  result_selector = RESULT_SELECTOR,
+  result_ready_selector = RESULT_SELECTOR .. ', .s-no-results-result, ' .. LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]',
   -- The ASIN sits on the row itself, so no selector is needed beside the attribute name.
   result_id_attr = "data-asin",
   result_url_selector = 'h2 a, a.a-link-normal.s-no-outline, a[href*="/dp/"], a[href*="/gp/product/"]',
@@ -48,15 +49,15 @@ local CONFIG = {
   result_shipping_selector = '[data-cy="delivery-block"], [data-cy="delivery-recipe"]',
   result_rating_selector = "i.a-icon-star-small span.a-icon-alt, .a-icon-alt",
   result_reviews_selector = 'a[href*="#customerReviews"] span, a[href*="#customerReviews"]',
-  result_limit = M.RESULT_LIMIT,
+  result_limit = 24,
   default_currency = "USD",
   -- An ASIN is ten alphanumerics; the id also appears in the product href, so both sources are tried.
   product_id_patterns = { "/dp/([A-Z0-9]+)", "/gp/product/([A-Z0-9]+)", "^([A-Z0-9]+)$" },
-  product_url_prefix = M.AMAZON_PRODUCT_URL_PREFIX,
+  product_url_prefix = "https://www.amazon.com/dp/",
   blocked_selectors = { { selector = 'form[action*="validateCaptcha"]', error = "captcha_required" } },
-  login_selector = M.LOGIN_SELECTOR,
+  login_selector = LOGIN_SELECTOR,
   login_urls = { "/ap/signin" },
-  -- Cart. The selectors are amazon's own, lifted from `add_to_cart.lua` and `00_common.lua`.
+  -- Cart. The selectors are amazon's own, lifted from the retired durable cart script.
   product_title_selectors = { "span#productTitle", "#title span#productTitle", "h1#title" },
   product_price_selectors = {
     "#corePrice_feature_div .a-offscreen",
@@ -71,8 +72,8 @@ local CONFIG = {
     'input[name="submit.addToCart"]',
   },
   quantity_selectors = { "#quantity" },
-  add_ready_selector = M.ADD_TO_CART_READY_SELECTOR,
-  confirmation_selector = M.ADD_TO_CART_CONFIRM_SELECTOR,
+  add_ready_selector = ADD_TO_CART_CONFIRM_SELECTOR .. ', ' .. ATTACH_PANE_SELECTOR .. ', ' .. LOGIN_SELECTOR .. ', form[action*="validateCaptcha"]',
+  confirmation_selector = ADD_TO_CART_CONFIRM_SELECTOR,
   confirmation_text_selectors = {
     "#NATC_SMART_WAGON_CONF_MSG_SUCCESS",
     "#attachDisplayAddBaseAlert",
@@ -83,8 +84,8 @@ local CONFIG = {
   },
   -- "Add a protection plan" stands between the click and the confirmation. Declining is the default:
   -- nobody approved a second product.
-  upsell_pane_selector = M.ATTACH_PANE_SELECTOR,
-  upsell_decline_selector = M.ATTACH_DECLINE_SELECTOR,
+  upsell_pane_selector = ATTACH_PANE_SELECTOR,
+  upsell_decline_selector = ATTACH_PANE_SELECTOR .. ' #attachSiNoCoverage input, ' .. ATTACH_PANE_SELECTOR .. ' #attachSiNoCoverage .a-button-input, ' .. ATTACH_PANE_SELECTOR .. ' #attachSiNoCoverage',
   cart_url = "https://www.amazon.com/gp/cart/view.html",
   cart_url_markers = { "/gp/cart/view.html", "/cart/view.html", "/cart?" },
   cart_count_selectors = { "#nav-cart-count", "#sc-subtotal-label-activecart" },
@@ -100,7 +101,7 @@ local CONFIG = {
     '[data-feature-id="proceed-to-checkout-action"] input',
     "#hlb-ptc-btn-native",
   },
-  checkout_ready_selector = M.CHECKOUT_READY_SELECTOR,
+  checkout_ready_selector = LOGIN_SELECTOR .. ', #submitOrderButtonId, #placeYourOrder, input[name="placeYourOrder1"], #spc-orders, #subtotals, #deliver-to-customer-text, #checkout-payment-option-panel, form[action*="validateCaptcha"]',
   checkout_url_markers = { "/gp/buy/", "/checkout/" },
   checkout_summary_selector = "#subtotals",
   checkout_delivering_to_selector = "#deliver-to-customer-text",
@@ -114,4 +115,4 @@ local CONFIG = {
   },
 }
 
-S.register(CONFIG)
+AX_SITE_CONFIGS[CONFIG.site] = CONFIG

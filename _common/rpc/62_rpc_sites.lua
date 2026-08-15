@@ -394,6 +394,7 @@ RPC_SITES["ebay"] = {
   search_param = "_nkw",
   search_path_marker = "/sch/",
   result_selector = "li.s-card[data-listingid], .su-item-card[data-view], .s-item-card[data-view]",
+  result_id_attr = "data-listingid",
   result_ready_selector = "li.s-card, .srp-river-results, .srp-results, .su-item-card, .srp-save-null-search, #signin-main, #captcha_form",
   result_url_selector = "a[href*='/itm/'], .su-link.su-item-card__title, .su-item-card__title",
   result_title_selector = ".s-card__title, .su-item-card__title .su-styled-text, .su-item-card__title, a[href*='/itm/']",
@@ -408,6 +409,22 @@ RPC_SITES["ebay"] = {
     "/itm/(%d+)"
   },
   product_url_prefix = "https://www.ebay.com/itm/",
+  product_title_selectors = {
+    "h1.x-item-title__mainTitle",
+    ".x-item-title__mainTitle"
+  },
+  product_price_selectors = {
+    ".x-price-primary",
+    ".x-bin-price__content"
+  },
+  product_price_approx_selectors = {
+    ".x-price-approx__price"
+  },
+  add_selectors = {
+    "#atcBtn_btn_1",
+    "[id^='atcBtn']",
+    ".x-atc-action a"
+  },
   blocked_selectors = {
     {
       selector = "#captcha_form, #captcha-box, form[action*='captcha'], input[name='captcha']",

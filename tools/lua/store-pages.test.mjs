@@ -2,13 +2,14 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
 import { COMMERCE_LAYER, loadLuaModules } from './harness.mjs';
+import { installRpcStub, makePage } from './rpc-stub.mjs';
 
 const lua = loadLuaModules([
   '_common/scripts/00_base.lua',
   '_common/scripts/44_pagination.lua',
   '_common/scripts/45_offer_view.lua',
   ...COMMERCE_LAYER,
-  '_common/scripts/60_storefront.lua',
+  '_common/rpc/61_rpc_storefront.lua',
 ]);
 after(() => lua.close());
 
@@ -28,27 +29,67 @@ function candidate(id, overrides = {}) {
   };
 }
 
-// ── adapter-side page planning ────────────────────────────────────────────────
+// One ported store's shape, enough for the RPC reader. The durable adapter layer these facts were first
+// pinned against is deleted; the reader that serves every store in production is
+// `_common/rpc/61_rpc_storefront.lua`, so the same facts are asserted through it, off a stubbed page.
+const READER = {
+  site: '11st',
+  search_url: 'https://search.11st.co.kr/pc/total-search',
+  search_param: 'kwd',
+  search_path_marker: '/pc/total-search',
+  result_selector: 'li.card',
+  result_ready_selector: 'li.card',
+  result_url_selector: 'a',
+  result_title_selector: '.name',
+  result_price_selector: '.price',
+  result_limit: 24,
+  default_currency: 'KRW',
+  product_id_patterns: ['/products/(%d+)'],
+  product_url_prefix: 'https://www.11st.co.kr/products/',
+};
 
-test('a storefront config exposes its page plan through the adapter layer', () => {
-  const plan = lua.call('AX_STOREFRONT.page_plan', pagedConfig, 2);
+function readStore(page, config = READER, args = {}) {
+  installRpcStub(lua, page);
+  return lua.call('AX_RPC_STOREFRONT.search', config, { query: '마우스', ...args });
+}
+
+const row = (id, name, price) => ({ text: `${name} ${price}`, url: `https://www.11st.co.kr/products/${id}`, title: name, price_text: price });
+
+// ── page planning ─────────────────────────────────────────────────────────────
+// The durable adapter exposed these through `AX_STOREFRONT.page_plan`, a one-line wrapper around
+// `44_pagination` — an RPC module that stays. The wrapper is gone; the module answers directly.
+
+test('a storefront config exposes its page plan through the pagination module', () => {
+  const plan = lua.call('AX_PAGINATION.plan_page', pagedConfig.pagination, 2);
   assert.equal(plan.supported, true);
   assert.deepEqual(plan.params, { page: 2 });
 });
 
 test('a storefront without a pagination block stays single page', () => {
-  const plan = lua.call('AX_STOREFRONT.page_plan', { site: 'etsy' }, 2);
+  const plan = lua.call('AX_PAGINATION.plan_page', null, 2);
   assert.equal(plan.supported, false);
   assert.equal(plan.error, 'pagination_unsupported');
 });
 
-test('has_more only claims another page when one is reachable and this page had rows', () => {
-  assert.equal(lua.call('AX_STOREFRONT.has_more_from', 12, true, null), true);
-  assert.equal(lua.call('AX_STOREFRONT.has_more_from', 0, true, null), false);
-  assert.equal(lua.call('AX_STOREFRONT.has_more_from', 12, false, null), false);
-  // An explicitly probed and absent "next page" control outranks the row count.
-  assert.equal(lua.call('AX_STOREFRONT.has_more_from', 12, true, false), false);
-  assert.equal(lua.call('AX_STOREFRONT.has_more_from', 12, true, true), true);
+// Whether another page is worth fetching was `AX_STOREFRONT.has_more_from(count, supported, probed)`.
+// The RPC reader answers the same question off the page itself. Two of the durable facts carried over
+// unchanged and are asserted here: a probed-and-present next control claims more, and a probed-and-absent
+// one refuses even on a full page. The other two were deliberately REFINED by the RPC port and are pinned
+// elsewhere: a site that cannot probe reports NOTHING rather than guessing from the row count
+// (rpc-storefront.test.mjs, 'a site that cannot tell reports nothing rather than false'), and an empty
+// page with pages left IS read again ('a first page with no relevant rows reads the next page', below).
+
+const PAGED_READER = { ...READER, pagination: { mode: 'query', param: 'page', start: 1, step: 1, max_pages: 2, next_selector: 'a.next' } };
+
+test('a probed and present next control says there is more', () => {
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row('1', 'x', '1,000원')], 'a.next': [{}] } });
+  assert.equal(readStore(page, PAGED_READER).has_more, true);
+});
+
+test('a probed and absent next control refuses another page even when this one is full', () => {
+  const rows = Array.from({ length: 24 }, (_, index) => row(`${100 + index}`, `상품 ${index}`, '1,000원'));
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': rows } });
+  assert.equal(readStore(page, PAGED_READER).has_more, false);
 });
 
 // ── collecting pages into one store result ────────────────────────────────────
@@ -252,24 +293,44 @@ test('a blocked store stops even when it claims another page exists', () => {
 // id carries it. A read that finds 24 cards and prices none of them is not "this store has no such
 // product" — reporting it as no_results made the store look absent from the comparison.
 
+const unpricedRow = (id) => ({ text: 'Options from', url: `https://www.11st.co.kr/products/${id}`, title: 'x' });
+
 test('cards found but none priced is reported as an unreadable price', () => {
-  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 24, 0), 'price_unavailable');
-  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 1, 0), 'price_unavailable');
+  for (const count of [24, 1]) {
+    const rows = Array.from({ length: count }, (_, index) => unpricedRow(200 + index));
+    const value = readStore(makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': rows } }));
+    assert.equal(value.next, 'price_unavailable');
+    assert.equal(value.cards_seen, count, 'the fact that cards existed must survive');
+  }
 });
 
 test('no cards at all is still no_results', () => {
-  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 0, 0), 'no_results');
+  const value = readStore(makePage({ href: 'https://www.google.com/', afterNavigate: {} }));
+  assert.equal(value.next, 'no_results');
+  assert.equal(value.cards_seen, 0);
 });
 
 test('any usable row means the read succeeded', () => {
-  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 24, 3) ?? null, null);
-  assert.equal(lua.call('AX_STOREFRONT.read_outcome', 3, 3) ?? null, null);
+  const priced = [row('1', 'a', '1,000원'), row('2', 'b', '2,000원'), row('3', 'c', '3,000원')];
+  const filler = Array.from({ length: 21 }, (_, index) => unpricedRow(300 + index));
+  const value = readStore(makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [...priced, ...filler] } }));
+  assert.equal(value.next, 'ok');
+  assert.equal(value.error ?? null, null);
+  assert.equal(value.candidates.length, 3);
 });
 
 // ── a price written twice in one string ──────────────────────────────────────
 // Walmart's tile prints the screen-reader form glued to the real one: "Now$4999current price Now
 // $49.99". Reading the first amount turned $49.99 into 4999 — a 100x error that would have poisoned
 // every comparison it entered.
+
+const priceOf = (text, over = {}) => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    afterNavigate: { 'li.card': [{ text, url: 'https://www.11st.co.kr/products/55', title: '마우스', price_text: '' }] },
+  });
+  return readStore(page, { ...READER, price_from_text: true, ...over });
+};
 
 test('a price text holding both forms is read as the decimal one', () => {
   const cases = [
@@ -278,25 +339,27 @@ test('a price text holding both forms is read as the decimal one', () => {
     ['current price $7.00', 7],
   ];
   for (const [text, expected] of cases) {
-    const amount = lua.call('AX_STOREFRONT.parse_candidate_price', text, 'USD', 'decimal_preferred');
-    assert.equal(amount, expected, `${text} -> ${amount}`);
+    const value = priceOf(text, { price_text_strategy: 'decimal_preferred', default_currency: 'USD' });
+    assert.equal(value.candidates[0]?.price, expected, `${text} -> ${value.candidates[0]?.price}`);
   }
 });
 
 test('two prices with no marker saying which is current are refused', () => {
   // "$1452Options from $9.88" could be $14.52 or $9.88 and nothing in the text decides. A wrong price in
   // a price comparison is worse than a missing row, which the store status already explains.
-  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '$1452Options from $9.88', 'USD', 'decimal_preferred') ?? null, null);
+  const value = priceOf('$1452Options from $9.88', { price_text_strategy: 'decimal_preferred', default_currency: 'USD' });
+  assert.equal(Object.keys(value.candidates).length, 0, 'the row is dropped, not guessed');
+  assert.equal(value.next, 'price_unavailable');
 });
 
 test('a price with no decimal form at all is still read', () => {
-  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '$120', 'USD', 'decimal_preferred'), 120);
-  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', 'US$1,299', 'USD', 'decimal_preferred'), 1299);
+  assert.equal(priceOf('$120', { price_text_strategy: 'decimal_preferred', default_currency: 'USD' }).candidates[0]?.price, 120);
+  assert.equal(priceOf('US$1,299', { price_text_strategy: 'decimal_preferred', default_currency: 'USD' }).candidates[0]?.price, 1299);
 });
 
 test('the other strategies are untouched', () => {
-  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '19,400원 무료배송 970원 적립', 'KRW', 'last_before_shipping'), 19400);
-  assert.equal(lua.call('AX_STOREFRONT.parse_candidate_price', '$49.99', 'USD'), 49.99);
+  assert.equal(priceOf('19,400원 무료배송 970원 적립', { price_text_strategy: 'last_before_shipping' }).candidates[0]?.price, 19400);
+  assert.equal(priceOf('$49.99', { default_currency: 'USD' }).candidates[0]?.price, 49.99);
 });
 
 // ── retrying a store with the other wording ──────────────────────────────────
@@ -374,35 +437,50 @@ test('every attempted wording is recorded so none is repeated', () => {
 // ── the product id a card actually carries ───────────────────────────────────
 // 11st stopped putting a product link on its result cards: every anchor is an ad-server redirect and the
 // id survives only inside a data attribute (`data-log-body` = {"content_type":"PRODUCT","content_no":"917…"}).
-// Reading it needs two things this module owns: patterns must be tried against the ATTRIBUTE, not only
+// Reading it needs two things the reader owns: patterns must be tried against the ATTRIBUTE, not only
 // the href, and an attribute no pattern understands must not be mined for a first token — every card
 // would then answer "content_type", one id would swallow the whole grid, and 24 listings would arrive as
 // one row. That is exactly what a live search returned: 156 cards on the page, 1 candidate read.
 
-const ELEVEN = {
+const ATTR_READER = {
+  ...READER,
+  result_id_selector: 'a.c-card-item__anchor[data-log-body]',
+  result_id_attr: 'data-log-body',
   product_id_patterns: ['/products/(%d+)', '"content_no"%s*:%s*"(%d+)"'],
 };
+const adRow = (attr, name = '무선 마우스', price = '10,000원', url = 'https://action.adoffice.11st.co.kr/act?trcKey=abc') =>
+  ({ text: `${name} ${price}`, url, title: name, price_text: price, root_id: attr });
 
 test('the id is read out of the attribute the card carries it in', () => {
   const attr = '{"content_type":"PRODUCT","content_no":"9170626560","link_url":"https://action.adoffice.11st.co.kr/act"}';
-  assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, null, attr), '9170626560');
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [adRow(attr)] } });
+  assert.equal(readStore(page, ATTR_READER).candidates[0]?.product_id, '9170626560');
 });
 
 test('a href still wins when the card has a real product link', () => {
-  assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, 'https://www.11st.co.kr/products/1234567890', null), '1234567890');
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [row('1234567890', 'x', '1,000원')] } });
+  assert.equal(readStore(page, ATTR_READER).candidates[0]?.product_id, '1234567890');
 });
 
 test('a plain id attribute is still taken as the id', () => {
-  assert.equal(lua.call('AX_STOREFRONT.product_id_from', { product_id_patterns: [] }, null, 'v1-4455'), 'v1-4455');
+  const bare = { ...ATTR_READER, product_id_patterns: [] };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [adRow('v1-4455')] } });
+  assert.equal(readStore(page, bare).candidates[0]?.product_id, 'v1-4455');
 });
 
 test('a structured attribute nobody can parse yields no id at all', () => {
   const attr = '{"content_type":"PRODUCT","other_no":"9170626560"}';
-  assert.equal(lua.call('AX_STOREFRONT.product_id_from', { product_id_patterns: ['/products/(%d+)'] }, null, attr), null);
+  const noPattern = { ...ATTR_READER, product_id_patterns: ['/products/(%d+)'] };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [adRow(attr)] } });
+  assert.equal(Object.keys(readStore(page, noPattern).candidates).length, 0);
 });
 
 test('a card with neither a link nor a usable attribute is dropped, not guessed', () => {
-  assert.equal(lua.call('AX_STOREFRONT.product_id_from', ELEVEN, 'https://action.adoffice.11st.co.kr/act/click/v1/landing?clickData=abc', null), null);
+  const page = makePage({
+    href: 'https://www.google.com/',
+    afterNavigate: { 'li.card': [{ text: 'x 1,000원', url: 'https://action.adoffice.11st.co.kr/act/click/v1/landing?clickData=abc', title: 'x', price_text: '1,000원' }] },
+  });
+  assert.equal(Object.keys(readStore(page, ATTR_READER).candidates).length, 0);
 });
 
 test('a store that found nothing returns no candidates key at all', () => {

@@ -37,23 +37,23 @@ export function mirrorReader({ root = repoRoot } = {}) {
 }
 
 /**
- * Loads the real common layer plus each site adapter and returns the config table each one registered.
- * Reading the registered table rather than parsing the file means the data is exactly what the runtime
- * would see, including defaults the adapter fills in itself.
+ * Loads each site's config-only declarations and returns the table they assigned. The declarations
+ * depend on nothing — no `_common` module is loaded — so the read works in a bare Lua state. Reading
+ * the assigned table rather than parsing the file keeps the property this generator was built on: the
+ * data is exactly what a Lua load produces, including values the declaration composes itself
+ * (amazon's ready selectors are concatenations).
  */
 export function readSiteConfigs({ root = repoRoot, sites = STOREFRONT_SITES } = {}) {
-  const common = readdirSync(join(root, '_common', 'scripts'))
-    .filter((file) => file.endsWith('.lua')).sort()
-    .map((file) => `_common/scripts/${file}`);
-  // Filename order over the whole directory, the way the extension injects a site layer. Loading only
-  // `00_common` missed a config declared in a later file and the adapter registered nothing.
+  // Filename order over the whole directory: a site may keep its declaration in a later file
+  // (amazon's is 01_storefront_config.lua), and loading a named subset is how a config once went
+  // unregistered.
   const adapters = sites.flatMap((site) => readdirSync(join(root, site, 'scripts'))
     .filter((file) => file.endsWith('.lua')).sort()
     .map((file) => `${site}/scripts/${file}`));
 
-  const lua = loadLuaModules([...common, ...adapters]);
+  const lua = loadLuaModules(adapters);
   try {
-    lua.define('function __rpc_dump_configs() return AX_STOREFRONT.configs end');
+    lua.define('function __rpc_dump_configs() return AX_SITE_CONFIGS end');
     return lua.call('__rpc_dump_configs');
   } finally {
     lua.close();

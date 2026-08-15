@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 
 import { loadLuaModules } from './lua/harness.mjs';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { readSiteConfigs, serializeSites, mirrorReader, repoRoot, PRODUCTION_READER, PLAYGROUND_READER, STOREFRONT_SITES } from './build-rpc-sites.mjs';
@@ -28,6 +28,36 @@ test('values come from the adapter, not from a pattern', () => {
   assert.equal(configs.ssg.embedded_json_selector, 'script#__NEXT_DATA__');
   assert.equal(configs.ssg.embedded_item_key, 'itemId');
   assert.deepEqual(configs.ssg.pagination, { mode: 'query', param: 'page', start: 1, step: 1, max_pages: 2 });
+});
+
+test('site declarations are self-contained: the durable layer is not needed to read them', () => {
+  // The CDP extension never injects the stored-Lua site layer, so a site's scripts may not depend on
+  // it. Loading ONLY the site files — no `_common` module at all — must yield every config, and may
+  // define no AX_ global beside the declaration table itself: an AX_ function here would be a durable
+  // command with no runtime left to call it.
+  const adapters = STOREFRONT_SITES.flatMap((site) => readdirSync(join(repoRoot, site, 'scripts'))
+    .filter((file) => file.endsWith('.lua')).sort()
+    .map((file) => `${site}/scripts/${file}`));
+  const lua = loadLuaModules(adapters);
+  try {
+    lua.define([
+      'function __rpc_selfcontained()',
+      '  local extras = {}',
+      '  for key, value in pairs(_G) do',
+      '    if type(key) == "string" and key:find("^AX_") and key ~= "AX_SITE_CONFIGS" then',
+      '      extras[#extras + 1] = key .. " (" .. type(value) .. ")"',
+      '    end',
+      '  end',
+      '  table.sort(extras)',
+      '  return { configs = AX_SITE_CONFIGS, extras = table.concat(extras, ", ") }',
+      'end',
+    ].join('\n'));
+    const result = lua.call('__rpc_selfcontained');
+    assert.equal(result.extras, '', 'a site script defined an AX_ global beside the declaration table');
+    assert.deepEqual(result.configs, configs);
+  } finally {
+    lua.close();
+  }
 });
 
 test('the generated module reproduces the adapter data exactly', () => {

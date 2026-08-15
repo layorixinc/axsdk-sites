@@ -1,5 +1,7 @@
-local S = AX_STOREFRONT
-if not S then error("_common/scripts/60_storefront.lua must be loaded before etsy/scripts/00_common.lua") end
+-- Config-only storefront declaration: read by tools/build-rpc-sites.mjs into the generated
+-- _common/rpc/62_rpc_sites.lua, which the RPC reader (_common/rpc/61_rpc_storefront.lua) serves in
+-- production. This file loads in a bare Lua state and must depend on nothing.
+AX_SITE_CONFIGS = AX_SITE_CONFIGS or {}
 
 local CONFIG = {
   site = "etsy",
@@ -46,6 +48,4 @@ local CONFIG = {
   }
 }
 
-function AX_search_product(args) return S.search(CONFIG, args) end
-function AX_add_to_cart(args) return S.add_to_cart(CONFIG, args) end
-S.register(CONFIG)
+AX_SITE_CONFIGS[CONFIG.site] = CONFIG

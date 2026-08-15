@@ -418,8 +418,17 @@ function AX_apply_offer_screening(args)
     end
     remaining = remaining + #kept
     local store_result = copy_table(value)
-    store_result.candidates = kept
+    -- An empty list crosses as ABSENT, never as the JSON object `{}` a schema validating an array
+    -- refuses — §13, and this repo has paid for it at four separate boundaries.
+    store_result.candidates = #kept > 0 and kept or nil
     store_result.total_count = #kept
+    if #kept == 0 then
+      -- And the status has to say what happened. It is copied from the reader, so a store whose every row
+      -- the model rejected kept `status = "candidates"` beside nothing — an outcome no caller can name,
+      -- which the sweep then reported as `unknown`, the label for a reader that could not say.
+      store_result.error = non_empty(store_result.error) or "no_relevant_offers"
+      store_result.status = store_result.error
+    end
     results[#results + 1] = { key = non_empty(record.key) or site, status = "completed", value = { store_result = store_result } }
   end)
 

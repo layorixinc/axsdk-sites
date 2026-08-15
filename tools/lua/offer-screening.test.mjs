@@ -183,3 +183,50 @@ test('rows the model removed are counted in the window', () => {
   });
   assert.match(ranked.comparison_text, /관련 없는 2건/);
 });
+
+// ── a screened-out store must say so, and cross as absent ────────────────────
+//
+// The second producer of a status that contradicts its own payload. `apply_offer_screening` rewrites
+// `candidates` and `total_count` for every worker and never touches `status`, so a store whose rows the
+// model rejected keeps `status = "candidates"` beside nothing. Traced live on etsy: the reader answered 5,
+// the normalizer kept 1, and the sweep read `candidates candidates=0` on a run where the verdict removed
+// it — an outcome nobody can name, and the label `unknown` is reserved for a reader that could not say.
+//
+// And an empty `kept` is assigned directly, so it crosses as the JSON OBJECT `{}`. This repo has paid for
+// that four times over (§13, "absent at EVERY boundary"): a schema that validates `candidates` as an array
+// refuses it, and a store with nothing becomes a technical failure instead of a store with nothing.
+test('a store whose every row was screened out reports that, not candidates', () => {
+  const applied = lua.call('AX_apply_offer_screening', {
+    store_results: [worker('etsy', [{ product_id: 'a', name: 'x', price: 1, currency: 'USD' }], { status: 'candidates' })],
+    screening_ids: 'etsy:a',
+    keep: '',
+  });
+
+  const store = applied.store_results[0].value.store_result;
+  assert.equal(store.total_count, 0);
+  assert.notEqual(store.status, 'candidates', 'a status may not contradict an empty payload');
+  assert.ok(typeof store.error === 'string' && store.error !== '', 'the outcome has to be nameable');
+});
+
+test('an emptied candidate list crosses as absent, never as {}', () => {
+  const applied = lua.call('AX_apply_offer_screening', {
+    store_results: [worker('etsy', [{ product_id: 'a', name: 'x', price: 1, currency: 'USD' }], { status: 'candidates' })],
+    screening_ids: 'etsy:a',
+    keep: '',
+  });
+
+  assert.equal(applied.store_results[0].value.store_result.candidates, undefined);
+});
+
+test('a store that kept rows still reports candidates', () => {
+  const applied = lua.call('AX_apply_offer_screening', {
+    store_results: [worker('etsy', [{ product_id: 'a', name: 'x', price: 1, currency: 'USD' }], { status: 'candidates' })],
+    screening_ids: 'etsy:a',
+    keep: '1',
+  });
+
+  const store = applied.store_results[0].value.store_result;
+  assert.equal(store.status, 'candidates');
+  assert.equal(store.total_count, 1);
+  assert.equal(store.error, undefined);
+});

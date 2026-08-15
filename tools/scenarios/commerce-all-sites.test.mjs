@@ -13,7 +13,9 @@ import {
   findCartMutations,
   groupByQuery,
   isNormalizedCandidates,
+  mergeWindowOutcomes,
   parseSiteFilter,
+  readWindowOutcomes,
   selectSites,
   tallySiteOutcomes,
 } from './commerce-all-sites.mjs';
@@ -174,7 +176,10 @@ test('the tally: answered sites classify per site; a site the turn never searche
 
   assert.equal(ebay.outcome, 'unsearched');
   assert.equal(ebay.responseValid, false);
-  assert.equal(ebay.normalized, true); // nothing to normalize; the two answer checks carry the failure
+  // `null`, not `true`: nothing answered, so nothing was verified. `true` claimed a pass on an empty list,
+  // which is the same vacuous check the window-attributed stores exposed. The two answer checks above
+  // carry the failure.
+  assert.equal(ebay.normalized, null);
   assert.equal(ebay.candidates, 0);
   assert.equal(ebay.url, '?');
 });
@@ -269,4 +274,139 @@ test('an aggregate entry with no key and no site is dropped', () => {
   }]);
 
   assert.equal(bySite.size, 0);
+});
+
+// ── the window is the complete source; the trace is truncated ─────────────────
+//
+// Measured live: every large tool output in the chat store is cut at 4120 characters and ends
+// "... [8066 chars trimmed]", so `JSON.parse` fails on all of them. Only walmart's outcome was readable,
+// at 111 characters, which is exactly why walmart was the one store the trace could attribute. Scraping a
+// truncated payload could recover a site NAME but never its candidate count, and reporting `candidates: 0`
+// from a payload we could not read would be a claim about listings nobody saw.
+//
+// The comparison window is complete by design — §13: store outcomes are part of the answer, and the
+// renderer names every store that produced offers and every store that failed. That is the source.
+test('offer lines attribute a store, and the store-status line attributes a failure', () => {
+  const window = [
+    '총 6개 중 1-5번 (1/2 페이지)',
+    '사이트 3곳 중 2곳에서 결과를 받았습니다 · 월마트(walmart): rpc_unavailable',
+    '1. [amazon] Logitech M185 고무 그립이 있는 컴팩트 … · 총 KRW 19,745 · 무료배송',
+    '2. [amazon] Logitech M185 컴팩트 양손잡이용 … · 총 KRW 21,029 · 무료배송',
+    '4. [ebay] Logitech M185 Wireless Optical Mouse … · 총 KRW 25,835 · 완전 새 상품',
+  ].join('\n');
+
+  const seen = readWindowOutcomes(window);
+
+  assert.equal(seen.get('amazon'), 'candidates');
+  assert.equal(seen.get('ebay'), 'candidates');
+  assert.equal(seen.get('walmart'), 'rpc_unavailable');
+});
+
+test('a window naming no store attributes nothing', () => {
+  // Absent stays absent: a turn that produced no window must not invent an outcome for anyone.
+  assert.equal(readWindowOutcomes('요청을 처리하지 못했어요.').size, 0);
+  assert.equal(readWindowOutcomes('').size, 0);
+  assert.equal(readWindowOutcomes(undefined).size, 0);
+});
+
+test('a store that both failed and produced offers counts as having produced them', () => {
+  // A store can appear in the status line for a page that failed and still have offers from another —
+  // offers are the stronger evidence, so they win.
+  const seen = readWindowOutcomes([
+    '사이트 2곳 중 1곳에서 결과를 받았습니다 · 이베이(ebay): no_results',
+    '1. [ebay] Something · 총 KRW 1,000',
+  ].join('\n'));
+
+  assert.equal(seen.get('ebay'), 'candidates');
+});
+
+test('the trace still wins when it could be read', () => {
+  // The trace carries the full store_result; the window carries only the outcome. Where both exist the
+  // trace is richer, so merging must not let a window label overwrite a parsed result.
+  const fromTrace = collectStoreResults([{
+    name: 'shopping_search_one_store',
+    output: { store_result: { site: 'walmart', status: 'error', error: 'rpc_unavailable', url: 'https://x/' } },
+  }]);
+
+  const merged = mergeWindowOutcomes(fromTrace, readWindowOutcomes('· 월마트(walmart): rpc_unavailable'));
+
+  assert.equal(merged.get('walmart').url, 'https://x/');
+});
+
+test('a window-attributed store with offers classifies as candidates', () => {
+  // The window showed its offer lines, so the store answered — even though the truncated trace could not
+  // hand over the candidate objects. Reporting `unknown` here would blame the store for our own read.
+  const { outcome, responseValid } = classifyStoreResult({
+    site: 'amazon', status: 'candidates', candidates: [], from_window: true,
+  });
+
+  assert.equal(outcome, 'candidates');
+  assert.equal(responseValid, true);
+});
+
+test('a window-attributed failure is named, but is NOT a classified store answer', () => {
+  // `rpc_unavailable` is OUR op channel failing to reach the store, not the store answering. Widening
+  // `recognizedAccessOutcomes` to accept it would hide a real failure behind a green check — the whole
+  // point of that set is that an access wall is a fact about the SITE. So the outcome is named (the sweep
+  // can report which store and why) and the classified-answer check still fails, which is what the live
+  // run already did for walmart.
+  const { outcome, responseValid } = classifyStoreResult({
+    site: 'walmart', status: 'rpc_unavailable', error: 'rpc_unavailable', from_window: true,
+  });
+
+  assert.equal(outcome, 'rpc_unavailable');
+  assert.equal(responseValid, false);
+});
+
+test('a status is read when there are neither candidates nor an error', () => {
+  // The etsy shape: 24 cards seen, relevance kept none. The reader now says no_results in its status, and
+  // the classifier must not fall through to `unknown` — that label is for a reader that could not say.
+  const { outcome, responseValid } = classifyStoreResult({
+    site: 'etsy', status: 'no_results', candidates: [], cards_seen: 24, total_count: 0,
+  });
+
+  assert.equal(outcome, 'no_results');
+  assert.equal(responseValid, true);
+});
+
+test('a result with nothing to go on is still unknown', () => {
+  // The one case the label exists for: no candidates, no error, no status.
+  assert.equal(classifyStoreResult({ site: 'x', candidates: [] }).outcome, 'unknown');
+  assert.equal(classifyStoreResult({ site: 'x', candidates: [] }).responseValid, false);
+});
+
+test('a window-attributed store reports its contract as UNVERIFIED, not as passing', () => {
+  // Live, after the window merge: etsy, coupang, 11st and ssg all read `outcome=candidates` with
+  // `candidates=0`, because the window proved they answered while the truncated trace could not hand over
+  // the candidate objects. The normalization check then passed on an empty list — vacuously. A check that
+  // cannot fail is not a check, so a window-attributed store says so instead of claiming a pass.
+  const [report] = tallySiteOutcomes(
+    [{ site: 'etsy', region: 'global' }],
+    new Map([['etsy', { site: 'etsy', status: 'candidates', candidates: [], from_window: true }]]),
+  );
+
+  assert.equal(report.outcome, 'candidates');
+  assert.equal(report.normalized, null, 'null means unverified; true would claim we checked');
+  assert.equal(report.fromWindow, true);
+});
+
+test('a store whose trace survived is verified for real', () => {
+  const [report] = tallySiteOutcomes(
+    [{ site: 'gmarket', region: 'korean' }],
+    new Map([['gmarket', {
+      site: 'gmarket', status: 'candidates', url: 'https://x/',
+      candidates: [{ site: 'gmarket', product_id: '1', name: 'n', price: 13700, currency: 'KRW', url: 'https://x/1' }],
+    }]]),
+  );
+
+  assert.equal(report.normalized, true);
+  assert.equal(report.fromWindow, false);
+  assert.equal(report.candidates, 1);
+});
+
+test('an unsearched store is still unverified and still fails', () => {
+  const [report] = tallySiteOutcomes([{ site: 'ssg', region: 'korean' }], new Map());
+
+  assert.equal(report.outcome, 'unsearched');
+  assert.equal(report.responseValid, false);
 });

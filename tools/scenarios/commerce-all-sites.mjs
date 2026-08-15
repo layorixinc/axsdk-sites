@@ -112,8 +112,15 @@ export function classifyStoreResult(value) {
   const payload = value && typeof value === 'object' ? value : {};
   const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
   const error = payload.login_required ? 'login_required' : payload.error;
-  const outcome = candidates.length > 0 ? 'candidates' : error || 'unknown';
-  const responseValid = candidates.length > 0 || recognizedAccessOutcomes.has(outcome);
+  // A store the WINDOW attributed has offers we saw and candidate objects the truncated trace could not
+  // carry; and a reader that filtered a full page says so in its status. In both cases the status is the
+  // only thing left to read, and reading it is the difference between naming the outcome and blaming the
+  // store for our own read. `unknown` stays for a result with nothing to go on at all.
+  const claimed = typeof payload.status === 'string' && payload.status !== '' ? payload.status : undefined;
+  const outcome = candidates.length > 0 ? 'candidates' : error || claimed || 'unknown';
+  const responseValid = candidates.length > 0
+    || outcome === 'candidates'
+    || recognizedAccessOutcomes.has(outcome);
   return { candidates, outcome, responseValid };
 }
 
@@ -170,6 +177,44 @@ export function collectStoreResults(toolCalls) {
   return bySite;
 }
 
+/**
+ * Store outcomes as the comparison WINDOW states them.
+ *
+ * The tool trace cannot carry them: every large output in the chat store is cut at 4120 characters and
+ * ends "... [N chars trimmed]", so `JSON.parse` fails on all of them. Measured on a three-store turn —
+ * only walmart's outcome parsed, at 111 characters, which is exactly why walmart was the one store the
+ * trace could attribute while amazon and ebay both had offers in the window. Scraping a truncated payload
+ * could recover a site NAME but never its candidate count, and reporting `candidates: 0` from a payload
+ * nobody could read would be a claim about listings nobody saw.
+ *
+ * The window is complete by design (§13: store outcomes are part of the answer) and states both signals:
+ * every offer line is tagged `[slug]`, and the store-status line names each store that failed as
+ * `label(slug): reason`. Offers are the stronger evidence, so a store with both keeps `candidates`.
+ */
+const OFFER_LINE = /^\s*\d+\.\s*\[([a-z0-9-]+)\]/gmu;
+const STORE_STATUS = /\(([a-z0-9-]+)\)\s*:\s*([a-z0-9_]+)/gu;
+
+export function readWindowOutcomes(windowText) {
+  const seen = new Map();
+  const text = typeof windowText === 'string' ? windowText : '';
+  for (const match of text.matchAll(STORE_STATUS)) seen.set(match[1], match[2]);
+  // Second, so an offer overrides a failure the same store reported for another page.
+  for (const match of text.matchAll(OFFER_LINE)) seen.set(match[1], 'candidates');
+  return seen;
+}
+
+/** The trace's parsed result wins where it exists; the window fills in what truncation hid. */
+export function mergeWindowOutcomes(fromTrace, fromWindow) {
+  const merged = new Map(fromTrace);
+  for (const [site, outcome] of fromWindow) {
+    if (merged.has(site)) continue;
+    merged.set(site, outcome === 'candidates'
+      ? { site, status: 'candidates', candidates: [], from_window: true }
+      : { site, status: outcome, error: outcome, from_window: true });
+  }
+  return merged;
+}
+
 /** The read-only guard: the sweep must never reach a cart or checkout mutation on any path. */
 export const CART_MUTATION_PATTERN = /add_selected_store_offer|add_to_cart|checkout|place_order/i;
 
@@ -177,27 +222,35 @@ export function findCartMutations(toolCalls) {
   return (toolCalls || []).filter(call => CART_MUTATION_PATTERN.test(call?.name || ''));
 }
 
-/** Per-site outcome accounting. A site the turn never attributed a store_result to is `unsearched`
- *  — not 'unknown', because nothing answered at all — and fails both answer checks; its empty
- *  candidate list has nothing to violate the normalization contract. */
+/**
+ * Per-site outcome accounting. A site the turn never attributed a store_result to is `unsearched` — not
+ * `unknown`, because nothing answered at all — and fails both answer checks.
+ *
+ * `normalized` is three-valued on purpose. A store the WINDOW attributed proved that it answered, but the
+ * truncated trace could not hand over its candidate objects, so there is nothing to check the contract
+ * against: `null` says unverified. Returning `true` there passed the check on an empty list — vacuously,
+ * for four of ten stores in a live run — and a check that cannot fail is not a check.
+ */
 export function tallySiteOutcomes(sites, resultsBySite) {
   return sites.map(item => {
     const result = resultsBySite.get(item.site);
     if (!result) {
       return {
         site: item.site, region: item.region, url: '?',
-        outcome: 'unsearched', responseValid: false, normalized: true,
+        outcome: 'unsearched', responseValid: false, normalized: null, fromWindow: false,
         candidates: 0, first: null, raw: null,
       };
     }
     const { candidates, outcome, responseValid } = classifyStoreResult(result);
+    const fromWindow = result.from_window === true;
     return {
       site: item.site,
       region: item.region,
       url: typeof result.url === 'string' && result.url !== '' ? result.url : '?',
       outcome,
       responseValid,
-      normalized: isNormalizedCandidates(item.site, candidates),
+      normalized: fromWindow ? null : isNormalizedCandidates(item.site, candidates),
+      fromWindow,
       candidates: candidates.length,
       first: candidates[0] || null,
       raw: result,
@@ -254,11 +307,22 @@ async function main() {
       const mutations = findCartMutations(turn.toolCalls);
       check(checks, `batch [${label}]: comparison stayed read-only`, mutations.length === 0, mutations.map(call => call.name).join(','));
 
-      const resultsBySite = collectStoreResults(turn.toolCalls);
+      // The trace is truncated at 4120 characters per output, so it can only attribute the stores whose
+      // outcome was short enough to survive. The window states all of them.
+      const resultsBySite = mergeWindowOutcomes(
+        collectStoreResults(turn.toolCalls),
+        readWindowOutcomes(turn.text),
+      );
       for (const report of tallySiteOutcomes(batch.sites, resultsBySite)) {
         check(checks, `${report.site}: site adapter answered through the flow engine`, report.outcome !== 'unsearched', `url=${report.url} outcome=${report.outcome}${report.outcome === 'unsearched' ? ` tools=${toolNames}` : ''}`);
         check(checks, `${report.site}: live adapter returns a classified result`, report.responseValid, `${report.outcome} candidates=${report.candidates}${report.outcome === 'unknown' ? ` raw=${JSON.stringify(report.raw)}` : ''}`);
-        check(checks, `${report.site}: candidate contract is normalized`, report.normalized, report.first ? `${report.first.currency} ${report.first.price}` : report.outcome);
+        // Three-valued: null is "the window proved it answered, the truncated trace carried no candidates
+        // to check". Printing PASS there would claim a verification nobody performed.
+        if (report.normalized === null) {
+          console.log(`SKIP  ${report.site}: candidate contract not verified — ${report.fromWindow ? 'trace truncated, attributed from the window' : report.outcome}`);
+        } else {
+          check(checks, `${report.site}: candidate contract is normalized`, report.normalized, report.first ? `${report.first.currency} ${report.first.price}` : report.outcome);
+        }
         reports.push(report);
       }
     }

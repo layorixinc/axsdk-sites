@@ -119,8 +119,12 @@ remote kind. That is one request document, and the shape it needs already exists
 
 ### D. Lua inside YAML
 
-Production carries **314 lines of inline Lua**, of which **37 are `function run(args)` wrappers** that do
-nothing but forward:
+> **Re-measured 2026-08-16, and the proposal below is withdrawn as written.** The numbers in the first
+> edition were taken before the RPC port finished and are wrong by an order of magnitude, and the risk
+> assessment was wrong in kind.
+
+Production carries **2,925 lines of inline Lua** across 53 blocks (first edition said 314), of which
+**22 are pure `function run(args)` forwarding wrappers** (first edition said 37):
 
 ```yaml
       entry: run
@@ -131,12 +135,23 @@ nothing but forward:
 ```
 
 **Cost.** No syntax highlighting, no linting, no unit test, and a YAML indentation error in a Lua block
-reads as a schema error. The wrapper is pure ceremony — the module entry is already named right there.
+reads as a schema error. That cost is real — but the wrappers are **88 of 2,925 lines, 3%**. Removing them
+leaves 97% of the problem exactly where it was, so this is not the lever the first edition took it for.
 
-**Proposal.** Let `entry:` name a module function directly (`entry: AX_RPC_OFFERS.present`) and have the
-builder synthesise the wrapper. Removes ~110 lines and one whole class of edit.
+**Why the proposal is withdrawn.** "Have the builder synthesise the wrapper · Risk low — the emitted
+document is unchanged" assumed production's document is built. **It is not.** `tools/rpc-package.mjs` only
+hashes and pushes, and `workspace.mjs` stores `_common/flows.yaml` **verbatim** as the flows layer — so a
+dotted `entry: AX_RPC_OFFERS.present` would reach the backend and the extension exactly as written, with no
+wrapper and no `lua:` block. Making it work means introducing a compile step into a delivery path that has
+none today, for both the stored path and the package push. That is a contract change, not a cleanup, and it
+belongs with items 5–7 rather than 1–4.
 
-**Effort** small (builder) · **Risk** low — the emitted document is unchanged.
+**If the Lua-in-YAML cost is what matters**, the lever is the other 97%: move the bodies into
+`_common/rpc/*.lua` modules — where they are already linted, unit-tested and syntax-highlighted — and let
+the YAML keep only the wrapper that names one. That is the same direction the RPC port already took and it
+needs no new build step. Sizing it is a separate measurement.
+
+**Effort** medium · **Risk** medium — a new compile step in the delivery path either way.
 
 ### E. 4,317 lines in one file
 
@@ -188,17 +203,22 @@ that holds the user is a candidate, because such a node re-reads a message it ca
 
 ## 3. Order of work
 
-| # | item | frees | risk |
-|---|---|---|---|
-| 1 | Delete the 14 redundant `model:` blocks; add `defaults.fallback` | ~150 lines | very low |
-| 2 | `entry:` names a module function; drop the 37 wrappers | ~110 lines of YAML-embedded Lua | low |
-| 3 | Split the document per flow, byte-identical output | edit safety | low |
-| 4 | Generate the thin per-flow entries | copies that drift | low |
-| 5 | One copy of the RPC modules, shared by both workspaces | 65 KiB duplicate | medium |
-| 6 | Derive `inputSelector` from declared properties | the three-list class of bug | medium |
-| 7 | Audit the remaining model nodes in holding loops | latency + a known bug class | medium |
+| # | item | frees | risk | state |
+|---|---|---|---|---|
+| 1 | Delete the node `model:` blocks that repeat the default | **98 lines** (14 blocks) | very low | **DONE** 2026-08-16, gated in `check:flows` |
+| 2 | ~~`entry:` names a module function; drop the wrappers~~ | 88 of 2,925 inline Lua lines (3%) | **medium, not low** | **WITHDRAWN** — see D: production has no compile step, so this adds one |
+| 3 | Split the document per flow, byte-identical output | edit safety | low | open |
+| 4 | Generate the thin per-flow entries | copies that drift | low | open |
+| 5 | One copy of the RPC modules, shared by both workspaces | 65 KiB duplicate | medium | open |
+| 6 | Derive `inputSelector` from declared properties | the three-list class of bug | medium | open |
+| 7 | Audit the remaining model nodes in holding loops | latency + a known bug class | medium | open |
 
-1–4 are mechanical and independently shippable. 5–7 change contracts and each wants a live turn.
+Item 1 was mechanical and is shipped. **Item 2 was not** — its "risk low, the emitted document is
+unchanged" rested on a build step production does not have, and its line counts were an order of magnitude
+stale. 3 and 4 remain mechanical; 5–7 change contracts and each wants a live turn.
+
+A note for whoever reads this next: every number in the first edition predates the finished RPC port, and
+two of them were wrong by 10x. **Re-measure before planning from any of them.**
 
 ---
 

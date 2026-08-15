@@ -366,8 +366,9 @@ page. `check:flows` 121 and `test:playground` 50 unchanged.
      `dom.get_location_href` reads all carry `#modal/docuray`, then `wait_for_navigation` answers
      `{ok:true, url:".../front/main"}` and the fragment is **gone** — bluemoonsoft's router consumes
      its own hash. So the arrival read taken AFTER the wait is worthless.
-   - fragment-only: `nav.navigate` answers **`{ok:false, reason:"window_not_available"}`** and nothing
-     moves. `navigate_page` ignored that return value entirely.
+   - fragment-only, first attempt: `nav.navigate` answered `{ok:false, reason:"window_not_available"}`.
+     **That reading was WRONG and is retired** — it was a symptom of the harness restarting the session
+     host on every call (§6.3), not of the runtime. On a stable session the same call returns nil.
 
    `66_rpc_navigate.lua` now splits the fragment: a fragment-only target never waits, consults
    `nav.navigate`'s return, decides from ONE immediate read, and answers `same_document_refused` rather
@@ -376,11 +377,17 @@ page. `check:flows` 121 and `test:playground` 50 unchanged.
    so a site consuming its hash is not a wrong landing. For a fragmentless target the behaviour is
    byte-identical (14 pre-existing tests untouched).
 
-   **[OPEN] the live fragment behaviour is UNRESOLVED.** `window_not_available` is core's
-   *default*-capabilities shape, which is what you see when an op falls through to core instead of the
-   CDP table — and `npm run cdp -- eval` goes through `axsdk-devtools-run`, not a flow tool, so it may
-   not carry the flow's CDP page binding. Do not conclude the runtime cannot navigate a fragment until
-   it has been measured from inside a flow tool.
+   **RESOLVED 2026-08-15, on a stable session.** `nav.navigate` to a fragment-only target **succeeds
+   and does nothing**: it returns nil and six consecutive `dom.get_location_href` reads all show the
+   un-fragmented URL. So the runtime accepts the call and no-ops — `Page.navigate` semantics for a URL
+   differing only by fragment. The classification is therefore keyed on the READ, not the return, and a
+   live turn now ends `{"next":"error","error":"same_document_refused","page_href":".../front/main"}`
+   instead of the misleading `navigation_failed`. Honest, and the user still cannot reach that page.
+
+   **[OPEN] a fragment route is unreachable through `nav.*` at all.** bluemoonsoft's sitemap names
+   `/front/main#modal/docuray` and the page renders that modal from its own router, so reaching it needs
+   a CLICK on the link the sitemap named, not a navigation. `66_rpc_navigate` is a navigator; deciding
+   where that click belongs is a design question, not a measurement.
 
    **[OPEN] and separate: our nav waits are unbounded live.** `dom-port.ts` takes a **single spec
    table**, but every `_common/rpc` caller writes
@@ -447,19 +454,27 @@ Three defects, found by actually running `npm run test:commerce:live:all` rather
    settles on a paused question and returns it as the reply text — only on a pause, never on an ordinary
    completed tool, or every multi-step turn would be cut off at its first step.
 
-With those three fixed the sweep gets real answers: **etsy passes end to end through the shipped path**
-(`outcome=candidates`, `USD 39.99`), and walmart reports the classified `rpc_unavailable`.
+4. **The fan-out publishes AGGREGATED, one level deeper than the runner read.** The screening step emits
+   `store_results:[{key,status,value:{store_result:{site,…}}}]`, so the store's own reply is at
+   `value.store_result` — §13 records the same trap for the discovery fan-out. Reading only the top level
+   attributed nothing, and a classified failure like walmart's `rpc_unavailable` then also failed its own
+   "returns a classified result" check because nothing was attributed to walmart at all. Both shapes are
+   read now; `key` names the store even when the value carries nothing usable.
 
-**[OPEN] two things remain in `commerce-all-sites.mjs`:**
+With those four fixed the sweep **completes in 94 seconds** where it used to time out at 600, runs all
+four batches, and attributes real per-store outcomes: `aliexpress: candidates` (the
+`result_url_from_root` fix), `gmarket: candidates` KRW 16900, `naver-shopping: access_denied`,
+`walmart: rpc_unavailable`. Both "at least one storefront returned live candidates" assertions pass, per
+region, and no paused comparison window is left behind.
 
-- **Per-site attribution reads the wrong level.** amazon, ebay and aliexpress come back `unsearched`
-  while their tool traces plainly show `shopping_search_one_store` and `shopping_collect_store_page`
-  three times over. The normalizer WRAPS the store answer, so the store's own reply is at
-  `store_result.store_result` (§13 records this exact trap for the discovery fan-out). The runner reads
-  one level too high, and a classified failure like walmart's then also fails its own
-  "returns a classified result" check.
-- **The Korean batch still exceeds its bound.** `max(300000, sites * 120000)` is a guess, not a
-  measurement. Time one three-store Korean turn end to end and set the bound from that number.
+**[OPEN] five stores still report `unsearched`** — amazon, ebay, coupang, 11st, ssg. This is no longer
+the runner reading the wrong level: the stores that produced either candidates or a classified error ARE
+attributed, so the question has moved to what the flow publishes per store in a three-store turn. Read
+one turn's whole trace and account for every store the request named before changing anything.
+
+**[OPEN] `etsy` answers `unknown`** with `cards_seen: 24` and `total_count: 0` — 24 cards read and
+relevance kept none. That is "found nothing relevant", which the classifier should call `no_results`;
+`unknown` is reserved for a reader that could not say. One of the two is mislabelled.
 
 ### 6.4 The durable layer is gone, and two of its facts were wrong (2026-08-15)
 

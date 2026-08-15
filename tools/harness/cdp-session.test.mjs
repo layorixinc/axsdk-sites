@@ -768,3 +768,28 @@ test('the default still provisions', async () => {
   assert.equal(fake.calls.writeWorkspaceStores.length, 1);
   await session.close();
 });
+
+// ── a turn reports how long it took ──────────────────────────────────────────
+//
+// The sweep's bound is `max(300000, sites * 120000)`, which was never measured. Same code, consecutive
+// runs: ten stores attributed in ~85 s, then a batch lost to its own 360 s ceiling. §13's own finding is
+// that latency here is LLM-dominated and swings ~4x for the SAME request, so a bound can only come from a
+// distribution — and nothing was recording one. A number nobody measures is a number somebody guesses.
+test('send reports the turn duration', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const before = [user('m1', 'hi')];
+  fake.seedConversation(before);
+  fake.turns.push([
+    before,
+    [...before, user('m2', 'go')],
+    [...before, user('m2', 'go'), assistant('m3', [textPart('p3', 'done')])],
+  ]);
+
+  const turn = await session.send('go');
+
+  assert.equal(typeof turn.elapsedMs, 'number');
+  assert.ok(turn.elapsedMs >= 0, 'a duration, not a timestamp');
+  assert.ok(turn.elapsedMs < 60_000, `a scripted turn cannot take a minute, saw ${turn.elapsedMs}`);
+  await session.close();
+});

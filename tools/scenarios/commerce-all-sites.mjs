@@ -223,6 +223,42 @@ export function findCartMutations(toolCalls) {
 }
 
 /**
+ * What the run actually cost, per batch and at its worst.
+ *
+ * The bound was `max(300000, sites * 120000)` and had never been measured. Same code, consecutive runs:
+ * ten stores attributed in ~85 s, then a batch lost to its own 360 s ceiling. §13's own finding is that
+ * latency here is LLM-dominated and swings roughly 4x for the SAME request, so one run cannot justify a
+ * bound — and tuning the multiplier until a run goes green is how a number nobody measured becomes a
+ * number everybody trusts.
+ *
+ * A timed-out batch is carried as a timeout, never as a duration: it measured the ceiling, not the turn,
+ * and averaging it in would drag the estimate toward whatever ceiling happened to be set. `null` for the
+ * worst when nothing was measured, because 0 would read as "instant".
+ */
+export function summariseTimings(entries) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const measured = rows.filter((row) => typeof row?.elapsedMs === 'number');
+  const timeouts = rows.filter((row) => typeof row?.timedOutAfterMs === 'number');
+  let worst = null;
+  let worstPerSite = null;
+  for (const row of measured) {
+    if (worst === null || row.elapsedMs > worst.elapsedMs) worst = row;
+    const perSite = row.elapsedMs / Math.max(1, Number(row.sites) || 1);
+    if (worstPerSite === null || perSite > worstPerSite.perSite) worstPerSite = { perSite, row };
+  }
+  return {
+    batches: rows.length,
+    measuredBatches: measured.length,
+    timedOut: timeouts.length,
+    totalMs: measured.reduce((sum, row) => sum + row.elapsedMs, 0),
+    worstMs: worst === null ? null : worst.elapsedMs,
+    worstLabel: worst === null ? null : worst.label,
+    worstPerSiteMs: worstPerSite === null ? null : Math.round(worstPerSite.perSite),
+    note: timeouts.map((row) => `${row.label}: timed out after ${row.timedOutAfterMs}ms`).join('; '),
+  };
+}
+
+/**
  * Per-site outcome accounting. A site the turn never attributed a store_result to is `unsearched` — not
  * `unknown`, because nothing answered at all — and fails both answer checks.
  *
@@ -273,6 +309,7 @@ async function main() {
   const batches = groupByQuery(sites);
   const checks = [];
   const reports = [];
+  const timings = [];
   // Lazy: unit tests import this module's pure exports without loading the CDP driver.
   const { openCdpSession } = await import('../harness/cdp-session.mjs');
   const session = await openCdpSession({ url: SITE_HOME.amazon });
@@ -301,7 +338,19 @@ async function main() {
       const fresh = await session.reset();
       check(checks, `batch [${label}]: fresh flow session created`, Boolean(fresh), `remaining=${fresh?.remaining ?? '?'}`);
 
-      const turn = await session.send(batchRequestText(batch), { timeoutMs: Math.max(300000, batch.sites.length * 120000) });
+      // A batch that exceeds its bound is recorded and the sweep CONTINUES. Dying on the first one hid
+      // every later batch's cost, which is exactly the distribution a bound has to be built from.
+      const bound = Math.max(300000, batch.sites.length * 120000);
+      let turn;
+      try {
+        turn = await session.send(batchRequestText(batch), { timeoutMs: bound });
+        timings.push({ label, sites: batch.sites.length, elapsedMs: turn.elapsedMs });
+        console.log(`TIME  batch [${label}]: ${(turn.elapsedMs / 1000).toFixed(1)}s for ${batch.sites.length} store(s)`);
+      } catch (error) {
+        timings.push({ label, sites: batch.sites.length, timedOutAfterMs: bound });
+        check(checks, `batch [${label}]: answered within its bound`, false, `${error.message}`);
+        continue;
+      }
       const toolNames = (turn.toolCalls || []).map(call => call.name).join('|');
 
       const mutations = findCartMutations(turn.toolCalls);
@@ -343,6 +392,20 @@ async function main() {
 
   console.log('\nSITE OUTCOMES');
   for (const report of reports) console.log(`${report.site.padEnd(15)} ${report.outcome.padEnd(32)} candidates=${report.candidates}`);
+
+  // The distribution a bound has to be built from. Several runs of this, not one, decide the multiplier.
+  const timing = summariseTimings(timings);
+  console.log('\nTIMING');
+  for (const row of timings) {
+    console.log(row.elapsedMs === undefined
+      ? `${row.label.padEnd(34)} TIMED OUT after ${(row.timedOutAfterMs / 1000).toFixed(0)}s`
+      : `${row.label.padEnd(34)} ${(row.elapsedMs / 1000).toFixed(1)}s / ${row.sites} store(s) = ${(row.elapsedMs / row.sites / 1000).toFixed(1)}s each`);
+  }
+  console.log(timing.worstMs === null
+    ? 'nothing measured'
+    : `worst batch ${(timing.worstMs / 1000).toFixed(1)}s (${timing.worstLabel}) · worst per store ${(timing.worstPerSiteMs / 1000).toFixed(1)}s`
+      + ` · total ${(timing.totalMs / 1000).toFixed(1)}s · timed out ${timing.timedOut}`);
+  if (timing.note) console.log(`note: ${timing.note}`);
   const passed = checks.filter(item => item.ok).length;
   console.log(`\nALL-SITE COMMERCE LIVE: ${passed}/${checks.length} PASS`);
   if (passed !== checks.length) process.exitCode = 1;

@@ -490,19 +490,28 @@ So the sweep reads the **window** as its fallback — complete by design (§13: 
 the answer), tagging every offer line `[slug]` and naming every failure `label(slug): reason`. Ten of ten
 stores are attributed now, and the sweep runs in ~85 s.
 
-**The sweep is materially better but NOT deterministically green, and the reasons are honest ones.** Two
-consecutive runs, same code: one attributed ten of ten stores in ~85 s, the next reported
-`walmart: unsearched` and lost a later batch to its own 360 s bound. Neither is a regression:
+**The bound was measured, and it is not the problem.** `summariseTimings` and a `TIME` line per batch now
+record what a run costs, and a batch that exceeds its bound is recorded and the sweep **continues** —
+dying on the first one hid every later batch's cost, which is the distribution a bound has to be built
+from. One clean run:
 
-- **Live store variance.** walmart answered `rpc_unavailable` in one run and produced nothing the next —
-  and §13 already records that most of its tiles cannot be priced at all. When neither the trace nor the
-  window names a store, `unsearched` is the correct report, not a bug to paper over.
-- **The bound is a guess.** `max(300000, sites * 120000)` was never measured. §13's own finding is that
-  latency here is LLM-dominated and swings roughly 4× for the SAME request (17 → 79 s for one item), so a
-  three-store turn can exceed 360 s on a bad routing day while taking 25 s on a good one.
+| batch | elapsed | per store |
+|---|---|---|
+| amazon, walmart, ebay | 18.8 s | 6.3 s |
+| aliexpress, etsy | 16.3 s | 8.2 s |
+| coupang, naver-shopping, gmarket | 24.0 s | 8.0 s |
+| 11st, ssg | 14.1 s | 7.1 s |
+| **worst / total** | **24.0 s / 73.2 s** | **8.1 s** |
 
-So this is not yet a gate. Making it one is a decision about how long a full sweep may take, and the input
-is a timing distribution over several runs — not one more guess at the multiplier.
+The bound is `max(300000, sites × 120000)` — **roughly 15× the measured per-store cost**, and generous even
+against §13's ~4× LLM swing. So the 360 s timeouts seen earlier were never a bound too tight for a healthy
+turn: they were turns that genuinely hung, and a larger multiplier would only have waited longer. **Do not
+raise it.** A hung turn is the thing to find, and the run now survives one instead of losing every batch
+after it.
+
+A second run in the same sitting hung again and produced no timing lines at all, so **the sweep is
+repeatable enough to measure with and not yet enough to gate on.** What a gate needs is not a number but a
+diagnosis of the hang — read the tool trace of a batch that stalls and find which node stops answering.
 
 And `normalized` became three-valued, because the first version of that fix passed the contract check on
 an empty list for four of ten stores. A window-attributed store proved it ANSWERED but handed over no

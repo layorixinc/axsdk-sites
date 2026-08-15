@@ -349,6 +349,10 @@ export async function openCdpSession(options = {}, lib = undefined) {
      * MUST be preceded by `reset()` in any scenario that could hit a paused node.
      */
     async send(text, { timeoutMs = SEND_TIMEOUT_MS } = {}) {
+      // What the turn actually cost. The sweep's bound was `max(300000, sites * 120000)` and had never
+      // been measured; §13's own finding is that latency here is LLM-dominated and swings ~4x for the same
+      // request, so a bound can only come from a distribution. Nothing was recording one.
+      const startedAt = Date.now();
       const before = await readChat();
       const known = new Set(
         before.messages.map((message) => message?.info?.id).filter((id) => typeof id === 'string'),
@@ -412,7 +416,7 @@ export async function openCdpSession(options = {}, lib = undefined) {
       // A paused flow renders its window through the tool, not a text part, so the question is the reply
       // the caller has to read. A turn that has both keeps the spoken text.
       const text_ = spoken !== '' ? spoken : (asked ?? '');
-      return { text: text_, parts: partsOf(turn.last), toolCalls };
+      return { text: text_, parts: partsOf(turn.last), toolCalls, elapsedMs: Date.now() - startedAt };
     },
 
     /**

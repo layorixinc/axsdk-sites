@@ -17,6 +17,7 @@ import {
   parseSiteFilter,
   readWindowOutcomes,
   selectSites,
+  summariseTimings,
   tallySiteOutcomes,
 } from './commerce-all-sites.mjs';
 
@@ -409,4 +410,47 @@ test('an unsearched store is still unverified and still fails', () => {
 
   assert.equal(report.outcome, 'unsearched');
   assert.equal(report.responseValid, false);
+});
+
+// ── the bound has to come from a distribution ────────────────────────────────
+//
+// `max(300000, sites * 120000)` was never measured. Same code, consecutive runs: ten stores attributed in
+// ~85 s, then a batch lost to its own 360 s ceiling. §13: latency here is LLM-dominated and swings ~4x for
+// the SAME request, so one run cannot justify a bound and tuning the multiplier until a run goes green is
+// how a number nobody measured becomes a number everybody trusts.
+test('the timing summary reports each batch and the worst of them', () => {
+  const summary = summariseTimings([
+    { label: 'amazon,walmart,ebay', sites: 3, elapsedMs: 31_170 },
+    { label: 'aliexpress,etsy', sites: 2, elapsedMs: 16_690 },
+    { label: 'coupang,naver-shopping,gmarket', sites: 3, elapsedMs: 24_560 },
+  ]);
+
+  assert.equal(summary.batches, 3);
+  assert.equal(summary.worstMs, 31_170);
+  assert.equal(summary.worstLabel, 'amazon,walmart,ebay');
+  assert.equal(summary.totalMs, 72_420);
+  // Per store, so batches of different sizes are comparable — that is the number a bound is built from.
+  // 31170/3 = 10390 beats 16690/2 = 8345 and 24560/3 = 8187.
+  assert.equal(summary.worstPerSiteMs, 10_390);
+});
+
+test('a batch that timed out is carried as such, not as a duration', () => {
+  // A timeout is the bound, not a measurement: averaging it in would drag the estimate toward whatever
+  // ceiling happened to be set.
+  const summary = summariseTimings([
+    { label: 'a,b,c', sites: 3, elapsedMs: 31_000 },
+    { label: 'd,e', sites: 2, timedOutAfterMs: 360_000 },
+  ]);
+
+  assert.equal(summary.batches, 2);
+  assert.equal(summary.timedOut, 1);
+  assert.equal(summary.worstMs, 31_000, 'the timeout is excluded from the worst measured turn');
+  assert.ok(summary.note.includes('360000'), 'but it is reported');
+});
+
+test('no batches summarise to nothing, not to a zero', () => {
+  const summary = summariseTimings([]);
+
+  assert.equal(summary.batches, 0);
+  assert.equal(summary.worstMs, null, 'null, not 0 — nothing was measured');
 });

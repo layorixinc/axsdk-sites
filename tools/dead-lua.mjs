@@ -59,7 +59,14 @@ function inventory() {
           lines: source.split('\n').length,
           commands: [...defines].filter((name) => /^AX_[a-z]/.test(name)),
           // Registration runs at load time and nothing references the file that does it.
-          registers: /^\s*[A-Z]\.register\(/m.test(source),
+          // A load-time side effect is the edge the reference graph cannot see. There are two shapes:
+          // the old adapters called `S.register(CONFIG)`, and a site config declaration now assigns
+          // itself into a table the GENERATOR reads (`tools/build-rpc-sites.mjs` loads these files and
+          // serialises what they declared into `_common/rpc/62_rpc_sites.lua`). Missing the second one
+          // reported all ten site declarations dead — 637 lines whose deletion would empty the
+          // generated site data that production reads.
+          registers: /^\s*[A-Z]\.register\(/m.test(source)
+            || /^\s*AX_[A-Z_]+\[[^\]]+\]\s*=/m.test(source),
         });
       }
     }
@@ -76,16 +83,19 @@ export function deadLua() {
   // Way in #2: a module named in a runtime tool's `modules:` list.
   const named = new Set([...flows.matchAll(/["']([a-z0-9_-]+\.[0-9a-z_]+)["']/gi)].map((m) => m[1]));
   // Way in #3: the dev CLI and the scenario runners. `ax page` calls `AX_read_page`, the playground tests
-  // call `AX_echo`, `tools/scenarios/checkout.mjs` calls `AX_checkout`. None of that is in a flow, and all
-  // of it breaks if the command goes.
+  // call `AX_echo`. None of that is in a flow, and all of it breaks if the command goes.
   const tooling = toolingText();
 
   const files = inventory();
   const alive = new Set(
     files.filter((file) => file.commands.some((name) => remote.has(name) || tooling.includes(name))
+      // Way in #2, restored: a module named in a runtime tool's `modules:` list. Dropping this line while
+      // rewording the comment below reported five reachable modules dead, `61_rpc_storefront` among them.
       || named.has(file.module)
-      // Way in #4: registration is a SIDE EFFECT at load time, not a global anything references. A
-      // storefront config's whole job is `S.register(CONFIG)`, and the graph cannot see that edge.
+      // Way in #4: registration is a SIDE EFFECT at load time, not a global anything references. It has
+      // two shapes now — the storefront adapters called `S.register(CONFIG)`, and a site config
+      // declaration assigns itself into the table `tools/build-rpc-sites.mjs` reads. Generator INPUT is
+      // a real way in, and a check that cannot see it proposes deleting the site data.
       || file.registers)
       .map((file) => file.id),
   );

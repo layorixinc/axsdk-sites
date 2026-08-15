@@ -510,12 +510,14 @@ candidates to check, so it prints **SKIP** rather than PASS. `rpc_unavailable` s
 classified-answer check on purpose: our op channel failing to reach a store is not the store answering,
 and widening `recognizedAccessOutcomes` to accept it would hide a real failure behind a green run.
 
-**[OPEN] `etsy` can still report `status: "candidates"` with none.** The accumulator no longer does
-(`56_store_io` now sets the status alongside the error), but a live run still showed it, so a second
-producer carries the same contradiction. `S.run_store_search` derives
-`status = (branch == "ok") and "candidates"` and strips an empty list on the way out — but note the
-reader does NOT filter for relevance, so a test written against it will not reproduce this; the filtering
-lives in the commerce layer. Find which layer published that shape from a live trace before changing one.
+**[OPEN, narrowed] `etsy` reporting `status: "candidates"` with none — two producers found and fixed.**
+The accumulator sets the status alongside the error (`56_store_io`), and so does the screening step
+(`54_comparison`'s `apply_offer_screening`, which rewrote `candidates`/`total_count` and never touched
+`status` — a store whose rows the model rejected now says `no_relevant_offers`). What remains is only
+whether a THIRD producer exists: `S.run_store_search` derives
+`status = (branch == "ok") and "candidates"` and strips an empty list on the way out, but the reader does
+NOT filter for relevance, so a test written against it does not reproduce the shape — the filtering lives in
+the commerce layer. Do not add a guard there until a live trace shows that layer publishing it.
 
 ### 6.4 The durable layer is gone, and two of its facts were wrong (2026-08-15)
 
@@ -558,15 +560,18 @@ lowered text for `free returns` / `무료 반품`. That derivation is the capabi
 `61_rpc_storefront`. Declaring a selector that matches nothing would have made the field silently absent
 forever; defaulting it would state a policy the store never offered.
 
-**[OPEN] eBay has no cart configuration at all.** Not a missing approx-price fallback — the generated
-`RPC_SITES.ebay` carries no `cart_url`, no `add_selectors`, no `confirmation_selector`, no product-page
-price selectors. So `AX_RPC_CART` cannot act on eBay and the one remaining `test:commerce` assertion
-(localized `.x-price-approx` satisfying strict revalidation) fails. It **fails safe** — the guard refuses
-rather than adds. Closing it needs a live cart survey on eBay (add button, cart url, confirmation
-selectors, product-page price incl. the localized alternate), and **a selector is only ever validated
-against the live page** — do not fill these in from memory. Blocked today by the harness's dom port
-dropping its binding mid-session (`dom.get_text("body")` returning 0 bytes on a page that had just read
-62 cards).
+**[OPEN, narrowed] eBay's cart configuration is half measured.** The product-page half is done and live-
+measured on `/itm/236940774206`: `product_title_selectors` (`h1.x-item-title__mainTitle`),
+`product_price_selectors` (`.x-price-primary` → "개당 US $5.34"), `product_price_approx_selectors`
+(`.x-price-approx__price` → "KRW7,559.73") and `add_selectors` (`#atcBtn_btn_1`). With those plus the
+approx fallback in `AX_RPC_CART.price_error`, revalidation stops refusing a correct add and
+`test:commerce` is 25/25.
+
+What is still missing is the CONFIRMATION half — `cart_url`, `cart_url_markers`, `confirmation_selector`,
+`confirmation_text_selectors` — and it cannot be measured without **putting an item in a real cart**,
+which is why it was not. Until then a guarded add on eBay answers `add_to_cart_pending`: the click
+happens, the confirmation cannot be read, and nothing is claimed. That fails safe, and **a selector is
+only ever validated against the live page** — do not fill these in from memory.
 
 ### 6.5 M1: shipping the workspace inside the package (`build:bundle`)
 

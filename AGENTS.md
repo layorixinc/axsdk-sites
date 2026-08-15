@@ -590,8 +590,34 @@ npm run build:bundle -- --out=../axsdk-sdk-js/packages/axsdk-extension-cdp/works
 cd ../axsdk-sdk-js/packages/axsdk-extension-cdp && bun run build   # copy-static picks it up
 ```
 
-The bundle carries **no `_common/rpc/` module** (gap 1). Until those ship in the package too, a
-bundled build is not yet the no-remote-fetch build P0-1 requires — it is the delivery half of it.
+The bundle carries **all 26 declared modules** — the 12 `_common/scripts` ones in the Lua layers and the
+14 `_common/rpc` ones in `axsdk:lua-modules`. (An earlier note here said it carried none of the rpc set;
+that was true before the module store was wired.)
+
+**M1's package-only provisioning is PROVEN, and proving it found the trigger bug.** Measured 2026-08-16:
+the stores were cleared to zero and the extension reloaded with **no harness write of any kind**, and it
+repopulated them itself — `axsdk:sites` 3,890 · `axsdk:flows` 223,248 · `axsdk:lua` 215,964 (11 layers) ·
+`axsdk:lua-modules` 237,335 (**14 modules**) — recording
+`axsdk:extension-cdp:workspace-bundle-digest = f4a5db917edd`, the artifact's own digest, with the sites
+index reading `source: local`.
+
+It did not work on the first attempt, and the failure shape is worth keeping: **the artifact was reachable
+and valid the whole time while nothing installed it.** From inside the service worker the bundle answered
+`status 200` and parsed as `v1 f4a5db917edd` with all five stores; what was missing was the trigger.
+`onInstalled` does not repeat for a load of a build already installed, and `onStartup` had passed before
+the extension existed — so on a running browser with the extension already there, neither listener fires.
+The install now runs at **module scope**, which happens on every worker start and subsumes `onStartup`,
+and the digest check keeps the repeat free (an MV3 worker starts often enough that re-writing on every wake
+would be a storage write per idle timeout).
+
+**[OPEN] a full turn from the package alone is not yet driven.** The two halves are proven separately: the
+package provisions the profile (above) and the same bytes drive real turns (the sweep). Closing it needs a
+session started without the harness's provisioning — `startSessionOn` creates the group but the backend
+session opens on the first turn, and `cdp-session.mjs` always provisions. A `--no-provision` mode on the
+driver is the missing piece, not a question about the bundle.
+
+> **Do not print the config store.** `axsdk:extension-cdp:config` carries the API key, and dumping it whole
+> while debugging this put the key into a session log. Read the fields you need by name.
 
 **Site flows are a one-shot.** Core sends a site's client flows once after that site becomes current.
 Editing `<domain>/flows.yaml` and re-running re-stores it, but an open session will not resend until the

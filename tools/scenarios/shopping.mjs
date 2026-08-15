@@ -3,64 +3,71 @@
 //  1) "신발 사줘"        -> search, then refine_item ASKS which product (paused, no add yet)
 //  2) "첫 번째로 해줘"    -> refine picks, add_to_cart, then checkout_confirm ASKS to checkout (no order)
 //  3) "응 체크아웃 해줘"  -> checkout reached (checkout-anywhere force-routes to checkout flow: run_checkout; NO order placed)
-import { resolveOptions, ensureChrome, attachActive, navigate, sendMessage, currentUrl, callInAxContext } from '../harness/cdp.mjs';
+// Runs on the shipping CDP extension via tools/harness/cdp-session.mjs (contract C3).
+import { pathToFileURL } from 'node:url';
 
-async function waitSendReady(page, options, ms = 40000) {
-  const t0 = Date.now();
-  while (Date.now() - t0 < ms) {
-    const ok = await callInAxContext(page, options, `function(){ const s=globalThis._AXSDK||globalThis.AXSDK; return !!(s&&typeof s.sendMessage==='function'); }`).catch(() => false);
-    if (ok) return Date.now() - t0;
-    await new Promise(r => setTimeout(r, 300));
-  }
-  return -1;
-}
-const toolsOf = (res) => (res?.parts || []).filter(p => p.type === 'tool').map(p => `${p.tool}(${p.status})`);
-const has = (res, name) => toolsOf(res).some(t => t.startsWith(name + '('));
+export const hasTool = (calls, name) => (calls || []).some(call => call.name === name);
+// Step predicates over { err, text, toolCalls } — pure, so the verdicts are unit-testable.
+export const refineAsksAfterSearch = step => !step.err
+  && hasTool(step.toolCalls, 'search_product')
+  && hasTool(step.toolCalls, 'shopping.refine_item')
+  && !hasTool(step.toolCalls, 'add_to_cart')
+  && !hasTool(step.toolCalls, 'checkout')
+  && step.text.length > 0;
+export const addThenConfirmAsks = step => !step.err
+  && hasTool(step.toolCalls, 'add_to_cart')
+  && hasTool(step.toolCalls, 'shopping.checkout_confirm')
+  && /체크아웃|결제|checkout/i.test(step.text);
+export const checkoutRunsNoOrder = step => !step.err
+  && (hasTool(step.toolCalls, 'run_checkout') || hasTool(step.toolCalls, 'do_checkout') || hasTool(step.toolCalls, 'checkout'))
+  && /주문|order|체크아웃|checkout|결제/i.test(step.text);
 
 async function step(session, label, msg, timeoutMs = 180000) {
   const t0 = Date.now();
   let res = null, err = null;
-  try { res = await sendMessage(session, msg, { timeoutMs }); } catch (e) { err = String(e && e.message || e); }
-  const reply = (res?.reply || '').replace(/\s+/g, ' ');
-  const tools = toolsOf(res);
+  try { res = await session.send(msg, { timeoutMs }); } catch (e) { err = String(e && e.message || e); }
+  const text = (res?.text || '').replace(/\s+/g, ' ');
+  const toolCalls = res?.toolCalls || [];
   console.log(`\n[${label}] send: ${msg}  (${Date.now() - t0}ms)${err ? ` ERR=${err}` : ''}`);
-  console.log(`  tools: ${tools.join(' -> ') || '(none)'}`);
-  console.log(`  reply: ${reply.slice(0, 240)}`);
-  return { res, reply, tools, err };
+  console.log(`  tools: ${toolCalls.map(call => `${call.name}(${call.status})`).join(' -> ') || '(none)'}`);
+  console.log(`  reply: ${text.slice(0, 240)}`);
+  return { err, text, toolCalls };
 }
 
 async function main() {
-  const options = resolveOptions({});
-  const { cdpUrl } = await ensureChrome(options, { launch: false });
-  const { page } = await attachActive(cdpUrl, options, {});
-  const session = { page, options, cdpUrl };
-
-  await navigate(page, 'https://www.amazon.com/');
-  await waitSendReady(page, options);
-  // Force a fresh session so the NEW common flows (refine_item/checkout) are sent at session creation.
-  // (buildCommonClientFlows binds common flows at session creation; a stale session runs the old flow.)
-  await callInAxContext(page, options, `function(){ const s=globalThis._AXSDK||globalThis.AXSDK; if(s&&s.resetSession) s.resetSession(); return true; }`).catch(() => {});
-
+  // Lazy: unit tests import this module's pure exports without loading the CDP driver.
+  const { openCdpSession } = await import('../harness/cdp-session.mjs');
+  const session = await openCdpSession();
   const checks = [];
-  const s1 = await step(session, '1 search->refine', '신발 사줘');
-  const p1 = !s1.err && has(s1.res, 'search_product') && has(s1.res, 'shopping.refine_item') && !has(s1.res, 'add_to_cart') && !has(s1.res, 'checkout') && s1.reply.length > 0;
-  checks.push(['refine asks after search (no add yet)', p1]);
+  try {
+    await session.open('https://www.amazon.com/');
+    // Fresh conversation, for two reasons: common flows bind at session creation (a stale session
+    // runs the old flow), and a leftover paused window would read "첫 번째로 해줘"/a bare number as a
+    // SELECTION — the cart-approval turn. Steps 2 and 3 deliberately continue THIS conversation, so
+    // there is exactly one reset(), here.
+    await session.reset();
 
-  const s2 = await step(session, '2 pick->add->checkout?', '첫 번째로 해줘');
-  const p2 = !s2.err && has(s2.res, 'add_to_cart') && has(s2.res, 'shopping.checkout_confirm') && /체크아웃|결제|checkout/i.test(s2.reply);
-  checks.push(['add_to_cart then checkout-confirm asks', p2]);
+    const s1 = await step(session, '1 search->refine', '신발 사줘');
+    checks.push(['refine asks after search (no add yet)', refineAsksAfterSearch(s1)]);
 
-  const s3 = await step(session, '3 approve->checkout', '응 체크아웃 해줘');
-  const endUrl = await currentUrl(session).catch(() => '?');
-  const p3 = !s3.err && (has(s3.res, 'run_checkout') || has(s3.res, 'do_checkout') || has(s3.res, 'checkout')) && /주문|order|체크아웃|checkout|결제/i.test(s3.reply);
-  checks.push(['checkout runs (no order placed)', p3]);
-  console.log(`  endUrl: ${endUrl}`);
+    const s2 = await step(session, '2 pick->add->checkout?', '첫 번째로 해줘');
+    checks.push(['add_to_cart then checkout-confirm asks', addThenConfirmAsks(s2)]);
+
+    const s3 = await step(session, '3 approve->checkout', '응 체크아웃 해줘');
+    checks.push(['checkout runs (no order placed)', checkoutRunsNoOrder(s3)]);
+    const endUrl = await session.status().then(s => s.url).catch(() => '?');
+    console.log(`  endUrl: ${endUrl}`);
+  } finally {
+    await session.close().catch(() => {});
+  }
 
   console.log('\n=== RESULT ===');
   let pass = 0;
   for (const [name, ok] of checks) { console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`); if (ok) pass++; }
   console.log(`SHOPTEST: ${pass}/${checks.length} PASS`);
-  try { page.close(); } catch { /* one-shot */ }
   process.exitCode = pass === checks.length ? 0 : 1;
 }
-main().catch(e => { console.error('FATAL', e && e.stack || e); process.exitCode = 1; });
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(e => { console.error('FATAL', e && e.stack || e); process.exitCode = 1; });
+}

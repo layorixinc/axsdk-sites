@@ -1,25 +1,24 @@
 #!/usr/bin/env node
 // Cross-site, cross-domain live scenario for the AXSDK arrival-delivery fix.
 //
-// Drives ONE dev-Chrome session through a journey that criss-crosses all three sites
+// Drives ONE session through a journey that criss-crosses all three sites
 // (bluemoonsoft / thumbtack service-quote / amazon shopping), covering every DIRECTED site pair,
 // so each leg forces a cross-origin navigation that the SDK's "complete-on-arrival" cross-nav must
 // survive (no "discarded because the active site changed", no "command unavailable").
 //
-// Prereq: `node tools/ax.mjs sync bluemoonsoft` (all sites' Lua + flows in the store, remote OFF),
-// extension reloaded. Run: `node tools/scenarios/crosssite.mjs [--port=9224]`.
+// Runs on the shipping CDP extension via tools/harness/cdp-session.mjs: the driver provisions the
+// CDP profile (port 9334, override with --port=<n>) with this workspace's stores — no `ax sync`
+// prereq, no extension reload step. Run: `node tools/scenarios/crosssite.mjs [--port=9334]`.
 //
-// Per leg it asserts: (1) NO forbidden cross-nav error in any tool part, (2) the tab reached the
-// leg's target domain, (3) at least one tool completed. Quote legs (interactive) carry full contact
-// fields so collect_request finishes and the flow actually navigates to thumbtack + runs
-// search_service; a "고마워 그만할게" reset (end_conversation) clears the paused refine step before the
-// next leg so it is not swallowed by continue_current.
+// Per leg it asserts: (1) NO forbidden cross-nav error in any tool output or reply text, (2) the
+// tab reached the leg's target domain, (3) at least one tool completed. Quote legs (interactive)
+// carry full contact fields so collect_request finishes and the flow actually navigates to
+// thumbtack + runs search_service; a "고마워 그만할게" reset (end_conversation) clears the paused
+// refine step before the next leg so it is not swallowed by continue_current.
 
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  resolveOptions, ensureChrome, attachActive, sendMessage, currentUrl, callInAxContext,
-} from '../harness/cdp.mjs';
+import { openCdpSession } from '../harness/cdp-session.mjs';
 
 const FORBIDDEN = /discarded because the active site changed|command unavailable|cannot resume|active site changed/i;
 const LOG = join(process.env.TEMP || process.env.TMPDIR || '/tmp', 'crosssite.log');
@@ -54,60 +53,56 @@ const LEGS = [
     msg: 'airpods 사줘' },
 ];
 
-function summarizeParts(parts) {
+// The turn's tool trace + reply, scanned for the forbidden cross-nav errors. Tool output rides at
+// state.output and the driver surfaces it (JSON-parsed) on toolCalls; the reply is turn.text.
+function summarizeTurn(turn) {
   const tools = [];
   let forbidden = null;
-  let text = '';
-  for (const p of parts || []) {
-    if (p.type === 'tool') {
-      const blob = JSON.stringify(p.output ?? '');
-      tools.push(`${p.tool}(${p.status || '?'})`);
-      if (!forbidden && FORBIDDEN.test(blob)) forbidden = `${p.tool}: ${blob.slice(0, 160)}`;
-    } else if (p.type === 'text' && p.text) {
-      text = p.text;
-      if (!forbidden && FORBIDDEN.test(p.text)) forbidden = `text: ${p.text.slice(0, 160)}`;
-    }
+  for (const t of turn?.toolCalls || []) {
+    const blob = JSON.stringify(t.output ?? '');
+    tools.push(`${t.name}(${t.status || '?'})`);
+    if (!forbidden && FORBIDDEN.test(blob)) forbidden = `${t.name}: ${blob.slice(0, 160)}`;
   }
+  const text = turn?.text || '';
+  if (!forbidden && FORBIDDEN.test(text)) forbidden = `text: ${text.slice(0, 160)}`;
   return { tools, forbidden, text };
+}
+
+function portArg(argv) {
+  const found = argv.find((a) => a.startsWith('--port='));
+  return found ? Number(found.slice('--port='.length)) : undefined;
 }
 
 async function main() {
   log(`=== cross-site journey START (log: ${LOG}) ===`);
-  const options = resolveOptions({});
-  const { cdpUrl } = await ensureChrome(options, { launch: options.launch !== false });
-  const { page } = await attachActive(cdpUrl, options, {});
-  const session = { page, options, cdpUrl };
-  // Wait until the AXSDK API has loaded on the (re-)attached tab before the first send. The SDK now holds
-  // the send until its chat handler is subscribed and the SSE stream has attached (plans/send-after-stream-
-  // attach.md), so leg 1 needs no SSE-priming warmup; this poll only avoids calling sendMessage before the
-  // AXSDK object exists.
-  for (let w = 0; w < 40; w++) {
-    const ready = await callInAxContext(page, options,
-      `function(){ const s = globalThis._AXSDK || globalThis.AXSDK; return !!(s && typeof s.sendMessage === 'function'); }`).catch(() => false);
-    if (ready) { log(`send-ready after ${w}s`); break; }
-    await new Promise(r => setTimeout(r, 1000));
-  }
-  // Start from a fresh session so the CURRENT common flows (shopping's refine/checkout steps, etc.) are
-  // bound at session creation — a stale persisted session would keep running its older flow.
-  await callInAxContext(page, options, `function(){ const s = globalThis._AXSDK || globalThis.AXSDK; if (s && s.resetSession) s.resetSession(); return true; }`).catch(() => {});
+  const session = await openCdpSession({ port: portArg(process.argv.slice(2)) ?? 9334 });
+  log(`session ready (backend ${session.sessionId}, workspace ${session.workspace.digest})`);
+  // The journey's first leg leaves amazon, so start there deterministically instead of wherever
+  // the last run left the session.
+  const start = await session.open('https://www.amazon.com/');
+  log(`start page: ${start.url} (site ${start.site || 'none'})`);
+  // Start from a fresh conversation so the CURRENT common flows (shopping's refine/checkout steps,
+  // etc.) are bound at session creation — a stale persisted session would keep running its older
+  // flow, and a paused comparison window would read the next bare number as a SELECTION.
+  await session.reset();
   const results = [];
   try {
     for (let i = 0; i < LEGS.length; i++) {
       const leg = LEGS[i];
-      const startUrl = await currentUrl(session).catch(() => '?');
+      const startUrl = await session.status().then((s) => s.url).catch(() => '?');
       log(`--- leg ${i + 1}/${LEGS.length}: ${leg.label}`);
       log(`    start: ${startUrl}`);
       log(`    send : ${leg.msg}`);
       let res, endUrl, sum, verdict, err = null;
       try {
-        res = await sendMessage(session, leg.msg, { timeoutMs: leg.timeout });
-        endUrl = await currentUrl(session).catch(() => '?');
-        sum = summarizeParts(res.parts);
+        res = await session.send(leg.msg, { timeoutMs: leg.timeout });
+        endUrl = await session.status().then((s) => s.url).catch(() => '?');
+        sum = summarizeTurn(res);
         const reached = String(endUrl || '').includes(leg.target);
         verdict = sum.forbidden ? 'FAIL(cross-nav)' : reached ? 'PASS' : 'PARTIAL(no-cross)';
         log(`    end  : ${endUrl}`);
         log(`    tools: ${sum.tools.join(' -> ') || '(none)'}`);
-        log(`    reply: ${(sum.text || res.reply || '').replace(/\s+/g, ' ').slice(0, 200)}`);
+        log(`    reply: ${(sum.text || '').replace(/\s+/g, ' ').slice(0, 200)}`);
         if (sum.forbidden) log(`    !! FORBIDDEN: ${sum.forbidden}`);
         log(`    verdict: ${verdict}  (target=${leg.target}, reached=${reached})`);
       } catch (e) {
@@ -121,13 +116,13 @@ async function main() {
       if (leg.reset) {
         log(`    reset: 고마워 그만할게 (end_conversation)`);
         try {
-          const r = await sendMessage(session, '고마워 그만할게', { timeoutMs: 90000 });
-          log(`    reset reply: ${(r.reply || '').replace(/\s+/g, ' ').slice(0, 120)}`);
+          const r = await session.send('고마워 그만할게', { timeoutMs: 90000 });
+          log(`    reset reply: ${(r.text || '').replace(/\s+/g, ' ').slice(0, 120)}`);
         } catch (e) { log(`    reset ERROR: ${String(e && e.message || e)}`); }
       }
     }
   } finally {
-    try { page.close(); } catch { /* one-shot */ }
+    try { await session.close(); } catch { /* one-shot */ }
   }
 
   log('=== SUMMARY ===');

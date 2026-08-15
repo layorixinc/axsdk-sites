@@ -467,14 +467,28 @@ four batches, and attributes real per-store outcomes: `aliexpress: candidates` (
 `walmart: rpc_unavailable`. Both "at least one storefront returned live candidates" assertions pass, per
 region, and no paused comparison window is left behind.
 
-**[OPEN] five stores still report `unsearched`** — amazon, ebay, coupang, 11st, ssg. This is no longer
-the runner reading the wrong level: the stores that produced either candidates or a classified error ARE
-attributed, so the question has moved to what the flow publishes per store in a three-store turn. Read
-one turn's whole trace and account for every store the request named before changing anything.
+**RESOLVED, and the cause was ours, not the flow's.** The flow was fine all along — a three-store turn
+answers `amazon` 3 offers + `ebay` 1 + `walmart: rpc_unavailable` and says so in the window
+("사이트 3곳 중 2곳에서 결과를 받았습니다"). What could not read it was the trace: **every large tool
+output in the chat store is cut at 4120 characters** and ends `... [N chars trimmed]`, so `JSON.parse`
+fails on all of them. walmart was attributable only because its outcome was 111 characters long.
 
-**[OPEN] `etsy` answers `unknown`** with `cards_seen: 24` and `total_count: 0` — 24 cards read and
-relevance kept none. That is "found nothing relevant", which the classifier should call `no_results`;
-`unknown` is reserved for a reader that could not say. One of the two is mislabelled.
+So the sweep reads the **window** as its fallback — complete by design (§13: store outcomes are part of
+the answer), tagging every offer line `[slug]` and naming every failure `label(slug): reason`. Ten of ten
+stores are attributed now, and the sweep runs in ~85 s.
+
+And `normalized` became three-valued, because the first version of that fix passed the contract check on
+an empty list for four of ten stores. A window-attributed store proved it ANSWERED but handed over no
+candidates to check, so it prints **SKIP** rather than PASS. `rpc_unavailable` still fails its
+classified-answer check on purpose: our op channel failing to reach a store is not the store answering,
+and widening `recognizedAccessOutcomes` to accept it would hide a real failure behind a green run.
+
+**[OPEN] `etsy` can still report `status: "candidates"` with none.** The accumulator no longer does
+(`56_store_io` now sets the status alongside the error), but a live run still showed it, so a second
+producer carries the same contradiction. `S.run_store_search` derives
+`status = (branch == "ok") and "candidates"` and strips an empty list on the way out — but note the
+reader does NOT filter for relevance, so a test written against it will not reproduce this; the filtering
+lives in the commerce layer. Find which layer published that shape from a live trace before changing one.
 
 ### 6.4 The durable layer is gone, and two of its facts were wrong (2026-08-15)
 

@@ -610,14 +610,20 @@ The install now runs at **module scope**, which happens on every worker start an
 and the digest check keeps the repeat free (an MV3 worker starts often enough that re-writing on every wake
 would be a storage write per idle timeout).
 
-**[OPEN] a full turn from the package alone is not yet driven.** The two halves are proven separately: the
-package provisions the profile (above) and the same bytes drive real turns (the sweep). Closing it needs a
-session started without the harness's provisioning — `startSessionOn` creates the group but the backend
-session opens on the first turn, and `cdp-session.mjs` always provisions. A `--no-provision` mode on the
-driver is the missing piece, not a question about the bundle.
+**A full turn from the package alone is PROVEN too.** `openCdpSession({ provision: false })` installs the
+build and starts a session while writing neither the settings nor the layers — so nothing the driver does
+can be mistaken for the thing under test. It does not even read the workspace: reading it is how a run gets
+a digest to write.
 
-> **Do not print the config store.** `axsdk:extension-cdp:config` carries the API key, and dumping it whole
-> while debugging this put the key into a session log. Read the fields you need by name.
+Live, on stores the extension installed itself:
+`scriptIds ["axsdk-default-form-tools","stored-lua:","stored-lua:11st"]`, and a multi-store comparison ran
+its whole pipeline — collect_request → identity → search_stores → two stores through
+search/normalize/collect → screening → judge_relevance → apply → verify → rank → present — answering
+`총 3개 중 1-3번 … 1. [amazon] … 총 KRW 19,830 · 무료배송`. **So P0-1's completion test is met: the
+extension provisions itself from its package and drives a real comparison with nothing fetched.**
+
+(The single-site flow answers that wording with its own clarifying gate instead of a price. That is the
+flow's design, not a packaging fact — use the multi-store wording to see a result.)
 
 **Site flows are a one-shot.** Core sends a site's client flows once after that site becomes current.
 Editing `<domain>/flows.yaml` and re-running re-stores it, but an open session will not resend until the

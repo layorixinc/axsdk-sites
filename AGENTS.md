@@ -490,6 +490,20 @@ So the sweep reads the **window** as its fallback — complete by design (§13: 
 the answer), tagging every offer line `[slug]` and naming every failure `label(slug): reason`. Ten of ten
 stores are attributed now, and the sweep runs in ~85 s.
 
+**The sweep is materially better but NOT deterministically green, and the reasons are honest ones.** Two
+consecutive runs, same code: one attributed ten of ten stores in ~85 s, the next reported
+`walmart: unsearched` and lost a later batch to its own 360 s bound. Neither is a regression:
+
+- **Live store variance.** walmart answered `rpc_unavailable` in one run and produced nothing the next —
+  and §13 already records that most of its tiles cannot be priced at all. When neither the trace nor the
+  window names a store, `unsearched` is the correct report, not a bug to paper over.
+- **The bound is a guess.** `max(300000, sites * 120000)` was never measured. §13's own finding is that
+  latency here is LLM-dominated and swings roughly 4× for the SAME request (17 → 79 s for one item), so a
+  three-store turn can exceed 360 s on a bad routing day while taking 25 s on a good one.
+
+So this is not yet a gate. Making it one is a decision about how long a full sweep may take, and the input
+is a timing distribution over several runs — not one more guess at the multiplier.
+
 And `normalized` became three-valued, because the first version of that fix passed the contract check on
 an empty list for four of ten stores. A window-attributed store proved it ANSWERED but handed over no
 candidates to check, so it prints **SKIP** rather than PASS. `rpc_unavailable` still fails its

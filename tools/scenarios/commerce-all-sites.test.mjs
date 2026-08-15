@@ -204,3 +204,69 @@ test('a split batch keeps its wording', () => {
   assert.ok(korean.length >= 2, 'five Korean stores cannot fit one batch');
   for (const batch of korean) assert.equal(batch.query, '로지텍 M185');
 });
+
+// ── the fan-out publishes its results AGGREGATED, one level deeper ────────────
+//
+// Measured live: amazon, ebay and aliexpress all came back `unsearched` while their tool traces plainly
+// showed `shopping_search_one_store` and `shopping_collect_store_page` three times over. The reason is
+// in the trace's own shape — the screening step publishes every worker's answer together:
+//   apply_screening -> {"next":"done","store_results":[
+//                        {"key":"amazon","status":"completed","value":{"store_result":{"site":"amazon",…}}},
+//                        …]}
+// so the store's own reply sits at `value.store_result`, not at the top level. §13 records this trap for
+// the discovery fan-out; reading one level too high found nothing and a classified failure like
+// walmart's then also failed its own "returns a classified result" check.
+test('a site is attributed from the aggregated fan-out, not only from a direct store_result', () => {
+  const aggregated = [{
+    name: 'shopping_apply_offer_screening',
+    output: {
+      next: 'done',
+      store_results: [
+        { key: 'amazon', status: 'completed', value: { store_result: { site: 'amazon', status: 'candidates', candidates: [{ site: 'amazon' }] } } },
+        { key: 'walmart', status: 'completed', value: { store_result: { site: 'walmart', status: 'error', error: 'rpc_unavailable' } } },
+      ],
+    },
+  }];
+
+  const bySite = collectStoreResults(aggregated);
+
+  assert.deepEqual([...bySite.keys()].sort(), ['amazon', 'walmart']);
+  assert.equal(bySite.get('walmart').error, 'rpc_unavailable');
+});
+
+test('a direct store_result still attributes, and the later write wins', () => {
+  // The per-store tools publish one level up, and they run BEFORE the aggregate. Whichever the flow
+  // emitted last must be what the tally sees, so it matches the result the ranking used.
+  const calls = [
+    { name: 'shopping_search_one_store', output: { store_result: { site: 'ebay', status: 'error', error: 'no_results' } } },
+    { name: 'shopping_apply_offer_screening', output: { store_results: [
+      { key: 'ebay', status: 'completed', value: { store_result: { site: 'ebay', status: 'candidates', candidates: [{ site: 'ebay' }] } } },
+    ] } },
+  ];
+
+  const bySite = collectStoreResults(calls);
+
+  assert.equal(bySite.get('ebay').status, 'candidates');
+});
+
+test('a worker that failed outright is still attributed to its store', () => {
+  // `key` names the store even when the worker's value carries nothing usable — a store that could not
+  // be reached has to say WHICH store, or it becomes an unsearched hole instead of the fact it reported.
+  const bySite = collectStoreResults([{
+    name: 'shopping_apply_offer_screening',
+    output: { store_results: [{ key: 'gmarket', status: 'error', value: null }] },
+  }]);
+
+  assert.deepEqual([...bySite.keys()], ['gmarket']);
+  assert.equal(bySite.get('gmarket').site, 'gmarket');
+});
+
+test('an aggregate entry with no key and no site is dropped', () => {
+  // Absent attribution must stay absent; inventing one would report a store the turn never touched.
+  const bySite = collectStoreResults([{
+    name: 'shopping_apply_offer_screening',
+    output: { store_results: [{ status: 'completed', value: { store_result: { candidates: [] } } }] },
+  }]);
+
+  assert.equal(bySite.size, 0);
+});

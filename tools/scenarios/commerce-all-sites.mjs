@@ -127,23 +127,45 @@ export function isNormalizedCandidates(site, candidates) {
     && typeof candidate.url === 'string');
 }
 
-// Every tool whose output publishes a `store_result` for one store, in pipeline order: the raw
-// reader, the page accumulator, then the normalizer. Last write wins per site, so the tally sees
-// the same result the ranking sees.
-const STORE_RESULT_TOOLS = ['shopping_search_one_store', 'shopping_collect_store_page', 'shopping_normalize_store_result'];
+// Every tool whose output attributes a result to one store. The per-store tools publish a
+// `store_result` directly; the screening step publishes every worker's answer AGGREGATED under
+// `store_results`, one level deeper. Pipeline order, so the later write wins per site and the tally sees
+// the same result the ranking used.
+const STORE_RESULT_TOOLS = [
+  'shopping_search_one_store', 'shopping_collect_store_page', 'shopping_normalize_store_result',
+  'shopping_apply_offer_screening',
+];
 
 const nameMatches = (name, suffix) => name === suffix || typeof name === 'string' && name.endsWith(`.${suffix}`);
 
-/** Per-site results out of one shared flow turn, keyed by `store_result.site` (the worker's own
- *  attribution). An output that decodes to no site — an errored worker, an unrelated tool — is
- *  dropped here and surfaces in the tally as `unsearched`. */
+/**
+ * Per-site results out of one shared flow turn, keyed by the worker's own attribution.
+ *
+ * Two shapes, because the fan-out has two. Measured live: amazon, ebay and aliexpress all came back
+ * `unsearched` while their traces showed `shopping_search_one_store` three times over, because the
+ * screening step publishes
+ *   {"store_results":[{"key":"amazon","status":"completed","value":{"store_result":{"site":"amazon",…}}}]}
+ * and reading only the top level found nothing. §13 records the same trap for the discovery fan-out:
+ * the normalizer WRAPS the store answer.
+ *
+ * `key` names the store even when the worker's value carries nothing usable, because a store that could
+ * not be reached has to say WHICH store — otherwise it becomes an unsearched hole instead of the fact it
+ * reported. An entry with neither a key nor a site is dropped: absent attribution stays absent.
+ */
 export function collectStoreResults(toolCalls) {
   const bySite = new Map();
+  const attribute = (result, fallbackSite) => {
+    const site = typeof result?.site === 'string' && result.site !== '' ? result.site : fallbackSite;
+    if (typeof site !== 'string' || site === '') return;
+    bySite.set(site, result && typeof result === 'object' ? { ...result, site } : { site });
+  };
   for (const call of toolCalls || []) {
     if (!STORE_RESULT_TOOLS.some(tool => nameMatches(call?.name, tool))) continue;
-    const result = decode(call.output)?.store_result;
-    const site = result?.site;
-    if (typeof site === 'string' && site !== '') bySite.set(site, result);
+    const output = decode(call.output);
+    attribute(output?.store_result);
+    for (const entry of Array.isArray(output?.store_results) ? output.store_results : []) {
+      attribute(decode(entry?.value)?.store_result, typeof entry?.key === 'string' ? entry.key : undefined);
+    }
   }
   return bySite;
 }

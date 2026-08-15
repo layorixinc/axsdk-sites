@@ -107,19 +107,37 @@ function R.on_product_page(config, product_id)
     and first_existing(config.product_title_selectors or {}) ~= nil
 end
 
---- Whether the cart now lists this product. The confirmation panel counts, and so does the cart page
---- listing the id; anything else is "not confirmed", never "probably fine".
+--- Whether the cart now lists THIS product.
+---
+--- Two kinds of evidence, and which one applies depends on where we are. A post-add confirmation PANEL
+--- is per-add evidence: it appeared because this add happened. Cart-page STRUCTURE is not — amazon's
+--- generated `confirmation_selector` grew `#sc-active-cart, .sc-list-item[data-asin]`, which any rendered
+--- amazon cart matches whatever it holds, and the first branch here took a `product_id` and never used
+--- it. So a cart containing someone else's item reported the approved product as `added`. This is the one
+--- path in this repo where a wrong answer spends the user's money; it fails closed or not at all.
+---
+--- On the cart page the id is therefore the ONLY evidence that means anything. `data-asin` is in the
+--- probe because amazon states the id most precisely there, and without it the one site whose cart page
+--- names the id could only be matched through an href.
 function R.cart_contains(config, product_id)
-  if config.confirmation_selector and exists(config.confirmation_selector) then return true end
   local href = here()
   local on_cart = false
   for index = 1, #(config.cart_url_markers or {}) do
     if tostring(href or ""):find(config.cart_url_markers[index], 1, true) then on_cart = true end
   end
-  if not on_cart then return false end
   local id = tostring(product_id or ""):gsub('["\\]', "")
-  if id == "" then return false end
-  return exists('a[href*="' .. id .. '"], [data-product-id="' .. id .. '"], [data-item-id="' .. id .. '"]')
+  if id ~= "" and exists('a[href*="' .. id .. '"], [data-product-id="' .. id .. '"], '
+    .. '[data-item-id="' .. id .. '"], [data-asin="' .. id .. '"]') then
+    return true
+  end
+  if on_cart then
+    -- On the cart page the WIDE selector is worthless: it is what the site uses to say "this is a cart".
+    -- `confirmation_text_selectors` is the narrow set the site shows only for an add that just happened,
+    -- which is why the reader already uses it to quote the confirmation back to the user.
+    return first_existing(config.confirmation_text_selectors or {}) ~= nil
+  end
+  if config.confirmation_selector and exists(config.confirmation_selector) then return true end
+  return false
 end
 
 --- The model the user approved must still be the model on the page. An id can outlive a listing's product.
@@ -153,9 +171,23 @@ function R.price_error(config, args, product_id)
              current_price_text = price_text }
   end
   if expected_currency and currency:upper() ~= expected_currency:upper() then
-    return { product_id = product_id, added = false, error = "currency_changed",
-             expected_currency = expected_currency:upper(), current_currency = currency:upper(),
-             current_price = current, current_price_text = price_text }
+    -- The primary quote is the SELLER's currency; a site may also print the buyer's localized
+    -- approximation, and that is the number the comparison window showed. Measured live on an eBay item:
+    -- `.x-price-primary` = "개당 US $5.34", `.x-price-approx__price` = "KRW7,559.73". Reading only the
+    -- primary refused a correct add with `currency_changed`, which is what the durable eBay adapter
+    -- avoided by revalidating against the approximation.
+    --
+    -- Consulted ONLY on a currency mismatch, only when the site declares one, and it still has to pass
+    -- the amount check below — it widens which QUOTE is read, never which amounts are acceptable.
+    local approx_text = first_text(config.product_price_approx_selectors or {})
+    local approx, approx_currency = AX_RPC_STOREFRONT.parse_money(approx_text, expected_currency)
+    if approx and approx_currency and approx_currency:upper() == expected_currency:upper() then
+      current, currency, price_text = approx, approx_currency, approx_text
+    else
+      return { product_id = product_id, added = false, error = "currency_changed",
+               expected_currency = expected_currency:upper(), current_currency = currency:upper(),
+               current_price = current, current_price_text = price_text }
+    end
   end
   if expected_price and current > expected_price + 0.005 then
     return { product_id = product_id, added = false, error = "price_changed",

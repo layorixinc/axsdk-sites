@@ -145,7 +145,17 @@ local function fields_for(config)
     fields[name] = { selector = selector }
     if attr then fields[name].attr = attr end
   end
-  add("url", config.result_url_selector, "href")
+  -- The href is usually on a descendant anchor, and a selector fetches it. But a card root can BE the
+  -- anchor: aliexpress declares `result_url_from_root` and carries no `result_url_selector` at all. The
+  -- durable reader consumed that key and this one did not, so every aliexpress row arrived with no url
+  -- and no id, `candidate_from` dropped all of them, and one of the ten stores answered zero candidates
+  -- on the SHIPPED path while the durable tests stayed green against the other implementation. Asked as
+  -- a root attribute so it still rides the single batched `query_all`.
+  if config.result_url_selector then
+    add("url", config.result_url_selector, "href")
+  elseif config.result_url_from_root then
+    fields.url = { attr = "href" }
+  end
   add("title", config.result_title_selector)
   -- A title selector is often a CSS LIST and the browser answers with the first match in document
   -- order. On 11st that is the image, whose textContent is empty; the alt carries the name. Live, not
@@ -403,6 +413,27 @@ local function seller_reviews(text)
   return inside and tonumber((inside:gsub(",", ""))) or nil
 end
 
+--- Return terms the card states in its own words, when the site marks them up nowhere.
+---
+--- Measured live on eBay search (2026-08-15): the cards carry title, condition, price, buy format,
+--- shipping and seller feedback and say nothing about returns — `[class*=return]` matched 0 elements on
+--- the page, and so did the old `.s-item__free-returns`. So there is no selector to declare, and ebay's
+--- generated config rightly has none. The DURABLE reader never used one either: it scanned the card's
+--- lowered text for these two phrases and left the field nil otherwise. That derivation is the
+--- capability, so it moves here. Declaring a selector that matches nothing would have made the field
+--- silently absent forever, and defaulting it would state a returns policy the store never offered.
+local RETURN_PHRASES = { { "free returns", "Free returns" }, { "무료 반품", "무료 반품" } }
+
+local function returns_from_text(text)
+  local low = tostring(text or ""):lower()
+  if low == "" then return nil end
+  for index = 1, #RETURN_PHRASES do
+    local phrase = RETURN_PHRASES[index]
+    if low:find(phrase[1], 1, true) then return phrase[2] end
+  end
+  return nil
+end
+
 --- Turns one read row into a candidate, or nil when it cannot be compared. A row without an id or a
 --- price is dropped rather than guessed: a wrong number in a price comparison is worse than a missing row.
 local function candidate_from(config, row)
@@ -445,7 +476,7 @@ local function candidate_from(config, row)
     reviews_text = non_empty(row.reviews_text),
     condition = non_empty(row.condition),
     delivery_text = non_empty(row.delivery_text),
-    return_terms = non_empty(row.return_terms),
+    return_terms = non_empty(row.return_terms) or returns_from_text(row.text),
     seller_rating_percent = seller_percent(row.seller_text),
     review_count = seller_reviews(row.seller_text),
   }

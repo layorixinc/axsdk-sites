@@ -98,7 +98,7 @@ function C.ensure_adapter(site)
   end
   if home_matches_url(home, href) then return nil, "site_navigation_failed", nil end
 
-  if nav and type(nav.clear_beforeunload) == "function" then nav.clear_beforeunload() end
+  B.clear_beforeunload()
   nav.navigate(home, {}, { reload = true })
   return nil, nil, "navigating"
 end

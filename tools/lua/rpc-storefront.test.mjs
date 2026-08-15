@@ -1049,26 +1049,263 @@ test('a shipping cell whose label is glued to its value still reads as a cost', 
   assert.equal(costOf({ shipping_text: '배송정보오늘출발(13시까지 주문시)' }).shipping_cost, undefined);
 });
 
-test('the two shipping parsers answer the same question the same way', () => {
-  // There are two: `S.parse_shipping` in `60_storefront.lua` and a private `parse_shipping` in
-  // `61_rpc_storefront.lua`, and the RPC one is what production runs. A fix for "배송비무료" landed in the
-  // other copy and every test still passed while the live path stayed broken.
-  //
-  // Two statements of one rule drift, and the drift is invisible until a store's rows quietly stop having
-  // totals. Until one of them is deleted, they answer together.
-  const durable = loadLuaModules(['_common/scripts/00_base.lua', '_common/scripts/60_storefront.lua']);
+test('the shipping parser holds every case the two-parser pin was holding', () => {
+  // There USED to be two statements of this rule: `S.parse_shipping` in the durable `60_storefront.lua`
+  // and the private `parse_shipping` here — and production ran this one while a fix for "배송비무료"
+  // landed in the other copy: every test stayed green and the live path stayed broken. A pin held the
+  // two parsers together until one of them was deleted. The durable statement is gone, so the rule
+  // finally has ONE statement; these are the answers the pin was guarding while both existed.
   const cases = [
     ['배송비무료', 0], ['배송비 무료', 0], ['무료배송', 0],
     ['배송비2,500원', 2500], ['배송비 2,500원', 2500],
     ['배송정보오늘출발(13시까지 주문시)', undefined],
     ['Free shipping', 0], ['Shipping $3.00', 3],
   ];
-
-  // A direct call marshals Lua nil as null; an absent object field reads as undefined. Same answer.
-  const answered = (value) => (value === null ? undefined : value);
   for (const [text, expected] of cases) {
-    assert.equal(answered(durable.call('AX_STOREFRONT.parse_shipping', text, 'KRW')), expected, `60_storefront on ${text}`);
-    assert.equal(answered(costOf({ shipping_text: text }).shipping_cost), expected, `61_rpc_storefront on ${text}`);
+    assert.equal(costOf({ shipping_text: text }).shipping_cost, expected, `parse_shipping on ${text}`);
   }
-  durable.close();
+});
+
+// ── result_url_from_root: the card root IS the anchor ────────────────────────
+//
+// A latent PRODUCTION bug, found while re-basing the offline commerce gates off the durable reader.
+// `aliexpress` is the one site whose config says `result_url_from_root = true`: its card root carries
+// the href itself, so there is no `result_url_selector` and no `result_id_attr`. The durable
+// `60_storefront` consumed that key. This reader never ported it — `fields_for` only asks for a url
+// when `result_url_selector` is set — so every aliexpress row arrived with no url and no id, and the
+// id source being nil dropped all of them. One of ten stores returned zero candidates on the shipped
+// path while the durable tests stayed green against the other implementation.
+const ROOT_URL_CONFIG = {
+  site: 'aliexpress',
+  search_url: 'https://www.aliexpress.com/wholesale',
+  search_param: 'SearchText',
+  search_path_marker: '/wholesale',
+  result_selector: 'a.card',
+  result_ready_selector: 'a.card',
+  result_url_from_root: true,
+  result_title_selector: '.name',
+  result_price_selector: '.price',
+  result_limit: 24,
+  default_currency: 'USD',
+  product_id_patterns: ['/item/(%d+)'],
+  product_url_prefix: 'https://www.aliexpress.com/item/',
+};
+
+test('a root-anchored card yields its href, so the row is not dropped', () => {
+  const page = makePage({
+    href: 'https://www.aliexpress.com/wholesale?SearchText=mouse',
+    dom: {
+      'a.card': [{
+        text: 'Wireless Mouse US $10.99',
+        url: 'https://www.aliexpress.com/item/1005001234567890.html',
+        title: 'Wireless Mouse',
+        price_text: 'US $10.99',
+      }],
+    },
+  });
+
+  const { value } = search(page, { query: 'mouse' }, ROOT_URL_CONFIG);
+
+  assert.equal(value.next, 'ok');
+  assert.equal(value.candidates.length, 1, 'the row must survive: its href is on the root');
+  assert.equal(value.candidates[0].product_id, '1005001234567890');
+  assert.match(value.candidates[0].url, /1005001234567890/);
+});
+
+test('the root href is requested as a root attribute, not through a selector', () => {
+  // The distinction matters: a selector would look for a descendant anchor, and on this shape there is
+  // none — the root is the anchor. The reader batches ONE query_all, so the ask has to ride on it.
+  const page = makePage({
+    href: 'https://www.aliexpress.com/wholesale?SearchText=mouse',
+    dom: {
+      'a.card': [{
+        text: 'Wireless Mouse US $10.99',
+        url: 'https://www.aliexpress.com/item/1005009999999999.html',
+        title: 'Wireless Mouse',
+        price_text: 'US $10.99',
+      }],
+    },
+  });
+
+  const { value, ops } = search(page, { query: 'mouse' }, ROOT_URL_CONFIG);
+
+  assert.equal(value.candidates.length, 1);
+  assert.equal(ops.filter((entry) => entry.op === 'dom.query_all').length, 1,
+    'still one query_all for the whole grid');
+});
+
+test('a site without result_url_from_root is unchanged', () => {
+  // The 11st config has a url SELECTOR and no root flag; adding the root rule must not change it.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4',
+    dom: { 'li.card': [card('9170626560', '무선 마우스', '10,000원')] },
+  });
+
+  const { value } = search(page);
+
+  assert.equal(value.candidates.length, 1);
+  assert.equal(value.candidates[0].product_id, '9170626560');
+});
+
+// ── return terms come from the card's own words ───────────────────────────────
+//
+// Measured live on eBay search (2026-08-15, ko locale): the cards state title, condition, price, buy
+// format, shipping and seller feedback, and NOTHING about returns. `[class*=return]` matched 0 elements
+// on the whole page and so did the old `.s-item__free-returns`. There is no selector to declare, which is
+// why ebay's generated config has no `result_return_selector`.
+//
+// The durable reader did not use a selector either — it scanned the card's lowered text for
+// "free returns" / "무료 반품" and set the field only when the site said so (deleted
+// `ebay/scripts/00_common.lua` lines 201-204). That derivation is the capability; porting it keeps the
+// field truthful, and inventing a selector that matches nothing would have made it silently absent
+// forever. A store that says nothing about returns must say nothing, not zero.
+const TEXT_RETURNS_CONFIG = { ...CONFIG, result_return_selector: undefined };
+
+test('a card that offers free returns says so, in the words the site used', () => {
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4',
+    dom: { 'li.card': [{
+      text: '무선 마우스 10,000원 Free returns',
+      url: 'https://www.11st.co.kr/products/1',
+      title: '무선 마우스',
+      price_text: '10,000원',
+    }] },
+  });
+
+  const { value } = search(page, {}, TEXT_RETURNS_CONFIG);
+
+  assert.equal(value.candidates.length, 1);
+  assert.equal(value.candidates[0].return_terms, 'Free returns');
+});
+
+test('the Korean wording is recognised too', () => {
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4',
+    dom: { 'li.card': [{
+      text: '무선 마우스 10,000원 무료 반품 가능',
+      url: 'https://www.11st.co.kr/products/2',
+      title: '무선 마우스',
+      price_text: '10,000원',
+    }] },
+  });
+
+  const { value } = search(page, {}, TEXT_RETURNS_CONFIG);
+
+  assert.equal(value.candidates[0].return_terms, '무료 반품');
+});
+
+test('a card that says nothing about returns reports nothing', () => {
+  // The live eBay case. Absent, never a fabricated default.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4',
+    dom: { 'li.card': [card('3', '무선 마우스', '10,000원')] },
+  });
+
+  const { value } = search(page, {}, TEXT_RETURNS_CONFIG);
+
+  assert.equal(value.candidates[0].return_terms, undefined);
+});
+
+test('a declared selector still wins over the text', () => {
+  // A site that marks it up properly is read from the markup: the text scan is the fallback, not a
+  // replacement, or a site whose row says "no free returns" would be read backwards.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4',
+    dom: { 'li.card': [{
+      text: '무선 마우스 10,000원 Free returns',
+      url: 'https://www.11st.co.kr/products/4',
+      title: '무선 마우스',
+      price_text: '10,000원',
+      return_terms: '30-day returns',
+    }] },
+  });
+
+  const { value } = search(page, {}, { ...CONFIG, result_return_selector: '.returns' });
+
+  assert.equal(value.candidates[0].return_terms, '30-day returns');
+});
+
+// ── a store that hides the id behind a dummy href ────────────────────────────
+//
+// Measured live on eBay search (2026-08-15): every `a[href*="/itm/"]` on the page reads
+// `https://ebay.com/itm/123456?itmmeta=...` — a PLACEHOLDER id, identical on all 143 anchors. The real
+// listing id is on the card root, `li.s-card[data-listingid]` = e.g. `236940774206`, 62 of them.
+//
+// ebay's generated config declares no `result_id_attr`, so `product_id_patterns` mined the href and every
+// row parsed to `123456`; dedupe then collapsed a whole page into ONE candidate. That is the same failure
+// signature §13 records for 11st, whose ad-server hrefs carry no id either — and the rule it left behind
+// applies here: a store returning exactly one row is the signature, so check the card count before
+// believing a thin result.
+const DUMMY_HREF_CONFIG = {
+  ...CONFIG,
+  result_selector: 'li.s-card[data-listingid]',
+  result_ready_selector: 'li.s-card[data-listingid]',
+  result_id_attr: 'data-listingid',
+  product_id_patterns: ['/itm/(%d+)'],
+  product_url_prefix: 'https://www.ebay.com/itm/',
+  default_currency: 'USD',
+};
+
+function dummyCard(listingId, title, price) {
+  return {
+    text: title + ' ' + price,
+    // The placeholder every card shares.
+    url: 'https://ebay.com/itm/123456?itmmeta=012DEW30YG0MEEKND7NH',
+    title,
+    price_text: price,
+    root_id: listingId,
+  };
+}
+
+test('rows sharing a placeholder href stay distinct through their own id attribute', () => {
+  const page = makePage({
+    href: 'https://www.ebay.com/sch/i.html?_nkw=logitech+m185',
+    afterNavigate: { 'li.s-card[data-listingid]': [
+      dummyCard('236940774206', '로지텍 M185 무선 마우스', 'US $10.99'),
+      dummyCard('236940774207', '로지텍 M185 무선 마우스 블루', 'US $12.50'),
+      dummyCard('236940774208', '로지텍 M185 무선 마우스 레드', 'US $13.75'),
+    ] },
+  });
+
+  const { value } = search(page, {}, DUMMY_HREF_CONFIG);
+
+  assert.equal(value.next, 'ok');
+  assert.equal(value.candidates.length, 3, 'a page of distinct listings must not collapse into one');
+  assert.deepEqual(
+    value.candidates.map((entry) => entry.product_id).sort(),
+    ['236940774206', '236940774207', '236940774208'],
+  );
+});
+
+test('the canonical url is rebuilt from the real id, not the placeholder', () => {
+  const page = makePage({
+    href: 'https://www.ebay.com/sch/i.html?_nkw=logitech+m185',
+    afterNavigate: { 'li.s-card[data-listingid]': [
+      dummyCard('236940774206', '로지텍 M185 무선 마우스', 'US $10.99'),
+    ] },
+  });
+
+  const { value } = search(page, {}, DUMMY_HREF_CONFIG);
+
+  assert.equal(value.candidates[0].product_id, '236940774206');
+  assert.doesNotMatch(value.candidates[0].url, /123456/,
+    'the placeholder must never reach the offer the user is shown');
+});
+
+test("ebay's SHIPPED config takes the id from the card attribute, not the href", () => {
+  // The two tests above prove the MECHANISM works once the attribute is declared — they pass with or
+  // without any change to ebay's config, so on their own they pin nothing about production. This one is a
+  // contract on the DATA, following the amazon-title pattern above, because that is where the defect is.
+  //
+  // Measured live 2026-08-15: every ebay anchor href on the search page is the placeholder
+  // `https://ebay.com/itm/123456?itmmeta=...` — identical across all 143 anchors. So
+  // `product_id_patterns` alone gave 62 cards ONE id and the dedupe kept a single candidate, the same
+  // signature §13 records for 11st. The real listing id is on the card root as `data-listingid`
+  // (e.g. 236940774206, 62 of them).
+  const source = readFileSync(new URL('../../_common/rpc/62_rpc_sites.lua', import.meta.url), 'utf8');
+  const block = source.slice(source.indexOf('RPC_SITES["ebay"]'), source.indexOf('RPC_SITES["etsy"]'));
+  const attr = (/result_id_attr\s*=\s*"([^"]+)"/.exec(block) ?? [])[1] ?? '';
+
+  assert.equal(attr, 'data-listingid',
+    'without this every ebay row parses to the placeholder id and the page collapses into one candidate');
 });

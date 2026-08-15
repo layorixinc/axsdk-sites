@@ -29,7 +29,9 @@ const WRITE_OPS = new Set([
  * @param {Record<string, object[]>} [spec.dom]            selector → rows visible now
  * @param {Record<string, object[]>} [spec.afterNavigate]  selector → rows visible after a navigation
  * @param {boolean} [spec.navigationFails]   the navigation is accepted but the href never changes
- * @param {number} [spec.settleAfter]        polls the new document needs before it answers (default 1)
+ * @param {string}  [spec.navigateRefusal]   `nav.navigate` answers `{ok:false, reason}` and nothing moves
+ * @param {number}  [spec.settleAfter]        polls the new document needs before it answers (default 1)
+ * @param {number}  [spec.fragmentLivesFor]  polls a navigated-to `#fragment` stays readable (default 1)
  */
 export function makePage(spec) {
   const page = {
@@ -77,23 +79,39 @@ export function makePage(spec) {
 
   page.navigate = (url) => {
     page.navigated = url;
-    if (spec.navigationFails) return true;          // accepted, but the document never changes
+    // A refusal is a real observed answer — measured live as `{ok=false, reason="window_not_available"}`
+    // from a runtime that would not perform the move. The op is answered; the page never moves. A script
+    // that ignores the return value turns that refusal into an arrival question it cannot win.
+    if (spec.navigateRefusal) return { ok: false, reason: spec.navigateRefusal };
+    if (spec.navigationFails) return null;          // accepted, but the document never changes
     page.pollsSinceNavigate = 0;
     // A navigation can land somewhere else — a login bounce, a canonical slug rewrite. The reader has to
     // classify where it ACTUALLY is, not where it aimed.
     page.pendingHref = spec.landsAt ?? url;
     page.pendingDom = { ...(spec.afterNavigate ?? {}) };
-    return true;
+    return null;                                    // the runtime answers nil for a fired navigation
   };
 
   // The new document becomes observable a poll later, the way a real navigation does.
   page.tick = () => {
-    if (page.pendingHref === undefined) return;
-    page.pollsSinceNavigate += 1;
-    if (page.pollsSinceNavigate >= (spec.settleAfter ?? 1)) {
-      page.href = page.pendingHref;
-      page.dom = page.pendingDom;
-      page.pendingHref = undefined;
+    if (page.pendingHref !== undefined) {
+      page.pollsSinceNavigate += 1;
+      if (page.pollsSinceNavigate >= (spec.settleAfter ?? 1)) {
+        page.href = page.pendingHref;
+        page.dom = page.pendingDom;
+        page.pendingHref = undefined;
+        // Measured live (bluemoonsoft): a fragment the navigation carried is readable immediately —
+        // twenty consecutive reads held `#modal/...` — and then the site's own router consumes it and
+        // rewrites the URL without it. A stub that kept the fragment forever would pass a reader that
+        // looks for it AFTER a wait, which is exactly the read the live run showed is worthless.
+        if (page.href.includes('#')) page.fragmentPollsLeft = spec.fragmentLivesFor ?? 1;
+      }
+      return;
+    }
+    if (page.fragmentPollsLeft !== undefined) {
+      if (page.fragmentPollsLeft > 0) { page.fragmentPollsLeft -= 1; return; }
+      page.href = page.href.slice(0, page.href.indexOf('#'));
+      page.fragmentPollsLeft = undefined;
     }
   };
 

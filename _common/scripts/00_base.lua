@@ -248,6 +248,25 @@ function B.dismiss_overlay(selector)
   return false
 end
 
+-- A capability that EXISTS is not a capability that WORKS.
+--
+-- `nav.clear_beforeunload` is on the `nav` table in the CDP runtime and RAISES when called:
+-- `Lua capability failed (nav.clear_beforeunload): nav.clear_beforeunload is not available over the
+-- dom port`. It only ever existed because the legacy in-page extension shipped a MAIN-world content
+-- script to null `window.onbeforeunload`; the CDP extension injects no MAIN world, so the name
+-- survived and the behaviour did not. Every call site guarded with
+-- `type(nav.clear_beforeunload) == "function"` — the one check that cannot tell those apart — so a
+-- refusal propagated as an unclassified error and took the caller's navigation with it. Measured live:
+-- all ten storefronts answered `unknown`, 22 of 35 checks in the all-site sweep, one identical error.
+--
+-- Answers whether the dialog was actually cleared, so a caller that cares can say so. Never raises:
+-- a page that may or may not have a beforeunload handler is not a reason to fail a read.
+function B.clear_beforeunload()
+  if not nav or type(nav.clear_beforeunload) ~= "function" then return false end
+  local ok = pcall(nav.clear_beforeunload)
+  return ok == true
+end
+
 -- ── dom actions (verified) ────────────────────────────────────────────────────
 -- Gate on a readiness selector: returns wait_for_selector's result so callers surface a real
 -- status instead of silently proceeding on timeout. { ok=true } | { ok=false, reason, selector }.

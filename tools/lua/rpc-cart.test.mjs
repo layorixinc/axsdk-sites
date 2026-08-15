@@ -339,3 +339,134 @@ test('no approval of any shape adds nothing', () => {
     assert.deepEqual(clicks(page), []);
   }
 });
+
+// ── the cart must contain THIS product, not merely be a cart ──────────────────
+//
+// Found by re-basing the offline commerce gate off the durable adapter. `cart_contains` took a
+// `product_id` and, on its first branch, never used it: any match for `confirmation_selector` answered
+// true. That was written for a post-add confirmation PANEL, which is per-add evidence. But amazon's
+// generated selector has since grown cart-page STRUCTURE — `#sc-active-cart, .sc-list-item[data-asin]` —
+// which is present on any rendered amazon cart whatever it holds. So the guarded cart could report
+// `added = true` for a cart containing something else entirely. This is the one path in this repo where
+// a wrong answer spends the user's money, so it fails closed or not at all.
+const STRUCTURAL_CONFIRM = {
+  ...CONFIG,
+  // Verbatim shape from the generated site data for amazon.
+  confirmation_selector: '#sw-atc-confirmation, #sc-active-cart, .sc-list-item[data-asin]',
+};
+
+test('a cart page holding a DIFFERENT product does not confirm the approved one', () => {
+  const page = shop({ href: CART, extra: {
+    // The cart rendered, and it lists someone else's item. Both of these match the site's structural
+    // confirmation selector.
+    '#sc-active-cart': 'Shopping Cart',
+    '.sc-list-item[data-asin]': 'Some Other Thing',
+    'a[href*="B0OTHER9999"]': 'Some Other Thing',
+  } });
+  installRpcStub(lua, page);
+
+  const confirmed = lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234');
+
+  assert.equal(confirmed, false, 'a cart is not evidence that THIS product is in it');
+});
+
+test('a cart page listing the approved product does confirm it', () => {
+  const page = shop({ href: CART, extra: {
+    '#sc-active-cart': 'Shopping Cart',
+    '.sc-list-item[data-asin]': 'Logitech M185',
+    'a[href*="B0TEST1234"]': 'Logitech M185 Wireless Mouse',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234'), true);
+});
+
+test('an asin declared on the row confirms it too', () => {
+  // Amazon carries the id in `data-asin`, which the id probe did not ask for — so on the one site whose
+  // cart page states the id most precisely, the check could only fall back to an href match.
+  const page = shop({ href: CART, extra: {
+    '#sc-active-cart': 'Shopping Cart',
+    '[data-asin="B0TEST1234"]': 'Logitech M185',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234'), true);
+});
+
+test('off the cart page a confirmation panel is still per-add evidence', () => {
+  // The original intent, preserved: a toast on the PRODUCT page appeared because this add happened.
+  const page = shop({ href: PRODUCT, extra: { '#sw-atc-confirmation': 'Added to Cart' } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234'), true);
+});
+
+// ── a foreign primary quote with a localized alternate ───────────────────────
+//
+// Measured live on an eBay item page (2026-08-15): the primary quote is the seller's currency and the
+// buyer's localized approximation sits beside it.
+//   .x-price-primary       -> "개당 US $5.34"
+//   .x-price-approx__price -> "KRW7,559.73"
+// The comparison approves whichever amount the WINDOW showed, which for a Korean shopper is the KRW one.
+// Reading only the primary therefore refused a correct add with `currency_changed`, and the durable eBay
+// adapter satisfied revalidation from the approximation. Approx is consulted ONLY when the primary is a
+// different currency than the one approved — never to make a mismatched amount pass.
+const APPROX_CONFIG = {
+  ...CONFIG,
+  product_price_selectors: ['.x-price-primary'],
+  product_price_approx_selectors: ['.x-price-approx__price'],
+};
+
+test('the localized alternate satisfies revalidation when the primary is another currency', () => {
+  const page = shop({ href: PRODUCT, extra: {
+    '.x-price-primary': [{ text: '개당 US $5.34' }],
+    '.x-price-approx__price': [{ text: 'KRW7,559.73' }],
+  } });
+  page.showProduct();
+  installRpcStub(lua, page);
+
+  const refusal = lua.call('AX_RPC_CART.price_error', APPROX_CONFIG,
+    { expected_unit_price: 7559.73, expected_currency: 'KRW' }, 'ITEM1');
+
+  assert.equal(refusal, null, 'the approved KRW amount is on the page, so nothing is wrong');
+});
+
+test('a localized alternate that is HIGHER than approved still blocks', () => {
+  const page = shop({ href: PRODUCT, extra: {
+    '.x-price-primary': [{ text: '개당 US $5.34' }],
+    '.x-price-approx__price': [{ text: 'KRW9,900.00' }],
+  } });
+  page.showProduct();
+  installRpcStub(lua, page);
+
+  const refusal = lua.call('AX_RPC_CART.price_error', APPROX_CONFIG,
+    { expected_unit_price: 7559.73, expected_currency: 'KRW' }, 'ITEM1');
+
+  assert.equal(refusal?.error, 'price_changed', 'the guard is against paying more, in any currency');
+});
+
+test('without an approx selector a foreign primary still refuses', () => {
+  // The fallback is opt-in per site. A site that declares no approximation must not start guessing.
+  const page = shop({ href: PRODUCT, extra: { '.x-price-primary': [{ text: '개당 US $5.34' }] } });
+  page.showProduct();
+  installRpcStub(lua, page);
+
+  const refusal = lua.call('AX_RPC_CART.price_error',
+    { ...CONFIG, product_price_selectors: ['.x-price-primary'] },
+    { expected_unit_price: 7559.73, expected_currency: 'KRW' }, 'ITEM1');
+
+  assert.equal(refusal?.error, 'currency_changed');
+});
+
+test('a matching primary currency never consults the approximation', () => {
+  // Otherwise a site showing both would have two sources of truth for one number.
+  const page = shop({ href: PRODUCT, extra: {
+    '.x-price-primary': [{ text: 'KRW 7,000' }],
+    '.x-price-approx__price': [{ text: 'KRW99,999.00' }],
+  } });
+  page.showProduct();
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.price_error', APPROX_CONFIG,
+    { expected_unit_price: 7559.73, expected_currency: 'KRW' }, 'ITEM1'), null);
+});

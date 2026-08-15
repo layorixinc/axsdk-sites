@@ -2009,6 +2009,7 @@ flows:
       site: bluemoonsoft
       requestText: null
       sitemap_hits: null
+      sitemap_source: null
     nodes:
       start:
         kind: action_contract
@@ -3943,6 +3944,10 @@ flowTools:
     output:
       next: { if: [ { var: result.error }, "error", "go" ] }
       sitemap_hits: result.chunks
+      # WHICH document answered is the whole basis of the refusal, and it was computed and never
+      # published — so a live `site_sitemap_missing` could not be told apart from "the site's sitemap
+      # loaded and matched nothing". Measured: the trace carried `sitemap_hits: {}` and no source.
+      sitemap_source: result.source
       # The raw reason rides along. A category alone cannot separate an op the client never registered
       # from one we called wrongly, and a live `sitemap_unavailable` said nothing about which.
       error:

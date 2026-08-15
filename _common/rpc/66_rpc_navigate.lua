@@ -80,12 +80,21 @@ local function same_page(here, target)
   return strip(here) == strip(target)
 end
 
+--- Splits a URL into the document it names and the fragment it carries. The fragment never reaches the
+--- server: a target that differs from the current page only by fragment is a same-document navigation.
+local function split_fragment(url)
+  local base, fragment = tostring(url or ""):match("^([^#]*)#(.+)$")
+  if base then return base, fragment end
+  return tostring(url or ""), nil
+end
+
 --- Navigates the current page to a same-site path or URL, and confirms it landed.
 ---
 --- Refusals are separate answers because they call for different things: `missing_link` is the caller's
 --- mistake, `offsite_link` would silently leave the flow's site, `navigation_failed` means the browser
---- never moved, and `wrong_landing` means it moved somewhere else — a login bounce or a canonical rewrite —
---- and names where, because the next node has to decide what to do about it.
+--- never moved, `same_document_refused` means the runtime would not perform a fragment-only move, and
+--- `wrong_landing` means it moved somewhere else — a login bounce or a canonical rewrite — and names
+--- where, because the next node has to decide what to do about it.
 function N.navigate_page(args)
   args = type(args) == "table" and args or {}
   local ok, here = pcall(dom.get_location_href)
@@ -109,14 +118,46 @@ function N.navigate_page(args)
     return { next = "go", href = here, navigated = false }
   end
 
-  nav.navigate(target)
+  local target_base, fragment = split_fragment(target)
+
+  -- A target that differs from the page only by fragment is a same-document move: no document is created,
+  -- so `wait_for_navigation` has nothing to wait for — and waiting destroys the evidence. Measured live
+  -- (bluemoonsoft): the fragment is readable immediately after `nav.navigate`, then the site's own router
+  -- consumes `#modal/...` and rewrites the URL without it, so a read taken after a wait shows the old URL
+  -- and was reported as `navigation_failed` — a false negative that asserts "the browser never moved".
+  -- Arrival is decided from one read taken immediately; the fragment being gone LATER is normal.
+  if fragment and same_page((split_fragment(here)), target_base) then
+    local fired = nav.navigate(target)
+    if type(fired) == "table" and fired.ok == false then
+      return { next = "error", error = "same_document_refused", reason = fired.reason,
+               href = here, target = target }
+    end
+    local read_ok, seen = pcall(dom.get_location_href)
+    if not read_ok or type(seen) ~= "string" or not seen:find("#" .. fragment, 1, true) then
+      -- NOT `navigation_failed` ("the browser never moved") and NOT `go` (a false positive would tell the
+      -- user a page opened that never did): the runtime would not perform the same-document move.
+      return { next = "error", error = "same_document_refused", reason = "fragment_not_applied",
+               href = read_ok and seen or here, target = target }
+    end
+    return { next = "go", href = seen, navigated = "within_document" }
+  end
+
+  local fired = nav.navigate(target)
+  if type(fired) == "table" and fired.ok == false then
+    -- A refusal is an answer, not something to wait out: the browser never moved, which is exactly what
+    -- `navigation_failed` means — with the runtime's own reason attached.
+    return { next = "error", error = "navigation_failed", reason = fired.reason,
+             href = here, target = target }
+  end
   nav.wait_for_navigation(here, { timeout = 12000, interval = 250 })
 
   local landed = pcall(dom.get_location_href) and dom.get_location_href() or nil
   if not landed or same_page(landed, here) then
     return { next = "error", error = "navigation_failed", href = landed or here, target = target }
   end
-  if not same_page(landed, target) and not landed:find(target, 1, true) then
+  -- Against the document the target names, not the full target: a site that consumes the fragment it was
+  -- navigated to has still landed on the right document, which must not read as `wrong_landing`.
+  if not same_page(landed, target_base) and not landed:find(target_base, 1, true) then
     return { next = "error", error = "wrong_landing", href = landed, target = target }
   end
   return { next = "go", href = landed, navigated = true }

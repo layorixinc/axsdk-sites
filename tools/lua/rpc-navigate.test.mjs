@@ -26,6 +26,7 @@ const go = (page, args) => {
 };
 
 const navigated = (page) => page.ops.filter((entry) => entry.op === 'nav.navigate').map((entry) => entry.params.url);
+const hrefReads = (page) => page.ops.filter((entry) => entry.op === 'dom.get_location_href').length;
 
 test('a relative link is resolved against the page we are on', () => {
   const page = makePage({ href: SITE, dom: {}, afterNavigate: {} });
@@ -114,6 +115,80 @@ test('an off-site link is refused: this tool navigates within the site', () => {
   assert.equal(result.next, 'error');
   assert.equal(result.error, 'offsite_link');
   assert.deepEqual(navigated(page), []);
+});
+
+test('a fragment-only target is a same-document move, not a wait for a document', () => {
+  // Measured live (bluemoonsoft): `nav.navigate` to `.../front/main#modal/docuray` from `.../front/main`
+  // leaves the href readable WITH the fragment immediately, and the site's own router then consumes the
+  // hash and rewrites the URL without it. A new document never arrives, so `wait_for_navigation` has
+  // nothing to wait for — and a read taken after it shows the fragment gone, which the old code reported
+  // as `navigation_failed`: an answer whose own doc comment means "the browser never moved".
+  const page = makePage({ href: SITE, dom: {}, afterNavigate: {} });
+  const result = go(page, { link: '/front/main#modal/docuray' });
+
+  assert.equal(result.next, 'go');
+  assert.equal(result.navigated, 'within_document');
+  assert.equal(result.href, 'http://bluemoonsoft.com/front/main#modal/docuray');
+  assert.deepEqual(navigated(page), ['http://bluemoonsoft.com/front/main#modal/docuray']);
+});
+
+test('the same-document arrival is decided before any wait could destroy the evidence', () => {
+  // The site consumes its own hash a moment after applying it. One read of `here`, one read right after
+  // the navigation — a third href read means a wait ran first, and by then the fragment is gone.
+  const page = makePage({ href: SITE, dom: {}, afterNavigate: {} });
+  const result = go(page, { link: '/front/main#modal/docuray' });
+
+  assert.equal(result.next, 'go');
+  assert.equal(hrefReads(page), 2, 'here + one immediate arrival read, no wait polls');
+});
+
+test('a fragment the runtime never applies is refused by name, not called go', () => {
+  // A false positive here tells the user a page opened that never did — worse than the failure it
+  // replaces. And `navigation_failed` would be wrong too: that answer means "the browser never moved",
+  // where this one means "the runtime would not perform a same-document move".
+  const page = makePage({ href: SITE, dom: {}, afterNavigate: {}, navigationFails: true });
+  const result = go(page, { link: '/front/main#modal/docuray' });
+
+  assert.equal(result.next, 'error');
+  assert.equal(result.error, 'same_document_refused');
+  assert.equal(result.reason, 'fragment_not_applied');
+});
+
+test('a runtime that refuses the move is answered from its refusal, not second-guessed', () => {
+  // Measured live: `nav.navigate` can answer `{ok=false, reason="window_not_available"}` with the href
+  // unchanged. The old code ignored the return value entirely, which is how a refusal became an
+  // arrival question in the first place.
+  const page = makePage({ href: SITE, dom: {}, afterNavigate: {}, navigateRefusal: 'window_not_available' });
+  const result = go(page, { link: '/front/main#modal/docuray' });
+
+  assert.equal(result.next, 'error');
+  assert.equal(result.error, 'same_document_refused');
+  assert.equal(result.reason, 'window_not_available');
+  assert.equal(hrefReads(page), 1, 'a refusal is an answer; nothing to poll for');
+});
+
+test('a refused cross-page navigation reports the refusal without waiting for it', () => {
+  const page = makePage({ href: SITE, dom: {}, afterNavigate: {}, navigateRefusal: 'window_not_available' });
+  const result = go(page, { link: '/front/product' });
+
+  assert.equal(result.next, 'error');
+  assert.equal(result.error, 'navigation_failed');
+  assert.equal(result.reason, 'window_not_available');
+  assert.equal(hrefReads(page), 1, 'no 12-second wait for a navigation the runtime refused');
+});
+
+test('a fragment on a DIFFERENT path is a real navigation, and it waits', () => {
+  // Only a fragment-ONLY difference is a same-document move. A new path is a new document even when the
+  // link carries a hash — and a site that consumes that hash on arrival has still landed on the right
+  // document, which must not read as `wrong_landing`.
+  const page = makePage({ href: SITE, dom: {}, afterNavigate: {} });
+  const result = go(page, { link: '/front/product#spec' });
+
+  assert.equal(result.next, 'go');
+  assert.equal(result.navigated, true);
+  assert.equal(result.href, 'http://bluemoonsoft.com/front/product');
+  assert.deepEqual(navigated(page), ['http://bluemoonsoft.com/front/product#spec']);
+  assert.ok(hrefReads(page) > 2, 'a cross-document navigation still waits for arrival');
 });
 
 test('opening a site by slug lands on its home', () => {

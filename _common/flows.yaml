@@ -204,13 +204,6 @@ flows:
     nodes:
       handle:
         kind: action_unit
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         llm: { maxCalls: 1 }
         inputSelector: [ requestText ]
         allowedTools: [ plan_memory ]
@@ -288,13 +281,6 @@ flows:
         next: { choose: choose_delete_keys, not_found: not_found, error: error }
       choose_delete_keys:
         kind: action_unit
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         llm: { maxCalls: 1 }
         messagePolicy: { currentUserText: active_node_only }
         inputSelector: [ requestText, memory_result, question ]
@@ -474,13 +460,6 @@ flows:
         description: Field-driven quote-request controller. State eligibility forces
           exactly one collection, ZIP-resolution, retry, or finish tool at each
           step.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - question
@@ -755,13 +734,6 @@ flows:
         description: Guaranteed approval gate — before ANY quote request is opened,
           present the shortlisted pros and ask the user to approve; proceed only
           on explicit approval, otherwise return to refinement.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - service_query
@@ -879,13 +851,6 @@ flows:
         description: Report the quote-request outcomes, then PAUSE and ask whether to
           request more quotes (from the current results) or start another
           request — never a hard stop, so the user can request again.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - service_query
@@ -972,13 +937,6 @@ flows:
         description: Build the shopping list — split the request into individual
           products, each with an English search query and a quantity; ask only
           if no product can be identified at all.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - shop_plan
@@ -1047,13 +1005,6 @@ flows:
           the current item, ask the user which product / how to narrow, then
           pick the matching product before adding it to the cart; loop with a
           new criterion when nothing matches.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - query
@@ -1101,13 +1052,6 @@ flows:
         description: After all items are in the cart, report the cart and ask the user
           whether to proceed to the checkout page for review; proceed only on
           explicit approval. Never places an order.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - shop_results
@@ -1312,13 +1256,6 @@ flows:
         description: Extract one product category, optional explicit brand/model and
           constraints, quantity, and at least two supported representative
           commerce sites; ask when required scope is missing.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - query
@@ -1478,13 +1415,6 @@ flows:
         messagePolicy: { currentUserText: active_node_only }
         description: Present grounded model options before comparison and accept only an
           explicit current option, exact model refinement, or cancellation.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - product_options
@@ -1602,13 +1532,6 @@ flows:
         kind: action_unit
         description: Decide which listed rows are actually the requested product and
           drop accessories, parts, bundles, and other products.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - screening_text
           - screening_count
@@ -2035,13 +1958,6 @@ flows:
         description: On arrival, route to sitemap navigation when the request already
           names a target page/topic, otherwise announce arrival and ask what the
           user needs.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
         allowedTools: [ assist_decide ]
@@ -2062,13 +1978,6 @@ flows:
           sitemap. Dummy base — the bluemoonsoft site overlay
           (bluemoonsoft/flows.yaml) provides the real sitemap-search prompt;
           this base only keeps the flow compilable off-domain.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
         allowedTools: [ sitemap_search ]
@@ -2084,13 +1993,6 @@ flows:
         description: Navigate to the chosen BlueMoonSoft page path from the sitemap
           search hits. Dummy base — the bluemoonsoft site overlay provides the
           real page-picking prompt.
-        model:
-          providerID: openrouter
-          modelID: openai/gpt-oss-120b
-          providerOptions:
-            openrouter:
-              provider: { sort: latency, allow_fallbacks: true }
-              reasoning: { effort: low }
         inputSelector:
           - requestText
           - sitemap_hits

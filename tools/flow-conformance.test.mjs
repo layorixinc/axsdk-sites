@@ -1616,3 +1616,26 @@ test('a store with no program still reaches the cart path it had before', () => 
   assert.equal(node.next.no_program, 'add_selected_offer');
   assert.equal(node.fallback.invalidNext, 'no_program', 'an unexpected answer must not strand the pick');
 });
+
+// A node that repeats `defaults.model` verbatim is 16 copies of one decision, and the copies are what
+// drift: change the model and fifteen nodes keep the old one, silently, because each is valid on its own.
+// Measured before the deletion: 16 node-level blocks, every one byte-identical to the default and to each
+// other. `FLOWS_IMPROVEMENTS.md` item 1.
+test('no node repeats the default model block', () => {
+  const normalise = (text) => text.replace(/#[^\n]*/g, '').replace(/\s+/g, ' ').trim();
+  for (const path of ['_common/flows.yaml', 'playground/_common/flows.yaml']) {
+    if (!existsSync(new URL(path, root))) continue;
+    const source = read(path).replace(/\r\n/g, '\n');
+    const defaults = /^defaults:\n(?:[ \t].*\n)*/m.exec(source);
+    if (!defaults) continue;
+    const fallback = /^ {2}model:\n((?: {4}.*\n)+)/m.exec(defaults[0]);
+    if (!fallback) continue;
+    const wanted = normalise(fallback[1]);
+
+    const repeats = [...source.matchAll(/^([ \t]{3,})model:\n((?:\1[ \t].*\n)+)/gm)]
+      .filter((match) => normalise(match[2]) === wanted);
+
+    assert.equal(repeats.length, 0,
+      `${path}: ${repeats.length} node(s) repeat defaults.model verbatim — delete them and let the default carry it`);
+  }
+});

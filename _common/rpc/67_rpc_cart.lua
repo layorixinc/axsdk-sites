@@ -264,7 +264,7 @@ function R.add_to_cart(args)
       local from = here()
       probe(function() return nav.navigate(R.product_url(config, product_id)) end)
       probe(function()
-        return nav.wait_for_navigation(from, { timeout = 15000, interval = 250 })
+        return nav.wait_for_navigation({ timeout = 15000, interval = 250 })
       end)
       wait_for("body", config.product_timeout or 10000)
     end
@@ -317,7 +317,7 @@ function R.add_to_cart(args)
     if not R.cart_contains(config, product_id) and config.cart_url then
       local from = here()
       probe(function() return nav.navigate(config.cart_url) end)
-      probe(function() return nav.wait_for_navigation(from, { timeout = 15000, interval = 250 }) end)
+      probe(function() return nav.wait_for_navigation({ timeout = 15000, interval = 250 }) end)
       wait_for("body", config.product_timeout or 10000)
     end
     R.last_count_before = before

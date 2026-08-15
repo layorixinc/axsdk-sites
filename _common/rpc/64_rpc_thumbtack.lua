@@ -174,7 +174,7 @@ function T.search_service(args)
   local target = T.search_url(query, zip_code)
   if not target then return { next = "error", error = "query_not_sluggable" } end
   nav.navigate(target)
-  nav.wait_for_navigation(from, { timeout = 8000, interval = 200 })
+  nav.wait_for_navigation({ timeout = 8000, interval = 200 })
 
   local candidates = T.settle(8, 2)
 

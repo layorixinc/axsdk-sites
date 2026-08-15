@@ -149,7 +149,7 @@ function N.navigate_page(args)
     return { next = "error", error = "navigation_failed", reason = fired.reason,
              href = here, target = target }
   end
-  nav.wait_for_navigation(here, { timeout = 12000, interval = 250 })
+  nav.wait_for_navigation({ timeout = 12000, interval = 250 })
 
   local landed = pcall(dom.get_location_href) and dom.get_location_href() or nil
   if not landed or same_page(landed, here) then
@@ -203,7 +203,7 @@ function N.open_site(args)
   end
 
   nav.navigate(target)
-  nav.wait_for_navigation(from, { timeout = 15000, interval = 250 })
+  nav.wait_for_navigation({ timeout = 15000, interval = 250 })
   local landed = pcall(dom.get_location_href) and dom.get_location_href() or nil
   if not landed or not N.same_site(target, landed) then
     return { next = "error", site = args.site, url = target, href = landed,

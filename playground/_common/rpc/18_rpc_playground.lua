@@ -68,7 +68,7 @@ function P.open_site(args)
 
   nav.navigate(config.home_url)
   -- ONE generous wait, not a retry loop: the SDK re-drives on DOM mutation and this timeout is a ceiling.
-  nav.wait_for_navigation(from, { timeout = 20000, interval = 250 })
+  nav.wait_for_navigation({ timeout = 20000, interval = 250 })
 
   local href = dom.get_location_href()
   if not on_site(config, href) then

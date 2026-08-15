@@ -661,7 +661,7 @@ function S.search(config, args)
     if not moved then return { next = "error", error = "rpc_unavailable", site = config.site } end
     -- href first. A document that is still alive answers a selector check from the OLD page, so an
     -- element probe here is a false positive waiting to happen.
-    if not nav.wait_for_navigation(from, { timeout = 8000, interval = 200 }) then
+    if not nav.wait_for_navigation({ timeout = 8000, interval = 200 }) then
       -- A channel that answered nothing is not a site that would not move.
       if __refused > 0 then return { next = "error", error = "rpc_unavailable", site = config.site } end
       return { next = "error", error = "navigation_stuck", site = config.site, href = dom.get_location_href() }

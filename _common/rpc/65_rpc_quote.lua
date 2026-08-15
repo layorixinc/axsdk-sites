@@ -849,7 +849,7 @@ function Q.request_quote(args)
     end
     local from = probe(function() return dom.get_location_href() end, 3)
     probe(function() return nav.navigate(url) end, 2)
-    probe(function() return nav.wait_for_navigation(from, { timeout = 12000, interval = 250 }) end, 2)
+    probe(function() return nav.wait_for_navigation({ timeout = 12000, interval = 250 }) end, 2)
     -- `nil` means the reads themselves were refused; only a definite `false` is a wrong landing. Calling
     -- an unanswered question a wrong landing abandoned the pro before the quote began.
     local landed = Q.on_pro(service_id)

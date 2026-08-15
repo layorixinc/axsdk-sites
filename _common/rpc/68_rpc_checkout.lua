@@ -172,7 +172,7 @@ function K.review(args)
     if not url_has(here(), config.cart_url_markers) then
       local from = here()
       probe(function() return nav.navigate(config.cart_url) end)
-      probe(function() return nav.wait_for_navigation(from, { timeout = 20000, interval = 250 }) end)
+      probe(function() return nav.wait_for_navigation({ timeout = 20000, interval = 250 }) end)
     end
     if config.cart_ready_selector then wait_for(config.cart_ready_selector, 30000) end
 

@@ -285,7 +285,28 @@ export function installRpcStub(lua, page, { allow } = {}) {
       navigate: (url) => call('nav.navigate', url),
       reload: () => call('nav.reload'),
       // Prelude helper: polls dom.get_location_href. NOT a wire op.
-      wait_for_navigation: (from, opts) => poll(() => call('dom.get_location_href') !== from, opts),
+      //
+      // ONE spec table, as both runtimes have — the CDP dom port reads `url`/`timeout`/`interval` off a
+      // single argument and the durable path takes `luaArg(args, 0)`. This stub used to accept
+      // `(from, opts)` and honour `opts`, which is why every caller passing two arguments looked correct
+      // here while the real port dropped the second and ran on its 30000 ms / 100 ms defaults. A stub
+      // that is more permissive than the capability hides exactly the bug it exists to catch.
+      wait_for_navigation: (spec, extra) => {
+        if (extra !== undefined) {
+          throw new Error('nav.wait_for_navigation takes one spec table; the runtime drops the second argument');
+        }
+        const options = spec && typeof spec === 'object' ? spec : undefined;
+        const wanted = options?.url;
+        // The document we are LEAVING is the baseline, read without a round trip and without ticking:
+        // mid-navigation the real port's `location.href` is still the old document, and a stub that
+        // consumed its own pending transition to get the baseline would never observe a change.
+        const before = page.href;
+        return poll(() => {
+          const now = call('dom.get_location_href');
+          if (now === null || now === undefined) return false;
+          return typeof wanted === 'string' && wanted !== '' ? String(now).includes(wanted) : now !== before;
+        }, options);
+      },
     },
     page: { eval: (script) => call('page.eval', script) },
     // Host primitives. Deliberately NOT routed through `call()`: they cost no round trip and consume no

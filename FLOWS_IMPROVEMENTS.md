@@ -211,5 +211,7 @@ that holds the user is a candidate, because such a node re-reads a message it ca
   fields to save bytes would reintroduce exactly the drift the generator removed.
 - **Replacing the planner prompt with rules.** Its follow-up rules are load-bearing and were each written
   after a live failure; they belong in a prompt because they interpret language.
-- **Deleting `60_storefront.lua`.** It is not dead: production RPC flows read `61_rpc_storefront`, and the
-  stored-Lua site layer the all-site sweep exercises reads `60_storefront`. Two callers, not two copies.
+- ~~**Deleting `60_storefront.lua`.**~~ Refused here while the stored-Lua site layer still read it — two
+  callers, not two copies. That layer is gone (2026-08-15) and `60_storefront.lua` went with it:
+  production RPC flows read `61_rpc_storefront`, and its site data is the generated `62_rpc_sites`
+  built from the config-only `<site>/scripts/*` declarations.

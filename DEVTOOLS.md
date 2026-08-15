@@ -55,6 +55,33 @@ It never reads, prints, or writes credentials. `sync` uses port `9235` and
 `%LOCALAPPDATA%/AXSDKPlaygroundChromeProfile`, writes the workspace's local index/Lua/flows to that
 profile only, forces `remote_sites:false`, and verifies stored—not remote or in-memory—Lua sources.
 
+## The CDP extension harness — **the shipping one**
+
+`@axsdk/extension-cdp` is what goes to the Chrome Web Store. The two harnesses above drive the
+**legacy** in-page extension, where a script runs in the page's isolated world; here a script runs in a
+session worker and `dom`/`nav` reach the page over the DevTools protocol, one session per tab group,
+several at once. Use this for day-to-day work; reach for the in-page harnesses only for the scenario
+runners that have not been ported.
+
+```bash
+npm run cdp -- sources                 # what this workspace would store; no browser
+npm run cdp                            # bring a session up (npm run chrome does the same)
+npm run cdp -- ls                      # every AX_* command, and which script owns it
+npm run cdp -- send '가격 알려줘'        # a real turn through the flow engine
+npm run repl                           # all of it, interactively
+```
+
+Once, beside this repo: `bun install` then `bun run build` in `packages/axsdk-extension-cdp`.
+
+It takes the workspace from the **current directory**, so that bundles this tree; `cd playground` for
+that one. Credentials come from this repo's `.env` (`AXSDK_API_KEY`, `AXSDK_APP_ID`,
+`AXSDK_BASE_URL`) and it prints which file it read. Then `… harness.mjs ls` shows every `AX_*` command
+and which script owns it, `call`/`run`/`eval`/`page`/`open`/`send` drive the session, and `repl` does
+all of it interactively.
+
+Full guide, including what is and is not bundled and what to do when it misbehaves:
+**`../axsdk-sdk-js/docs/cdp-harness-for-sites.md`**.
+
 ## 1. Select the right execution context
 
 `window._AXSDK` exists only when the extension runs in **debug mode**, and only in the

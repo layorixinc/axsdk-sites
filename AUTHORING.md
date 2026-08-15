@@ -241,22 +241,20 @@ Everything in `AGENTS.md` §10 still holds. Added this stretch:
 
 ## 9. One rule, one implementation
 
-There are two shipping parsers: `S.parse_shipping` in `60_storefront.lua` and a private one in
-`61_rpc_storefront.lua`. **Production runs the RPC one.** A fix for `배송비무료` landed in the other
-copy; every test passed and the live path stayed broken.
+There USED to be two shipping parsers: `S.parse_shipping` in the durable `60_storefront.lua` and a
+private one in `61_rpc_storefront.lua`. **Production ran the RPC one.** A fix for `배송비무료` landed in
+the other copy; every test passed and the live path stayed broken. A pin test held the two answers
+together until one of them could be deleted.
 
-Before fixing behaviour, ask **which copy production runs**. There are two storefront stacks and they
-serve different callers:
+The durable stack is gone (2026-08-15): `60_storefront.lua` is deleted, `<site>/scripts/*` are
+config-only declarations read by `tools/build-rpc-sites.mjs`, and the rule has ONE statement —
+`61_rpc_storefront.lua`, whose site data is the generated `62_rpc_sites.lua`. The cases the pin was
+guarding live on in `tools/lua/rpc-storefront.test.mjs` ("the shipping parser holds every case the
+two-parser pin was holding").
 
-| stack | reached by |
-|---|---|
-| `61_rpc_storefront` + `62_rpc_sites` | production RPC flows |
-| `<site>/scripts/*` + `60_storefront` | the stored-Lua site layer: site-local `AX_search_product` / `AX_add_to_cart`, exercised by `test:commerce:live:all` |
-
-`60_storefront` is in **no** flow tool's `modules:` and is still live for the site layer — check both
-before calling either one dead.
-
-> **Gate** — *the two shipping parsers answer the same question the same way*, until one is deleted.
+Before fixing behaviour, ask **which copy production runs** — and if the answer is ever "there are two
+copies", that is the regression this section records. A storefront rule belongs in the RPC layer, and a
+site-specific fact belongs in the site's config declaration, where the generator carries it whole.
 
 ---
 

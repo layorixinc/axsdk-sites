@@ -33,7 +33,7 @@ extension options after Chrome drops them on a cold start — see `playground/RE
 
 ```text
 index.md                      # public site directory (keep synced with real, populated sites)
-package.json                  # npm scripts: build:lua*, check:flows, test:commerce*, ax, chrome, repl
+package.json                  # npm scripts: build:lua*, check:flows, test:commerce*, ax, chrome, repl, cdp
 .env                          # AXSDK_BASE_URL/APP_ID/API_KEY/SITES_URL — gitignored secret
 tools/
   merge-lua.mjs               # bundles each layer's *.lua -> dist/ (load-order faithful)
@@ -183,8 +183,53 @@ Nothing reached it. The defaults apply there now, as on every other site.
 
 ## 5. Dev Chrome + CDP (the live environment)
 
-The harness drives a **dedicated dev Chrome** over the Chrome DevTools Protocol. Canonical config
-(all overridable by env; defaults live in `tools/harness/cdp.mjs`):
+> **The shipping extension is `@axsdk/extension-cdp`.** The in-page `@axsdk/extension` is **legacy** —
+> it is what §5.1/§6.6 describe and it is not what goes to the Chrome Web Store. Anything measured
+> against the in-page extension (manifest facts, permissions, content scripts) has to be re-measured
+> against the CDP build before it is used as evidence.
+
+### The CDP extension — what ships, and the default dev target
+
+A **session worker** runs the Lua; `dom`/`nav` reach the page over the DevTools protocol from the
+service worker. One session per **tab group**, several at once. Config lives in
+`../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/` (`harness-config.mjs`, `browser-session.mjs`):
+
+| thing | value |
+|---|---|
+| CDP port | **9334** |
+| profile | `%LOCALAPPDATA%/AXSDKChromeProfiles/axsdk-extension-cdp` |
+| extension id | `kmpjeabgdfgicnnplgiokmaolfilokko` |
+| extension build | `../axsdk-sdk-js/packages/axsdk-extension-cdp/dist` |
+| harness | `npm run cdp -- <cmd>` (§6) |
+
+**Manifest, measured 2026-08-06** (`dist/manifest.json`) — this is the CWS baseline:
+
+- `permissions`: `storage`, **`debugger`**, `offscreen`, `tabGroups`,
+  **`declarativeNetRequestWithHostAccess`**, `scripting` — six.
+- `host_permissions`: `http://*/*`, `https://*/*` — **required**, no `optional_host_permissions`.
+- `content_scripts`: **one** — `activity-overlay.js` (4 KiB) at `document_idle`, no `world` key
+  (ISOLATED). **No MAIN-world injection anywhere** — the legacy extension's `page-content.js` is gone.
+- icons 16/32/48/128 present; `options_page`; `action`; no `minimum_chrome_version`; no `sandbox`.
+- dist **7.06 MiB** / 19 files: `widget.js` 2,612 KiB, `assets/session-worker-*.js` 2,095 KiB,
+  `service-worker.js` 1,877 KiB, `assets/fengari-*.js` 223 KiB, `page-bundle.js` 22 KiB.
+
+**How it touches a page**: `chrome.debugger` (9 sites) → `Page.createIsolatedWorld` +
+`Page.addScriptToEvaluateOnNewDocument` installs the bundled `page-bundle.js`, then `Runtime.evaluate`
+calls into it. The evaluated expressions are **extension-authored**, never remote Lua text — so the
+Debugger API is how our ops reach the DOM, not a channel for remote logic. `new Function(` is 0; the
+`eval(` hits are the Lua runtime's own `lua.eval` method and a bundled regex engine, not JS `eval`.
+`declarativeNetRequestWithHostAccess` adds exactly **one** dynamic rule, derived from `baseUrl` + the
+extension origin, so the worker can reach the backend. `offscreen` is
+`reasons:[WORKERS]`, justification *"Agent runtime host: one Web Worker per concurrent agent session."*
+
+**P0-1 is unchanged by the port.** `raw.githubusercontent.com` appears in the service worker, the
+session worker and `widget.js`, and fengari is bundled — the remote-Lua-plus-interpreter shape that
+`CWS_LAUNCH_PLAN.md` P0-1 targets is still there.
+
+### 5.1 Legacy: the in-page extension
+
+Kept for the scenario runners in `tools/scenarios/` and `tools/playground.mjs`, which have not been
+ported. Defaults live in `tools/harness/cdp.mjs`:
 
 | thing | value | env |
 |---|---|---|
@@ -216,12 +261,295 @@ the CDP HTTP endpoint respond but the WebSocket connect fail.
 
 ---
 
-## 6. ★ The daily live harness: `tools/ax.mjs` (`ax`)
+## 6. ★ The daily live harness: `npm run cdp` (the CDP extension)
 
-**Use this for day-to-day work.** One command launches/attaches the dev Chrome, finds the AXSDK
-context, and runs any `AX_*` command against the tab you're looking at — **no DevTools console, no
-git push, no extension reload.** Built on `tools/harness/cdp.mjs` (the single source of CDP/Lua
-plumbing). Verified working end-to-end (Chrome 149, port 9224).
+**Use this for day-to-day work.** `../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/harness.mjs`,
+wrapped as `npm run cdp -- <cmd>`; `npm run chrome` boots it and `npm run repl` opens its repl. It
+brings the profile to the state you asked for and stops — every step is a no-op when already done, so
+re-running is the fast way back to the browser you were looking at. Full reference:
+`../axsdk-sdk-js/docs/cdp-harness-for-sites.md`.
+
+```bash
+npm run cdp -- sources                 # what this workspace would store; NO browser
+npm run cdp                            # bring a session up and leave it running
+npm run cdp -- status                  # what the running session actually loaded
+npm run cdp -- ls                      # every AX_* command, and which script owns it
+npm run cdp -- run  AX_x '{"a":1}'     # run it the way the agent does
+npm run cdp -- call AX_x '{"a":1}'     # one Lua turn, read-only check
+npm run cdp -- eval 'return dom.get_text("h1")'
+npm run cdp -- send '가격 알려줘'        # a real turn through the flow engine; prints the reply
+npm run cdp -- page | open <url> | reset | repl | help
+```
+
+Workspace = **cwd** (`AXSDK_WORKSPACE=<path>|off`), start page = `AXSDK_HARNESS_URL`
+(default `https://axsdk.ai`, which deliberately has no site layer). Credentials come from our own
+`.env` (`AXSDK_API_KEY`/`AXSDK_APP_ID`/`AXSDK_BASE_URL`) and it prints which file it read.
+
+**What it stores** — five things, and settings forced to them (`remote_sites:false`,
+`storedFlowsEnabled`, `storedLuaEnabled`, remote site flows off):
+
+| Path | Store | Layer key |
+|---|---|---|
+| `index.md` | `axsdk:sites` | `state.index` |
+| `_common/flows.yaml` | `axsdk:flows` | `":"` |
+| `_common/scripts/*.lua` | `axsdk:lua` | `":"` — one bundle, name order, each file in an IIFE |
+| `<domain>/flows.yaml` | `axsdk:flows` | `":<domain>"` |
+| `<domain>/scripts/*.lua` | `axsdk:lua` | `":<domain>"` |
+
+**Verified 2026-08-06** from this repo: `sources` → digest `2b95acc54f57`, 15 sites, 13 layers
+(`:` flows 213,133 B + lua 201,207 B, matching `dist/_common.lua`); a run reused Chrome on 9334, opened
+backend session `ses_003cc7556001…`, resolved `https://www.amazon.com/` → site `amazon` with
+`stored-lua:amazon`; after a nav `ls` reported `site 11st` / `stored-lua:11st` — the session follows the
+page. `check:flows` 121 and `test:playground` 50 unchanged.
+
+### 6.1 One delivery gap you must close yourself, and one that is now fixed
+
+1. **`_common/rpc/` is not read.** Only the five paths above are. Production flows declare **26
+   modules, 14 of them from `_common/rpc`**, and those arrive as the app package's `luaModules`. So an
+   RPC flow needs `npm run build:rpc` +
+   `node tools/rpc-package.mjs push . --app=<app> --modules-only` **before** the harness run, or every
+   runtime tool answers as if its module were missing (§9's "authored flows carry module NAMES" trap).
+   `npm run build:bundle` prints the 14 names on every run so the list cannot drift silently.
+2. ~~`<site>/sitemap.md` is not delivered~~ — **fixed 2026-08-06, in two places.** `loadWorkspace`
+   now reads each `<domain>/sitemap.md` and `storeEnvelopes` seeds a C1-shaped record per site so
+   core's site refresh takes its cached-record branch. **That alone was not enough**:
+   `writeWorkspaceStores` replaced the store with a hard-coded `sites: {}` and skipped the write
+   entirely when only a sitemap had changed, so the producer's records were discarded — the classic
+   "a field the script COMPUTES and nothing publishes is a field it did not compute". Both are fixed
+   and pinned by tests (`scripts/workspace.test.ts`, `scripts/browser-session.test.ts`, 104 pass).
+
+   Measured on the live profile, before → after:
+
+   | | before | after |
+   |---|---|---|
+   | `sites.bluemoonsoft.sitemapMd` | 0 | **1903** |
+   | `currentSite.sitemapMd` | 0 | **1903** |
+   | `currentSitemap` | 0 | **1903** |
+   | `index.indexMd` | 1507 | 1507 |
+
+   (1903 is the JS string length; the file is 2271 **bytes** — Korean text, so the two differ. Say
+   which one you mean.)
+
+   **The sitemap chain is now GREEN, in three fixes — and the flow fails one node LATER, on a
+   different bug.** Full RED → GREEN, all measured on the live profile:
+
+   | fix | where | evidence |
+   |---|---|---|
+   | read + seed the records | `scripts/workspace.mjs` | `sources` reports `:bluemoonsoft sitemap: 2271` |
+   | stop discarding them | `scripts/browser-session.mjs` | store `currentSitemap` 0 → **1903** |
+   | stop forwarding the op | `src/ops/table.ts` + `src/offscreen/session-worker.ts` | `sitemap_source` `"none"` → **`"site"`**, 2 real hits |
+
+   The third one is the interesting one, and the first two were not enough on their own. **`LOCAL_OPS`
+   (`memory.*`, `sitemap.search_site`) were being forwarded out of the only realm that can answer
+   them.** The session worker installs core's state storage and rehydrates
+   (`session-worker.ts` `setAXSDKStateStorage` + `rehydratePersistedStores`);
+   `background/service-worker.ts` does **neither** — zero references. But the worker forwarded *every*
+   op name from `createRpcOpTable()`, so a local op left the realm that had the data for the one that
+   never will. Its own file comment had the rule right all along — *"every **wire** op is replaced"* —
+   and the loop was wider than the sentence. `forwardedOpNames(extra)` in `ops/table.ts` is now that
+   sentence as code, and a local op named as an `extra` is still local.
+
+   Diagnosis note worth keeping: **the field that told us was one the module computed and the flow
+   never published.** `sitemap_source` existed in `72_rpc_sitemap.lua` purely as evidence for its own
+   refusal, and `sitemap_search.output` did not carry it — so `site_sitemap_missing` could not be told
+   apart from "the sitemap loaded and matched nothing". Publishing it answered the question in one
+   turn. And one hypothesis was **refuted** by measurement: restarting only the service worker
+   (CDP `Target.closeTarget` on its target, which respawns) changed nothing, which is what ruled out a
+   rehydration race and pointed at routing instead.
+
+   **Downstream, now fixed too — but the live proof is still open.** `go_page` answered
+   `navigation_failed` because the resolved target was `/front/main#modal/docuray`, a **fragment on the
+   page already open**. Two measurements, both mine, both on the live profile:
+
+   - cross-origin with a fragment: `nav.navigate` succeeds (returns nil — and a Lua key with a nil
+     value does not exist, so an ABSENT `nav_ret` means success), twenty consecutive
+     `dom.get_location_href` reads all carry `#modal/docuray`, then `wait_for_navigation` answers
+     `{ok:true, url:".../front/main"}` and the fragment is **gone** — bluemoonsoft's router consumes
+     its own hash. So the arrival read taken AFTER the wait is worthless.
+   - fragment-only: `nav.navigate` answers **`{ok:false, reason:"window_not_available"}`** and nothing
+     moves. `navigate_page` ignored that return value entirely.
+
+   `66_rpc_navigate.lua` now splits the fragment: a fragment-only target never waits, consults
+   `nav.navigate`'s return, decides from ONE immediate read, and answers `same_document_refused` rather
+   than `navigation_failed` when the runtime will not do it — the two mean different things and only one
+   of them blames the browser. `wrong_landing` now classifies against the document part of the target,
+   so a site consuming its hash is not a wrong landing. For a fragmentless target the behaviour is
+   byte-identical (14 pre-existing tests untouched).
+
+   **[OPEN] the live fragment behaviour is UNRESOLVED.** `window_not_available` is core's
+   *default*-capabilities shape, which is what you see when an op falls through to core instead of the
+   CDP table — and `npm run cdp -- eval` goes through `axsdk-devtools-run`, not a flow tool, so it may
+   not carry the flow's CDP page binding. Do not conclude the runtime cannot navigate a fragment until
+   it has been measured from inside a flow tool.
+
+   **[OPEN] and separate: our nav waits are unbounded live.** `dom-port.ts` takes a **single spec
+   table**, but every `_common/rpc` caller writes
+   `nav.wait_for_navigation(from, { timeout = 12000, interval = 250 })` — two positional args. The
+   second is silently dropped, so the wait uses the port default (30000 ms / 100 ms). Against a
+   `deadlineMs` capped at 120000 that is a real budget leak, and it is invisible from the Lua side.
+
+Also: `ls`/`run`/`call` reach the **stored-Lua durable commands** (`_common/scripts` + site adapters) —
+the second storefront stack of §13, which no flow tool declares. Production behaviour is **`send`**,
+through the flow engine. Don't read a green `run AX_search_product` as evidence about the shipped path.
+
+### 6.2 Why the durable stack had to go (the incompatibility that forced §6.4)
+
+`npm run test:commerce:live:all` drives `AX_search_store_product` — the durable stack — and on the CDP
+extension it fails for **all ten** storefronts at **13/35**, with one identical error per site. The
+cause is a class, not a bug: **the CDP runtime raises where the in-page runtime returned nil.** Two
+found so far, each blocking the next:
+
+| capability | in-page | CDP |
+|---|---|---|
+| `nav.clear_beforeunload` | present, works | **on the `nav` table and RAISES** — the op only existed because the in-page build shipped a MAIN-world script to null `window.onbeforeunload`, and the CDP build injects no MAIN world |
+| `dom.get_attr` on a missing element | nil | **raises `no_element`** |
+
+The first is fixed: `B.clear_beforeunload()` in `00_base.lua` calls it and survives the raise, and all
+four call sites (`50_commerce_core` ×1, `60_storefront` ×3) go through it. **A capability that EXISTS is
+not a capability that WORKS** — every one of those sites guarded with
+`type(nav.clear_beforeunload) == "function"`, the single check that cannot tell the two apart. Pinned by
+`tools/lua/nav-capability.test.mjs`. The sweep then moved on to `dom.get_attr`, which is the same class.
+
+**Do not harden the rest of it without deciding it is worth hardening.** `61_rpc_storefront` already
+carries exactly this tolerance (§13, "Tolerance must not fabricate"), because the RPC path was written
+for this runtime. The durable stack was written for the in-page one and **no flow tool declares it** —
+its only callers are `ax run` and this sweep. The useful change is probably to make
+`commerce-all-sites.mjs` exercise the shipped path (`send`) instead of `run`, not to port a second
+storefront implementation onto a runtime it was never written for. **That is a scope call, not a fix.**
+
+What the shipped path actually does, measured the same afternoon:
+`npm run test:commerce:live:discovery` → **9/14**, with live 11st returning **6 grounded product
+options**, provenance naming real sites, the identity gate holding before ranking, discovery unable to
+mutate a cart, and `취소` leaving every cart untouched. The five failures are the known-honest ones §13
+records: the scenario picks option 1, that option carries no model name, and the system correctly
+refuses to compare it. **9/14 is the correct number here, not a regression.**
+
+### 6.3 Live sweep: what a paused flow does to a runner (2026-08-15)
+
+Three defects, found by actually running `npm run test:commerce:live:all` rather than trusting it.
+
+1. **The harness restarted the session host on EVERY call.** Measured: three consecutive
+   `npm run cdp -- status` calls on one tab group produced three different backend sessions and one
+   `not opened`. Cause was mine — the seeded-record comparison in `writeWorkspaceStores` compared our
+   set against the WHOLE stored map, and the running session writes its own records via `setSite`, so
+   every call read as changed, rewrote, and sent `restart-host`. **That single bug produced most of the
+   afternoon's "flaky" symptoms**: `nav.navigate` answering `window_not_available`, `dom.get_text("body")`
+   returning 0 bytes on a page that had just read 62 cards, and sessions drifting to the default start
+   page. Now only what the workspace owns is compared (the sitemap of each domain it seeds); three calls,
+   one session.
+2. **A batch may ask for at most three stores.** The comparison frontier is three (§4), and the sweep
+   grouped five per query wording. It never answered and died on its own bound — the flow was only ever
+   going to compare three, so no per-site answer was coming for the other two.
+3. **A flow that PAUSES has answered, and `send` did not know that.** The comparison loop has no model
+   node by design: `present_offers` renders a window, pauses, and reads the next reply. So its assistant
+   message never gets `time.completed`, and the driver waited out the whole bound on a turn that had run
+   19 tool parts to completion and ended `{"next":"ask","question":"총 5개 중 1-5번 …"}`. `send` now
+   settles on a paused question and returns it as the reply text — only on a pause, never on an ordinary
+   completed tool, or every multi-step turn would be cut off at its first step.
+
+With those three fixed the sweep gets real answers: **etsy passes end to end through the shipped path**
+(`outcome=candidates`, `USD 39.99`), and walmart reports the classified `rpc_unavailable`.
+
+**[OPEN] two things remain in `commerce-all-sites.mjs`:**
+
+- **Per-site attribution reads the wrong level.** amazon, ebay and aliexpress come back `unsearched`
+  while their tool traces plainly show `shopping_search_one_store` and `shopping_collect_store_page`
+  three times over. The normalizer WRAPS the store answer, so the store's own reply is at
+  `store_result.store_result` (§13 records this exact trap for the discovery fan-out). The runner reads
+  one level too high, and a classified failure like walmart's then also fails its own
+  "returns a classified result" check.
+- **The Korean batch still exceeds its bound.** `max(300000, sites * 120000)` is a guess, not a
+  measurement. Time one three-store Korean turn end to end and set the bound from that number.
+
+### 6.4 The durable layer is gone, and two of its facts were wrong (2026-08-15)
+
+`_common/scripts` is now exactly **12 RPC modules + 3 explicitly-labelled dev shims**
+(`20_echo`, `30_resolve_zip`, `40_read_page` — thin commands over `B.*` in `00_base`, kept only because
+`npm run cdp -- page` calls `AX_read_page` from the SDK harness and `ax` calls `AX_resolve_zip`; each
+file states its own removal condition). `60_storefront.lua` and all nine durable adapter/command files
+are deleted; `<site>/scripts/` holds config-only declarations (`AX_SITE_CONFIGS[CONFIG.site] = CONFIG`)
+that the generator loads without any `_common` module.
+
+**The safety property held**: `_common/rpc/62_rpc_sites.lua` is byte-identical, sha256
+`a491abd46e46320baff382df8fa47d7fad70f7969e3a5ae422463a4c144c19bd` / 28,051 B, against a baseline hash
+captured before the work started. The data moved; it was not rewritten.
+
+**Contract coverage went UP, not down** — that was the point of re-basing before deleting:
+`test:commerce:sites` 17 tests/99 asserts → **19/114**, `test:commerce` 24/76 → **25/81**,
+`test:lua` 471 → **493**, `check:flows` 121 → **122**, `dead:lua` alive 39 · dead 0.
+
+**Two production bugs the migration exposed, both fixed:**
+
+1. **`result_url_from_root` was never ported.** The durable reader consumed it; the RPC reader asked for
+   a url only when `result_url_selector` was set. aliexpress declares the flag and neither of the other
+   two keys, so every row arrived with no url and no id and was dropped — **one of ten stores returned
+   zero candidates on the shipped path** while the durable tests stayed green against the other
+   implementation. `fields_for` now asks for the root `href`, riding the same single batched `query_all`.
+2. **The guarded cart confirmed an unrelated cart.** `cart_contains(config, product_id)` never used
+   `product_id` on its first branch, and amazon's generated `confirmation_selector` had grown
+   `#sc-active-cart, .sc-list-item[data-asin]` — cart STRUCTURE, true of any rendered cart. So
+   `added = true` could be reported for a cart holding something else. The id match now comes first
+   (including `[data-asin]`, which is where amazon states it most precisely), and **on the cart page the
+   wide selector is not evidence** — only the narrow `confirmation_text_selectors`, which a site shows
+   for an add that just happened. A first attempt that required the id unconditionally broke five tests:
+   a site may navigate to the cart AND show a real confirmation, so the wide/narrow split is the rule.
+
+**Return terms come from the card's words, because eBay has no selector for them.** Measured live on
+eBay search (ko locale): cards state title, condition, price, buy format, shipping and seller feedback
+and **nothing** about returns — `[class*=return]` matched **0** elements on the page and so did the old
+`.s-item__free-returns`. The deleted durable reader never used a selector either; it scanned the card's
+lowered text for `free returns` / `무료 반품`. That derivation is the capability, so it moved into
+`61_rpc_storefront`. Declaring a selector that matches nothing would have made the field silently absent
+forever; defaulting it would state a policy the store never offered.
+
+**[OPEN] eBay has no cart configuration at all.** Not a missing approx-price fallback — the generated
+`RPC_SITES.ebay` carries no `cart_url`, no `add_selectors`, no `confirmation_selector`, no product-page
+price selectors. So `AX_RPC_CART` cannot act on eBay and the one remaining `test:commerce` assertion
+(localized `.x-price-approx` satisfying strict revalidation) fails. It **fails safe** — the guard refuses
+rather than adds. Closing it needs a live cart survey on eBay (add button, cart url, confirmation
+selectors, product-page price incl. the localized alternate), and **a selector is only ever validated
+against the live page** — do not fill these in from memory. Blocked today by the harness's dom port
+dropping its binding mid-session (`dom.get_text("body")` returning 0 bytes on a page that had just read
+62 cards).
+
+### 6.5 M1: shipping the workspace inside the package (`build:bundle`)
+
+`npm run build:bundle` writes `dist/workspace-bundle.json` — `storeEnvelopes()` output verbatim under
+`{ version: 1, digest, generatedAt, stores }`. The extension parses it at install/startup, writes the
+four envelopes and forces the stored sources; a missing artifact is a no-op, so a build without it
+behaves exactly as today. `npm run check:bundle` fails on real drift and **never** on `generatedAt`
+alone — a permanently red check is one nobody reads.
+
+Measured (2026-08-06): digest `2b95acc54f57`, 15 sites declared / 12 with layers,
+`axsdk:sites` 5.3 KiB + `axsdk:flows` 222.7 KiB + `axsdk:lua` 323.0 KiB + `axsdk:widgets` 0.0 KiB =
+**551.0 KiB**; largest single layer `flows[:]` 208.1 KiB = **81.3% of the 256 KiB per-layer ceiling**.
+That last number is the one to watch — the ceiling is per layer, not per bundle.
+
+**To ship it, the artifact has to reach the extension package**, which nothing does automatically:
+`copy-static.mjs` copies `workspace-bundle.json` from the CDP **package root**, and we write it into
+`SITES/dist/`. Use the `--out` flag rather than a manual copy:
+
+```bash
+npm run build:bundle -- --out=../axsdk-sdk-js/packages/axsdk-extension-cdp/workspace-bundle.json
+cd ../axsdk-sdk-js/packages/axsdk-extension-cdp && bun run build   # copy-static picks it up
+```
+
+The bundle carries **no `_common/rpc/` module** (gap 1). Until those ship in the package too, a
+bundled build is not yet the no-remote-fetch build P0-1 requires — it is the delivery half of it.
+
+**Site flows are a one-shot.** Core sends a site's client flows once after that site becomes current.
+Editing `<domain>/flows.yaml` and re-running re-stores it, but an open session will not resend until the
+domain changes — `reset` then a fresh run is the reliable way.
+
+### 6.6 Legacy: `tools/ax.mjs` (`ax`) — the in-page extension
+
+`npm run ax -- <args>`, `npm run chrome:legacy`, `npm run repl:legacy`. Built on
+`tools/harness/cdp.mjs`, which **13 files still import**: `ax.mjs`, `playground.mjs`,
+`measure-rpc.mjs`, `probe-client-modules.mjs`, `playground/{cli,runtime,store}.mjs`, and the scenario
+runners `checkout` · `commerce-all-sites` · `crosssite` · `memory` · `multi-store-total-cost` ·
+`shopping`. `test:playground` runs `tools/harness/cdp.test.mjs`. **`test:commerce:live:*` therefore
+still exercises the legacy extension** — port those to `npm run cdp -- send` before treating them as
+evidence about the shipped build.
 
 ```bash
 node tools/ax.mjs chrome [site|url]    # ensure dev Chrome is up (launch detached if down)
@@ -234,7 +562,8 @@ node tools/ax.mjs page                 # current url + quick AX_read_page situat
 node tools/ax.mjs ls | status          # lua.listCommands() / lua.status()
 node tools/ax.mjs repl                 # interactive loop (".help" for meta-commands)
 ```
-npm aliases: `npm run chrome`, `npm run repl`, `npm run ax -- <args>`.
+npm aliases: `npm run ax -- <args>`, `npm run chrome:legacy`, `npm run repl:legacy`.
+(Unsuffixed `npm run chrome` / `npm run repl` now go to the CDP harness — §6.)
 
 **Typical loop (edit Lua → see it live):**
 ```bash
@@ -262,8 +591,11 @@ Flags: `--port`, `--cdp`, `--chrome`, `--profile`, `--extension-id`, `--extensio
 substr>` (pick a tab), `--site=<slug>`, `--store` (build + store-inject before run), `--no-build`,
 `--timeout=<ms>`, `--no-launch`.
 
-> The `ax` CLI is the canonical shared-plumbing path — the last runner that kept its own copy of the
-> CDP primitives went with the durable Thumbtack layer.
+> Within the legacy target, the `ax` CLI is the canonical shared-plumbing path — the last runner that
+> kept its own copy of the CDP primitives went with the durable Thumbtack layer. `ax` also owns
+> `reload-ext` (required for a flow GRAPH change, §9), `syncSitesIndex`, `<site>/sitemap.md` delivery,
+> and the `chrome.storage` reclamation that keeps a long-lived profile under quota. **None of those
+> exist in the CDP harness yet** — §6.1 lists what remains.
 
 ---
 
@@ -280,23 +612,32 @@ addresses) → Census `onelineaddress` (full street only) → error. No API key 
 
 ## 8. Testing & verification
 
-**Canonical method — test local Lua + flows against the live extension (`ax`, store-based):**
+**Canonical method — test local Lua + flows against the shipping CDP extension:**
 
-1. Edit `_common/scripts/*` / `<site>/scripts/*` (Lua) and/or `_common/flows.yaml` / `<site>/flows.yaml`.
-2. `node tools/ax.mjs sync <site>` — builds, injects both stores, turns remote OFF, reloads, and prints
-   the verdict: `fromStore`/`fromRemote` (Lua) + `appliedClientFlows` (flows). Expect **`fromRemote: 0`**
-   and **`clientFlows {remoteSites:false, stored:true}`** — proof the live extension runs YOUR working
-   copy, not GitHub. (`ax open <site>` first if no tab is open.)
-3. Exercise commands: `ax run AX_<cmd> '{json}'` (durable) · `ax call …` (single turn) · `ax page`
-   (situational read) · `ax ls` (source per command). After more edits, re-run `ax sync`, or use
-   `ax run --store AX_<cmd> '{json}'` to build+sync inline.
-4. Test the FLOW engine end to end (uses the stored flows + Lua): drive a real user turn and read the
-   result — `AXSDK.sendMessage("<text>")`, then poll `AXSDK.getChatStore().getState()` (assistant output
-   is the last message's `parts[]`: tool parts carry `state.output`; the terminal reply is a
-   `type:"text"` part — messages have no `role`). Run from the AXSDK Assistant DevTools console.
-5. **No push while iterating** — `ax sync` persists in `chrome.storage` and survives the flow's
-   navigations. Push to `origin/main` only to ship (the deployed extension fetches from GitHub when
-   remote is ON).
+1. Edit `_common/rpc/*` · `_common/scripts/*` · `<site>/scripts/*` (Lua) and/or
+   `_common/flows.yaml` / `<site>/flows.yaml`.
+2. `npm run cdp -- sources` — no browser. Confirms the digest, the site count and every layer this
+   workspace would store. Cheapest way to catch "my file is not in the bundle".
+3. **If the change touches an RPC module** (`_common/rpc/*`, i.e. anything a flowTool names in
+   `modules:`): `npm run build:rpc` then
+   `node tools/rpc-package.mjs push . --app=<app> --modules-only`. The harness does **not** deliver
+   `_common/rpc/` — §6.1. Skipping this makes a delivery failure look like a selector failure.
+4. `npm run cdp` — stores the layers, forces the stored sources, brings a session up. Re-running after
+   an edit does exactly the work the edit needs.
+5. Exercise it: `npm run cdp -- ls` (which script owns each command — the answer to *"is my edit the
+   code that is running"*) · `run` / `call` / `eval` / `page`. `stored-lua:` is your `_common`,
+   `stored-lua:<domain>` is that site's; anything else came from somewhere you did not edit.
+6. **Test the FLOW engine end to end** with `npm run cdp -- send '<text>'`, which prints the reply.
+   This is the only step that exercises the shipped path — `run`/`call` reach the durable command
+   layer (§6.1).
+7. Editing `<domain>/flows.yaml` on an open session needs `npm run cdp -- reset` then a fresh run:
+   site client flows are sent once per domain becoming current.
+8. **No push while iterating** — the harness persists in `chrome.storage`. Push to `origin/main` only
+   to ship (the deployed extension fetches from GitHub when remote is ON).
+
+> **Legacy in-page path** (`ax sync <site>` → `ax run/call/page/ls` → `AXSDK.sendMessage`) is §6.6.
+> Use it only for the scenario runners that have not been ported, and don't quote its results as
+> evidence about the shipped build.
 
 Other tools:
 

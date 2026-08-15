@@ -92,7 +92,7 @@ end
 ---
 --- Refusals are separate answers because they call for different things: `missing_link` is the caller's
 --- mistake, `offsite_link` would silently leave the flow's site, `navigation_failed` means the browser
---- never moved, `same_document_refused` means the runtime would not perform a fragment-only move, and
+--- never moved, a fragment-only target is already open so it is not a move at all, and
 --- `wrong_landing` means it moved somewhere else — a login bounce or a canonical rewrite — and names
 --- where, because the next node has to decide what to do about it.
 function N.navigate_page(args)
@@ -126,20 +126,21 @@ function N.navigate_page(args)
   -- consumes `#modal/...` and rewrites the URL without it, so a read taken after a wait shows the old URL
   -- and was reported as `navigation_failed` — a false negative that asserts "the browser never moved".
   -- Arrival is decided from one read taken immediately; the fragment being gone LATER is normal.
+  -- A fragment-only target names a section of the document we already have, so we are already there.
+  --
+  -- Measured live on bluemoonsoft: `nav.navigate` to such a target succeeds and does NOT move the hash
+  -- (six consecutive reads show the un-fragmented URL); no anchor for the fragment exists on the page
+  -- (`a[href*="#modal/docuray"]` matched 0, and the only docuray link leaves the site); and reaching the
+  -- same URL as a real cross-document navigation lands with the hash consumed on a body that already
+  -- contains the section's own words. Refusing told the caller a page could not be opened while the page
+  -- was open and readable — so the reader is what should decide, and firing a move the runtime will not
+  -- perform only costs a round trip and muddies the trace.
+  --
+  -- `navigated = "already_open"` keeps it distinguishable from a real load, and the fragment is reported
+  -- so a caller that genuinely needs that section can say the runtime cannot reach it.
   if fragment and same_page((split_fragment(here)), target_base) then
-    local fired = nav.navigate(target)
-    if type(fired) == "table" and fired.ok == false then
-      return { next = "error", error = "same_document_refused", reason = fired.reason,
-               href = here, target = target }
-    end
-    local read_ok, seen = pcall(dom.get_location_href)
-    if not read_ok or type(seen) ~= "string" or not seen:find("#" .. fragment, 1, true) then
-      -- NOT `navigation_failed` ("the browser never moved") and NOT `go` (a false positive would tell the
-      -- user a page opened that never did): the runtime would not perform the same-document move.
-      return { next = "error", error = "same_document_refused", reason = "fragment_not_applied",
-               href = read_ok and seen or here, target = target }
-    end
-    return { next = "go", href = seen, navigated = "within_document" }
+    return { next = "go", href = here, target = target, fragment = fragment,
+             navigated = "already_open" }
   end
 
   local fired = nav.navigate(target)

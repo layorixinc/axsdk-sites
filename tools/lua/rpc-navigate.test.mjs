@@ -117,54 +117,47 @@ test('an off-site link is refused: this tool navigates within the site', () => {
   assert.deepEqual(navigated(page), []);
 });
 
-test('a fragment-only target is a same-document move, not a wait for a document', () => {
-  // Measured live (bluemoonsoft): `nav.navigate` to `.../front/main#modal/docuray` from `.../front/main`
-  // leaves the href readable WITH the fragment immediately, and the site's own router then consumes the
-  // hash and rewrites the URL without it. A new document never arrives, so `wait_for_navigation` has
-  // nothing to wait for — and a read taken after it shows the fragment gone, which the old code reported
-  // as `navigation_failed`: an answer whose own doc comment means "the browser never moved".
+test('a fragment-only target does not navigate at all: the document is already open', () => {
+  // Three live measurements settled this, in order. `nav.navigate` to `.../front/main#modal/docuray` from
+  // `.../front/main` succeeds and does NOT move the hash — six consecutive reads show the un-fragmented
+  // URL. No anchor for the fragment exists on the page (`a[href*="#modal/docuray"]` matched 0, and the
+  // only docuray link leaves the site), so there is nothing to click either. And reaching the same URL as
+  // a real cross-document navigation lands with the hash consumed on a body that already contains that
+  // section's own words.
+  //
+  // So the section lives in the document we have. Firing a move the runtime will not perform costs a
+  // round trip and muddies the trace, and reporting an error tells the caller a page could not be opened
+  // while it is open and readable.
   const page = makePage({ href: SITE, dom: {}, afterNavigate: {} });
   const result = go(page, { link: '/front/main#modal/docuray' });
 
   assert.equal(result.next, 'go');
-  assert.equal(result.navigated, 'within_document');
-  assert.equal(result.href, 'http://bluemoonsoft.com/front/main#modal/docuray');
-  assert.deepEqual(navigated(page), ['http://bluemoonsoft.com/front/main#modal/docuray']);
+  assert.equal(result.navigated, 'already_open');
+  assert.equal(result.href, SITE, 'where we actually are, fragment and all not applied');
+  assert.equal(result.fragment, 'modal/docuray', 'so a caller needing that section can say so');
+  assert.deepEqual(navigated(page), [], 'nothing fired');
 });
 
-test('the same-document arrival is decided before any wait could destroy the evidence', () => {
-  // The site consumes its own hash a moment after applying it. One read of `here`, one read right after
-  // the navigation — a third href read means a wait ran first, and by then the fragment is gone.
+test('the answer costs one read and no wait', () => {
+  // No new document is coming, so there is nothing to wait for — and a wait would only spend the budget
+  // that the tools with the most round trips are already short of.
   const page = makePage({ href: SITE, dom: {}, afterNavigate: {} });
   const result = go(page, { link: '/front/main#modal/docuray' });
 
   assert.equal(result.next, 'go');
-  assert.equal(hrefReads(page), 2, 'here + one immediate arrival read, no wait polls');
+  assert.equal(hrefReads(page), 1, 'just `here`');
 });
 
-test('a fragment the runtime never applies is refused by name, not called go', () => {
-  // A false positive here tells the user a page opened that never did — worse than the failure it
-  // replaces. And `navigation_failed` would be wrong too: that answer means "the browser never moved",
-  // where this one means "the runtime would not perform a same-document move".
-  const page = makePage({ href: SITE, dom: {}, afterNavigate: {}, navigationFails: true });
-  const result = go(page, { link: '/front/main#modal/docuray' });
-
-  assert.equal(result.next, 'error');
-  assert.equal(result.error, 'same_document_refused');
-  assert.equal(result.reason, 'fragment_not_applied');
-});
-
-test('a runtime that refuses the move is answered from its refusal, not second-guessed', () => {
-  // Measured live: `nav.navigate` can answer `{ok=false, reason="window_not_available"}` with the href
-  // unchanged. The old code ignored the return value entirely, which is how a refusal became an
-  // arrival question in the first place.
+test('a runtime that would refuse the move is never asked', () => {
+  // The refusal shapes that used to drive this branch — `{ok=false, reason="window_not_available"}` and a
+  // fragment the runtime never applies — cannot arise when nothing is fired. `window_not_available` in
+  // particular turned out to be a symptom of the harness restarting the session host, not of the runtime.
   const page = makePage({ href: SITE, dom: {}, afterNavigate: {}, navigateRefusal: 'window_not_available' });
   const result = go(page, { link: '/front/main#modal/docuray' });
 
-  assert.equal(result.next, 'error');
-  assert.equal(result.error, 'same_document_refused');
-  assert.equal(result.reason, 'window_not_available');
-  assert.equal(hrefReads(page), 1, 'a refusal is an answer; nothing to poll for');
+  assert.equal(result.next, 'go');
+  assert.equal(result.navigated, 'already_open');
+  assert.deepEqual(navigated(page), []);
 });
 
 test('a refused cross-page navigation reports the refusal without waiting for it', () => {
@@ -248,4 +241,54 @@ test('the published site list is the one the site data declares', () => {
     assert.equal(sites.call('__home', slug), expected, slug);
   }
   sites.close();
+});
+
+// ── a fragment on the document already open IS arrival ───────────────────────
+//
+// Measured live on bluemoonsoft, and it settles what `same_document_refused` should have been:
+//   - `nav.navigate` to a fragment-only target succeeds (returns nil) and does NOT move the hash — six
+//     consecutive reads show the un-fragmented URL.
+//   - No anchor for that fragment exists on the page: `a[href*="#modal/docuray"]` matched 0, and the only
+//     docuray link points at a different site. So there is nothing to click either.
+//   - Reaching `/front/main#modal/docuray` as a real cross-document navigation lands on `/front/main`
+//     with the hash consumed and a body that already contains "docuray" and "Office DRM".
+//
+// The content is in the document we are on. Refusing tells the caller a page could not be opened when the
+// page is open and readable; the honest answer is that this runtime is already as close as it gets, so the
+// reader should read. `navigated` distinguishes it, so a caller that genuinely needs the hash can tell.
+test('a fragment on the page already open reports arrival, not a refusal', () => {
+  const page = makePage({ href: 'https://shop.test/front/main' });
+  installRpcStub(lua, page);
+
+  const value = lua.call('AX_RPC_NAV.navigate_page', { link: '/front/main#modal/docuray' });
+
+  assert.equal(value.next, 'go');
+  assert.equal(value.navigated, 'already_open');
+  assert.equal(value.href, 'https://shop.test/front/main');
+  assert.equal(value.fragment, 'modal/docuray', 'the caller learns which section was asked for');
+});
+
+test('the fragment move is not even attempted when the document is already open', () => {
+  // Firing a navigation the runtime will not perform costs a round trip and can only confuse the trace.
+  const page = makePage({ href: 'https://shop.test/front/main' });
+  installRpcStub(lua, page);
+
+  lua.call('AX_RPC_NAV.navigate_page', { link: '/front/main#modal/docuray' });
+
+  assert.equal(page.ops.filter((entry) => entry.op === 'nav.navigate').length, 0);
+});
+
+test('a fragment on a DIFFERENT path is still a real navigation', () => {
+  const page = makePage({
+    href: 'https://shop.test/front/main',
+    afterNavigate: {},
+    landsAt: 'https://shop.test/front/other#part',
+  });
+  installRpcStub(lua, page);
+
+  const value = lua.call('AX_RPC_NAV.navigate_page', { link: '/front/other#part' });
+
+  assert.equal(page.ops.filter((entry) => entry.op === 'nav.navigate').length, 1);
+  assert.equal(value.next, 'go');
+  assert.notEqual(value.navigated, 'already_open');
 });

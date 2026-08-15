@@ -370,30 +370,43 @@ page. `check:flows` 121 and `test:playground` 50 unchanged.
      **That reading was WRONG and is retired** — it was a symptom of the harness restarting the session
      host on every call (§6.3), not of the runtime. On a stable session the same call returns nil.
 
-   `66_rpc_navigate.lua` now splits the fragment: a fragment-only target never waits, consults
-   `nav.navigate`'s return, decides from ONE immediate read, and answers `same_document_refused` rather
-   than `navigation_failed` when the runtime will not do it — the two mean different things and only one
-   of them blames the browser. `wrong_landing` now classifies against the document part of the target,
-   so a site consuming its hash is not a wrong landing. For a fragmentless target the behaviour is
-   byte-identical (14 pre-existing tests untouched).
+   `66_rpc_navigate.lua` splits the fragment out and answers it without navigating — the three
+   measurements below are why, and each overturned the previous answer. `wrong_landing` classifies against
+   the document part of the target, so a site consuming its own hash is not a wrong landing. For a
+   fragmentless target the behaviour is byte-identical (14 pre-existing tests untouched).
 
-   **RESOLVED 2026-08-15, on a stable session.** `nav.navigate` to a fragment-only target **succeeds
-   and does nothing**: it returns nil and six consecutive `dom.get_location_href` reads all show the
-   un-fragmented URL. So the runtime accepts the call and no-ops — `Page.navigate` semantics for a URL
-   differing only by fragment. The classification is therefore keyed on the READ, not the return, and a
-   live turn now ends `{"next":"error","error":"same_document_refused","page_href":".../front/main"}`
-   instead of the misleading `navigation_failed`. Honest, and the user still cannot reach that page.
+   **CLOSED 2026-08-15, in three measurements that each overturned the previous answer.** Worth reading
+   in order, because the first two both looked conclusive:
 
-   **[OPEN] a fragment route is unreachable through `nav.*` at all.** bluemoonsoft's sitemap names
-   `/front/main#modal/docuray` and the page renders that modal from its own router, so reaching it needs
-   a CLICK on the link the sitemap named, not a navigation. `66_rpc_navigate` is a navigator; deciding
-   where that click belongs is a design question, not a measurement.
+   1. On a stable session `nav.navigate` to a fragment-only target **succeeds and does nothing** — returns
+      nil, and six consecutive `dom.get_location_href` reads show the un-fragmented URL. (The earlier
+      `window_not_available` was the harness restarting the session host, §6.3.) So the answer was keyed on
+      the read and reported `same_document_refused`.
+   2. **There is nothing to click either.** `a[href*="#modal/docuray"]` matched **0** elements on the page,
+      and the only `docuray` link points at `docuray.com` — a different site. So the "reach it with a
+      click" plan had no target.
+   3. **The content is already in the open document.** Reaching `/front/main#modal/docuray` as a real
+      cross-document navigation lands on `/front/main` with the hash consumed, on a body of 6,594 bytes
+      that already contains "docuray" and "Office DRM".
 
-   **[OPEN] and separate: our nav waits are unbounded live.** `dom-port.ts` takes a **single spec
-   table**, but every `_common/rpc` caller writes
-   `nav.wait_for_navigation(from, { timeout = 12000, interval = 250 })` — two positional args. The
-   second is silently dropped, so the wait uses the port default (30000 ms / 100 ms). Against a
-   `deadlineMs` capped at 120000 that is a real budget leak, and it is invisible from the Lua side.
+   So a fragment-only target names a SECTION of the document we have, and the honest answer is arrival:
+   `next = "go"` with `navigated = "already_open"` and the fragment reported, firing nothing. Refusing told
+   the caller a page could not be opened while it was open and readable, and firing a move the runtime will
+   not perform only spent a round trip. Live: `go_page → {"next":"go","page_href":".../front/main"}` and the
+   user gets an answer instead of "페이지를 찾지 못했어요". A caller that genuinely needs the hash applied can
+   say so from `navigated`.
+
+   **[NOTE] the reply is still generic** ("BlueMoonSoft 페이지로 이동했습니다") rather than presenting the
+   DocuRay details that are on the page. That is flow/prompt quality, not navigation, and it was not
+   investigated.
+
+   **[CLOSED] our nav waits were unbounded live.** `dom-port.ts` takes a **single spec table**, and every
+   `_common/rpc` caller wrote `nav.wait_for_navigation(from, { timeout = ..., interval = ... })` — the
+   second argument was dropped and every wait ran on the port defaults of 30000 ms / 100 ms. Fixed in all
+   ten callers. It had stayed invisible because `tools/lua/rpc-stub.mjs` accepted `(from, opts)` and
+   honoured them: **the fixture was more permissive than the capability it stood in for**, which is the one
+   way this class survives a green suite. The stub now refuses a second argument, which turned 102 tests red
+   before the migration.
 
 Also: `ls`/`run`/`call` reach the **stored-Lua durable commands** (`_common/scripts` + site adapters) —
 the second storefront stack of §13, which no flow tool declares. Production behaviour is **`send`**,

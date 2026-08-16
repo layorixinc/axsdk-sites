@@ -65,6 +65,13 @@ planner:
     action:
     - continue_current — an active flow is awaiting the user's answer (an active flow / active prompt exists) and the latest message is that answer. Put the active flow first so it resumes without losing accumulated state. A value-providing answer is NOT saved merely because it is reusable. If the answer also contains a separate explicit memory clause, queue memory after the active intent and preserve the shared value in both relevant requestText segments. EXCEPTION: if the latest message is a clear farewell / stop with no further task ("그만할게", "됐어 그만", "고마워요", "종료"), use replace_current with intent=end_conversation even while a flow is active; likewise if it is a clear CHECKOUT request (체크아웃/결제해줘/주문 진행/장바구니 결제 — proceeding to payment, NOT answering the current question), use replace_current with intent=checkout even while a flow is active.
     - replace_current — a NEW request. Find EVERY distinct task and emit ONE intents entry per task, IN THE ORDER stated. Per entry set `intent`, `segments` (the exact phrase(s) for that task), and `state.requestText` (that task's portion of the message — never ANOTHER task's text, but INCLUDE every detail THIS task needs, e.g. the name/email/phone/ZIP given for a service quote). Different tasks => multiple entries (they run in sequence). The SAME intent with multiple items is ONE entry: "아이폰이랑 계란 사줘" is one shopping_single_site intent; saving several keys and deleting several exact keys is one memory intent.
+    - EXPLICIT MEMORY CLAUSE — a message containing "기억해줘" / "기억해" / "remember" / "저장해줘" / "잊어줘" / "forget" ALWAYS produces its own `memory` entry, even when another task in the same message uses the same value, and that entry's `segments` and `state.requestText` MUST carry the VALUE itself. The other task keeps the value too if it needs it; a value both tasks need is not "another task's text". Measured live, both ways it can go wrong: the memory entry once arrived as "전화번호 기억해줘" with the number stripped, so the save had nothing to save and answered with an operation outside its enum; and when the value was shown only inside the quote's requestText, the planner read the whole message as a quote-with-contact and emitted NO memory entry at all — three runs out of three, and nothing was ever saved. "Contact stays in the quote requestText and is not automatically saved" governs a message with NO memory clause; it never cancels one that has it.
+      A memory clause is USUALLY THE LAST clause of the message, and a trailing one is the case that gets
+      dropped. Measured, one run each and consistent with three runs of the first: "…견적 줘. 내 전화번호 …
+      기억해줘." emitted NO memory entry, adding "그리고" changed nothing, and only moving the clause to the
+      FRONT ("내 전화번호 … 기억해줘. 그리고 …견적 줘.") produced one and saved the value. So finishing the
+      first task's entry is not finishing the job: RE-READ the message to its end and emit the trailing memory
+      entry too, even when the earlier clause is a large task flow that could absorb the value.
     - clarify — ambiguous / unclassifiable: set `question` plus a single best-guess entry.
     - out_of_scope — the message matches NO configured task intent. A service quote, product purchase, checkout, BlueMoonSoft topic, explicit memory request, or farewell is NEVER out_of_scope. Route explicit remember/save, forget/delete, list/show, exact-read questions, and memory-search requests to memory. Route a standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope; never reinterpret it as consent to save.
 
@@ -123,6 +130,7 @@ planner:
     - "체크아웃 해줘" / "결제 진행해줘" → replace_current, intents=[{intent:checkout, segments:["체크아웃 해줘"], state:{requestText:"체크아웃 해줘"}}]
     - "샌프란시스코 청소 견적 줘. 이름 홍길동, 이메일 a@b.com, 전화 415-555-0100" → replace_current, intents=[{intent:request_service_quote, segments:["샌프란시스코 청소 견적 줘 …"], state:{requestText:"샌프란시스코 청소 견적 줘. 이름 홍길동, 이메일 a@b.com, 전화 415-555-0100"}}] — contact STAYS in this quote requestText and is not automatically saved.
     - "내 이메일 thumbtack-test@example.com을 기억해" → replace_current, intents=[{intent:memory, segments:["내 이메일 thumbtack-test@example.com을 기억해"], state:{requestText:"내 이메일 thumbtack-test@example.com을 기억해"}}]
+    - "샌프란시스코 94103에서 청소 견적 줘. 내 전화번호 415-555-0199 기억해줘." → replace_current, intents=[{intent:request_service_quote, segments:["샌프란시스코 94103에서 청소 견적 줘"], state:{requestText:"샌프란시스코 94103에서 청소 견적 줘"}}, {intent:memory, segments:["내 전화번호 415-555-0199 기억해줘"], state:{requestText:"내 전화번호 415-555-0199 기억해줘"}}] — TWO entries, and the memory one carries the VALUE. The quote asks for contact itself, so the number is not folded into its requestText here: shown that way, the planner read the whole message as a quote-with-contact and emitted NO memory entry at all, three runs out of three.
     - "이메일을 잊어줘" → replace_current, intents=[{intent:memory, segments:["이메일을 잊어줘"], state:{requestText:"이메일을 잊어줘"}}]
     - "기억한 내용 보여줘" → replace_current, intents=[{intent:memory, segments:["기억한 내용 보여줘"], state:{requestText:"기억한 내용 보여줘"}}]
     - "이메일 thumbtack-test@example.com을 기억하고 예전 주소는 잊어줘" → replace_current, intents=[{intent:memory, segments:["이메일 thumbtack-test@example.com을 기억하고 예전 주소는 잊어줘"], state:{requestText:"이메일 thumbtack-test@example.com을 기억하고 예전 주소는 잊어줘"}}]
@@ -231,6 +239,13 @@ flows:
             memory_entries=[{key:<exact key>, value:<complete Markdown or "">}, ...].
 
           In memory_entries, a non-empty value saves and "" deletes the exact key.
+
+          `operation` is REQUIRED and its enum is the six above — there is no "cannot" value. So when a save
+          is asked for and the text carries NO value to save (the planner segmented it away, or the user only
+          said "remember my phone number"), answer next="error" with operation="set" and no memory_entries.
+          The error terminal then says the request could not be completed and that nothing was saved, which is
+          true. Measured live: without this rule the model invented an operation outside the enum, the args were
+          rejected before the script, and the turn reported an internal error to the user.
 
           Use these fixed keys when applicable: full_name, first_name, last_name, email, phone,
           address, zip_code. For another explicit fact, use a short lowercase snake_case key.

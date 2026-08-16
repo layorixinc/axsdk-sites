@@ -420,6 +420,43 @@ test('the href still wins when it carries the id', () => {
   assert.equal(search(page, {}, ATTR_ID).value.candidates[0]?.product_id, '4242');
 });
 
+// ── the two eBay href measurements disagree, so agreement is not a junk signal ─
+//
+// AGENTS §13 says eBay's first search card is its own "Shop on eBay" promo tile and that the price check
+// drops it because it carries no price. Re-measured 2026-08-15: it now advertises `$20.00`, so the price
+// check no longer reaches it, and it renders TWICE with one `data-listingid` (2500219655424533), which the
+// dedupe collapses to a single junk row per search. Relevance drops it downstream — it states no model
+// code and no brand — so the cost is one row of the screening budget, not a wrong answer.
+//
+// A rule was tried and REJECTED: drop a card whose attribute id and own `/itm/` link disagree. It looked
+// clean against one scan (62 cards, 60 agreed, and the 2 that disagreed were both the tile). But the
+// fixture below this comment was measured the SAME DAY and records the opposite rendering — every
+// `a[href*="/itm/"]` on the page reading the placeholder `https://ebay.com/itm/123456`, all 143 of them.
+// Under that rendering the rule drops EVERY eBay card, which is the exact store-emptying failure the
+// dummy-href fixture exists to prevent. Two live measurements of one site disagree, so neither is the
+// site's contract, and a rule keyed on their agreement is unsafe in one direction and useless in the
+// other. No structural signature separates the tile from a listing: the placeholder href, the `ebay.com`
+// host without `www`, and a bare numeric attribute all appear on real cards in one measurement or the
+// other.
+//
+// What IS pinned is the handling that survives both renderings: the attribute wins, and the canonical URL
+// is rebuilt from it. This test fails if anyone makes href/attribute disagreement fatal.
+test('a card is kept when its attribute id and its link id disagree', () => {
+  const promo = {
+    url: 'https://ebay.com/itm/123456',
+    title: 'Anker USB-C Cable',
+    price_text: '$20.00',
+    root_id: '236951166964',
+  };
+  const bare = { ...ATTR_ID, product_id_patterns: ['/itm/(%d+)', '^(%d+)$'] };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [promo] } });
+
+  const { value } = search(page, {}, bare);
+
+  assert.equal(value.candidates.length, 1, 'a placeholder href must not cost a real listing');
+  assert.equal(value.candidates[0].product_id, '236951166964', 'the attribute is the id');
+});
+
 // Live, 11st found 24 cards and produced zero candidates. Its title selector is a CSS LIST
 // (`.c-card-item__name dd, img[alt]`) and the browser answers with the first match in document order —
 // the image, whose textContent is empty. The durable reader survives that by also asking for the image's

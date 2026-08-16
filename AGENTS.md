@@ -1630,8 +1630,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   usage is still over the mark (they were 4.7 MB of a 10.4 MB fill). The ACTIVE chat is never dropped.
 - **eBay search cards are `li.s-card[data-listingid]`.** The `.su-item-card[data-view]` markup it used
   before is gone (live: 0 matches against 62 `li.s-card`), which is why eBay silently returned nothing.
-  Title `.s-card__title`, price `.s-card__price`; the first card is eBay's own "Shop on eBay"
-  placeholder and carries no price, so the price check drops it.
+  Title `.s-card__title`, price `.s-card__price`. **Correction (2026-08-15):** the first card is eBay's own
+  "Shop on eBay" promo tile, and this entry said the price check drops it for carrying no price — it now
+  advertises **$20.00**, so the price check no longer reaches it. It renders twice under one
+  `data-listingid`, the dedupe leaves one junk row per search, and relevance drops it downstream because it
+  states no model code and no brand. Cost is one row of the screening budget, not a wrong answer.
+- **Two live measurements of eBay's card hrefs disagree, so their agreement is not a signal.** One scan the
+  same day recorded every `a[href*="/itm/"]` reading the placeholder `https://ebay.com/itm/123456` (all 143
+  anchors, which is why `result_id_attr` exists); another recorded 60 of 62 cards carrying the real id in
+  that href, the 2 exceptions being the promo tile. A rule to drop cards whose attribute id and link id
+  disagree was written, tested, and **REJECTED**: under the first rendering it drops EVERY eBay card, which
+  is the store-emptying failure `result_id_attr` was added to prevent. No structural signature separates
+  the promo tile from a listing — the placeholder href, the `www`-less `ebay.com` host and a bare numeric
+  attribute each appear on real cards in one measurement or the other. What is pinned instead is the
+  handling that survives both: the attribute wins and the canonical URL is rebuilt from it. When two live
+  measurements of one site conflict, neither is the contract, and a rule keyed on their agreement is unsafe
+  in one direction and useless in the other.
 - **Walmart result tiles mostly cannot be priced, and that is the site, not the reader.** Of 24 tiles
   measured live: 1 carried an exact "current price", 9 advertised only "Options from $X" (a variant
   range), and 14 rendered no price at all — scrolling changes none of it, and `__NEXT_DATA__` ships the

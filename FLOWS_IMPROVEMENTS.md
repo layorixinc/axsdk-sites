@@ -205,20 +205,35 @@ that holds the user is a candidate, because such a node re-reads a message it ca
 
 | # | item | frees | risk | state |
 |---|---|---|---|---|
-| 1 | Delete the node `model:` blocks that repeat the default | **98 lines** (14 blocks) | very low | **DONE** 2026-08-16, gated in `check:flows` |
-| 2 | ~~`entry:` names a module function; drop the wrappers~~ | 88 of 2,925 inline Lua lines (3%) | **medium, not low** | **WITHDRAWN** — see D: production has no compile step, so this adds one |
-| 3 | Split the document per flow, byte-identical output | edit safety | low | open |
-| 4 | Generate the thin per-flow entries | copies that drift | low | open |
-| 5 | One copy of the RPC modules, shared by both workspaces | 65 KiB duplicate | medium | open |
-| 6 | Derive `inputSelector` from declared properties | the three-list class of bug | medium | open |
-| 7 | Audit the remaining model nodes in holding loops | latency + a known bug class | medium | open |
+| 1 | Delete the node `model:` blocks that repeat the default | **98 lines** (14 blocks) | very low | **DONE** 2026-08-16, gated |
+| 2 | ~~`entry:` names a module function; drop the wrappers~~ | 88 of 2,925 inline Lua lines (3%) | **medium, not low** | **WITHDRAWN** — production has no compile step, so this adds one |
+| 3 | Split the document per flow, byte-identical output | edit safety | **medium** | **BLOCKED on the same wall as 2** |
+| 4 | Generate the thin per-flow entries | copies that drift | **medium** | **BLOCKED on the same wall as 2** |
+| 5 | ~~One copy of the RPC modules, shared by both workspaces~~ | 68.3 KiB, generated | — | **ALREADY CLOSED** before the item was written |
+| 6 | ~~Derive `inputSelector` from declared properties~~ | 3 fields of 309 | — | **DONE differently** — the 3 deleted, the direction gated |
+| 7 | Audit the remaining model nodes in holding loops | 12 stall guards + 4 message policies | low | **DONE** 2026-08-16, both gated |
 
-Item 1 was mechanical and is shipped. **Item 2 was not** — its "risk low, the emitted document is
-unchanged" rested on a build step production does not have, and its line counts were an order of magnitude
-stale. 3 and 4 remain mechanical; 5–7 change contracts and each wants a live turn.
+**Every item in this document has now been measured, and only two survived as written.** What the measurements
+found:
 
-A note for whoever reads this next: every number in the first edition predates the finished RPC port, and
-two of them were wrong by 10x. **Re-measure before planning from any of them.**
+- **3 and 4 inherit item 2's blocker.** A per-flow split needs an assembled output, and the delivery path reads
+  `_common/flows.yaml` by that exact path (`workspace.mjs`, `build-workspace-bundle.mjs`) — the same missing
+  compile step. Decide 2, 3 and 4 together or not at all.
+- **Item 5 was already closed when it was written.** `tools/build-rpc-sites.mjs` MIRRORS the production reader
+  into the playground (`mirrorReader`) and generates both sites modules; `build-rpc-sites.test.mjs`, inside
+  `check:flows`, asserts the mirror and even mutation-checks itself by writing `-- drifted` and requiring the
+  generator to restore it. Of six playground Lua files, hand-maintained duplicates: **zero**.
+- **Item 6's premise held; its proposal did not.** 309 selector entries across 89 nodes,
+  selected-but-not-declared **0** (already gated), declared-but-never-selected **3** — the two tools the finding
+  named. Deriving the lists is a contract change plus the missing compile step, for 3 fields of 309. The three
+  were deleted (they were the residue of the abandoned second listing channel) and the direction is now gated.
+- **Item 7 was the one with a real defect behind it.** §13 claimed every model node had a stall guard; 8 of 14
+  did not, twelve counting the site overlay and the playground, two of them gates that hold the user. Fixed and
+  gated, along with `active_node_only` on the three approval gates that lacked it.
+
+A note for whoever reads this next: every number in the first edition predates the finished RPC port, two were
+wrong by 10x, and two items described work already done. **Re-measure before planning from any of them** — and
+the same applies to this revision.
 
 ---
 

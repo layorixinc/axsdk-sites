@@ -1675,3 +1675,46 @@ test('every model node has a stall guard that names a real node', () => {
   assert.deepEqual(missing, [], 'model nodes with no stall guard');
   assert.deepEqual(dangling, [], 'stall guards naming a node that does not exist');
 });
+
+// §13's worst live incident is this shape: the user typed 취소 and the offer was ADDED TO CART, because a
+// model gate re-sent the previous turn's "3번". `messagePolicy: { currentUserText: active_node_only }` hands
+// an `action_unit` the text of the turn IT was active for. The fix reached `choose_product` and the
+// conformance test pinned that ONE node — while three approval gates kept the shape: `confirm_quote` (sends
+// a quote), `checkout_confirm` (proceeds to checkout) and `refine_item` (leads to a cart add).
+//
+// So the gate is written the other way round: EVERY self-looping `action_unit` must either declare the policy
+// or be listed here with the reason it must not. A new gate then fails until someone decides which it is,
+// instead of inheriting the default that already cost a wrong cart mutation.
+const COLLECTORS_WITHOUT_ACTIVE_NODE_ONLY = {
+  // A collector is entered with the user's request and the ORIGINAL text is exactly what it must read;
+  // withholding it after an automatic transition would starve the node that opens the flow.
+  'request_service_quote.collect_request': true,
+  'shopping_single_site.collect_shopping': true,
+  'shopping_multi_store_total_cost.collect_request': true,
+  // Navigation-only, no mutation behind it: the worst a stale text can do is open the wrong page, which the
+  // next turn corrects. bluemoonsoft never fills or submits a form.
+  'bluemoonsoft.assist': true,
+};
+
+test('every self-looping model gate has decided about active_node_only', () => {
+  const files = ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+    'playground/_common/flows.yaml'];
+  const undecided = [];
+  for (const path of files) {
+    if (!existsSync(new URL(path, root))) continue;
+    const document = parseFlow(path);
+    if (document.defaults?.messagePolicy?.currentUserText === 'active_node_only') continue;
+    for (const [flowName, flow] of Object.entries(document.flows ?? {})) {
+      for (const [nodeName, node] of Object.entries(flow?.nodes ?? {})) {
+        if (node?.kind !== 'action_unit') continue;
+        const loops = Object.values(node.next ?? {}).some((target) => target === nodeName);
+        if (!loops) continue;
+        if (node.messagePolicy?.currentUserText === 'active_node_only') continue;
+        if (COLLECTORS_WITHOUT_ACTIVE_NODE_ONLY[`${flowName}.${nodeName}`] === true) continue;
+        undecided.push(`${path} ${flowName}.${nodeName}`);
+      }
+    }
+  }
+  assert.deepEqual(undecided, [],
+    'self-looping model gates that neither declare active_node_only nor say why they must not');
+});

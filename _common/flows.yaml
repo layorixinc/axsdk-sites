@@ -731,6 +731,7 @@ flows:
 
       confirm_quote:
         kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
         description: Guaranteed approval gate — before ANY quote request is opened,
           present the shortlisted pros and ask the user to approve; proceed only
           on explicit approval, otherwise return to refinement.
@@ -848,6 +849,7 @@ flows:
 
       quotes_done:
         kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
         description: Report the quote-request outcomes, then PAUSE and ask whether to
           request more quotes (from the current results) or start another
           request — never a hard stop, so the user can request again.
@@ -1001,6 +1003,7 @@ flows:
 
       refine_item:
         kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
         description: Agentic product refinement — present the searched candidates for
           the current item, ask the user which product / how to narrow, then
           pick the matching product before adding it to the cart; loop with a
@@ -1049,6 +1052,7 @@ flows:
 
       checkout_confirm:
         kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
         description: After all items are in the cart, report the cart and ask the user
           whether to proceed to the checkout page for review; proceed only on
           explicit approval. Never places an order.

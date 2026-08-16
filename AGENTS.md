@@ -1292,6 +1292,27 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   PHONE looks broken while email saves, persists, updates and forgets. Measured, unfixed, and the next thread to
   pull. **An instrument nothing runs is an instrument that tells you nothing** — the point of fixing the runners
   first is that their answers only become evidence afterwards.
+- **The planner drops a TRAILING explicit memory clause, and no prompt formulation moved it** (measured
+  2026-08-16; `memory.mjs` A/C/D). "샌프란시스코 …견적 줘. 내 전화번호 415-555-0199 기억해줘." emits NO memory
+  entry — three runs of three — adding "그리고" changes nothing, and only moving the clause to the FRONT
+  ("…기억해줘. 그리고 …견적 줘.") produces one and saves the value. **Delivery was verified before blaming the
+  model**: the stored common flows layer is 221,620 bytes, byte-for-byte the file carrying the new rules. Three
+  formulations were tried — a value-carrying example, an imperative ALWAYS rule, and a rule naming the ordering
+  bias outright — and none of them moved it; **the first made it worse**, because folding the phone into the
+  quote's `requestText` collided with the existing "contact stays in the quote and is not automatically saved"
+  rule and the planner then dropped the memory entry entirely. The rules stay as the written contract with their
+  measurements attached, and the next lever is the MODEL or a deterministic pre-pass, not more wording. Stop
+  after the third formulation: prompt tuning past that point is the "adjust the number until it goes green"
+  failure in another costume.
+  - What the same trace DID fix: `plan_memory`'s `operation` is required with a six-value enum, so a save whose
+    text carries no value had no legal answer and the model invented one — `stage: tool_args` reached the user
+    in place of a reply. The prompt now gives it `next="error"` with `operation="set"`, verified live from a
+    cleared store, and the user reads an honest Korean refusal instead of a schema violation.
+- **A memory measurement must read the store BEFORE the turn, not only after.** An isolated probe showed
+  "saved 3/3" and was reading a LEFTOVER `g/phone` document a run minutes earlier had written; the suite's
+  `writeMemory({})` clean slate is exactly what the probe skipped, and from a cleared store the same case is
+  **0/3**. I nearly reported a fix that did not exist. The suite is the honest instrument here precisely because
+  it clears first.
 - **A runner that attaches by hand owes the page close.** The playground CLI encodes it in
   `withPlaygroundSession`'s `finally`; the new sweep did not, printed `6/7 PASS`, and sat for 25 minutes — the
   same shape as the commerce sweep's attached-Chrome leak, in a different mechanism, one day apart. **Before

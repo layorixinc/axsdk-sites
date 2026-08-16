@@ -1171,6 +1171,37 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   (`present_store_offers|shopping_refine_store_offers|present_store_offers`, the folded rows appearing with
   their shipping fees). **Any multi-turn claim MUST be measured inside one `openCdpSession`.** Two of this
   stretch's "defects" were this artifact; the third, checked the same way, was real.
+- **`npm run test:playground:live` is the playground's first live gate** (`tools/scenarios/playground-live.mjs`,
+  2026-08-16). Seven scenarios — one per user-routable flow, the fan-out twice — in **120 s**, driving the
+  LEGACY extension on port **9235** / profile `AXSDKPlaygroundChromeProfile`, which is what the playground
+  tooling has always used (9334 appears nowhere in it). Utterances are quoted from each route's own `examples`;
+  an invented phrase would test the planner's generosity instead of the route. Three properties of the
+  workspace decide the design, and a naive suite gets all three wrong:
+  1. **The router has a `defaultIntent`** (`playground_durable_checkpoint`), so an unmatched utterance still
+     answers confidently — a suite accepting any non-empty reply reports six passing flows while five never
+     ran. Each scenario names the tool that DECIDES it.
+  2. **A flow is judged by its BRANCH, not its prose.** `shopping`'s terminal respond is an instruction
+     ("Reply in the user's language"), so a Korean utterance answers `Amazon 검색이 완료되었습니다` while the
+     trace carries `{"next":"done","candidates":[…]}` — an English regex called that a failure. Prose is only
+     the contract for the two flows whose respond is "reply with exactly this line and nothing else", and for
+     `rpc_nav_only`, whose ok and error edges both land on `done` so the stage timings are all there is.
+  3. **A branch key is not a node name** — `rpc_probe.read` routes `{ok: done}`, so accepting "done" failed a
+     perfect reply. The same mistake the flow gates caught earlier in the document, made again in a new place;
+     the offline suite now derives every accepted branch from the document.
+  The sync root is checked BEFORE Chrome is touched, because nothing in the playground tooling does it: the
+  authored workspace still names its modules (25,533 B with 12 names vs the built 230,618 B with none) and
+  syncing it answers `RPC SEARCH EMPTY` with a blank href — a delivery failure that reads like a selector one.
+- **Two Amazon searches in one playground session, and exactly one answers `navigation_stuck`.** Measured:
+  `shopping` alone passed **5/5** with 19 candidates each; in a session that also runs the Amazon fixture one
+  of the pair fails, and WHICH one varies (the sweep failed `shopping`; a controlled
+  `--only=amazon-fixture,shopping-from-request` pair failed the FIXTURE and passed shopping). So it is not "the
+  second search fails". `navigation_stuck` is our own reading and §13 already warns it blames the site when the
+  channel may be at fault, so this is a **lead for `61_rpc_storefront`'s navigation wait**, not a playground
+  defect. The scenario stays strict: a retry would erase the only samples anyone has.
+- **A runner that attaches by hand owes the page close.** The playground CLI encodes it in
+  `withPlaygroundSession`'s `finally`; the new sweep did not, printed `6/7 PASS`, and sat for 25 minutes — the
+  same shape as the commerce sweep's attached-Chrome leak, in a different mechanism, one day apart. **Before
+  concluding a runner hangs, check whether it already answered.**
 - **Store outcomes are part of the answer.** `C.store_status` renders one line naming every store that
   failed and what the user must do ("네이버쇼핑: 보안 확인 필요 …"); it rides in the comparison window,
   in `report_cart`, and in `no_results`. Counts come from the WHOLE listing, so folding a row away never

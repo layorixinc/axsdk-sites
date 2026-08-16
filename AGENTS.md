@@ -1147,6 +1147,30 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   never a node name: every fallback in the document is a branch key and most name no node at all
   (`invalidNext: done` where `next.done: shopping_done`). **A false settled finding is worse than no finding,
   because nobody re-checks it** — this one sat here while eight nodes were exposed.
+- **Saying no MUST work at every gate — and `shopping_single_site` was the flow where it did not** (fixed
+  2026-08-16). Measured across the document: memory, the quote flow and the multi-store comparison all carry
+  cancel routes; that one flow pauses at three gates, mutates at `add_item`/`checkout_confirm`/`do_checkout`,
+  and had none. Live in one session, at its `refine_item` gate, "취소" was routed into
+  `shopping_multi_store_total_cost`, which answered "어떤 제품을 비교하고 싶으신가요?" and announced a fresh
+  one-to-two-minute comparison — failing safe on the cart, and doing nothing the user asked. **The
+  load-bearing part was the PLANNER**, not the flow: the reply never reached the node, which is the same
+  class as the COMPARISON BROWSING FOLLOW-UP rule. A cancel needs all four or it is inert — a planner
+  follow-up rule, `cancel` in the tool's `next` enum (a next the enum does not carry is a next the model
+  cannot emit), the node's branch, and the prompt naming it. `check:flows` pins the rule with no allowlist:
+  a flow that cannot mutate has nothing to cancel, and one that never pauses never holds a user.
+- **The repo's own documented rule was applied to one node and enforced for one node.**
+  `messagePolicy: { currentUserText: active_node_only }` is stated for 승인·선택 노드 in
+  `AXSDK_CHROME_EXTENSION_AGENTIC_TASKS.md`; §13 records what its absence cost (취소 read as an approval, an
+  offer added to a cart). It reached `choose_product`, and the conformance test pinned that ONE node, while
+  `confirm_quote`, `checkout_confirm` and `refine_item` kept the shape. **A gate that names one node protects
+  one node** — write it so a NEW node must decide: every self-looping `action_unit` either declares the policy
+  or is listed with the reason it must not.
+- **Two `npm run cdp -- send` calls are two PROCESSES with two sessions, so a paused flow cannot resume
+  across them.** This produced a false reading — "resumption is broken product-wide" — from what is only a
+  property of the CLI: within ONE session the multi-store window resumes correctly on "미확인 포함"
+  (`present_store_offers|shopping_refine_store_offers|present_store_offers`, the folded rows appearing with
+  their shipping fees). **Any multi-turn claim MUST be measured inside one `openCdpSession`.** Two of this
+  stretch's "defects" were this artifact; the third, checked the same way, was real.
 - **Store outcomes are part of the answer.** `C.store_status` renders one line naming every store that
   failed and what the user must do ("네이버쇼핑: 보안 확인 필요 …"); it rides in the comparison window,
   in `report_cart`, and in `no_results`. Counts come from the WHOLE listing, so folding a row away never

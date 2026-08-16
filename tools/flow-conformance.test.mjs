@@ -1766,13 +1766,20 @@ test('a flow that pauses and can mutate has a cancel route to a terminal', () =>
 //
 // `action_unit` is excluded on purpose: its `parameters.properties` are the MODEL's arguments and have nothing
 // to do with what the node selects.
-// The playground's three search fixtures declare `query`/`site`/`item`/`index`/`key`/`context` that no node
-// selects — the same drift, from before the carrier convention (§13: nested paths are the SCRIPT's job,
-// `args.item.site`; declare the carrier). They are exempt rather than fixed because NO gate exercises a
-// playground flow live: the offline suite never runs one, so a deletion there cannot be verified the way
-// production's three were (their modules provably rebuild the fields from the restored snapshot, or never load
-// the module that reads them). Closing this needs a live playground turn — sync `--root=dist/playground` and
-// drive the multi-site search — after which these entries go away rather than growing.
+// The playground's three search fixtures declare properties no single node selects, and it is NOT drift: the
+// shared module accepts TWO envelopes on purpose, and says so in its own doc comment — "`site` may arrive flat
+// or as the worker's `item.site`, `query` flat or as `context.query` — the same envelope the production fan-out
+// uses, where reading only the flat key made every store refuse" (19_rpc_playground_search.lua). The code
+// matches: `query = args.query` falling back to `context.query`, and `P.site_of` reading `args.site` else
+// `args.item.site`. So the direct callers select `query` and the mapped caller selects the map carrier
+// (`item`/`index`/`key`/`context`, which §13 says to declare), and each tool declares both shapes because
+// either can arrive.
+//
+// They are listed rather than deleted because the declaration mirrors a contract instead of drifting from one —
+// the opposite of production's three, which were proven dead by their modules (one rebuilds the fields from the
+// restored snapshot, the other never loads the module that reads them). Reviewed 2026-08-16; an entry here needs
+// the module's own contract to justify it, and `index`/`key` are read by no playground module at all — they are
+// the platform's map envelope, carried faithfully.
 const UNEXERCISED_PLAYGROUND_FIXTURES = {
   'playground_search_amazon_fixture.site': true,
   'playground_search_amazon_fixture.item': true,

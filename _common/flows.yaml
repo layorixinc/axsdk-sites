@@ -205,7 +205,9 @@ router:
         - 기억한 내용 보여줘
         - 내가 기억하라고 한 주소가 뭐야
 hooks:
-  beforeIntent: []
+  # Deterministic, once per routable turn, no LLM routing decision (FLOWS.md §13.1) — the only place a capture can
+  # read the user's own message instead of the planner's segmentation of it.
+  beforeIntent: [ record_memory ]
 flows:
   memory:
     goal: Handle one explicit memory request with one remote AX memory call.
@@ -222,7 +224,12 @@ flows:
       handle:
         kind: action_unit
         llm: { maxCalls: 1 }
-        inputSelector: [ requestText ]
+        # `userMessages` is injected into every action node's state and `messagePolicy.userText: original` asks for the
+        # RAW message rather than the planner's segment. Both arrive: `requestText` is the segment, `userMessages[1]` is
+        # what the user typed. This is what makes a save possible when the planner strips the value out of the
+        # segment — measured, "…전화번호 415-555-0199 기억해줘." reached this node as "전화번호 기억해줘".
+        messagePolicy: { userText: original }
+        inputSelector: [ requestText, userMessages ]
         allowedTools: [ plan_memory ]
         maxSelfSteps: 1
         prompt: |-
@@ -240,12 +247,18 @@ flows:
 
           In memory_entries, a non-empty value saves and "" deletes the exact key.
 
+          `requestText` is the planner's SEGMENT of the message and `userMessages` carries what the user
+          actually typed (`userMessages` last entry = this turn). When the segment names a field but not its
+          value — "전화번호 기억해줘" — take the value from `userMessages`, which still has it. Measured live:
+          "…청소 견적 줘. 내 전화번호 415-555-0199 기억해줘." reached this node with the number stripped out of
+          the segment, and the number was in the raw message all along.
+
           `operation` is REQUIRED and its enum is the six above — there is no "cannot" value. So when a save
-          is asked for and the text carries NO value to save (the planner segmented it away, or the user only
-          said "remember my phone number"), answer next="error" with operation="set" and no memory_entries.
-          The error terminal then says the request could not be completed and that nothing was saved, which is
-          true. Measured live: without this rule the model invented an operation outside the enum, the args were
-          rejected before the script, and the turn reported an internal error to the user.
+          is asked for and NEITHER the segment NOR the raw message carries a value to save, answer
+          next="error" with operation="set" and no memory_entries. The error terminal then says the request
+          could not be completed and that nothing was saved, which is true. Measured live: without this rule
+          the model invented an operation outside the enum, the args were rejected before the script ran, and
+          the turn reported an internal error to the user.
 
           Use these fixed keys when applicable: full_name, first_name, last_name, email, phone,
           address, zip_code. For another explicit fact, use a short lowercase snake_case key.
@@ -2069,7 +2082,120 @@ flows:
         kind: terminal
         inputSelector: []
         respond: 도움이 되었길 바랍니다. 필요하면 언제든 다시 불러 주세요.
+
+  # Deterministic memory capture, run as a `beforeIntent` hook (FLOWS.md §13.1).
+  #
+  # Why a hook and not a planner instruction: the planner drops a TRAILING "기억해줘" clause and no prompt
+  # formulation moved it — measured, the clause at the FRONT worked every time and at the END produced no memory
+  # entry at all, three runs of three. A hook does not depend on that judgement: it runs once per routable turn
+  # with no routing decision, and `userMessages` gives it the user's own message.
+  #
+  # The runtime team measured the hook path independently and cleared it: hook present or absent, the target flow
+  # runs (2.1s / 2.1s / 2.2s), and a hook that deliberately never answers still lets the target flow run at 12.3s —
+  # fire-and-continue holds. The stalls we first blamed on this hook were `POST /sessions/message` answering
+  # 402 LimitExceeded, which our driver could not see; a hook reaches that limit sooner because it adds one flow
+  # per turn, which is why removing it looked like a cure.
+  record_memory:
+    goal: Capture an explicit memory clause from the user's own message, before the turn's flow runs.
+    state:
+      userMessages: null
+      memory: null
+      confirmed: null
+      memory_error: null
+      memory_reason: null
+    nodes:
+      capture:
+        kind: action_contract
+        inputSelector: [ userMessages ]
+        id: capture_memory_clause
+        next:
+          save: write
+          skip: done
+        fallback: { invalidNext: skip, exhaustedNext: skip }
+      write:
+        kind: action_contract
+        inputSelector: [ memory, confirmed ]
+        id: write_captured_memory
+        next:
+          report: done
+          error: done
+        fallback: { invalidNext: error, exhaustedNext: error }
+      done:
+        kind: terminal
+        inputSelector: []
 flowTools:
+  capture_memory_clause:
+    description: Read the user's own message and, only when it carries an explicit remember/save clause, report
+      the values beside that clause. Deterministic; no model call, no browser op.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ _common.70_rpc_memory ]
+      entry: run
+      lua: |
+        function run(args)
+          local result = AX_RPC_MEMORY.capture(args)
+          if result.next ~= "save" then return result end
+          -- `set_bulk` takes `memory`, a key→value MAP — what `prepare_memory` builds for the interactive
+          -- flow. Built here rather than adding a node for a shape conversion; passing the list answered
+          -- `missing_memory`.
+          local memory = {}
+          for index = 1, #(result.memory_entries or {}) do
+            local entry = result.memory_entries[index]
+            if type(entry) == "table" and type(entry.key) == "string" then memory[entry.key] = entry.value end
+          end
+          -- The CLAUSE is the consent: the user asked for this in the message the hook just read, and a capture
+          -- with no clause never reaches here.
+          return { next = "save", memory = memory, confirmed = true }
+        end
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        userMessages: { type: array, items: { type: string } }
+    output:
+      next: result.next
+      memory: result.memory
+      confirmed: result.confirmed
+
+  write_captured_memory:
+    description: Write the captured entries to the on-device memory store. One round trip; an absent value deletes.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ _common.70_rpc_memory ]
+      entry: run
+      rpc:
+        allow: [ memory.set_bulk ]
+        opTimeoutMs: 2000
+        deadlineMs: 15000
+      lua: |
+        function run(args)
+          return AX_RPC_MEMORY.set_bulk(args)
+        end
+    effect: mutation
+    # The platform REQUIRES this on a mutation adapter — removing it answers `consent must be required for
+    # mutation adapters` and the whole document fails to compile. Worth recording because that failure looks
+    # exactly like a stalled turn from the outside: no tool runs, and one of our earlier "the hook stalls turns"
+    # measurements was this compile error, not a stall.
+    consent: required
+    idempotent: true
+    # Satisfiable by equality, unlike the cart's `{ product_id: true }`: `confirmed` is a boolean the capture
+    # node sets to exactly `true`, and only when the message carried a clause.
+    require: { confirmed: true }
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ memory ]
+      properties:
+        confirmed: { type: boolean }
+        memory: { type: object, additionalProperties: { type: string } }
+    output:
+      next: result.next
+      # The reason travels, or a failed write is a silent one — the first live run answered only `error`.
+      memory_error: result.error
+      memory_reason: result.reason
+
   collect_total_cost_request:
     description: Capture one product category, optional exact brand/model and
       constraints, quantity, and two to ten supported commerce sites, or ask for

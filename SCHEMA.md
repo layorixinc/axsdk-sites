@@ -110,6 +110,22 @@
     }
   },
   {
+    "name": "capture_memory_clause",
+    "description": "Read the user's own message and, only when it carries an explicit remember/save clause, report the values beside that clause. Deterministic; no model call, no browser op.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "userMessages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "checkout",
     "description": "Navigate to the cart and open the checkout REVIEW page so the user can read the order total, address and payment method. Never places an order.",
     "parameters": {
@@ -3268,6 +3284,28 @@
             "string",
             "null"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "write_captured_memory",
+    "description": "Write the captured entries to the on-device memory store. One round trip; an absent value deletes.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "memory"
+      ],
+      "properties": {
+        "confirmed": {
+          "type": "boolean"
+        },
+        "memory": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     }

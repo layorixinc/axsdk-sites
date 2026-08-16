@@ -44,13 +44,20 @@ async function main() {
   const b = await send(session, 'B memory-only', '내 이메일 hong@test.com 기억해줘.');
   checks.push(['B email saved', /hong@test\.com/i.test(memVals(b.mem))]);
 
-  // C) contact given as an ANSWER to the quote flow (continue_current) must be auto-remembered.
+  // C) A contact given as an ANSWER to the quote flow is NOT saved on its own, and IS saved when the user asks.
+  //
+  // This case used to assert the opposite — that answering a quote auto-remembers the contact — and it
+  // contradicted the shipped rule it was supposed to defend. The planner states it: "A value-providing answer is
+  // NOT saved merely because it is reusable", and the examples add "contact STAYS in this quote requestText and is
+  // not automatically saved". The deterministic capture enforces the same boundary: no explicit clause, no
+  // capture. So the negative half is the one that matters, and it is checked first.
   await freshSession(session);
-  const c1 = await send(session, 'C1 start quote (no contact)', '샌프란시스코 94103에서 집 청소 견적 받아줘. 다음 주에 아파트 전체 청소 필요해.');
-  const c2 = await send(session, 'C2 answer with contact', '이름은 홍길동, 이메일은 gildong@test.com, 전화번호는 415-555-0155 이야.');
+  await send(session, 'C1 start quote (no contact)', '샌프란시스코 94103에서 집 청소 견적 받아줘. 다음 주에 아파트 전체 청소 필요해.');
+  const c2 = await send(session, 'C2 answer with contact, no clause', '이름은 홍길동, 이메일은 gildong@test.com, 전화번호는 415-555-0155 이야.');
   const cv = memVals(c2.mem);
-  checks.push(['C phone saved from flow answer', /415.?555.?0155/.test(cv)]);
-  checks.push(['C email saved from flow answer', /gildong@test\.com/i.test(cv)]);
+  checks.push(['C answering a flow does NOT save the contact', !/415.?555.?0155/.test(cv) && !/gildong@test\.com/i.test(cv)]);
+  const c3 = await send(session, 'C3 same answer WITH a clause', '이메일 gildong@test.com 기억해줘.');
+  checks.push(['C the same value IS saved when asked', /gildong@test\.com/i.test(memVals(c3.mem))]);
 
   // D) memory PRESENT is reused by a task flow: a quote with NO contact in the message must
   //    fill contact+zip from <memory> and proceed (verify_request passes) instead of re-asking.

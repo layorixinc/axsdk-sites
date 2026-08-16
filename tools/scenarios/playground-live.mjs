@@ -21,10 +21,10 @@
  * (`nav.navigate` plus four `dom` reads), so no click, input or submit op is grantable and no cart, checkout or
  * order step exists to reach. Live navigations to real storefronts DO happen.
  *
- * The  flake this gate found on day one is FIXED (see AGENTS.md §13): the arrival wait
- * needed the target, because a navigation that commits faster than the baseline read can never look like a
- * change. Both multi-site scenarios answered  before the fix and  after — the fan-out had been
- * losing a store to it.
+ * The `navigation_stuck` flake this gate found on day one is FIXED (see AGENTS.md §13): the arrival wait needed
+ * the TARGET, because a navigation that commits faster than the baseline read can never look like a change.
+ * Both multi-site scenarios answered `partial` before the fix and `done` after — the fan-out had been losing a
+ * store to it, which is what makes this a coverage bug and not a cosmetic flake.
  *
  * Usage: `node tools/scenarios/playground-live.mjs [--only=<name,name>] [--no-sync] [--timeout=<ms>]`
  */

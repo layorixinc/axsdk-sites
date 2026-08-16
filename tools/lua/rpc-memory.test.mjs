@@ -147,3 +147,72 @@ test('writes are sent in the shape the client actually accepts', () => {
   assert.deepEqual(removed[1].map((entry) => entry.key).sort(), ['home', 'work']);
   assert.ok(removed[1].every((entry) => entry.value === undefined), 'no value means remove');
 });
+
+// ── the deterministic capture (AX_RPC_MEMORY.capture) ────────────────────────
+//
+// The planner drops a TRAILING "기억해줘" clause and no prompt formulation moved it (§13): measured, the memory
+// entry either arrived with the VALUE STRIPPED ("전화번호 기억해줘") or was not emitted at all, three runs of
+// three. So the capture cannot depend on the planner's segmentation. It runs as a `beforeIntent` hook, which is
+// deterministic and receives the user's OWN message — measured live: `userMessages` is an array of strings
+// carrying the full text, phone number intact.
+//
+// The consent boundary is the whole risk of doing it this way, so it is a pure condition and it is tested first.
+// §13: "Route a standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope;
+// never reinterpret it as consent to save."
+const capture = (text) => lua.call('AX_RPC_MEMORY.capture', { userMessages: [text] });
+
+test('a message with no memory clause captures NOTHING, however much it looks like a fact', () => {
+  for (const text of [
+    '내 전화번호는 415-555-0199야',
+    '이메일 hong@test.com 으로 연락 줘',
+    '샌프란시스코 94103에서 청소 견적 줘. 이름 홍길동, 전화 415-555-0100',
+    'my phone is 415-555-0199',
+  ]) {
+    const result = capture(text);
+    assert.equal(result.next, 'skip', `must not capture: ${text}`);
+    assert.equal(result.memory_entries, undefined, `must carry no entries: ${text}`);
+  }
+});
+
+test('an explicit clause captures the value beside it', () => {
+  const result = capture('샌프란시스코 94103에서 청소 견적 줘. 내 전화번호 415-555-0199 기억해줘.');
+  assert.equal(result.next, 'save');
+  assert.deepEqual(result.memory_entries, [{ key: 'phone', value: '415-555-0199' }]);
+});
+
+test('the clause may sit anywhere, which is the point', () => {
+  const trailing = capture('청소 견적 줘. 내 전화번호 415-555-0199 기억해줘.');
+  const leading = capture('내 전화번호 415-555-0199 기억해줘. 그리고 청소 견적 줘.');
+  assert.deepEqual(trailing.memory_entries, leading.memory_entries);
+  assert.equal(trailing.next, 'save');
+});
+
+test('email, phone and zip are recognised, and several in one message are all captured', () => {
+  const result = capture('이름은 홍길동, 이메일은 gildong@test.com, 전화번호는 415-555-0155 이야. 기억해줘.');
+  const byKey = Object.fromEntries((result.memory_entries ?? []).map((entry) => [entry.key, entry.value]));
+  assert.equal(byKey.email, 'gildong@test.com');
+  assert.equal(byKey.phone, '415-555-0155');
+  assert.equal(result.next, 'save');
+});
+
+test('English clauses count too', () => {
+  assert.equal(capture('remember my email is hong@test.com').next, 'save');
+  assert.equal(capture('please save my phone 415-555-0199').next, 'save');
+  assert.equal(capture('forget my email').next, 'skip', 'a forget with no value is not a save');
+});
+
+test('a clause with no recognisable value captures nothing rather than guessing', () => {
+  const result = capture('전화번호 기억해줘');
+  assert.equal(result.next, 'skip');
+  assert.equal(result.memory_entries, undefined);
+});
+
+test('the latest message is the one read, and junk input is not a crash', () => {
+  assert.equal(lua.call('AX_RPC_MEMORY.capture', {}).next, 'skip');
+  assert.equal(lua.call('AX_RPC_MEMORY.capture', { userMessages: [] }).next, 'skip');
+  const result = lua.call('AX_RPC_MEMORY.capture', {
+    userMessages: ['청소 견적 줘', '내 이메일 a@b.com 기억해줘'],
+  });
+  assert.equal(result.next, 'save', 'the newest message carries the clause');
+  assert.deepEqual(result.memory_entries, [{ key: 'email', value: 'a@b.com' }]);
+});

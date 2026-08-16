@@ -106,3 +106,102 @@ function Y.delete(args)
   end
   return { next = "report", ok = true, memory_result = value }
 end
+
+
+--- Deterministic capture of an EXPLICIT memory clause from the user's own message.
+---
+--- Why this exists rather than a planner instruction: the planner drops a TRAILING "기억해줘" clause and no
+--- prompt formulation moved it. Measured (§13) — the memory entry arrived once with the VALUE STRIPPED
+--- ("전화번호 기억해줘"), and after two further formulations it was not emitted at all, three runs of three,
+--- while moving the same clause to the FRONT worked every time. This runs as a `beforeIntent` hook instead:
+--- deterministic, once per routable turn, no routing decision, and it receives the user's OWN message —
+--- measured live, `userMessages` is an array of strings carrying the full text with the number intact.
+---
+--- The consent boundary is the whole risk of capturing without being asked, so it is the first condition and
+--- nothing else runs without it: NO explicit clause, NO capture. §13 states the rule this enforces — "route a
+--- standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope; never
+--- reinterpret it as consent to save." A clause with no recognisable value captures nothing rather than
+--- guessing, which is the other half of not inventing consent.
+local SAVE_CLAUSES = {
+  "기억해", "기억 해", "저장해", "저장 해", "remember", "save my", "save this", "keep my",
+}
+
+--- Values we can recognise WITHOUT guessing. A name or an address needs a judgement about where it starts and
+--- ends; an email, a phone and a US ZIP do not, and those are the fields the quote flow re-asks for.
+local function values_in(text)
+  local found = {}
+  local seen = {}
+  local function add(key, value)
+    if value == nil or value == "" or seen[key] then return end
+    seen[key] = true
+    found[#found + 1] = { key = key, value = value }
+  end
+
+  add("email", text:match("[%w%.%_%%%+%-]+@[%w%.%-]+%.%a%a+"))
+
+  -- A US phone with separators, so a bare run of digits is never mistaken for one. The ZIP below is matched
+  -- only outside a phone for the same reason: "415-555-0199" contains three digit groups.
+  local phone = text:match("%d%d%d[%-%.%s]%d%d%d[%-%.%s]%d%d%d%d")
+  add("phone", phone)
+
+  local scrubbed = phone and text:gsub(phone:gsub("([%-%.%+%*%?%[%]%^%$%(%)%%])", "%%%1"), " ") or text
+  local zip = scrubbed:match("%f[%d](%d%d%d%d%d)%f[%D]")
+  add("zip_code", zip)
+
+  return found
+end
+
+--- Answers `save` with the entries to write, or `skip`. Never raises: a hook must not take the turn down.
+function Y.capture(args)
+  args = type(args) == "table" and args or {}
+  local messages = type(args.userMessages) == "table" and args.userMessages or {}
+  -- The LATEST message is the turn's; earlier ones are history the hook also receives.
+  local text = nil
+  for index = #messages, 1, -1 do
+    if type(messages[index]) == "string" and messages[index] ~= "" then text = messages[index] break end
+  end
+  if type(text) ~= "string" or text == "" then return { next = "skip" } end
+
+  -- Scoped to the SENTENCE the clause is in, not the whole message. Consent was given for that clause: a
+  -- ZIP the user typed for a quote in the previous sentence is not a fact they asked to keep, and capturing it
+  -- would be the same over-reach as reading a bare statement as consent — measured on
+  -- "샌프란시스코 94103에서 청소 견적 줘. 내 전화번호 415-555-0199 기억해줘.", where whole-message extraction
+  -- took the ZIP too.
+  --
+  -- A sentence ends at punctuation FOLLOWED BY SPACE, never at a bare dot: splitting on every "." cut
+  -- "hong@test.com" into "hong@test" and "com", and the email stopped being recognised at all.
+  local sentences = {}
+  for piece in ((text .. "\n"):gsub("([%.!%?])%s", "%1\1")):gmatch("[^\1\n]+") do
+    if piece:match("%S") then sentences[#sentences + 1] = piece end
+  end
+
+  local entries = {}
+  local seen_key = {}
+  local function take(sentence)
+    local taken = false
+    for _, entry in ipairs(values_in(sentence)) do
+      if not seen_key[entry.key] then
+        seen_key[entry.key] = true
+        entries[#entries + 1] = entry
+        taken = true
+      end
+    end
+    return taken
+  end
+
+  for index = 1, #sentences do
+    local lowered = sentences[index]:lower()
+    local asked = false
+    for clause = 1, #SAVE_CLAUSES do
+      if lowered:find(SAVE_CLAUSES[clause], 1, true) then asked = true break end
+    end
+    if asked and not take(sentences[index]) and index > 1 then
+      -- A bare "기억해줘" refers to what was just said: "…이메일은 gildong@test.com, 전화번호는 … 이야.
+      -- 기억해줘." is the measured shape of a quote answer. ONE sentence back, and only when the clause's own
+      -- carries nothing — so the ZIP case above stays out of reach.
+      take(sentences[index - 1])
+    end
+  end
+  if #entries == 0 then return { next = "skip" } end
+  return { next = "save", memory_entries = entries }
+end

@@ -1,10 +1,20 @@
-# RPC Lua 런타임 요청 17 — 원문 사용자 메시지를 노드에 노출, `beforeIntent` 훅이 memory 전용 턴을 멈춤
+# RPC Lua 런타임 요청 17 — 원문 사용자 메시지 노출, 그리고 턴이 아무 도구도 실행하지 않는 간헐 결함
 
 날짜: 2026-08-16 · 대상: agentv3 runtime · 작성: axsdk-sites
 근거: 라이브 실측. 저장된 common flows 레이어 221,620 B(로컬 파일과 바이트 일치), `fromRemote: 0`.
 관련: 요청 15/16(런타임 도구는 `parameters.properties`로 투영된다 — 이 문서의 R17-1이 그 규칙의 결과입니다)
 
-**요청 2건**: R17-1(노출), R17-2(훅 결함 조사).
+**요청 2건**: R17-1(노출), R17-3(간헐 결함).
+
+> **정정 이력 — 이 문서의 첫 판을 이미 보내셨다면 R17-2는 무시해 주십시오.**
+> 첫 판은 "`beforeIntent` 훅을 등록하면 memory 전용 턴이 멈춘다"고 보고했습니다. **그 귀속은
+> 철회합니다.** 훅을 완전히 제거한 **대조군에서 같은 두 턴이 동일하게 멈췄고**, 훅 없는 상태에서
+> "안녕" 한 마디도 60초 무실행으로 끝났습니다(직후 재시도는 2.9초 정상). 즉 그때 관측한 멈춤은
+> R17-3의 간헐 결함이었을 가능성이 높고, 훅 탓이라고 말할 근거가 없습니다.
+>
+> 살아남는 관측과 그렇지 않은 관측을 구분해 적었습니다: **성공은 간헐 결함으로 설명되지 않으므로
+> 유효하고, 실패는 귀속 불가**입니다. 훅이 실행되고 `userMessages`가 원문을 담아 도착하며 혼합
+> 케이스가 캡처→저장까지 완료한 것은 **성공 관측이므로 유효**합니다.
 
 ---
 
@@ -85,12 +95,22 @@ keys=requestText   original=nil   planned=nil   userText=nil
 
 ---
 
-## R17-2 — `beforeIntent` 훅을 등록하면 memory 전용 턴이 아무 도구도 실행하지 않고 멈춥니다
+## R17-2 — 철회 (내용은 R17-3으로 대체)
 
-### 관측 (여기가 차단 요인입니다)
+첫 판의 "`beforeIntent` 훅이 memory 전용 턴을 멈춘다"는 **귀속을 철회합니다.** 대조 실험 결과:
 
-`FLOWS.md` §13.1의 훅은 저희 문제에 정확히 맞는 기계장치입니다 — 결정적이고, 매 라우팅 턴에 돌며,
-런타임이 **원문 메시지를 주입**합니다. 실측으로 확인했습니다:
+| 구성 | memory 전용 턴 | 혼합 턴 |
+|---|---|---|
+| 훅 등록(캡처만) | 120s 무실행 | 120s 무실행 |
+| **훅 완전 제거(대조군)** | **120s 무실행** | **120s 무실행** |
+| 훅 없는 상태, "안녕" 한 마디 | 1회차 60s 무실행 · **2회차 2.9s 정상** | — |
+
+훅이 없어도 같은 증상이 나오므로 훅 탓이 아닙니다. 세션 개설도 같은 시간대에 60초 실패 3연속 →
+직후 A/B에서는 훅 등록 상태로도 9.0s·8.7s 정상 개설. **간헐 결함이며 R17-3입니다.**
+
+### 훅에 대해 여전히 유효한 관측 (성공은 간헐 결함으로 설명되지 않습니다)
+
+`FLOWS.md` §13.1의 훅은 저희 문제에 맞는 기계장치이고, 다음은 실제로 확인됐습니다.
 
 ```
 keys=targetIntent,userMessages
@@ -99,82 +119,74 @@ userMessages: table #=1
 targetIntent=request_service_quote
 ```
 
-- `userMessages`는 **문자열 배열**이고 원문이 그대로 옵니다(선언은
-  `{ type: array, items: { type: string } }`. `type: [array, object, string, "null"]`은
-  `expected record, received array`로 거부되고, `items: { type: object }`는
-  `userMessages.0: expected object, received string`으로 거부됩니다 — 문서에 한 줄 있으면 좋겠습니다).
-- 훅은 trace **첫 자리**에서 실행됩니다(대상 flow의 `detect_cancellation`보다 먼저).
+- 훅은 trace **첫 자리**에서 실행됩니다(대상 flow의 첫 노드보다 먼저).
+- `userMessages`는 **문자열 배열**이고 **원문이 그대로** 옵니다 — 플래너가 지운 번호가 살아 있습니다.
+- 혼합 케이스는 캡처→저장까지 완료했습니다:
+  `{"next":"save","memory":{"phone":"415-555-0199"},"confirmed":true}` → `{"next":"report"}` →
+  비운 저장소에서 `{"g/phone":"415-555-0199"}`, **2/2**.
 
-혼합 케이스는 **동작했습니다**:
+선언 형태로 두 가지가 거부됩니다(문서에 한 줄 있으면 좋겠습니다):
+`type: [array, object, string, "null"]` → `expected record, received array`,
+`items: { type: object }` → `userMessages.0: expected object, received string`.
+올바른 선언은 `{ type: array, items: { type: string } }` 입니다.
+
+**즉 훅 경로 자체는 저희가 플랫폼 변경 없이 끝낼 수 있어 보입니다.** 남은 확인은 R17-3이 잦아들었을 때
+같은 실험을 다시 돌리는 것뿐입니다.
+
+---
+
+## R17-3 — 턴이 아무 도구도 실행하지 않고 바운드를 태우는 간헐 결함
+
+### 증상
+
+`sendMessage`는 수락되고(`delivered: true`), 그 뒤 **아무 것도 실행되지 않습니다.** 저희 하네스의 진단
+문구로는:
 
 ```
-capture_memory_clause  {"next":"save","memory":{"phone":"415-555-0199"},"confirmed":true}
-write_captured_memory  {"next":"report"}
-memory (비운 상태에서 시작) → {"g/phone":"415-555-0199"}      ← 2/2
+The turn ran no tool call at all — the send was accepted but the message never reached the chat store.
 ```
 
-**그런데 memory 전용 턴이 멈춥니다:**
+사용자 메시지가 chat store에 나타나지 않으므로, 엔진이 턴을 기록하기 전 단계에서 실패하는 것으로
+보입니다. 같은 계열로 **세션 개설 60초 타임아웃**도 관측됩니다
+(`Timed out waiting for the backend to open a session`).
 
-```
-send: "내 이메일 hong@test.com 기억해줘."
-elapsed 200.0s · memory {} · 실행된 도구 0개
-진단: "The turn ran no tool call at all — the send was accepted but the message never reached the chat store"
-```
+### 빈도 (2026-08-16, 같은 세션·같은 프로필)
 
-훅 등록 상태에서 전체 memory 스위트가 **6/10 → 2/10**, 소요 **23분**(멈춘 턴들이 각자 바운드를 태움).
-훅을 제거하면 즉시 6/10으로 복귀합니다.
+- 이른 시간: 라이브 48턴 중 **1턴**.
+- `tools/scenarios/checkout.mjs`와 프로브에서 `reset()` 60초 타임아웃 **2회** — 재시도로 해소.
+- 후반: 세션 개설 실패 **3연속**, 이어서 턴 무실행 **6/6**, 그 사이 "안녕" 한 마디가 1회 실패 후
+  2.9초 성공. **코드 변경 없이 나타났다 사라집니다.**
 
-### 배제한 것
+### 요청
 
-- **`consent: required`** — 훅에는 물어볼 사용자가 없으니 이것이라 의심해 제거했습니다. **변화 없음**
-  (여전히 120초 무실행).
-- **전달 문제 아님** — 같은 훅이 혼합 케이스에서는 정상 실행되고 저장까지 완료합니다.
-- **컴파일 오류 아님** — `check:flows` 137/0, 문서가 로드되고 다른 flow는 정상.
+1. 이 시간대의 서버 로그에서 **왜 턴이 기록 전에 사라지는지** 확인해 주십시오.
+   (필요하시면 세션 id를 별도로 전달합니다 — 이 문서에는 남기지 않았습니다.)
+2. 가능하다면 `sendMessage`가 **수락 후 실패했음을 알릴 채널**이 필요합니다. 현재는 수락과 침묵이
+   구분되지 않아, 호출자가 바운드를 전부 태운 뒤에야 실패를 압니다.
 
-### 우리 쪽 훅 구성(재현용 최소형)
+### 왜 중요한가
 
-```yaml
-hooks:
-  beforeIntent: [ record_memory ]
-
-flows:
-  record_memory:
-    state: { userMessages: null, memory: null, confirmed: null }
-    nodes:
-      capture:                       # kind: action_contract, runtime lua, 순수 계산
-        inputSelector: [ userMessages ]
-        next: { save: write, skip: done }
-      write:                         # kind: action_contract, runtime lua, rpc.allow [memory.set_bulk]
-        inputSelector: [ memory, confirmed ]
-        next: { report: done, error: done }
-      done:                          # respond 없는 terminal
-        kind: terminal
-        inputSelector: []
-```
-
-### 질문
-
-1. **훅 flow가 대상 intent와 같은 도메인을 건드리면(여기서는 둘 다 memory 쓰기) 금지되는 조합입니까?**
-   그렇다면 문서에 명시해 주시면 저희가 설계를 바꿉니다.
-2. `targetIntent == memory`일 때 훅과 대상 flow가 같은 op(`memory.set_bulk`)를 쓰는 것이 문제입니까?
-3. "the message never reached the chat store"는 엔진이 턴을 기록하기 전에 실패했음을 뜻합니다 —
-   훅 단계의 실패가 턴 자체를 삼킬 수 있는 경로가 있습니까? §13.1은 "A hook error never blocks the
-   target flow (fire-and-continue)"라고 명시합니다.
+저희 라이브 게이트 전체의 신뢰도가 여기에 걸립니다. 이 결함이 활성인 동안의 실패는 어떤 것도 코드에
+귀속할 수 없고, 실제로 오늘 저희가 훅에 잘못 귀속했다가 대조군으로 철회했습니다. **성공 관측은
+살아남지만 실패 관측은 무효**가 되므로, 이 결함이 곧 진단 비용입니다.
 
 ### 우선순위
 
-**높음.** 이것이 유일한 차단 요인입니다. 훅이 memory 전용 턴을 멈추지 않는다면 저희는 플랫폼 변경
-없이 이 문제를 끝낼 수 있습니다 — 추출기는 이미 작성되어 오프라인 테스트 16개와 변이 검사를
-통과했고(`AX_RPC_MEMORY.capture`), 혼합 케이스는 라이브에서 저장까지 확인했습니다.
+**높음.**
 
 ---
 
 ## 현재 상태
 
-- 훅 배선은 **되돌렸습니다**(회귀를 출하하지 않기 위해). 추출기와 테스트는 커밋되어 있고 어떤 flow도
-  아직 호출하지 않습니다.
-- memory 스위트 **6/10** — A/C/D가 위 원인으로 실패, B/E/F/G는 통과.
+- 훅 배선은 **되돌렸습니다.** 되돌린 이유는 첫 판에 적은 "훅이 턴을 멈춘다"가 아니라, **R17-3이 활성인
+  동안에는 훅의 효과를 측정할 수 없기 때문**입니다. 회귀를 출하하지 않으려면 측정되지 않은 배선을
+  두지 않는 편이 맞습니다.
+- 추출기(`AX_RPC_MEMORY.capture`)와 테스트 16개는 커밋되어 있고 어떤 flow도 아직 호출하지 않습니다.
+  동의 경계(명시적 절이 없으면 캡처하지 않음)는 순수 조건이고 변이 검사로 고정했습니다.
+- memory 스위트 **6/10** — A/C/D 실패. A의 원인은 플래너의 뒤 절 누락(§0), C/D는 그 결과입니다.
 - 게이트: `test:lua` 525 · `check:flows` 137 · `test:playground` 80 · `test:scenarios` 77 ·
   `check:bundle` · `dead:lua` alive 39/dead 0.
 - 우리 쪽에서 이번에 고친 것: 값 없는 저장이 enum 밖 `operation` 대신 `next="error"`로 정직하게
   실패하도록 프롬프트 수정(라이브 확인).
+- **R17-3이 잦아들면 저희가 먼저 할 일**: 훅 실험을 대조군과 함께 재측정합니다. 그 결과가 좋으면
+  R17-1도 차단 요인이 아니게 됩니다(잘린-값 경로의 방어로만 남습니다).

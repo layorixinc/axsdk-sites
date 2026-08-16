@@ -1827,3 +1827,34 @@ test('a contract tool declares only state some node hands over', () => {
   }
   assert.deepEqual(stray, [], 'contract tools declaring state that is always nil');
 });
+
+// `require` compares an argument to the value given, BY EQUALITY — measured against the two shapes in the
+// document. `shopping_add_selected_store_offer` names strings to match
+// (`cart_approval: user_selected_compared_offer`) and adds to a real cart live, 12/12. `shopping_add_to_cart`
+// named `product_id: true`, meaning "the id must be the boolean true", and `"B0F34DXKZH" ~= true` — so the
+// single-site cart add could NEVER have succeeded. Live it answered `adapter requirement failed: product_id`
+// with the id sitting right there in the node's selected state, and a probe inside the tool never ran at all:
+// the requirement is checked before the script.
+//
+// Presence is what `parameters.required` states. A `require` demanding `true` of a property the same tool
+// declares as a non-boolean is a contradiction the document can check for itself.
+test('a require never demands true of a property declared as something else', () => {
+  const contradictions = [];
+  for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+    'playground/_common/flows.yaml']) {
+    if (!existsSync(new URL(path, root))) continue;
+    const tools = parseFlow(path).flowTools ?? {};
+    for (const [id, tool] of Object.entries(tools)) {
+      for (const [key, wanted] of Object.entries(tool.require ?? {})) {
+        if (wanted !== true) continue;
+        const declared = tool.parameters?.properties?.[key]?.type;
+        if (declared === undefined) continue; // a state marker the tool does not take as an argument
+        const types = Array.isArray(declared) ? declared : [declared];
+        if (!types.includes('boolean')) {
+          contradictions.push(`${path} ${id}.require.${key} wants true but declares ${types.join('|')}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(contradictions, [], 'requirements that no value of the declared type can satisfy');
+});

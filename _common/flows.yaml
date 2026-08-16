@@ -938,6 +938,7 @@ flows:
       shop_results: ""
       shop_count: null
       shop_refine_stage: null
+      cart_approval: null
       checkout_stage: null
       checkout_status: null
       checkout_view: null
@@ -1037,7 +1038,7 @@ flows:
              next="ask", shop_refine_stage="criteria", question=<in the user's language: state how many products were found for `query`, list the top few by name with price_text/rating, then offer concrete ways to choose — e.g. 저렴한 순(price), 평점 높은 순(rating), 특정 브랜드/키워드, 또는 "첫 번째"/"아무거나". Ask which they want.>. Do NOT set product_id.
           3. `shop_refine_stage`="criteria" (requestText is the user's choice/criterion):
              Rank/filter `candidates` by that criterion (lowest price, highest rating, a brand/keyword in name, "first"/"아무거나"/"any" -> the first candidate, …).
-             - If one matches: next="pick", product_id=<the chosen candidate's id>, product_name=<its name>. Copy id/name VERBATIM from candidates.
+             - If one matches: next="pick", product_id=<the chosen candidate's id>, product_name=<its name>, cart_approval="user_picked_searched_product". Copy id/name VERBATIM from candidates.
              - If the user declines / says skip / none: next="skip".
              - If NONE match: next="ask", shop_refine_stage="criteria", question=<in the user's language: say nothing matched, restate the options, ask for a different criterion>. Do NOT set product_id.
 
@@ -1052,7 +1053,7 @@ flows:
 
       add_item:
         kind: action_contract
-        inputSelector: [ product_id, quantity ]
+        inputSelector: [ product_id, quantity, cart_approval ]
         id: shopping_add_to_cart
         description: Add the picked product to the cart with the requested quantity.
           Single durable call — navigates to the product page, clicks Add to
@@ -4150,7 +4151,6 @@ flowTools:
           -- The gate for this flow is `refine_item`, where the user picked THIS product out of the searched
           -- list. Naming it here is what lets the shared cart refuse a call that carries no approval at all
           -- while still serving a flow that has no comparison to approve.
-          args.cart_approval = "user_picked_searched_product"
           args.site = args.site or "amazon"
           return AX_RPC_CART.add_to_cart(args)
         end
@@ -4162,7 +4162,19 @@ flowTools:
     effect: mutation
     consent: required
     idempotent: true
-    require: { product_id: true }
+    # No `require:` here on purpose. It compares an argument to the value given BY EQUALITY, so the
+    # `{ product_id: true }` that stood here demanded the id BE the boolean true — `"B0F34DXKZH" ~= true` — and
+    # the single-site cart add could never succeed: live it answered `adapter requirement failed: product_id`
+    # with the id sitting in the node's selected state, and a probe inside the tool never ran, because the
+    # requirement is checked before the script. Presence is what `parameters.required` below states. The
+    # approval this mutation carries is the flow's own gate, `refine_item`, which the entry Lua names as
+    # `cart_approval = "user_picked_searched_product"` for the shared cart to accept.
+    # The platform refuses a mutation adapter with no `require`, and this one is SATISFIABLE because the
+    # value is a literal the gate writes into state. What stood here was `{ product_id: true }`, which
+    # compares by equality and so demanded the id BE the boolean true — the single-site cart add could never
+    # succeed, and live it answered `adapter requirement failed: product_id` with the id sitting in the
+    # node's selected state. Mirrors `shopping_add_selected_store_offer`, which adds to a real cart.
+    require: { cart_approval: user_picked_searched_product }
     parameters:
       type: object
       additionalProperties: false
@@ -4170,6 +4182,7 @@ flowTools:
       properties:
         product_id: { type: string }
         quantity: { type: [ integer, number, string ] }
+        cart_approval: { type: string, enum: [ user_picked_searched_product ] }
 
   refine_products:
     description: Refine the searched products for the current item — ask the user
@@ -4190,6 +4203,7 @@ flowTools:
         shop_refine_stage: { type: [ string, "null" ] }
         product_id: { type: [ string, "null" ] }
         product_name: { type: [ string, "null" ] }
+        cart_approval: { type: string, enum: [ user_picked_searched_product ] }
         message: { type: string }
 
   checkout_decision:

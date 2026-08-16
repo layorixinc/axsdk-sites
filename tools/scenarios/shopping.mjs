@@ -6,20 +6,29 @@
 // Runs on the shipping CDP extension via tools/harness/cdp-session.mjs (contract C3).
 import { pathToFileURL } from 'node:url';
 
+/** A tool that RAN, whatever it answered. */
 export const hasTool = (calls, name) => (calls || []).some(call => call.name === name);
-// Step predicates over { err, text, toolCalls } — pure, so the verdicts are unit-testable.
+// A tool that ran is not a tool that worked. Measured live: `shopping_add_to_cart` answered `error` while the
+// terminal said both "장바구니에 담았습니다" and "shoes는 추가되지 않았습니다", and a name-only predicate called
+// that a pass. The cart step is the one place in this flow where the distinction is the whole point.
+export const toolSucceeded = (calls, name) => (calls || [])
+  .some(call => call.name === name && call.status !== 'error' && call.status !== 'failed');
+
+// Step predicates over { err, text, toolCalls } — pure, so the verdicts are unit-testable. Every tool name is
+// the RPC name a live trace showed; the durable names this flow used before the port (`search_product`,
+// `shopping.refine_item`, `add_to_cart`) no longer exist and matched nothing for as long as they stood here.
 export const refineAsksAfterSearch = step => !step.err
-  && hasTool(step.toolCalls, 'search_product')
-  && hasTool(step.toolCalls, 'shopping.refine_item')
-  && !hasTool(step.toolCalls, 'add_to_cart')
-  && !hasTool(step.toolCalls, 'checkout')
+  && hasTool(step.toolCalls, 'shopping_search_product')
+  && hasTool(step.toolCalls, 'shopping_single_site.refine_item')
+  && !hasTool(step.toolCalls, 'shopping_add_to_cart')
+  && !hasTool(step.toolCalls, 'run_checkout')
   && step.text.length > 0;
 export const addThenConfirmAsks = step => !step.err
-  && hasTool(step.toolCalls, 'add_to_cart')
-  && hasTool(step.toolCalls, 'shopping.checkout_confirm')
+  && toolSucceeded(step.toolCalls, 'shopping_add_to_cart')
+  && hasTool(step.toolCalls, 'shopping_single_site.checkout_confirm')
   && /체크아웃|결제|checkout/i.test(step.text);
 export const checkoutRunsNoOrder = step => !step.err
-  && (hasTool(step.toolCalls, 'run_checkout') || hasTool(step.toolCalls, 'do_checkout') || hasTool(step.toolCalls, 'checkout'))
+  && (hasTool(step.toolCalls, 'run_checkout') || hasTool(step.toolCalls, 'do_checkout'))
   && /주문|order|체크아웃|checkout|결제/i.test(step.text);
 
 async function step(session, label, msg, timeoutMs = 180000) {

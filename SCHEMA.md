@@ -1760,6 +1760,12 @@
             "null"
           ]
         },
+        "cart_approval": {
+          "type": "string",
+          "enum": [
+            "user_picked_searched_product"
+          ]
+        },
         "message": {
           "type": "string"
         }
@@ -2052,6 +2058,12 @@
             "integer",
             "number",
             "string"
+          ]
+        },
+        "cart_approval": {
+          "type": "string",
+          "enum": [
+            "user_picked_searched_product"
           ]
         }
       }

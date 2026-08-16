@@ -1309,3 +1309,30 @@ test("ebay's SHIPPED config takes the id from the card attribute, not the href",
   assert.equal(attr, 'data-listingid',
     'without this every ebay row parses to the placeholder id and the page collapses into one candidate');
 });
+
+// Measured live and it silently dropped a store from a comparison: without a `url` the port asks "has the
+// address changed since I started" and reads its baseline through a ROUND TRIP. An Amazon search commits in
+// ~460ms and an op costs about the same, so the baseline often comes back as the page we already arrived at,
+// `now ~= before` is false forever, and the wait burns its whole 8s ceiling before reporting failure about a
+// navigation that worked. Reproduced in the playground: two Amazon searches in one session, one `navigation_stuck`,
+// the tab sitting on the correct search URL afterwards.
+//
+// The redirect fallback keeps the search alive either way, so correctness alone cannot pin this — the COST can.
+// With the target the wait ends on its first check; without it, it polls the ceiling.
+test('arrival is checked against the target, so a fast navigation costs one check and not a ceiling', () => {
+  const page = makePage({
+    href: 'https://www.11st.co.kr/',
+    // The navigation has ALREADY committed by the time the wait reads its baseline — the live race.
+    settleAfter: 0,
+    afterNavigate: { 'li.card': [card('1', '마우스', '10,000원')] },
+  });
+  const { value, ops } = search(page);
+
+  assert.equal(value.next, 'ok', `the search still answers: ${JSON.stringify(value.error ?? null)}`);
+  const hrefReads = ops.filter((entry) => entry.op === 'dom.get_location_href').length;
+  // Measured both ways against this stub: 5 href reads with the target, 45 without it (the 8000/200 ceiling
+  // plus the surrounding reads). The bound sits between them with headroom, so it fails on a ceiling and not on
+  // an extra read someone legitimately adds.
+  assert.ok(hrefReads <= 10,
+    `arrival should settle in a few href reads, not a ceiling of them — got ${hrefReads}`);
+});

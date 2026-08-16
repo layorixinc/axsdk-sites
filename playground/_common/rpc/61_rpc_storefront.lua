@@ -661,10 +661,27 @@ function S.search(config, args)
     if not moved then return { next = "error", error = "rpc_unavailable", site = config.site } end
     -- href first. A document that is still alive answers a selector check from the OLD page, so an
     -- element probe here is a false positive waiting to happen.
-    if not nav.wait_for_navigation({ timeout = 8000, interval = 200 }) then
+    --
+    -- The TARGET is passed, and that is not a nicety. Without a `url` the port asks "has the address changed
+    -- since I started", and it reads its baseline through a round trip: measured live, an Amazon search
+    -- commits in ~460ms and an op costs about the same, so the baseline read often returns the page we just
+    -- arrived at. `now ~= before` is then false forever, the wait burns its whole ceiling and reports failure
+    -- about a navigation that WORKED — a store silently dropped from a comparison because it answered too
+    -- fast. With `url` the check is `now:includes(target)`, true whenever we are there, whichever won the
+    -- race. Reproduced in the playground: two Amazon searches in one session, one of them stuck, and the tab
+    -- sitting on the correct search URL afterwards.
+    if not nav.wait_for_navigation({ url = target, timeout = 8000, interval = 200 }) then
       -- A channel that answered nothing is not a site that would not move.
       if __refused > 0 then return { next = "error", error = "rpc_unavailable", site = config.site } end
-      return { next = "error", error = "navigation_stuck", site = config.site, href = dom.get_location_href() }
+      -- A site may redirect off the target (canonical slug, locale, an interstitial), and then the target
+      -- match cannot hold however long it waits. Moving AT ALL is the fact worth having: `from` is the
+      -- address before the navigation fired, so a different one now means the page went somewhere, and the
+      -- selector wait below decides whether it is a result page. Only an address that never moved is stuck.
+      local landed = dom.get_location_href()
+      if landed == nil then return { next = "error", error = "rpc_unavailable", site = config.site } end
+      if landed == from then
+        return { next = "error", error = "navigation_stuck", site = config.site, href = landed }
+      end
     end
   end
 

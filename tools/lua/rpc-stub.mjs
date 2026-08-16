@@ -92,7 +92,23 @@ export function makePage(spec) {
     return null;                                    // the runtime answers nil for a fired navigation
   };
 
-  // The new document becomes observable a poll later, the way a real navigation does.
+  // The new document becomes observable a poll later, the way a real navigation does — unless
+  // `settleAfter: 0`, which is the live race: measured, an Amazon search commits in ~460ms while an op round
+  // trip costs about the same, so the document can be there BEFORE the waiter reads its baseline. A waiter
+  // that asks "changed since I started" then compares the new page against itself and never sees a change.
+  if (spec.settleAfter === 0) {
+    const alreadyThere = page.navigate;
+    page.navigate = (url) => {
+      const answer = alreadyThere(url);
+      if (page.pendingHref !== undefined) {
+        page.href = page.pendingHref;
+        page.dom = page.pendingDom;
+        page.pendingHref = undefined;
+      }
+      return answer;
+    };
+  }
+
   page.tick = () => {
     if (page.pendingHref !== undefined) {
       page.pollsSinceNavigate += 1;
@@ -297,10 +313,15 @@ export function installRpcStub(lua, page, { allow } = {}) {
         }
         const options = spec && typeof spec === 'object' ? spec : undefined;
         const wanted = options?.url;
-        // The document we are LEAVING is the baseline, read without a round trip and without ticking:
-        // mid-navigation the real port's `location.href` is still the old document, and a stub that
-        // consumed its own pending transition to get the baseline would never observe a change.
-        const before = page.href;
+        // The baseline is read through a ROUND TRIP, exactly as the real port does
+        // (`axsdk-core/src/lua/dom-port.ts`: `const before = await locationHref(on)` before the poll). This
+        // stub used to take it from `page.href` without ticking, on the reasoning that mid-navigation the
+        // port still sees the old document — and live measurement killed that reasoning: an Amazon search
+        // commits in ~460ms while an op round trip costs about the same, so the baseline read often returns
+        // the NEW url and `now !== before` can then never become true. The wait polls its whole ceiling and
+        // answers false about a navigation that worked. A caller that passes `url` is immune, because
+        // `now.includes(wanted)` is true whenever the page is there, before or after the baseline.
+        const before = call('dom.get_location_href');
         return poll(() => {
           const now = call('dom.get_location_href');
           if (now === null || now === undefined) return false;

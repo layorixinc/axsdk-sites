@@ -119,23 +119,36 @@ end
 --- On the cart page the id is therefore the ONLY evidence that means anything. `data-asin` is in the
 --- probe because amazon states the id most precisely there, and without it the one site whose cart page
 --- names the id could only be matched through an href.
+---
+--- And the id probe is evidence ONLY there. Measured live 2026-08-15: a PRODUCT page states its own id
+--- in links that have nothing to do with a cart — eBay's sign-in return URL (`ru=…%2Fitm%2F<id>`) and its
+--- related-item rails (`_trkparms`), amazon's brand showcase, warranty and review links. Counts on
+--- arrival, cart contents irrelevant: ebay `/itm/188780934255` **51**, amazon `/dp/B0DGJ7HYG1` **95**
+--- (90 of them outside every cart-UI subtree), amazon `/dp/B0FBWHDNXK` **16**. Because `add_to_cart`
+--- guards its entire add block with `if not cart_contains(...)`, a true answer on arrival SKIPPED the
+--- click and the final read answered true again — `added = true`, `next = "done"`, a confirmation quoted
+--- to the user, and nothing in the cart. Same defect as the paragraph above, other half of the costume:
+--- that fix scoped the structural selector and left the id probe running everywhere.
 function R.cart_contains(config, product_id)
   local href = here()
   local on_cart = false
   for index = 1, #(config.cart_url_markers or {}) do
     if tostring(href or ""):find(config.cart_url_markers[index], 1, true) then on_cart = true end
   end
-  local id = tostring(product_id or ""):gsub('["\\]', "")
-  if id ~= "" and exists('a[href*="' .. id .. '"], [data-product-id="' .. id .. '"], '
-    .. '[data-item-id="' .. id .. '"], [data-asin="' .. id .. '"]') then
-    return true
-  end
   if on_cart then
+    local id = tostring(product_id or ""):gsub('["\\]', "")
+    if id ~= "" and exists('a[href*="' .. id .. '"], [data-product-id="' .. id .. '"], '
+      .. '[data-item-id="' .. id .. '"], [data-asin="' .. id .. '"]') then
+      return true
+    end
     -- On the cart page the WIDE selector is worthless: it is what the site uses to say "this is a cart".
     -- `confirmation_text_selectors` is the narrow set the site shows only for an add that just happened,
     -- which is why the reader already uses it to quote the confirmation back to the user.
     return first_existing(config.confirmation_text_selectors or {}) ~= nil
   end
+  -- Off the cart page only a per-add panel counts. Verified live that amazon's own
+  -- `#sw-atc-confirmation, #sc-active-cart, .sc-list-item[data-asin]` matches 0 on a product page, so
+  -- this branch stays what it was written to be.
   if config.confirmation_selector and exists(config.confirmation_selector) then return true end
   return false
 end

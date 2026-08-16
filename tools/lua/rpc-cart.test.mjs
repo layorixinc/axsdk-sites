@@ -401,6 +401,36 @@ test('off the cart page a confirmation panel is still per-add evidence', () => {
   assert.equal(lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234'), true);
 });
 
+// ── the id is cart-page evidence, and ONLY there ──────────────────────────────
+//
+// Measured live 2026-08-15, and it is the same defect as the one above wearing the other half of the
+// costume: the fix scoped the STRUCTURAL selector to the cart page and left the ID probe running
+// everywhere. A product page states its own id in links that have nothing to do with a cart — sign-in
+// return URLs (`ru=…%2Fitm%2F<id>`), related-item rails carrying it in `_trkparms`, brand showcases,
+// warranty and review links. So the probe answered true on arrival, before any click.
+//
+// What that costs is not a cosmetic mislabel. `add_to_cart` guards its whole add block with
+// `if not cart_contains(...)`, so a true answer SKIPS the click and the final read answers true again:
+// `added = true`, `next = "done"`, a confirmation quoted back to the user, and nothing in the cart.
+//
+// Live counts for the first branch on a PRODUCT page, cart contents irrelevant:
+//   ebay   /itm/188780934255  -> 51 matches
+//   amazon /dp/B0DGJ7HYG1     -> 95 matches, 90 of them outside every cart-UI subtree
+//   amazon /dp/B0FBWHDNXK     -> 16 matches
+test('off the cart page an anchor bearing the id is NOT evidence of an add', () => {
+  const page = shop({ href: PRODUCT, extra: {
+    // eBay's sign-in link on every item page embeds the item id in its return URL; amazon's brand
+    // showcase and warranty links embed the asin. Neither says anything about a cart.
+    'a[href*="B0TEST1234"]': 'Sign in',
+    '[data-asin="B0TEST1234"]': 'More from this brand',
+  } });
+  installRpcStub(lua, page);
+
+  const confirmed = lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234');
+
+  assert.equal(confirmed, false, 'a product page naming its own id is not a cart holding it');
+});
+
 // ── a foreign primary quote with a localized alternate ───────────────────────
 //
 // Measured live on an eBay item page (2026-08-15): the primary quote is the seller's currency and the

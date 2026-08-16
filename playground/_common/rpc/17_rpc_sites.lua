@@ -425,6 +425,17 @@ RPC_SITES["ebay"] = {
     "[id^='atcBtn']",
     ".x-atc-action a"
   },
+  cart_url = "https://cart.ebay.com/",
+  cart_url_markers = {
+    "cart.ebay.com"
+  },
+  cart_count_selectors = {
+    ".gh-cart .gh-badge",
+    ".gh-cart__icon .badge"
+  },
+  cart_ready_selector = "[data-test-id='app-cart']",
+  cart_item_selector = "[data-test-id='cart-item-link']",
+  cart_empty_selector = "[data-test-id='start-shopping']",
   blocked_selectors = {
     {
       selector = "#captcha_form, #captcha-box, form[action*='captcha'], input[name='captcha']",

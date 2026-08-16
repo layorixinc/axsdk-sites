@@ -53,6 +53,34 @@ local CONFIG = {
   product_price_selectors = { ".x-price-primary", ".x-bin-price__content" },
   product_price_approx_selectors = { ".x-price-approx__price" },
   add_selectors = { "#atcBtn_btn_1", "[id^='atcBtn']", ".x-atc-action a" },
+  -- Cart, measured live 2026-08-15 with a real add and a real removal. eBay declared `add_selectors` and
+  -- none of the keys that CONFIRM an add, so the guard had nothing on this site to read.
+  --
+  -- The add is an in-page update, not a navigation: the button carries
+  -- `href="https://cart.payments.ebay.com/sc/add?srt=…"` and the SPA intercepts the click, so the URL stays
+  -- on `/itm/<id>` and only the header count moves (aria `장바구니에 0개…` -> `1개`). Confirmation therefore
+  -- comes from navigating to the cart and finding THIS id, which `cart_contains` does with `cart_url`.
+  --
+  -- Deliberately absent, both of them: `confirmation_selector` (there is no per-add panel on the item page
+  -- — the only thing that appears is a minicart flyout reading `로드 중...`) and
+  -- `confirmation_text_selectors` (a text assertion would be locale-bound, and this profile renders the
+  -- item page in Korean while the cart page titles itself `Cart` in English). Leaving both out makes the
+  -- id on the cart page the ONLY evidence, which is the strongest and the only language-independent one.
+  cart_url = "https://cart.ebay.com/",
+  cart_url_markers = { "cart.ebay.com" },
+  -- The count lives in a word-based design-system badge whose text is the digit; the same number is also
+  -- in the link's `aria-label`, but that is a Korean sentence here, and a digit is not.
+  cart_count_selectors = { ".gh-cart .gh-badge", ".gh-cart__icon .badge" },
+  -- The cart page states everything through `data-test-id`, which is what §10 asks for. Measured: with one
+  -- item `app-cart`/`cart-bucket`/`cart-item-link`/`cta-top` are each 1; after removing it `cart-item-link`,
+  -- `cart-bucket` and `cta-top` are 0, `start-shopping` appears, and the badge is ABSENT rather than "0".
+  cart_ready_selector = "[data-test-id='app-cart']",
+  cart_item_selector = "[data-test-id='cart-item-link']",
+  cart_empty_selector = "[data-test-id='start-shopping']",
+  -- `checkout_button_selectors` is NOT set, so `AX_RPC_CHECKOUT` keeps answering `checkout_unavailable`
+  -- here. The control was measured — `[data-test-id='cta-top']`, `체크아웃으로 가기` — but eBay's review page
+  -- is behind a sign-in this profile does not have, so nothing past the click could be verified, and a
+  -- configured path nobody has walked is worse than one that says it is not configured.
   -- Both walls answer with a page rather than an error, so they are named and classified instead of
   -- being read as a store with nothing in it.
   blocked_selectors = { { selector = "#captcha_form, #captcha-box, form[action*='captcha'], input[name='captcha']", error = "captcha_required" } },

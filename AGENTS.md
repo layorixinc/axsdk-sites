@@ -1788,3 +1788,42 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   Handyman." Knowing only the first made the second a generic `quote_unavailable`, so the user learned
   nothing. Each phrase now carries how its sentence STARTS, because `dom.get_text` is textContent and a
   fixed window drags in whatever the page rendered next.
+- **The guarded cart reported adds that never happened, on every site, and the "fails closed" comment above
+  the function was describing the half that had been fixed.** `cart_contains` scoped the STRUCTURAL selector
+  to the cart page and left the ID probe running everywhere, and `add_to_cart` guards its entire add block
+  with `if not cart_contains(...)` — so a true answer on ARRIVAL skipped the click and the final read
+  answered true again: `added = true`, `next = "done"`, a confirmation quoted to the user, nothing in the
+  cart. A product page states its own id in links that have nothing to do with a cart: eBay's sign-in
+  return URL (`ru=…%2Fitm%2F<id>`) and its related-item rails (`_trkparms`), amazon's brand showcase,
+  warranty and review links. Measured on arrival, cart contents irrelevant — ebay `/itm/188780934255`
+  **51** matches, amazon `/dp/B0DGJ7HYG1` **95** (90 outside every cart-UI subtree), `/dp/B0FBWHDNXK`
+  **16**. On the cart page the same probe matches **1**. Those two numbers are the whole defect and the
+  whole fix. Off-cart evidence is now only a per-add panel, which is what it was written to be — verified
+  live that amazon's own `#sw-atc-confirmation, #sc-active-cart, .sc-list-item[data-asin]` matches **0** on
+  a product page. Live proof the click now happens: the shopping scenario landed on
+  `amazon.com/cart/smart-wagon?newItems=…`, a URL only a real add produces, where before the fix the tool
+  never navigated at all.
+- **A green live scenario proved the instrument, not the product.** `shopping.mjs` asserts
+  `toolSucceeded(shopping_add_to_cart)` and had been passing for exactly as long as the false positive
+  existed — the tool answered success without clicking. `added: true` is a claim about the SITE, so the
+  only assertion that can catch this is one the site itself makes (`newItems=` in the landing URL, the id
+  on the cart page). Reading a tool's own status back is not verification of a mutation.
+- **eBay declared `add_selectors` and none of the eleven keys that CONFIRM an add**, so the one site whose
+  guard had nothing to read was also the one where the id probe answered 51. Measured 2026-08-15 with a
+  real add and a real removal: the add is an IN-PAGE update (the button carries
+  `href="https://cart.payments.ebay.com/sc/add?srt=…"` and the SPA intercepts it, so the URL stays on
+  `/itm/<id>` and only the header count moves), the cart page states everything through `data-test-id`
+  (`app-cart`, `cart-bucket`, `cart-item-link`, `cta-top`, and `start-shopping` only when empty), and the
+  count lives in `span.badge.gh-badge` whose text is the digit. `confirmation_selector` and
+  `confirmation_text_selectors` are deliberately ABSENT: there is no per-add panel, and a text assertion
+  would be locale-bound — this profile renders the item page in Korean while the cart page titles itself
+  `Cart` in English. That leaves the id on the cart page as the only evidence, which is the strongest and
+  the only language-independent one. `checkout_button_selectors` is left unset on purpose: the control was
+  measured (`[data-test-id='cta-top']`) but eBay's review page is behind a sign-in this profile lacks, and
+  a configured path nobody has walked is worse than one that says it is not configured.
+- **`cart_subtotal_selectors` is read by nobody.** Amazon declares it; no module consumes it. It was not
+  mirrored onto eBay — copying a dead key is how the next survey concludes the reader is broken.
+- **`shopping_single_site`'s entry node is literally `open_amazon`.** The single-site cart flow is
+  hardcoded to one store, so eBay's cart config is reachable only through the multi-store comparison's
+  select-then-add path. A probe that opens ebay.com and sends a shopping request lands on amazon and looks
+  like a site-detection bug; it is the flow graph.

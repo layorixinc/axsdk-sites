@@ -76,6 +76,16 @@ function fakeExtension() {
     seedConversation(messages) {
       writeChat(group, messages, group.sessionId);
     },
+    /** Any store, verbatim — the driver's own stores are envelope-shaped, so a test writes the real shape. */
+    setState(key, value) {
+      storage.set(key, value);
+    },
+    /** The session-scoped key the driver will read. The group id starts at 7 and increments, so a test that
+     *  hardcodes `s1:` writes to a store nobody looks at — which is how the first version of this passed
+     *  nothing to the assertion it was meant to prove. */
+    sessionKey(store) {
+      return `s${group.id}:axsdk:${store}`;
+    },
   };
 
   function writeChat(target, messages, sessionId) {
@@ -952,6 +962,68 @@ test('a stalled turn carries the node it stalled on', async () => {
     assert.equal(error.stage, 'stalled');
     assert.equal(error.stoppedOn, 'shopping_judge_relevance');
     assert.equal(error.landed, true);
+    return true;
+  });
+  await session.close();
+});
+
+// The runtime team found what a whole day of "the turn ran nothing" actually was: `POST /sessions/message`
+// answered **402 LimitExceeded (mar 1001/1000)** while session creation returned 200. Our driver never looked at
+// the status, so a quota refusal and a healthy-but-silent turn were the same observation — and a hook, which adds
+// one flow per turn, reached the limit sooner, which is why removing it "fixed" things and why I misattributed
+// the stall to it.
+//
+// The extension records what it knows in its own `axsdk:errors` store. On a turn that ran NO node, the driver now
+// reads it and says so. It cannot invent the status — it reports whatever is there — and that is the point: the
+// bare timeout was the least informative sentence available.
+test('a turn that reached no node reports what the extension recorded', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  fake.seedConversation([user('m1', 'hi')]);
+  fake.turns.push([]); // delivered, and the store never moves
+  fake.setState(fake.sessionKey('errors'), JSON.stringify({
+    state: { errors: [{ status: 402, code: 'LimitExceeded', detail: 'mar 1001/1000' }] },
+  }));
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.match(error.message, /no tool call/i);
+    assert.match(error.message, /402/, 'the status the extension recorded');
+    assert.match(error.message, /LimitExceeded/, 'and its code');
+    return true;
+  });
+  await session.close();
+});
+
+test('a silent turn with nothing recorded says exactly that, inventing no cause', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  fake.seedConversation([user('m1', 'hi')]);
+  fake.turns.push([]);
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.match(error.message, /no tool call/i);
+    assert.doesNotMatch(error.message, /402|LimitExceeded/, 'no cause is invented');
+    return true;
+  });
+  await session.close();
+});
+
+// A turn that DID run nodes needs no such lookup: the trace already says where it stopped, and reading a store
+// on every stall would add a round trip to the path that is already slow.
+test('a stalled turn is not made to carry an error store lookup', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const seeded = [user('m1', 'hi')];
+  fake.seedConversation(seeded);
+  fake.setState(fake.sessionKey('errors'), JSON.stringify({ state: { errors: [{ status: 402 }] } }));
+  fake.turns.push([[...seeded, user('m2', 'go'), assistant('m3', [
+    toolPart('p1', 'shopping_search_stores', 'completed', { next: 'done' }),
+    toolPart('p2', 'shopping_judge_relevance', 'pending', undefined),
+  ], { completed: false })]]);
+
+  await assert.rejects(() => session.send('go', { timeoutMs: 900 }), (error) => {
+    assert.equal(error.stage, 'stalled');
+    assert.doesNotMatch(error.message, /402/, 'a stall names its node, not the store');
     return true;
   });
   await session.close();

@@ -134,7 +134,9 @@ async function pollWithDiagnosis(check, label, timeoutMs, diagnose, intervalMs =
     return await poll(check, label, timeoutMs, intervalMs);
   } catch (error) {
     let account;
-    try { account = diagnose(); } catch { account = undefined; }
+    // Awaited: the account for a turn that ran nothing includes what the extension recorded, which is a store
+    // read. It only happens on the timeout path, so a healthy wait still pays nothing for it.
+    try { account = await diagnose(); } catch { account = undefined; }
     if (account === undefined || typeof account.text !== 'string' || account.text === '') throw error;
     const { text, ...facts } = account;
     throw Object.assign(new Error(`${error.message} ${text}`, { cause: error }), facts);
@@ -258,6 +260,32 @@ export async function openCdpSession(options = {}, lib = undefined) {
     const messages = Array.isArray(state?.messages) ? state.messages : [];
     const id = state?.session?.id;
     return { sessionId: typeof id === 'string' && id !== '' ? id : undefined, messages };
+  };
+
+  /**
+   * What the extension recorded for this session, as a short line — or `undefined` when it recorded nothing.
+   *
+   * Read only when a turn ran NO node, because that is the case the driver cannot explain by itself: measured by
+   * the runtime team, `POST /sessions/message` can answer 402 LimitExceeded while session creation returns 200,
+   * and this driver never saw a status. Summarised, never dumped: the status and the code are what a reader
+   * needs, and a whole payload is how a secret ends up in a log.
+   */
+  const readRecordedErrors = async () => {
+    const stored = await stateGet(`s${groupId}:axsdk:errors`).catch(() => undefined);
+    if (stored === undefined) return undefined;
+    let entries;
+    try {
+      const state = JSON.parse(stored)?.state;
+      entries = Array.isArray(state?.errors) ? state.errors : Array.isArray(state) ? state : undefined;
+    } catch { entries = undefined; }
+    if (entries === undefined || entries.length === 0) return undefined;
+    const summary = entries.slice(-3).map((entry) => {
+      if (entry === null || typeof entry !== 'object') return String(entry).slice(0, 80);
+      const parts = [entry.status, entry.code, entry.detail ?? entry.message ?? entry.reason]
+        .filter((value) => value !== undefined && value !== null && value !== '');
+      return parts.length > 0 ? parts.join(' ').slice(0, 120) : JSON.stringify(entry).slice(0, 120);
+    });
+    return summary.join(' · ');
   };
 
   const pageUrl = async () => {
@@ -433,7 +461,7 @@ export async function openCdpSession(options = {}, lib = undefined) {
         const shape = JSON.stringify(now.messages);
         if (shape !== previousShape) { previousShape = shape; return undefined; }
         return { fresh, answer, last: now.messages[now.messages.length - 1] };
-      }, 'the agent to answer', timeoutMs, () => {
+      }, 'the agent to answer', timeoutMs, async () => {
         // A stop must say where it was. All of this was already in the snapshot the poll just read; the
         // timeout simply threw it away, so every hang cost a whole repeat run to locate. No tool part at
         // all is a DIFFERENT fact — the turn never reached a node — and naming it as a stall points the
@@ -444,14 +472,25 @@ export async function openCdpSession(options = {}, lib = undefined) {
           // long ago), so if the user's own message is not even in the chat store the send died on the way
           // to the engine. If it landed and nothing followed, the engine has the turn and ran no node —
           // which is the shape §9 records after a reconnect, when the first send comes back empty.
+          //
+          // And whatever the EXTENSION recorded travels with it. The runtime team found what a day of
+          // "the turn ran nothing" actually was: `POST /sessions/message` answered 402 LimitExceeded
+          // (mar 1001/1000) while session creation returned 200. This driver never looked at a status, so a
+          // quota refusal and a healthy-but-silent turn were the same observation — and a `beforeIntent` hook,
+          // which adds one flow per turn, reached the limit sooner, which is exactly why removing it looked
+          // like a fix and why the stall was misattributed to it. Nothing is invented here: the record is
+          // reported when there is one and left alone when there is not.
+          const recorded = await readRecordedErrors();
           return {
             stage: 'no-node',
             landed,
-            text: landed
+            recorded,
+            text: (landed
               ? 'The turn ran no tool call at all — the message reached the chat store and the engine'
                 + ' answered nothing, so no node ever ran.'
               : 'The turn ran no tool call at all — the send was accepted but the message never reached the'
-                + ' chat store, so it died before the engine.',
+                + ' chat store, so it died before the engine.')
+              + (recorded === undefined ? '' : ` The extension recorded: ${recorded}`),
           };
         }
         const finished = seen.filter((part) => part.state?.status === 'completed').length;

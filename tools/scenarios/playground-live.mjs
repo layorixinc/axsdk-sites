@@ -21,13 +21,10 @@
  * (`nav.navigate` plus four `dom` reads), so no click, input or submit op is grantable and no cart, checkout or
  * order step exists to reach. Live navigations to real storefronts DO happen.
  *
- * **Known live flake, measured rather than hidden.** Two Amazon searches in ONE session and exactly one of them
- * answers `navigation_stuck`: `shopping` alone passed 5/5 (19 candidates each), while in a session that also
- * runs the Amazon fixture one of the pair fails — and which one varies (the sweep failed `shopping`, a controlled
- * `--only=amazon-fixture,shopping-from-request` pair failed the FIXTURE and passed shopping). So it is not "the
- * second search fails". `navigation_stuck` is our own reading of the page and §13 warns it blames the site when
- * the channel may be at fault, so this is a lead for `61_rpc_storefront`'s navigation wait, not a playground
- * defect. The scenario stays strict on purpose: a retry here would erase the only samples anyone has.
+ * The  flake this gate found on day one is FIXED (see AGENTS.md §13): the arrival wait
+ * needed the target, because a navigation that commits faster than the baseline read can never look like a
+ * change. Both multi-site scenarios answered  before the fix and  after — the fan-out had been
+ * losing a store to it.
  *
  * Usage: `node tools/scenarios/playground-live.mjs [--only=<name,name>] [--no-sync] [--timeout=<ms>]`
  */

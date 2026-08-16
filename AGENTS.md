@@ -1191,13 +1191,33 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   The sync root is checked BEFORE Chrome is touched, because nothing in the playground tooling does it: the
   authored workspace still names its modules (25,533 B with 12 names vs the built 230,618 B with none) and
   syncing it answers `RPC SEARCH EMPTY` with a blank href — a delivery failure that reads like a selector one.
-- **Two Amazon searches in one playground session, and exactly one answers `navigation_stuck`.** Measured:
-  `shopping` alone passed **5/5** with 19 candidates each; in a session that also runs the Amazon fixture one
-  of the pair fails, and WHICH one varies (the sweep failed `shopping`; a controlled
-  `--only=amazon-fixture,shopping-from-request` pair failed the FIXTURE and passed shopping). So it is not "the
-  second search fails". `navigation_stuck` is our own reading and §13 already warns it blames the site when the
-  channel may be at fault, so this is a **lead for `61_rpc_storefront`'s navigation wait**, not a playground
-  defect. The scenario stays strict: a retry would erase the only samples anyone has.
+- **A store was dropped from comparisons for answering too FAST — `nav.wait_for_navigation` needs the TARGET**
+  (diagnosed and fixed 2026-08-16, found by the playground gate on its first day). Without a `url` the port asks
+  "has the address changed since I started" and reads that baseline through a ROUND TRIP
+  (`axsdk-core/src/lua/dom-port.ts:263`). An op costs about what a navigation costs — measured, an Amazon search
+  commits in **~460 ms**, four times across two queries — so the baseline read often returns the page we already
+  arrived at, `now !== before` is false forever, the wait burns its whole ceiling and the reader reports
+  `navigation_stuck` about a navigation that WORKED. Both obvious readings were wrong: not a slow site (460 ms),
+  and not `already_showing` misjudging (after the failing turn the tab sits on the correct search URL). **With
+  `url` the check is `now.includes(target)` — true whenever the page is there, whichever won the race.** The
+  redirect case needs the other half: a canonical-slug or locale bounce can never match the target, so the
+  fallback compares against `from`, the address before the navigation fired — moved at all means the selector
+  wait decides, and only an address that never moved is stuck.
+  - **The stub was optimistic about exactly this**, in the file that already warns a stub more permissive than
+    the capability hides the bug it exists to catch: it took the baseline from `page.href` with no round trip.
+    Faithful now, plus `settleAfter: 0` for a document that commits before the waiter arms — and with no `url`,
+    **79 offline tests fail**: the whole reader depended on winning that race.
+  - **Correctness could not pin the fix; COST could.** The redirect fallback keeps the search alive either way,
+    so the test bounds round trips instead: measured **5 href reads with the target against 45 without** (the
+    8000/200 ceiling plus the surrounding reads).
+  - Live: the pair that failed every time passes 3/3, the playground sweep went 6/7 → **7/7**, and both
+    multi-site scenarios moved from `partial` to **`done`** — stores that were being dropped are now searched.
+    So this was not a cosmetic flake; it was silent loss of store coverage in every multi-store search.
+  - **Seven callers in five other modules still pass no target** (`64_rpc_thumbtack:177`, `65_rpc_quote:852`,
+    `66_rpc_navigate:153,207`, `67_rpc_cart:267,320`, `68_rpc_checkout:175`), three of them on MUTATION paths
+    where a false stuck report would misstate whether a cart or checkout step happened. None has a live
+    reproduction yet, so they are named rather than changed blind — a wait with no target to name is a genuine
+    case (a dialog step), and those need the `from` comparison instead.
 - **A runner that attaches by hand owes the page close.** The playground CLI encodes it in
   `withPlaygroundSession`'s `finally`; the new sweep did not, printed `6/7 PASS`, and sat for 25 minutes — the
   same shape as the commerce sweep's attached-Chrome leak, in a different mechanism, one day apart. **Before

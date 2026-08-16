@@ -9,9 +9,9 @@
     "build:lua:check": "node tools/merge-lua.mjs --check",
     "build:bundle": "node tools/build-workspace-bundle.mjs",
     "check:bundle": "node tools/build-workspace-bundle.mjs --check",
-    "check:flows": "node --test tools/flow-conformance.test.mjs tools/build-rpc-flows.test.mjs tools/rpc-allow.test.mjs tools/rpc-modules.test.mjs tools/rpc-package.test.mjs tools/build-rpc-sites.test.mjs",
+    "check:flows": "node --test \"tools/*.test.mjs\"",
     "test:lua": "node --test \"tools/lua/*.test.mjs\"",
-    "test:playground": "node --test tools/harness/cdp.test.mjs tools/playground/cli.test.mjs tools/playground/credentials.test.mjs tools/playground/repl.test.mjs tools/playground/runtime.test.mjs tools/playground/setup.test.mjs tools/playground/sources.test.mjs tools/playground/store.test.mjs tools/scenarios/playground-live.test.mjs",
+    "test:playground": "node --test \"tools/harness/*.test.mjs\" \"tools/playground/*.test.mjs\"",
     "test:commerce": "bun tools/test_multi_store_total_cost.mjs && bun tools/test_representative_commerce_sites.mjs",
     "test:commerce:sites": "bun tools/test_representative_commerce_sites.mjs",
     "test:commerce:live": "node tools/scenarios/multi-store-total-cost.mjs",
@@ -32,7 +32,8 @@
     "probe:client-modules": "node tools/probe-client-modules.mjs",
     "build:schema": "node tools/build-schema.mjs",
     "dead:lua": "node tools/dead-lua.mjs",
-    "test:playground:live": "node tools/scenarios/playground-live.mjs"
+    "test:playground:live": "node tools/scenarios/playground-live.mjs",
+    "test:scenarios": "node --test \"tools/scenarios/*.test.mjs\""
   },
   "devDependencies": {
     "fengari": "^0.1.4",

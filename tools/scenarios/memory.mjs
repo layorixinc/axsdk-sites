@@ -9,6 +9,7 @@
 // live in the shared `axsdk:memory` store as `g/<key>` markdown entries; a seeded write only
 // reaches the session runtime after `session.reset()` (the worker reads the store when it spawns),
 // which is also what keeps every check clear of paused flow nodes.
+import { pathToFileURL } from 'node:url';
 import { openCdpSession } from '../harness/cdp-session.mjs';
 
 const tools = (r) => (r?.toolCalls || []).map((t) => `${t.name}(${t.status})`);
@@ -87,4 +88,9 @@ async function main() {
   try { await session.close(); } catch { /* one-shot */ }
   process.exitCode = pass === checks.length ? 0 : 1;
 }
-main().catch((e) => { console.error('FATAL', e && e.stack || e); process.exitCode = 1; });
+// Only when this file IS the entry point. Without the guard, a unit test importing a pure function from
+// here started the whole live journey — measured, a five-assertion test file took 174 seconds and drove three
+// real sites. The same idiom as `shopping.mjs`.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((e) => { console.error('FATAL', e && e.stack || e); process.exitCode = 1; });
+}

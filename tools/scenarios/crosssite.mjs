@@ -16,6 +16,7 @@
 // thumbtack + runs search_service; a "고마워 그만할게" reset (end_conversation) clears the paused
 // refine step before the next leg so it is not swallowed by continue_current.
 
+import { pathToFileURL } from 'node:url';
 import { appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openCdpSession } from '../harness/cdp-session.mjs';
@@ -68,6 +69,30 @@ function summarizeTurn(turn) {
   return { tools, forbidden, text };
 }
 
+/**
+ * What a leg's outcome MEANS. Pure, so the rule is unit-testable rather than buried in the loop.
+ *
+ * A leg that never reached the other site is a **failure**, not a shade of success. This runner exists to prove
+ * that each leg forces a cross-origin navigation and the SDK's complete-on-arrival survives it; a leg that
+ * stayed put produced no such proof. The previous edition scored that `PARTIAL(no-cross)` and left it out of the
+ * failure count, so a journey where NOT ONE leg crossed still exited 0 — the runner could report success for
+ * exactly the situation it was written to catch.
+ */
+export function legVerdict(leg, turn = {}) {
+  if (turn.error) return 'ERROR';
+  if (turn.forbidden) return 'FAIL(cross-nav)';
+  return String(leg?.endUrl || '').includes(leg?.target) ? 'PASS' : 'FAIL(no-cross: never reached the target)';
+}
+
+/** The run's verdict. Green needs every leg crossed, nothing forbidden, and at least one leg attempted. */
+export function journeyOutcome(results) {
+  const rows = Array.isArray(results) ? results : [];
+  const passed = rows.filter((row) => row?.verdict === 'PASS').length;
+  const failed = rows.length - passed;
+  const forbidden = rows.filter((row) => row?.forbidden).length;
+  return { total: rows.length, passed, failed, forbidden, ok: rows.length > 0 && failed === 0 && forbidden === 0 };
+}
+
 function portArg(argv) {
   const found = argv.find((a) => a.startsWith('--port='));
   return found ? Number(found.slice('--port='.length)) : undefined;
@@ -98,8 +123,9 @@ async function main() {
         res = await session.send(leg.msg, { timeoutMs: leg.timeout });
         endUrl = await session.status().then((s) => s.url).catch(() => '?');
         sum = summarizeTurn(res);
-        const reached = String(endUrl || '').includes(leg.target);
-        verdict = sum.forbidden ? 'FAIL(cross-nav)' : reached ? 'PASS' : 'PARTIAL(no-cross)';
+        // One rule, in `legVerdict`, so the loop cannot disagree with what the unit tests pin.
+        verdict = legVerdict({ target: leg.target, endUrl }, sum);
+        const reached = verdict === 'PASS';
         log(`    end  : ${endUrl}`);
         log(`    tools: ${sum.tools.join(' -> ') || '(none)'}`);
         log(`    reply: ${(sum.text || '').replace(/\s+/g, ' ').slice(0, 200)}`);
@@ -126,17 +152,20 @@ async function main() {
   }
 
   log('=== SUMMARY ===');
-  let pass = 0, partial = 0, fail = 0;
-  for (const r of results) {
-    if (r.verdict === 'PASS') pass++;
-    else if (r.verdict.startsWith('PARTIAL')) partial++;
-    else fail++;
-    log(`  ${r.verdict.padEnd(16)} ${r.leg}`);
-  }
-  const forbiddenCount = results.filter(r => r.forbidden).length;
-  log(`RESULT: ${pass} PASS / ${partial} PARTIAL / ${fail} FAIL(+ERROR)  |  forbidden-cross-nav-errors=${forbiddenCount}`);
+  for (const r of results) log(`  ${r.verdict.padEnd(34)} ${r.leg}`);
+  // `journeyOutcome` owns the rule, and it has no PARTIAL: a leg that never reached the other site produced no
+  // cross-navigation to survive, which is the one thing this runner exists to prove. Counting it as a shade of
+  // success meant a journey where NOT ONE leg crossed still exited 0.
+  const outcome = journeyOutcome(results);
+  log(`RESULT: ${outcome.passed}/${outcome.total} legs crossed · failed ${outcome.failed}`
+    + ` · forbidden-cross-nav-errors ${outcome.forbidden}`);
   log('=== cross-site journey DONE ===');
-  process.exitCode = (fail === 0 && forbiddenCount === 0) ? 0 : 1;
+  process.exitCode = outcome.ok ? 0 : 1;
 }
 
-main().catch(e => { log(`FATAL ${e && e.stack || e}`); process.exitCode = 1; });
+// Only when this file IS the entry point. Without the guard, a unit test importing a pure function from
+// here started the whole live journey — measured, a five-assertion test file took 174 seconds and drove three
+// real sites. The same idiom as `shopping.mjs`.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(e => { log(`FATAL ${e && e.stack || e}`); process.exitCode = 1; });
+}

@@ -15,6 +15,22 @@ export function tally(checks) {
   return { pass, total: checks.length, allPassed: pass === checks.length };
 }
 
+/**
+ * Runs one case and records its outcome, whatever happens.
+ *
+ * Measured live: `reset()` timed out at 60 s inside this runner's `try`, the throw left `main`, and the run
+ * printed NO verdict at all — three checks silently became no checks. A step that fails must cost ONE check and
+ * let the others report, the same rule the commerce sweep learned when dying on the first batch hid every later
+ * batch's cost. The reason travels with the check so the report says what broke.
+ */
+export async function recordCase(checks, name, run) {
+  try {
+    checks.push([name, (await run()) === true]);
+  } catch (error) {
+    checks.push([name, false, String(error?.message ?? error)]);
+  }
+}
+
 async function send(session, label, msg, timeoutMs = 150000) {
   const res = await session.send(msg, { timeoutMs }).catch(e => ({ text: 'ERR ' + (e && e.message), parts: [], toolCalls: [] }));
   const url = await session.status().then(s => s.url).catch(() => '?');
@@ -30,33 +46,43 @@ async function main() {
   const { openCdpSession } = await import('../harness/cdp-session.mjs');
   const session = await openCdpSession();
   const checks = [];
+  // Each case is recorded whatever it does. A `reset()` that times out — measured twice live — used to throw
+  // out of here and take the verdict with it, so three checks became none.
   try {
     // 1) idle on amazon. reset() before the send: a leftover paused comparison window would read the
     // next message as its own turn (a bare number is a SELECTION — the cart-approval turn).
-    await session.open('https://www.amazon.com/');
-    await session.reset();
-    const c1 = await send(session, '1 idle checkout', '체크아웃 해줘');
-    checks.push(['1 idle -> checkout node ran', checkoutCasePassed(c1.res.toolCalls, c1.url)]);
+    await recordCase(checks, '1 idle -> checkout node ran', async () => {
+      await session.open('https://www.amazon.com/');
+      await session.reset();
+      const c1 = await send(session, '1 idle checkout', '체크아웃 해줘');
+      return checkoutCasePassed(c1.res.toolCalls, c1.url);
+    });
 
     // 2) from bluemoonsoft (cross-domain)
-    await session.open('http://bluemoonsoft.com/');
-    await session.reset();
-    const c2 = await send(session, '2 checkout from bluemoonsoft', '장바구니 결제 진행해줘');
-    checks.push(['2 other-site -> cross-nav to amazon + checkout', checkoutCasePassed(c2.res.toolCalls, c2.url)]);
+    await recordCase(checks, '2 other-site -> cross-nav to amazon + checkout', async () => {
+      await session.open('http://bluemoonsoft.com/');
+      await session.reset();
+      const c2 = await send(session, '2 checkout from bluemoonsoft', '장바구니 결제 진행해줘');
+      return checkoutCasePassed(c2.res.toolCalls, c2.url);
+    });
 
     // 3) mid-flow interrupt: start a quote (asks), then checkout. reset() only before 3a — the 3b
     // interrupt must land in the MIDDLE of the quote flow, so there is no reset between 3a and 3b.
-    await session.open('https://www.amazon.com/');
-    await session.reset();
-    await send(session, '3a start quote', '샌프란시스코 청소 견적 줘');
-    const c3 = await send(session, '3b checkout mid-flow', '체크아웃 해줘');
-    checks.push(['3 mid-flow checkout force-routes (not quote answer)', checkoutCasePassed(c3.res.toolCalls, c3.url)]);
+    await recordCase(checks, '3 mid-flow checkout force-routes (not quote answer)', async () => {
+      await session.open('https://www.amazon.com/');
+      await session.reset();
+      await send(session, '3a start quote', '샌프란시스코 청소 견적 줘');
+      const c3 = await send(session, '3b checkout mid-flow', '체크아웃 해줘');
+      return checkoutCasePassed(c3.res.toolCalls, c3.url);
+    });
   } finally {
     await session.close().catch(() => {});
   }
 
   console.log('\n=== RESULT ===');
-  for (const [name, ok] of checks) console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}`);
+  for (const [name, ok, why] of checks) {
+    console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${name}${why ? ` — ${why}` : ''}`);
+  }
   const { pass, total, allPassed } = tally(checks);
   console.log(`COTEST: ${pass}/${total} PASS`);
   process.exitCode = allPassed ? 0 : 1;

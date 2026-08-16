@@ -254,7 +254,17 @@ export function summariseTimings(entries) {
     worstMs: worst === null ? null : worst.elapsedMs,
     worstLabel: worst === null ? null : worst.label,
     worstPerSiteMs: worstPerSite === null ? null : Math.round(worstPerSite.perSite),
-    note: timeouts.map((row) => `${row.label}: timed out after ${row.timedOutAfterMs}ms`).join('; '),
+    // A timeout carries `send`'s account of WHERE the turn stopped, when it has one. "Timed out after
+    // 360s" is the sentence that cost a repeat run to act on; the node that stopped answering is the
+    // one fact that makes a hang actionable, and the summary is where it gets read. Absent stays absent —
+    // a hang with nothing to say must not be given an invented node.
+    note: timeouts
+      .map((row) => {
+        const where = typeof row.stoppedOn === 'string' && row.stoppedOn.trim() !== ''
+          ? ` — ${row.stoppedOn.trim()}` : '';
+        return `${row.label}: timed out after ${row.timedOutAfterMs}ms${where}`;
+      })
+      .join('; '),
   };
 }
 
@@ -347,7 +357,7 @@ async function main() {
         timings.push({ label, sites: batch.sites.length, elapsedMs: turn.elapsedMs });
         console.log(`TIME  batch [${label}]: ${(turn.elapsedMs / 1000).toFixed(1)}s for ${batch.sites.length} store(s)`);
       } catch (error) {
-        timings.push({ label, sites: batch.sites.length, timedOutAfterMs: bound });
+        timings.push({ label, sites: batch.sites.length, timedOutAfterMs: bound, stoppedOn: error.message });
         check(checks, `batch [${label}]: answered within its bound`, false, `${error.message}`);
         continue;
       }

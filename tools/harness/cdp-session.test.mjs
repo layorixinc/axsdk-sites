@@ -793,3 +793,49 @@ test('send reports the turn duration', async () => {
   assert.ok(turn.elapsedMs < 60_000, `a scripted turn cannot take a minute, saw ${turn.elapsedMs}`);
   await session.close();
 });
+
+// A timeout that says only "waiting for the agent to answer" turns every hang into a repeat of the run that
+// produced it. The sweep already survives a hang and records it; what it cannot do is name the node that
+// stopped answering, and all of that is sitting in the chat snapshot the poll just read. Same rule as the
+// quote driver's `quote_last_step`: a stop must say WHERE it was.
+test('a hang names the tool it stopped on and how far the turn got', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const seeded = [user('m1', 'hi')];
+  fake.seedConversation(seeded);
+  // A turn that ran two nodes and stalled on the third: the assistant message never closes, so the poll
+  // keeps waiting on the last snapshot until the bound runs out.
+  const stalled = [...seeded, user('m2', 'compare'), assistant('m3', [
+    toolPart('p1', 'shopping_collect_request', 'completed', { next: 'ok' }),
+    toolPart('p2', 'shopping_search_stores', 'completed', { next: 'done' }),
+    toolPart('p3', 'shopping_judge_relevance', 'pending', undefined),
+  ], { completed: false })];
+  fake.turns.push([stalled]);
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.match(error.message, /agent/i, 'keeps the original sentence');
+    assert.match(error.message, /shopping_judge_relevance/, 'names where it stopped');
+    assert.match(error.message, /pending/, 'and the state it stopped in');
+    assert.match(error.message, /\b3\b/, 'names how many tool calls ran');
+    assert.match(error.message, /\b2\b/, 'and how many of them finished');
+    return true;
+  });
+  await session.close();
+});
+
+// A turn with no tool call at all is a DIFFERENT fact: the flow never started, so the send never reached the
+// engine — not a node that stalled. Reporting one as the other sends the next reader to the wrong file.
+test('a hang with no tool call says the turn never started', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  fake.seedConversation([user('m1', 'hi')]);
+  fake.turns.push([]); // delivered, and the store never moves
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.match(error.message, /agent/i);
+    assert.match(error.message, /no tool call/i, 'says the flow never ran a node');
+    assert.doesNotMatch(error.message, /stopped on/, 'and never claims a node it did not see');
+    return true;
+  });
+  await session.close();
+});

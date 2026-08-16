@@ -454,3 +454,29 @@ test('no batches summarise to nothing, not to a zero', () => {
   assert.equal(summary.batches, 0);
   assert.equal(summary.worstMs, null, 'null, not 0 — nothing was measured');
 });
+
+// A timeout in the summary that says only "after 360s" is the sentence that cost a repeat run to act on.
+// `send` now names the node the turn stopped on, so the summary a reader scrolls to must carry it — the
+// whole point of the diagnosis is that it survives to where someone reads it.
+test('a timed-out batch reports where the turn stopped', () => {
+  const summary = summariseTimings([
+    { label: 'a,b', sites: 2, elapsedMs: 18_800 },
+    {
+      label: 'c,d,e',
+      sites: 3,
+      timedOutAfterMs: 360_000,
+      stoppedOn: 'The turn ran 7 tool call(s), 6 completed; it stopped on shopping_judge_relevance (pending).',
+    },
+  ]);
+
+  assert.equal(summary.timedOut, 1);
+  assert.match(summary.note, /shopping_judge_relevance/, 'the note names the node that stopped answering');
+  assert.match(summary.note, /360000/, 'and still says how long it waited');
+});
+
+// A hang with nothing to say must not invent a node.
+test('a timed-out batch with no diagnosis still reports the timeout alone', () => {
+  const summary = summariseTimings([{ label: 'c,d', sites: 2, timedOutAfterMs: 300_000 }]);
+  assert.match(summary.note, /300000/);
+  assert.doesNotMatch(summary.note, /stopped on/);
+});

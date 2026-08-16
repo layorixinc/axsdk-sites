@@ -118,6 +118,25 @@ async function poll(check, label, timeoutMs, intervalMs = POLL_MS) {
 }
 
 /**
+ * `poll`, but a timeout carries the caller's own account of where the wait was when it ran out.
+ *
+ * A bare "timed out waiting for X" is the least useful sentence a long live run can end on: the sweep
+ * already survives a hang and records it, and locating one still cost a whole repeat run because the
+ * evidence — which node had answered, which had not — was read on every poll and then discarded.
+ * `diagnose` is called only on the timeout path, so an ordinary wait pays nothing for it.
+ */
+async function pollWithDiagnosis(check, label, timeoutMs, diagnose, intervalMs = POLL_MS) {
+  try {
+    return await poll(check, label, timeoutMs, intervalMs);
+  } catch (error) {
+    let account = '';
+    try { account = String(diagnose() ?? ''); } catch { account = ''; }
+    if (account === '') throw error;
+    throw new Error(`${error.message} ${account}`, { cause: error });
+  }
+}
+
+/**
  * The payload of a durable run. `AXSDK.lua.run` answers `{ status, result, deferId }` with the
  * result serialised as JSON; a completed run resolves to that parsed value, a failed one throws,
  * and pending passes through so the caller can retry or await the deferId. A payload that is not
@@ -380,13 +399,16 @@ export async function openCdpSession(options = {}, lib = undefined) {
         }
         return undefined;
       };
-      const turn = await poll(async () => {
+      /** The last trace the poll saw, so a timeout can say WHERE the turn stopped. */
+      let seen = [];
+      const turn = await pollWithDiagnosis(async () => {
         const now = await readChat();
         const fresh = now.messages.filter((message, index) => {
           const id = message?.info?.id;
           return typeof id === 'string' ? !known.has(id) : index >= beforeCount;
         });
         const answer = [...fresh].reverse().find((message) => message?.info?.role === 'assistant');
+        seen = fresh.flatMap((message) => partsOf(message).filter((part) => part?.type === 'tool'));
         const done = answer !== undefined
           && (answer.info?.time?.completed !== undefined || answer.info?.finish !== undefined
             // A turn is also answered when the flow PAUSES on a question. The comparison loop has no
@@ -399,7 +421,17 @@ export async function openCdpSession(options = {}, lib = undefined) {
         const shape = JSON.stringify(now.messages);
         if (shape !== previousShape) { previousShape = shape; return undefined; }
         return { fresh, answer, last: now.messages[now.messages.length - 1] };
-      }, 'the agent to answer', timeoutMs);
+      }, 'the agent to answer', timeoutMs, () => {
+        // A stop must say where it was. All of this was already in the snapshot the poll just read; the
+        // timeout simply threw it away, so every hang cost a whole repeat run to locate. No tool part at
+        // all is a DIFFERENT fact — the turn never reached a node — and naming it as a stall points the
+        // next reader at the flow instead of at delivery.
+        if (seen.length === 0) return 'The turn ran no tool call at all — it never reached a node.';
+        const finished = seen.filter((part) => part.state?.status === 'completed').length;
+        const stopped = seen[seen.length - 1];
+        return `The turn ran ${seen.length} tool call(s), ${finished} completed;`
+          + ` it stopped on ${stopped.tool ?? '(unnamed)'} (${stopped.state?.status ?? 'no status'}).`;
+      });
 
       const asked = pausedQuestion(turn.answer);
       const toolCalls = [];

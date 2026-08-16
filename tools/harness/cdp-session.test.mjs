@@ -61,6 +61,9 @@ function fakeExtension() {
     onLua: () => { throw new Error('no scripted lua behaviour'); },
     // Queue of turns; each turn is a list of chat-store snapshots served one per read.
     turns: [],
+    // What `launchChrome` hands back. Default: a browser that was already running, so nothing is ours.
+    chromeChild: undefined,
+    chromeReused: true,
     groupOf: () => group,
     chatKey: () => `s${group.id}:axsdk:chat`,
     setSitesStore(domain) {
@@ -226,7 +229,12 @@ function fakeExtension() {
       if (typeof port !== 'number' || !Number.isInteger(port)) {
         throw new Error(`Not a debugger port: ${String(port)}`);
       }
-      return { cdp: cdpToken, chrome: undefined, profile: `${profileRoot}/${profileName}`, reused: true };
+      return {
+        cdp: cdpToken,
+        chrome: fake.chromeChild,
+        profile: `${profileRoot}/${profileName}`,
+        reused: fake.chromeReused,
+      };
     },
     async ensureExtension(cdp, extensionDir) {
       assertCdp(cdp);
@@ -838,4 +846,39 @@ test('a hang with no tool call says the turn never started', async () => {
     return true;
   });
   await session.close();
+});
+
+// The launcher spawns Chrome ATTACHED and deliberately so (`detached: true` was tried and left the shell
+// pipeline open on Windows). The consequence was missed: an attached child holds the event loop, so node
+// cannot exit while it lives. Measured — the sweep printed its whole summary and `34/36 PASS`, then sat
+// there until a 2400s bash timeout killed it, twice, and both times the run had ALREADY finished. That is
+// what every earlier "the sweep hangs" reading actually was.
+//
+// `close` releases the handle instead of killing the browser: killing it would relaunch and re-provision on
+// every CLI call, and leaving the browser up for the next run to reuse is the whole reason it is attached.
+test('close releases the browser it launched so the process can exit', async () => {
+  const fake = fakeExtension();
+  let released = 0;
+  let killed = 0;
+  fake.chromeChild = { unref: () => { released += 1; }, kill: () => { killed += 1; } };
+  fake.chromeReused = false;
+
+  const session = await openSession(fake);
+  await session.close();
+
+  assert.equal(released, 1, 'the child handle we launched is released');
+  assert.equal(killed, 0, 'and the browser stays up for the next run to reuse');
+});
+
+// A browser this session did not launch is not this session's to touch.
+test('close leaves a browser it did not launch alone', async () => {
+  const fake = fakeExtension();
+  let touched = 0;
+  fake.chromeChild = { unref: () => { touched += 1; }, kill: () => { touched += 1; } };
+  fake.chromeReused = true;
+
+  const session = await openSession(fake);
+  await session.close();
+
+  assert.equal(touched, 0, 'a reused browser is never ours to release or kill');
 });

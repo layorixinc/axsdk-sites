@@ -192,7 +192,11 @@ export async function openCdpSession(options = {}, lib = undefined) {
     ? await sdk.loadWorkspace(workspaceRoot)
     : { root: workspaceRoot, digest: '', domains: [] };
 
-  const { cdp } = await sdk.launchChrome({
+  // `chrome` and `reused` were both destructured away, and that is what made every long run look like it
+  // hung: the launcher spawns Chrome ATTACHED on purpose, an attached child holds node's event loop, and
+  // with the handle discarded nothing could ever release it. The sweep printed its full summary and then
+  // sat until a 2400s bash timeout — the run had already finished both times.
+  const { cdp, chrome: launched, reused } = await sdk.launchChrome({
     profileName: sdk.profileName, profileRoot: sdk.profileRoot, port,
   });
   const { extensionId, options: optionsPage, installed } = await sdk.ensureExtension(cdp, sdk.extensionDir);
@@ -511,8 +515,17 @@ export async function openCdpSession(options = {}, lib = undefined) {
       await stateSet('axsdk:memory', JSON.stringify({ state: { memory: entries }, version: 1 }));
     },
 
+    /**
+     * Closes the debugger channel and RELEASES the browser this session launched — it does not kill it.
+     *
+     * Killing would relaunch and re-provision Chrome on every CLI call, and leaving it up for the next run
+     * to reuse is the whole reason the launcher attaches rather than detaches. `unref` is the third option:
+     * node stops counting the child, so the process can exit, and the browser lives on. A browser that was
+     * already running is not ours — `reused` says so — and is never touched.
+     */
     async close() {
       cdp.close();
+      if (reused !== true && launched !== undefined) launched.unref?.();
     },
   };
 

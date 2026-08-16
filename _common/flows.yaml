@@ -3120,16 +3120,6 @@ flowTools:
         # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
         # tool is a compile error. Nullable and not required: the first pass has no listing yet.
         comparison_state: { type: [ string, "null" ] }
-        offers:
-          {
-            type: [ array, "null" ],
-            items: { type: object, additionalProperties: true }
-          }
-        all_offers:
-          {
-            type: [ array, "null" ],
-            items: { type: object, additionalProperties: true }
-          }
         failures:
           {
             type: [ array, "null" ],
@@ -3298,7 +3288,6 @@ flowTools:
         # The listing itself, carried between turns. Declared because UNDECLARED IS DROPPED — the runtime
         # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
         # tool is a compile error. Nullable and not required: the first pass has no listing yet.
-        comparison_state: { type: [ string, "null" ] }
         identity_approval: { type: string, enum: [ locked_product_identity ] }
         comparison_approval: { type: string, enum: [ current_comparison ] }
         cart_approval: { type: string, enum: [ user_selected_compared_offer ] }

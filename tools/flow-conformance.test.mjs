@@ -1750,3 +1750,73 @@ test('a flow that pauses and can mutate has a cancel route to a terminal', () =>
   }
   assert.deepEqual(gaps, [], 'flows that hold the user before a mutation with no way to say no');
 });
+
+// The other direction of the three-parallel-lists problem. Selected-but-not-declared is already gated (§13: a
+// field selected but not DECLARED is dropped in silence). The reverse — a contract tool declaring state its
+// node never selects — is not a schema error and never throws: the argument is simply always nil, so the
+// declaration reads like a channel that exists.
+//
+// That is exactly how the two-channel bug got in. §13: "One channel for the listing, or two can disagree about
+// which offers were numbered" — the pick read `offers` from its own state field while the listing lived in the
+// snapshot, and live it answered `offers: Invalid input: expected array, received null` one turn before a cart
+// approval. Measured here: `shopping_refine_store_offers` still declared `offers`/`all_offers` (its module
+// rebuilds them from the restored snapshot) and `shopping_add_selected_store_offer` still declared
+// `comparison_state` (its modules do not even load the one that restores a snapshot). Leaving them declared
+// invites someone to write to the channel that was deliberately replaced.
+//
+// `action_unit` is excluded on purpose: its `parameters.properties` are the MODEL's arguments and have nothing
+// to do with what the node selects.
+// The playground's three search fixtures declare `query`/`site`/`item`/`index`/`key`/`context` that no node
+// selects — the same drift, from before the carrier convention (§13: nested paths are the SCRIPT's job,
+// `args.item.site`; declare the carrier). They are exempt rather than fixed because NO gate exercises a
+// playground flow live: the offline suite never runs one, so a deletion there cannot be verified the way
+// production's three were (their modules provably rebuild the fields from the restored snapshot, or never load
+// the module that reads them). Closing this needs a live playground turn — sync `--root=dist/playground` and
+// drive the multi-site search — after which these entries go away rather than growing.
+const UNEXERCISED_PLAYGROUND_FIXTURES = {
+  'playground_search_amazon_fixture.site': true,
+  'playground_search_amazon_fixture.item': true,
+  'playground_search_amazon_fixture.index': true,
+  'playground_search_amazon_fixture.key': true,
+  'playground_search_amazon_fixture.context': true,
+  'playground_search_shopping.site': true,
+  'playground_search_shopping.item': true,
+  'playground_search_shopping.index': true,
+  'playground_search_shopping.key': true,
+  'playground_search_shopping.context': true,
+  'playground_search_worker.query': true,
+  'playground_search_worker.site': true,
+};
+
+test('a contract tool declares only state some node hands over', () => {
+  const stray = [];
+  for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+    'playground/_common/flows.yaml']) {
+    if (!existsSync(new URL(path, root))) continue;
+    const document = parseFlow(path);
+    const tools = document.flowTools ?? {};
+    // One tool may back several nodes, each selecting its own subset — the playground's search fixture is
+    // shared by three — so the tool legitimately declares the UNION. What no node selects is what is always
+    // nil, whoever calls it. Production's mapped node is the shape to copy: `shopping_search_one_store.search`
+    // lists `item`/`index`/`key`/`context` in its own selector and its tool declares exactly those six.
+    const selectedPerTool = new Map();
+    for (const flow of Object.values(document.flows ?? {})) {
+      for (const node of Object.values(flow?.nodes ?? {})) {
+        if (node?.kind !== 'action_contract' || !Array.isArray(node.inputSelector)) continue;
+        const toolId = node.id ?? (node.allowedTools ?? [])[0];
+        if (toolId === undefined) continue;
+        const seen = selectedPerTool.get(toolId) ?? new Set();
+        for (const field of node.inputSelector) seen.add(field);
+        selectedPerTool.set(toolId, seen);
+      }
+    }
+    for (const [toolId, selected] of selectedPerTool) {
+      for (const property of Object.keys(tools[toolId]?.parameters?.properties ?? {})) {
+        if (selected.has(property)) continue;
+        if (UNEXERCISED_PLAYGROUND_FIXTURES[`${toolId}.${property}`] === true) continue;
+        stray.push(`${path} ${toolId} declares ${property}`);
+      }
+    }
+  }
+  assert.deepEqual(stray, [], 'contract tools declaring state that is always nil');
+});

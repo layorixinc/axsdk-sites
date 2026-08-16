@@ -2013,12 +2013,6 @@
           "type": "string",
           "minLength": 1
         },
-        "comparison_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "identity_approval": {
           "type": "string",
           "enum": [
@@ -2673,26 +2667,6 @@
             "string",
             "null"
           ]
-        },
-        "offers": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "all_offers": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
         },
         "failures": {
           "type": [

@@ -509,9 +509,32 @@ turn: they were turns that genuinely hung, and a larger multiplier would only ha
 raise it.** A hung turn is the thing to find, and the run now survives one instead of losing every batch
 after it.
 
-A second run in the same sitting hung again and produced no timing lines at all, so **the sweep is
-repeatable enough to measure with and not yet enough to gate on.** What a gate needs is not a number but a
-diagnosis of the hang — read the tool trace of a batch that stalls and find which node stops answering.
+**The sweep was never hanging. It was finishing and then failing to exit** (2026-08-16). A second run
+produced no timing lines, then a third sat for 2400 s with no pipe attached — and its log showed the whole
+summary and `34/36 PASS` already printed. `launchChrome` spawns Chrome **attached** on purpose
+(`detached: true` was tried and left the shell pipeline open on Windows), an attached child keeps node's
+event loop alive, and `openCdpSession` destructured `chrome` and `reused` away, so nothing could ever
+release the handle. The SDK's own CLI hides this behind `process.exit(0)`; the sweep sets `process.exitCode`
+and lets the loop drain, which is why it was the one caller that showed it. `close()` now **releases** the
+handle (`unref`) rather than killing the browser — killing would relaunch and re-provision on every CLI
+call, and measured across two passes in one process the browser is alive 3 s after close and the next
+`openCdpSession` reuses it in **0.2 s against 8.1 s** cold. A browser this session did not launch is never
+touched. **Blaming a runner for hanging when it has already printed its answer costs whole afternoons —
+check whether the work finished before looking for where it stopped.**
+
+**The distribution, seven runs** (once the exit leak was fixed the wall time is the turn time): worst per
+store **7.5–9.2 s**, total 69.5–78.7 s, wall **86–95 s**, and §13's ~4× LLM swing does **not** appear at
+batch granularity. The bound stays where it is.
+
+**What remains is one reliability defect, and it is not timing:** 1 turn in 48 live turns reached **no node
+at all**. Neither targeted probe reproduced it — `reset()` then send ×14 (all answered in 1.2–2.1 s) and ten
+accumulated flow turns in one process (all 5 tool calls, 6.2–9.1 s). So it is instrumented instead of
+guessed at: a timeout now carries `stage` (`no-node` / `stalled`), `landed` (did the user's message reach the
+chat store — delivery versus an engine that answered nothing, which are **two different repos**) and
+`stoppedOn`. The sweep branches on the FIELD, never the prose, retries **only** a `no-node` batch and only
+once — a turn that stalled mid-way produced evidence and re-running it would throw that evidence away — and
+always reports the retry (`retried N`, plus a note). **A session-level fault must not be read as ten adapter
+failures**, and a retry that is not reported is a flake nobody will ever have samples of.
 
 And `normalized` became three-valued, because the first version of that fix passed the contract check on
 an empty list for four of ten stores. A window-attributed store proved it ANSWERED but handed over no

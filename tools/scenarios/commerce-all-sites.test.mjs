@@ -480,3 +480,30 @@ test('a timed-out batch with no diagnosis still reports the timeout alone', () =
   assert.match(summary.note, /300000/);
   assert.doesNotMatch(summary.note, /stopped on/);
 });
+
+// The gate question. A batch whose turn never reached a node measured NOTHING, so its stores are not failing
+// adapters — the sweep must retry it once and say so, rather than let a session-level failure be read as ten
+// adapter failures. Measured: 1 turn in 48 live turns reached no node, and neither targeted probe (reset then
+// send x14, ten accumulated flow turns) could reproduce it.
+test('a batch that reached no node is retried and named, not counted as an adapter answer', () => {
+  const summary = summariseTimings([
+    { label: 'a,b', sites: 2, elapsedMs: 18_000 },
+    { label: 'c,d', sites: 2, elapsedMs: 21_000, retriedAfter: 'no-node' },
+  ]);
+
+  assert.equal(summary.timedOut, 0, 'the retry answered, so nothing timed out');
+  assert.equal(summary.retried, 1, 'but the run says a batch needed a retry');
+  assert.match(summary.note, /no-node/, 'and names why');
+  assert.equal(summary.worstMs, 21_000, 'the retried turn is a real measurement and counts');
+});
+
+// A retry that also fails is a timeout like any other, and must not be laundered into a measurement.
+test('a batch that failed its retry is still a timeout', () => {
+  const summary = summariseTimings([
+    { label: 'c,d', sites: 2, timedOutAfterMs: 300_000, retriedAfter: 'no-node', stoppedOn: 'no node ran' },
+  ]);
+
+  assert.equal(summary.timedOut, 1);
+  assert.equal(summary.retried, 1);
+  assert.equal(summary.worstMs, null, 'nothing was measured');
+});

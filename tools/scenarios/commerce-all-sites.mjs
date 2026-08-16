@@ -239,6 +239,7 @@ export function summariseTimings(entries) {
   const rows = Array.isArray(entries) ? entries : [];
   const measured = rows.filter((row) => typeof row?.elapsedMs === 'number');
   const timeouts = rows.filter((row) => typeof row?.timedOutAfterMs === 'number');
+  const retries = rows.filter((row) => typeof row?.retriedAfter === 'string' && row.retriedAfter !== '');
   let worst = null;
   let worstPerSite = null;
   for (const row of measured) {
@@ -258,13 +259,19 @@ export function summariseTimings(entries) {
     // 360s" is the sentence that cost a repeat run to act on; the node that stopped answering is the
     // one fact that makes a hang actionable, and the summary is where it gets read. Absent stays absent —
     // a hang with nothing to say must not be given an invented node.
-    note: timeouts
-      .map((row) => {
+    // A batch that reached no node measured nothing about any adapter, so it is retried once — and the
+    // retry is REPORTED, never laundered. Measured: 1 turn in 48 live turns reached no node, and neither
+    // targeted probe reproduced it, so hiding it would erase the only samples anyone has. A retried
+    // measurement is a real one and counts; a retry that also failed is a timeout like any other.
+    retried: retries.length,
+    note: [
+      ...timeouts.map((row) => {
         const where = typeof row.stoppedOn === 'string' && row.stoppedOn.trim() !== ''
           ? ` — ${row.stoppedOn.trim()}` : '';
         return `${row.label}: timed out after ${row.timedOutAfterMs}ms${where}`;
-      })
-      .join('; '),
+      }),
+      ...retries.map((row) => `${row.label}: retried after ${row.retriedAfter}`),
+    ].join('; '),
   };
 }
 
@@ -352,15 +359,34 @@ async function main() {
       // every later batch's cost, which is exactly the distribution a bound has to be built from.
       const bound = Math.max(300000, batch.sites.length * 120000);
       let turn;
-      try {
-        turn = await session.send(batchRequestText(batch), { timeoutMs: bound });
-        timings.push({ label, sites: batch.sites.length, elapsedMs: turn.elapsedMs });
-        console.log(`TIME  batch [${label}]: ${(turn.elapsedMs / 1000).toFixed(1)}s for ${batch.sites.length} store(s)`);
-      } catch (error) {
-        timings.push({ label, sites: batch.sites.length, timedOutAfterMs: bound, stoppedOn: error.message });
-        check(checks, `batch [${label}]: answered within its bound`, false, `${error.message}`);
-        continue;
+      // A turn that reached NO node measured nothing about any adapter, so it is the one failure worth one
+      // retry: without it a session-level fault is read as ten adapter failures. A turn that stalled MID-way
+      // is not retried — it produced evidence, and re-running it would throw that evidence away. Measured:
+      // 1 of 48 live turns reached no node, and neither targeted probe could reproduce it, so the retry is
+      // always REPORTED and the run still says a batch needed one.
+      let retriedAfter;
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          turn = await session.send(batchRequestText(batch), { timeoutMs: bound });
+          timings.push({ label, sites: batch.sites.length, elapsedMs: turn.elapsedMs, retriedAfter });
+          console.log(`TIME  batch [${label}]: ${(turn.elapsedMs / 1000).toFixed(1)}s for ${batch.sites.length} store(s)`
+            + (retriedAfter === undefined ? '' : ` (after a ${retriedAfter} retry)`));
+          break;
+        } catch (error) {
+          if (error.stage === 'no-node' && attempt === 1) {
+            retriedAfter = 'no-node';
+            check(checks, `batch [${label}]: answered without a retry`, false, `${error.message}`);
+            await session.reset().catch(() => null);
+            continue;
+          }
+          timings.push({
+            label, sites: batch.sites.length, timedOutAfterMs: bound, stoppedOn: error.message, retriedAfter,
+          });
+          check(checks, `batch [${label}]: answered within its bound`, false, `${error.message}`);
+          break;
+        }
       }
+      if (turn === undefined) continue;
       const toolNames = (turn.toolCalls || []).map(call => call.name).join('|');
 
       const mutations = findCartMutations(turn.toolCalls);
@@ -414,7 +440,7 @@ async function main() {
   console.log(timing.worstMs === null
     ? 'nothing measured'
     : `worst batch ${(timing.worstMs / 1000).toFixed(1)}s (${timing.worstLabel}) · worst per store ${(timing.worstPerSiteMs / 1000).toFixed(1)}s`
-      + ` · total ${(timing.totalMs / 1000).toFixed(1)}s · timed out ${timing.timedOut}`);
+      + ` · total ${(timing.totalMs / 1000).toFixed(1)}s · timed out ${timing.timedOut} · retried ${timing.retried}`);
   if (timing.note) console.log(`note: ${timing.note}`);
   const passed = checks.filter(item => item.ok).length;
   console.log(`\nALL-SITE COMMERCE LIVE: ${passed}/${checks.length} PASS`);

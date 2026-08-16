@@ -919,3 +919,40 @@ test('a hang whose message landed says the engine answered nothing', async () =>
   });
   await session.close();
 });
+
+// A caller that has to decide what to do about a hang must not sniff the prose. The sentence is for the
+// human reading the summary; the field is for the sweep deciding whether the batch is evidence about an
+// adapter at all. A turn that reached no node measured nothing, so its stores are not adapter failures.
+test('a hang carries the stage it failed at, not just a sentence', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  fake.seedConversation([user('m1', 'hi')]);
+  fake.turns.push([]);
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.equal(error.stage, 'no-node', 'the turn never reached a node');
+    assert.equal(error.landed, false, 'and the message never even landed');
+    assert.equal(error.stoppedOn, undefined, 'there is no node to name');
+    return true;
+  });
+  await session.close();
+});
+
+test('a stalled turn carries the node it stalled on', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const seeded = [user('m1', 'hi')];
+  fake.seedConversation(seeded);
+  fake.turns.push([[...seeded, user('m2', 'go'), assistant('m3', [
+    toolPart('p1', 'shopping_collect_request', 'completed', { next: 'ok' }),
+    toolPart('p2', 'shopping_judge_relevance', 'pending', undefined),
+  ], { completed: false })]]);
+
+  await assert.rejects(() => session.send('go', { timeoutMs: 900 }), (error) => {
+    assert.equal(error.stage, 'stalled');
+    assert.equal(error.stoppedOn, 'shopping_judge_relevance');
+    assert.equal(error.landed, true);
+    return true;
+  });
+  await session.close();
+});

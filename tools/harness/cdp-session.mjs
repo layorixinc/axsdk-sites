@@ -124,15 +124,20 @@ async function poll(check, label, timeoutMs, intervalMs = POLL_MS) {
  * already survives a hang and records it, and locating one still cost a whole repeat run because the
  * evidence — which node had answered, which had not — was read on every poll and then discarded.
  * `diagnose` is called only on the timeout path, so an ordinary wait pays nothing for it.
+ *
+ * It answers `{ text, ...facts }`: the sentence goes to the human reading the summary, and the facts go
+ * onto the error for the caller that has to DECIDE something. A caller sniffing the prose to make that
+ * decision would be one rewording away from silently taking the other branch.
  */
 async function pollWithDiagnosis(check, label, timeoutMs, diagnose, intervalMs = POLL_MS) {
   try {
     return await poll(check, label, timeoutMs, intervalMs);
   } catch (error) {
-    let account = '';
-    try { account = String(diagnose() ?? ''); } catch { account = ''; }
-    if (account === '') throw error;
-    throw new Error(`${error.message} ${account}`, { cause: error });
+    let account;
+    try { account = diagnose(); } catch { account = undefined; }
+    if (account === undefined || typeof account.text !== 'string' || account.text === '') throw error;
+    const { text, ...facts } = account;
+    throw Object.assign(new Error(`${error.message} ${text}`, { cause: error }), facts);
   }
 }
 
@@ -439,16 +444,25 @@ export async function openCdpSession(options = {}, lib = undefined) {
           // long ago), so if the user's own message is not even in the chat store the send died on the way
           // to the engine. If it landed and nothing followed, the engine has the turn and ran no node —
           // which is the shape §9 records after a reconnect, when the first send comes back empty.
-          return landed
-            ? 'The turn ran no tool call at all — the message reached the chat store and the engine answered'
-              + ' nothing, so no node ever ran.'
-            : 'The turn ran no tool call at all — the send was accepted but the message never reached the'
-              + ' chat store, so it died before the engine.';
+          return {
+            stage: 'no-node',
+            landed,
+            text: landed
+              ? 'The turn ran no tool call at all — the message reached the chat store and the engine'
+                + ' answered nothing, so no node ever ran.'
+              : 'The turn ran no tool call at all — the send was accepted but the message never reached the'
+                + ' chat store, so it died before the engine.',
+          };
         }
         const finished = seen.filter((part) => part.state?.status === 'completed').length;
         const stopped = seen[seen.length - 1];
-        return `The turn ran ${seen.length} tool call(s), ${finished} completed;`
-          + ` it stopped on ${stopped.tool ?? '(unnamed)'} (${stopped.state?.status ?? 'no status'}).`;
+        return {
+          stage: 'stalled',
+          landed,
+          stoppedOn: stopped.tool,
+          text: `The turn ran ${seen.length} tool call(s), ${finished} completed;`
+            + ` it stopped on ${stopped.tool ?? '(unnamed)'} (${stopped.state?.status ?? 'no status'}).`,
+        };
       });
 
       const asked = pausedQuestion(turn.answer);

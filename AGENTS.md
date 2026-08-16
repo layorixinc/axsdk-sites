@@ -1841,3 +1841,18 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   hardcoded to one store, so eBay's cart config is reachable only through the multi-store comparison's
   select-then-add path. A probe that opens ebay.com and sends a shopping request lands on amazon and looks
   like a site-detection bug; it is the flow graph.
+- **The working tree mixes line endings, and two gates compare BYTES — so a revert can turn a gate red
+  without any content change.** `core.autocrlf=true` with no `.gitattributes`: measured 203 LF-only files,
+  10 CRLF-only, and 2 genuinely mixed (`tools/flow-conformance.test.mjs`, and
+  `_common/scripts/46_candidate_browser.lua` with exactly ONE CRLF among 158 lines). Editing writes LF;
+  `git checkout -- <file>` restores CRLF. So reverting `61_rpc_storefront.lua` flipped its endings, and
+  `check:flows` failed on the production-vs-playground reader mirror (`actual` LF, `expected` CRLF) while
+  `check:bundle` reported digest drift — both about endings, neither about content. `git diff HEAD` was
+  EMPTY throughout. Diagnose a byte-comparison failure by counting `\r\n` before reading the diff, and
+  re-run after git has touched the file.
+- **The bundle digest is checkout-local, not content identity.** It is computed from the working tree, so
+  the same commit yields one digest under CRLF and another under LF (measured: `544f0e7ad327` LF ->
+  `5efa7d2a8e25` CRLF, same bytes in git). That is fine for what it does — it compares the artifact to the
+  workspace on ONE machine — but it is not a cross-machine identifier, so never quote a digest as proof
+  that two checkouts carry the same workspace. It is deterministic locally (verified: three consecutive
+  builds, identical), and `generatedAt` is not part of it.

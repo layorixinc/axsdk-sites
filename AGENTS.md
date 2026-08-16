@@ -1263,6 +1263,35 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   either way. ② `reset()` twice timed out at 60 s waiting for the backend to open a fresh session, once in
   `tools/scenarios/checkout.mjs` and once in a probe — session management, plausibly the same family as the
   `no-node` turn, and a retry cleared it both times.
+- **An audit of the sibling live runners found four things, and a green gate showed none of them** (2026-08-16,
+  prompted by `shopping.mjs` turning out to be blind). All four are instrument defects, which is the class that
+  hides product defects behind a pass.
+  1. **Five suites were unreachable from every npm script**: `checkout.test.mjs` (carrying two real failures),
+     `commerce-all-sites.test.mjs`, `multi-store-total-cost.test.mjs`, `tools/build-workspace-bundle.test.mjs`,
+     and `tools/harness/cdp-session.test.mjs` — 30 tests covering the CDP driver, written and extended the same
+     day. `check:flows` named six of the seven files in `tools/` and missed exactly one. §13's own lesson
+     recurring, so `check:flows`, `test:playground` and the new `test:scenarios` are all **globs** now and
+     `runner-contract.test.mjs` refuses any suite no script can reach. Counts moved 128 → **137**, 63 → **80**,
+     plus 77 new.
+  2. **`crosssite.mjs` could not fail at what it exists to prove.** A leg that never reached the other site
+     scored `PARTIAL(no-cross)` and was left out of the failure count, so a journey where NOT ONE leg crossed
+     still exited 0. `legVerdict`/`journeyOutcome` are pure and unit-tested, there is no PARTIAL, and an empty
+     journey is not green. Live after: **6/6 legs genuinely crossed** — the cross-navigation worked; the runner
+     had no way to say so.
+  3. **Two runners drove a real browser on IMPORT.** `crosssite.mjs` and `memory.mjs` called `main()` at module
+     scope, so importing one for a pure function started its live journey — a five-assertion test file took
+     **174 s**. Guarded with the idiom `shopping.mjs` already used; 174s → 0s, and the gate refuses an unguarded
+     runner. §13 records the softer version ("a module that does work at import time edits the repo"); a runner
+     that does it drives a browser.
+  4. **`checkout.mjs` lost its verdict whenever a step threw.** A `reset()` timeout inside the `try` left `main`
+     and three checks became none. Each case now runs through `recordCase`, which records the failure with its
+     reason and lets the others report — the sweep's rule, in a second place.
+- **`memory.mjs` reports 6/10 live, and nobody could have known** (2026-08-16): it was one of the five suites no
+  gate ran, and it drove a browser on import so no test dared touch it. The four failures are "A phone saved",
+  "C phone saved from flow answer", "C email saved from flow answer" and "D quote reused memory" — saving a
+  PHONE looks broken while email saves, persists, updates and forgets. Measured, unfixed, and the next thread to
+  pull. **An instrument nothing runs is an instrument that tells you nothing** — the point of fixing the runners
+  first is that their answers only become evidence afterwards.
 - **A runner that attaches by hand owes the page close.** The playground CLI encodes it in
   `withPlaygroundSession`'s `finally`; the new sweep did not, printed `6/7 PASS`, and sat for 25 minutes — the
   same shape as the commerce sweep's attached-Chrome leak, in a different mechanism, one day apart. **Before

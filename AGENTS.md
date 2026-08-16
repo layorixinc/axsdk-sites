@@ -1213,11 +1213,28 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   - Live: the pair that failed every time passes 3/3, the playground sweep went 6/7 → **7/7**, and both
     multi-site scenarios moved from `partial` to **`done`** — stores that were being dropped are now searched.
     So this was not a cosmetic flake; it was silent loss of store coverage in every multi-store search.
-  - **Seven callers in five other modules still pass no target** (`64_rpc_thumbtack:177`, `65_rpc_quote:852`,
-    `66_rpc_navigate:153,207`, `67_rpc_cart:267,320`, `68_rpc_checkout:175`), three of them on MUTATION paths
-    where a false stuck report would misstate whether a cart or checkout step happened. None has a live
-    reproduction yet, so they are named rather than changed blind — a wait with no target to name is a genuine
-    case (a dialog step), and those need the `from` comparison instead.
+  - **The other seven callers were a COST bug, not a wrong answer, and are now fixed too** (2026-08-16).
+    `64_rpc_thumbtack:177`, `65_rpc_quote:852`, `66_rpc_navigate:153,207`, `67_rpc_cart:267,320`,
+    `68_rpc_checkout:175` all IGNORE the wait's return and re-read the page to decide where they landed — which
+    is why only the storefront reader ever answered wrongly. What they lost was the ceiling in round trips:
+    measured against the stub with a document that commits before the waiter arms, **67 / 86 / 52 / 42 href
+    reads** (cart, checkout, navigate, thumbtack) against a handful with the target. At the measured ~460 ms per
+    op that is **19–40 s per navigation**, out of a `deadlineMs` the platform caps at 120 s — the same class of
+    waste that once killed a quote wizard with `deadline exceeded`. Five of them also carried a
+    `local from = here()` that nothing read: a wasted round trip each, copied from the storefront reader, which
+    is the one place that does use it.
+  - **The tradeoff is real and goes the other way on a REDIRECT.** With a target the wait cannot match a landing
+    that bounced elsewhere, so it spends its ceiling — measured live: Amazon's checkout redirects to
+    `/ap/signin`, and the review tool still answered correctly ("주문이 완료되지 않았으며") because it re-reads the
+    page. Without a target, the fast-commit race burns the ceiling instead, and that happens on EVERY
+    same-origin navigation at 460 ms. So the target is the better default and the redirect is the rarer bad
+    case; the storefront reader, which does consult the answer, keeps the `from` fallback for exactly that.
+  - `tools/lua/rpc-stub.test.mjs` pins it: every `nav.wait_for_navigation` in `_common/rpc` must name a target,
+    so a caller that genuinely has none (a dialog step waiting for whatever comes next) has to say so rather
+    than inherit the mode by omission. Live-verified per module: playground 7/7 and the production sweep (61),
+    a real guarded cart add answering `cart_status: "added"` with checkout untouched (67), Amazon's login wall
+    classified with no order placed (68), bluemoonsoft reaching its page (66), and a Thumbtack search reaching
+    the quote dialog's contact step (64 + 65).
 - **A runner that attaches by hand owes the page close.** The playground CLI encodes it in
   `withPlaygroundSession`'s `finally`; the new sweep did not, printed `6/7 PASS`, and sat for 25 minutes — the
   same shape as the commerce sweep's attached-Chrome leak, in a different mechanism, one day apart. **Before

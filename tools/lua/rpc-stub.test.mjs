@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readdirSync, readFileSync } from 'node:fs';
 import test, { after } from 'node:test';
 
 import { loadLuaModules } from './harness.mjs';
@@ -54,4 +55,30 @@ test('a spec naming a url waits for the href to contain it, not to differ from i
   const { run } = withStub('return nav.wait_for_navigation({ url = "example.test/one", timeout = 30, interval = 10 })');
 
   assert.equal(run(), true, 'the current href already contains it, so this is satisfied at once');
+});
+
+// The port's arrival wait has two modes and only one is timing-independent: with a `url` it asks "is the page
+// there", without one it asks "has the address changed since I started" — and it reads that baseline through a
+// round trip, so a navigation that commits first can never look like a change and the wait polls its whole
+// ceiling. Measured live: an Amazon search commits in ~460ms, about what one op costs, and the storefront reader
+// reported `navigation_stuck` about navigations that had worked, dropping a store from comparisons. The other
+// seven callers verified their own landing so they stayed correct while spending 19-40s per navigation on a
+// question already answered.
+//
+// A caller with no target to name is a real case (a dialog step that waits for whatever comes next). It must say
+// so, rather than inherit the mode by omission.
+test('every arrival wait in the RPC modules names its target', () => {
+  const root = new URL('../../_common/rpc/', import.meta.url);
+  const offenders = [];
+  for (const file of readdirSync(root).filter((name) => name.endsWith('.lua'))) {
+    const source = readFileSync(new URL(file, root), 'utf8');
+    source.split(/\r?\n/).forEach((line, index) => {
+      if (!line.includes('nav.wait_for_navigation(')) return;
+      if (/^\s*(--|---)/.test(line)) return;
+      if (line.includes('url =')) return;
+      offenders.push(`${file}:${index + 1} ${line.trim()}`);
+    });
+  }
+  assert.deepEqual(offenders, [],
+    'arrival waits with no target: they poll their whole ceiling whenever the page arrives first');
 });

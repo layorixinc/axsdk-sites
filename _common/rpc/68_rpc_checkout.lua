@@ -170,9 +170,13 @@ function K.review(args)
 
   if not K.on_checkout_page(config) then
     if not url_has(here(), config.cart_url_markers) then
-      local from = here()
       probe(function() return nav.navigate(config.cart_url) end)
-      probe(function() return nav.wait_for_navigation({ timeout = 20000, interval = 250 }) end)
+      -- Named target. This was the widest ceiling in the port (20000/250) and `K.on_checkout_page` plus
+      -- the readiness selector below decide the landing regardless, so a fast commit spent ~40s live on
+      -- a question already answered.
+      probe(function()
+        return nav.wait_for_navigation({ url = config.cart_url, timeout = 20000, interval = 250 })
+      end)
     end
     if config.cart_ready_selector then wait_for(config.cart_ready_selector, 30000) end
 

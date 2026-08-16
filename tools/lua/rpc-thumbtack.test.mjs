@@ -182,3 +182,20 @@ test('a figure past the summary cut is still read', () => {
   assert.equal(candidate.hire_count, 812);
   assert.ok(candidate.summary.length <= 360, 'the stored summary stays bounded');
 });
+// The arrival wait must name its TARGET. Without a `url` the port asks "has the address changed since I
+// started" and reads that baseline through a round trip, so a navigation that commits first — an Amazon search
+// commits in ~460ms, about what one op costs — can never look like a change, and the wait polls its whole
+// ceiling before answering false. The service search verifies its own landing afterwards, so the answer stays right; what it
+// loses is the ceiling in round trips, and §13 records that op budget IS the feature budget (a quote wizard died
+// on `deadline exceeded` for exactly this class of waste). `settleAfter: 0` is that race.
+test('a results navigation that commits immediately does not burn the arrival ceiling', () => {
+  const page = makePage({
+    href: 'https://www.thumbtack.com/',
+    settleAfter: 0,
+    dom: {},
+    afterNavigate: {},
+  });
+  const { ops } = search(page);
+  const reads = ops.filter((entry) => entry.op === 'dom.get_location_href').length;
+  assert.ok(reads <= 20, `arrival should not poll its 8000/200 ceiling — got ${reads} href reads`);
+});

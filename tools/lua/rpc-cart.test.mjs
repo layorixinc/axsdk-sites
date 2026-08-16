@@ -470,3 +470,20 @@ test('a matching primary currency never consults the approximation', () => {
   assert.equal(lua.call('AX_RPC_CART.price_error', APPROX_CONFIG,
     { expected_unit_price: 7559.73, expected_currency: 'KRW' }, 'ITEM1'), null);
 });
+// The arrival wait must name its TARGET. Without a `url` the port asks "has the address changed since I
+// started" and reads that baseline through a round trip, so a navigation that commits first — an Amazon search
+// commits in ~460ms, about what one op costs — can never look like a change, and the wait polls its whole
+// ceiling before answering false. The guarded cart verifies its own landing afterwards, so the answer stays right; what it
+// loses is the ceiling in round trips, and §13 records that op budget IS the feature budget (a quote wizard died
+// on `deadline exceeded` for exactly this class of waste). `settleAfter: 0` is that race.
+test('a cart add whose navigation commits immediately does not burn the arrival ceiling', () => {
+  const page = makePage({
+    href: 'https://www.amazon.com/',
+    settleAfter: 0,
+    dom: {},
+    afterNavigate: { body: [{ text: 'Logitech M185' }], '#add-to-cart-button': [{ text: 'Add to Cart' }] },
+  });
+  add(page);
+  const reads = page.ops.filter((entry) => entry.op === 'dom.get_location_href').length;
+  assert.ok(reads <= 20, `arrival should not poll its 15000/250 ceiling — got ${reads} href reads`);
+});

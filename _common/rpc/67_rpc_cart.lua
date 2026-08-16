@@ -261,10 +261,14 @@ function R.add_to_cart(args)
 
   if not R.cart_contains(config, product_id) then
     if not R.on_product_page(config, product_id) then
-      local from = here()
-      probe(function() return nav.navigate(R.product_url(config, product_id)) end)
+      local product_url = R.product_url(config, product_id)
+      probe(function() return nav.navigate(product_url) end)
+      -- The TARGET is named, or the port asks "has the address changed since I started" and reads that
+      -- baseline through a round trip: a navigation that commits first can never look like a change, so the
+      -- wait polls its whole ceiling. Measured against the stub, that is the difference between a handful of
+      -- href reads and 42-86 of them — 19-40s live. §13: op budget IS the feature budget.
       probe(function()
-        return nav.wait_for_navigation({ timeout = 15000, interval = 250 })
+        return nav.wait_for_navigation({ url = product_url, timeout = 15000, interval = 250 })
       end)
       wait_for("body", config.product_timeout or 10000)
     end
@@ -315,9 +319,10 @@ function R.add_to_cart(args)
     end
 
     if not R.cart_contains(config, product_id) and config.cart_url then
-      local from = here()
       probe(function() return nav.navigate(config.cart_url) end)
-      probe(function() return nav.wait_for_navigation({ timeout = 15000, interval = 250 }) end)
+      probe(function()
+        return nav.wait_for_navigation({ url = config.cart_url, timeout = 15000, interval = 250 })
+      end)
       wait_for("body", config.product_timeout or 10000)
     end
     R.last_count_before = before

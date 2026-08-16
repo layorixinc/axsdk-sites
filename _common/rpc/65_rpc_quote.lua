@@ -847,9 +847,11 @@ function Q.request_quote(args)
     if not url then
       return { next = "error", quote_error = "missing_url", quote_status = "no_target" }
     end
-    local from = probe(function() return dom.get_location_href() end, 3)
     probe(function() return nav.navigate(url) end, 2)
-    probe(function() return nav.wait_for_navigation({ timeout = 12000, interval = 250 }) end, 2)
+    -- The TARGET is named: without it the port compares against a baseline it read through a round trip,
+    -- so a fast commit makes the wait poll its whole ceiling before answering false. `Q.on_pro` below is
+    -- what decides the landing either way, so the ceiling was pure waste out of this tool's budget.
+    probe(function() return nav.wait_for_navigation({ url = url, timeout = 12000, interval = 250 }) end, 2)
     -- `nil` means the reads themselves were refused; only a definite `false` is a wrong landing. Calling
     -- an unanswered question a wrong landing abandoned the pro before the quote began.
     local landed = Q.on_pro(service_id)

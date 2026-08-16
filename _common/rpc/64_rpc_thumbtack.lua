@@ -168,13 +168,16 @@ function T.search_service(args)
   local zip_code = trim(args.zip_code)
   if not query then return { next = "error", error = "query_required" } end
 
-  local ok, from = pcall(dom.get_location_href)
+  local ok = pcall(dom.get_location_href)
   if not ok then return { next = "error", error = "rpc_unavailable" } end
 
   local target = T.search_url(query, zip_code)
   if not target then return { next = "error", error = "query_not_sluggable" } end
   nav.navigate(target)
-  nav.wait_for_navigation({ timeout = 8000, interval = 200 })
+  -- The TARGET is named, or the port asks "has the address changed since I started" and reads that
+  -- baseline through a round trip: a navigation that commits first can never look like a change, so the
+  -- wait polls its whole ceiling. Measured: a handful of href reads against 42 of them, ~19s live.
+  nav.wait_for_navigation({ url = target, timeout = 8000, interval = 200 })
 
   local candidates = T.settle(8, 2)
 

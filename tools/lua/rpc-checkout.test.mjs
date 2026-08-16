@@ -229,3 +229,20 @@ test('a summary with even one field keeps it', () => {
   assert.match(summary.order_total, /32\.61/);
   assert.equal(summary.items, undefined);
 });
+// The arrival wait must name its TARGET. Without a `url` the port asks "has the address changed since I
+// started" and reads that baseline through a round trip, so a navigation that commits first — an Amazon search
+// commits in ~460ms, about what one op costs — can never look like a change, and the wait polls its whole
+// ceiling before answering false. The checkout review verifies its own landing afterwards, so the answer stays right; what it
+// loses is the ceiling in round trips, and §13 records that op budget IS the feature budget (a quote wizard died
+// on `deadline exceeded` for exactly this class of waste). `settleAfter: 0` is that race.
+test('reaching the cart with an immediate commit does not burn the arrival ceiling', () => {
+  const page = makePage({
+    href: 'https://www.amazon.com/',
+    settleAfter: 0,
+    dom: {},
+    afterNavigate: { body: [{ text: 'Shopping Cart' }] },
+  });
+  review(page);
+  const reads = page.ops.filter((entry) => entry.op === 'dom.get_location_href').length;
+  assert.ok(reads <= 20, `arrival should not poll its 20000/250 ceiling — got ${reads} href reads`);
+});

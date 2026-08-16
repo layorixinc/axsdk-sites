@@ -882,3 +882,40 @@ test('close leaves a browser it did not launch alone', async () => {
 
   assert.equal(touched, 0, 'a reused browser is never ours to release or kill');
 });
+
+// One sample is not enough to fix a hang, but it is enough to make the NEXT one conclusive. "The turn ran no
+// tool call at all" has two possible causes and they live in different repos: the send never reached the
+// engine, or the engine took it and produced nothing. Whether the user's own message landed in the chat
+// store separates them, and §9 already records the second shape — after a reconnect the first send comes
+// back empty. Measured once live, on the fourth batch of a sweep whose other three answered in 12-25s.
+test('a hang says whether the message itself even landed', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  fake.seedConversation([user('m1', 'hi')]);
+  fake.turns.push([]); // delivered, and the store never moves at all
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.match(error.message, /no tool call/i);
+    assert.match(error.message, /did not reach the chat store|never reached the chat store/i,
+      'the send was accepted and the message is not even there — delivery, not the flow');
+    return true;
+  });
+  await session.close();
+});
+
+test('a hang whose message landed says the engine answered nothing', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const seeded = [user('m1', 'hi')];
+  fake.seedConversation(seeded);
+  // The user's message is in the store and nothing else ever happens: the engine has it and ran no node.
+  fake.turns.push([[...seeded, user('m2', 'compare')]]);
+
+  await assert.rejects(() => session.send('compare', { timeoutMs: 900 }), (error) => {
+    assert.match(error.message, /no tool call/i);
+    assert.match(error.message, /reached the chat store/i, 'the message landed');
+    assert.doesNotMatch(error.message, /did not reach|never reached/i, 'so it must not be blamed on delivery');
+    return true;
+  });
+  await session.close();
+});

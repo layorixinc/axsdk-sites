@@ -405,6 +405,8 @@ export async function openCdpSession(options = {}, lib = undefined) {
       };
       /** The last trace the poll saw, so a timeout can say WHERE the turn stopped. */
       let seen = [];
+      /** Whether the user's own message ever appeared — which repo a hang belongs to depends on it. */
+      let landed = false;
       const turn = await pollWithDiagnosis(async () => {
         const now = await readChat();
         const fresh = now.messages.filter((message, index) => {
@@ -413,6 +415,7 @@ export async function openCdpSession(options = {}, lib = undefined) {
         });
         const answer = [...fresh].reverse().find((message) => message?.info?.role === 'assistant');
         seen = fresh.flatMap((message) => partsOf(message).filter((part) => part?.type === 'tool'));
+        if (fresh.some((message) => message?.info?.role === 'user')) landed = true;
         const done = answer !== undefined
           && (answer.info?.time?.completed !== undefined || answer.info?.finish !== undefined
             // A turn is also answered when the flow PAUSES on a question. The comparison loop has no
@@ -430,7 +433,18 @@ export async function openCdpSession(options = {}, lib = undefined) {
         // timeout simply threw it away, so every hang cost a whole repeat run to locate. No tool part at
         // all is a DIFFERENT fact — the turn never reached a node — and naming it as a stall points the
         // next reader at the flow instead of at delivery.
-        if (seen.length === 0) return 'The turn ran no tool call at all — it never reached a node.';
+        if (seen.length === 0) {
+          // Two causes, in two different repos, and one sample of a hang is not enough to fix either — so
+          // the next one has to be conclusive. The host ACCEPTED the send (`delivered: true`, or this threw
+          // long ago), so if the user's own message is not even in the chat store the send died on the way
+          // to the engine. If it landed and nothing followed, the engine has the turn and ran no node —
+          // which is the shape §9 records after a reconnect, when the first send comes back empty.
+          return landed
+            ? 'The turn ran no tool call at all — the message reached the chat store and the engine answered'
+              + ' nothing, so no node ever ran.'
+            : 'The turn ran no tool call at all — the send was accepted but the message never reached the'
+              + ' chat store, so it died before the engine.';
+        }
         const finished = seen.filter((part) => part.state?.status === 'completed').length;
         const stopped = seen[seen.length - 1];
         return `The turn ran ${seen.length} tool call(s), ${finished} completed;`

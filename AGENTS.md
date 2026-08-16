@@ -1235,6 +1235,34 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
     a real guarded cart add answering `cart_status: "added"` with checkout untouched (67), Amazon's login wall
     classified with no order placed (68), bluemoonsoft reaching its page (66), and a Thumbtack search reaching
     the quote dialog's contact step (64 + 65).
+- **`require` compares an argument to the value given, BY EQUALITY — and a mutation adapter must have one.**
+  `shopping_add_to_cart` declared `require: { product_id: true }`, which demanded the id BE the boolean true, so
+  `"B0F34DXKZH" ~= true` and the single-site cart add had **never** worked. Live it answered `adapter requirement
+  failed: product_id` with the id sitting in the node's selected state, and a probe placed INSIDE the tool never
+  ran — the requirement is checked before the script, which is why reading `selectedState` alone points at the
+  wrong file. Deleting the block is not available: the platform answers `require is required for mutation
+  adapters`. The working shape is three lines away — `shopping_add_selected_store_offer` names STRINGS to match
+  (`cart_approval: user_selected_compared_offer`) — so the single-site flow now carries the same kind of marker
+  for its own gate: `refine_item` sets `cart_approval="user_picked_searched_product"` on the pick, enum-constrained
+  so it cannot be invented, the node hands it over, the tool requires it. **A marker the entry Lua asserts cannot
+  satisfy a check that runs before the Lua** — that line is gone, because two writers of one approval is how an
+  approval stops meaning anything. `check:flows` refuses any `require` demanding `true` of a property the same
+  tool declares as a non-boolean. Live after: 3/3 with `add_status: "added"` and Amazon's own `Added to cart`.
+- **The scenario that should have caught it was blind, and its fixtures agreed with it.**
+  `tools/scenarios/shopping.mjs` still named the DURABLE tools the RPC port replaced (`search_product`,
+  `shopping.refine_item`, `add_to_cart`) and `shopping.test.mjs` named them too, so the unit tests passed while
+  the live scenario reported 1/3 for reasons that had nothing to do with behaviour. Fixtures now carry names
+  copied from a live trace, and the step-2 predicate asserts the add **succeeded** rather than merely ran — a
+  name-only check called an errored add a pass. **When a live scenario and its unit tests disagree with the
+  product, suspect the fixtures before the product.**
+- **Two things observed and NOT attributed** (2026-08-16), recorded so the next occurrence is not a first
+  sighting. ① A criterion reply at the single-site gate ("가장 저렴한 것" after a search) was routed into
+  `shopping_multi_store_total_cost.collect_request` twice, with the single-site state intact in `globalState`;
+  after the cart-approval work the same pair passes **5/5** and it no longer reproduces. Candidates: LLM
+  routing nondeterminism, or the flow now carrying `cart_approval` and the prompt naming the pick path. No claim
+  either way. ② `reset()` twice timed out at 60 s waiting for the backend to open a fresh session, once in
+  `tools/scenarios/checkout.mjs` and once in a probe — session management, plausibly the same family as the
+  `no-node` turn, and a retry cleared it both times.
 - **A runner that attaches by hand owes the page close.** The playground CLI encodes it in
   `withPlaygroundSession`'s `finally`; the new sweep did not, printed `6/7 PASS`, and sat for 25 minutes — the
   same shape as the commerce sweep's attached-Chrome leak, in a different mechanism, one day apart. **Before

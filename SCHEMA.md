@@ -133,7 +133,8 @@
           "enum": [
             "ask",
             "checkout",
-            "done"
+            "done",
+            "cancel"
           ]
         },
         "question": {
@@ -483,7 +484,8 @@
           "type": "string",
           "enum": [
             "ask",
-            "done"
+            "done",
+            "cancel"
           ]
         },
         "question": {
@@ -1733,7 +1735,8 @@
           "enum": [
             "ask",
             "pick",
-            "skip"
+            "skip",
+            "cancel"
           ]
         },
         "question": {

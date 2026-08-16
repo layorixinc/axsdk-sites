@@ -1718,3 +1718,35 @@ test('every self-looping model gate has decided about active_node_only', () => {
   assert.deepEqual(undecided, [],
     'self-looping model gates that neither declare active_node_only nor say why they must not');
 });
+
+// §13: "Saying no MUST work at every gate" — recorded for the quote flow, where cancel reaches
+// `quote_cancelled` from three gates. Measured across the whole document: memory, the quote flow and the
+// multi-store comparison all have cancel routes, and `shopping_single_site` — which pauses at three gates and
+// mutates at `add_item`, `checkout_confirm` and `do_checkout` — had NONE. Live, in one session: at its
+// `refine_item` gate a reply of "취소" was routed into the multi-store flow and answered "어떤 제품을 비교하고
+// 싶으신가요?", starting a fresh comparison instead of stopping. The cart was not mutated, so it failed safe,
+// but the user's no did nothing.
+//
+// The rule needs no allowlist: a flow that cannot mutate has nothing to cancel (bluemoonsoft pauses and only
+// navigates), and a flow that never pauses never holds a user to say no.
+test('a flow that pauses and can mutate has a cancel route to a terminal', () => {
+  const MUTATION = /add_.*cart|submit_quote|checkout|delete_memory|set_memory|resolve_offer/i;
+  const gaps = [];
+  for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml']) {
+    if (!existsSync(new URL(path, root))) continue;
+    const document = parseFlow(path);
+    for (const [flowName, flow] of Object.entries(document.flows ?? {})) {
+      const nodes = flow?.nodes ?? {};
+      const pauses = Object.entries(nodes).some(([name, node]) =>
+        Object.values(node?.next ?? {}).includes(name));
+      if (!pauses) continue;
+      const mutates = Object.values(nodes).some((node) =>
+        MUTATION.test(`${node?.id ?? ''} ${(node?.allowedTools ?? []).join(' ')}`));
+      if (!mutates) continue;
+      const cancels = Object.values(nodes).some((node) => Object.entries(node?.next ?? {})
+        .some(([branch, target]) => /^cancel/.test(branch) && nodes[target]?.kind === 'terminal'));
+      if (!cancels) gaps.push(`${path} ${flowName}`);
+    }
+  }
+  assert.deepEqual(gaps, [], 'flows that hold the user before a mutation with no way to say no');
+});

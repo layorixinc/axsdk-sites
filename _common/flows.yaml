@@ -80,10 +80,19 @@ planner:
     a keyword, and a cancellation. Without the verbatim copy the browser never sees the reply and silently
     keeps the previous ranking.
 
-    A refusal at a gate ("아니요", "취소할게요", "됐어요") while request_service_quote or
-    shopping_multi_store_total_cost is active is ALWAYS continue_current with that flow: the flow owns its
-    own cancel path and answers with what was and was not done. Routing it to out_of_scope or
-    end_conversation leaves the user unsure whether anything was sent.
+    SINGLE-SITE SHOPPING FOLLOW-UP: if activeFlow=shopping_single_site and activeNode is collect_shopping,
+    refine_item or checkout_confirm, that flow is holding a question — which product to pick, by what
+    criterion, or whether to go to checkout — and the latest message answers it. Always use continue_current
+    with that flow and copy the message VERBATIM into segments and state.requestText. This covers a criterion
+    ("가장 저렴한 순", "평점 높은 순", "첫 번째", "아무거나"), an approval ("예", "진행"), and a refusal.
+    Measured live: without this rule "취소" at the refine_item gate was routed into
+    shopping_multi_store_total_cost, which answered "어떤 제품을 비교하고 싶으신가요?" and started a fresh
+    comparison — the user's no did nothing and a new one-to-two-minute search was announced instead.
+
+    A refusal at a gate ("아니요", "취소할게요", "됐어요") while request_service_quote,
+    shopping_multi_store_total_cost or shopping_single_site is active is ALWAYS continue_current with that
+    flow: the flow owns its own cancel path and answers with what was and was not done. Routing it to
+    out_of_scope or end_conversation leaves the user unsure whether anything was sent, added or ordered.
 
     COMPARISON BROWSING FOLLOW-UP: if activeFlow=shopping_multi_store_total_cost and activeNode is
     present_offers, browse_offers or choose_product, a numbered list is on screen and the
@@ -954,11 +963,13 @@ flows:
           - collect_shopping(next, question?, shop_plan?): ALWAYS re-emit the FULL shop_plan you already know on every call — never drop an item. shop_plan is an ARRAY of { query, quantity }. next is "ask" or "done" ONLY; "ask" needs a `question` in the user's language.
 
           Make ONE tool call — the FIRST rule that applies:
+          - The user REFUSES or withdraws (아니요 / 취소 / 그만 / 됐어요 / no, never mind) -> next="cancel".
           - NO product can be identified at all (the request names nothing concrete to buy) -> collect_shopping next="ask" with a question asking what to buy.
           - At least one product is identified -> collect_shopping next="done", emitting the full shop_plan (every item with an English query and an integer quantity, default 1).
         next:
           ask: collect_shopping
           done: open_amazon
+          cancel: cancelled
           error: error
         fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 3, stalledNext: error }
 
@@ -1019,6 +1030,7 @@ flows:
           You help the user choose WHICH product to add to the cart for the current item, BEFORE it is added. The searched products are in `candidates` (each has: id, name, price_text, rating, badge, summary, url). `query` is the current item's search term; `quantity` is how many; `requestText` is the latest user message; `shop_refine_stage` tracks the dialog.
 
           Call refine_products EXACTLY ONCE — the FIRST rule that applies:
+          0. requestText REFUSES or withdraws (아니요 / 취소 / 그만 / 됐어요 / no, never mind): next="cancel". Nothing more is added.
 
           1. `candidates` is empty/absent: next="skip" (nothing to choose).
           2. `shop_refine_stage` is empty/absent (results just arrived, no criterion asked yet):
@@ -1034,6 +1046,7 @@ flows:
           ask: refine_item
           pick: add_item
           skip: next_product
+          cancel: cancelled
           error: next_product
         fallback: { invalidNext: skip, exhaustedNext: skip, maxStalledSteps: 2, stalledNext: skip }
 
@@ -1066,6 +1079,7 @@ flows:
           The shopping items have been added to the cart. `shop_results` is the per-item cart outcome (one line per item); `shop_count` is how many were processed; `requestText` is the latest user message; `checkout_stage` tracks this gate. NO order is ever placed here — checkout only navigates to the checkout page for the user to review.
 
           Call checkout_decision EXACTLY ONCE — the FIRST rule that applies:
+          0. requestText REFUSES or withdraws (아니요 / 취소 / 그만 / 됐어요 / no, never mind): next="cancel". No order is placed.
           1. `checkout_stage` is empty/absent (approval NOT asked yet): next="ask", checkout_stage="asked", question=<in the user's language: give a SHORT cart summary from shop_results (item + added/not), then ask clearly whether to proceed to checkout, e.g. "장바구니에 담았습니다. 결제(체크아웃) 페이지로 진행할까요? 주문은 진행되지 않습니다. 진행하려면 '예'라고 답해 주세요.">. IGNORE requestText here — always ask first.
           2. `checkout_stage`="asked" (the user is answering the approval question):
              - requestText APPROVES (yes / 예 / 응 / 진행 / 결제 / 체크아웃 / go ahead): next="checkout", checkout_stage="".
@@ -1076,6 +1090,7 @@ flows:
           ask: checkout_confirm
           checkout: do_checkout
           done: shopping_done
+          cancel: cancelled
           error: shopping_done
         fallback: { invalidNext: done, exhaustedNext: done, maxStalledSteps: 2, stalledNext: done }
 
@@ -1100,6 +1115,19 @@ flows:
           (login_required, cart_empty, checkout_unavailable, checkout_pending, captcha_required), say the
           checkout could not be completed and state the reason briefly. ALWAYS state clearly that NO order has
           been placed. Do NOT invent addresses, totals, or payment details.
+
+      # A cancel must say what did NOT happen — the same reason `memory.cancelled` says nothing was deleted
+      # and `quote_cancelled` says no pro was contacted. This gate can be reached before anything was added
+      # and also after earlier items already were, so it states both: nothing further, and no order.
+      cancelled:
+        kind: terminal
+        inputSelector: [ shop_results ]
+        respond: |-
+          Reply in the user's language: the request was cancelled. State clearly that nothing further was
+          added to the cart and NO order was placed. If shop_results is present and non-empty, list VERBATIM
+          in one short line per item what had already been added before the cancellation, so the user knows
+          what is in the cart — do NOT invent items, quantities, or prices, and do not claim anything was
+          removed.
 
       shopping_done:
         kind: terminal
@@ -3799,7 +3827,7 @@ flowTools:
       additionalProperties: true
       required: [ next ]
       properties:
-        next: { type: string, enum: [ ask, done ] }
+        next: { type: string, enum: [ ask, done, cancel ] }
         question: { type: string }
         shop_plan:
           type: array
@@ -4168,7 +4196,7 @@ flowTools:
       additionalProperties: true
       required: [ next ]
       properties:
-        next: { type: string, enum: [ ask, pick, skip ] }
+        next: { type: string, enum: [ ask, pick, skip, cancel ] }
         question: { type: string }
         shop_refine_stage: { type: [ string, "null" ] }
         product_id: { type: [ string, "null" ] }
@@ -4188,7 +4216,7 @@ flowTools:
       additionalProperties: true
       required: [ next ]
       properties:
-        next: { type: string, enum: [ ask, checkout, done ] }
+        next: { type: string, enum: [ ask, checkout, done, cancel ] }
         question: { type: string }
         checkout_stage: { type: [ string, "null" ] }
         message: { type: string }

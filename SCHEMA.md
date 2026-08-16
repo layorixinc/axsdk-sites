@@ -1737,6 +1737,22 @@
     }
   },
   {
+    "name": "recall_saved_contact",
+    "description": "Read the saved contact fields from the on-device memory store and publish them as one line for the collect gate. One round trip; nothing is written.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "userMessages": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "refine_products",
     "description": "Refine the searched products for the current item — ask the user which product / how to narrow, or (after they answer) record the chosen product to add, or skip. The LLM ranks/filters the candidates; this tool captures the decision.",
     "parameters": {

@@ -429,6 +429,7 @@ flows:
       popover; after reporting, PAUSE and ask whether to request more quotes or
       start another request — never a hard stop.
     state:
+      recalled_contact: null
       service_query: null
       site: thumbtack
       user_requirements: null
@@ -489,8 +490,21 @@ flows:
           - requestText
         next:
           cancel: quote_cancelled
-          continue: collect_request
+          continue: recall_contact
         fallback: { invalidNext: continue, exhaustedNext: continue }
+
+      # Saved contact, read ONCE before the gate asks for it. Without this the flow re-asks for a name, email and
+      # phone the user already asked us to keep — measured: with memory seeded, `verify_request` never completed
+      # because nothing in this flow could see the store. A read failure is not a reason to abandon the quote, so
+      # every branch continues to the gate.
+      recall_contact:
+        kind: action_contract
+        inputSelector: []
+        id: recall_saved_contact
+        next:
+          done: collect_request
+          error: collect_request
+        fallback: { invalidNext: error, exhaustedNext: error }
 
       collect_request:
         kind: action_unit
@@ -509,6 +523,7 @@ flows:
           - submit_email
           - submit_first_name
           - submit_last_name
+          - recalled_contact
         allowedTools:
           # Always eligible: a user who declines must never be answered with another question.
           - cancel_quote_request
@@ -557,6 +572,13 @@ flows:
           (아니요 / 취소할게요 / 그만할게요 / 됐어요 / no thanks / never mind) rather than information for the
           request, call cancel_quote_request exactly once and stop. Never answer a refusal with another
           question — nothing has been searched or sent, and the terminal says so.
+
+          SAVED CONTACT: `recalled_contact` is one line of `key=value` pairs the user previously asked us to
+          remember (full_name / first_name / last_name / email / phone / zip_code, dot-separated). Fill any
+          contact field that is still missing from it instead of asking for it again — asking for what they
+          already told us to keep is the whole reason they told us. What the CURRENT message says always wins
+          over it, and a field absent from the line is still asked for. Never mention the line itself; the user
+          knows what they saved.
 
           `requestText` is the complete latest user message and remains available at every internal
           controller step. Inspect the entire requestText again at every stage, even after another
@@ -2124,6 +2146,61 @@ flows:
         kind: terminal
         inputSelector: []
 flowTools:
+  recall_saved_contact:
+    description: Read the saved contact fields from the on-device memory store and publish them as one line for
+      the collect gate. One round trip; nothing is written.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ _common.70_rpc_memory ]
+      entry: run
+      rpc:
+        allow: [ memory.search ]
+        opTimeoutMs: 2000
+        deadlineMs: 15000
+      lua: |
+        function run(args)
+          -- ONE round trip. `memory.get()` with no key answers `{ keys = ... }` — names only, no values, measured —
+          -- so reading five fields that way would cost five ops on every quote turn. `search` answers
+          -- `memory_result.matches = { { key = "email", excerpt = "…", truncated = false }, … }` with the BARE key
+          -- and the value in `excerpt`, which is one op for all of them.
+          local answer = AX_RPC_MEMORY.search({ regex = "." })
+          -- A store that cannot be reached is not a reason to abandon the quote: the gate asks, as it did before
+          -- this node existed. Both branches lead there.
+          if type(answer) ~= "table" or answer.next == "error" then return { next = "error" } end
+
+          local wanted = { full_name = true, first_name = true, last_name = true, email = true, phone = true,
+                           zip_code = true }
+          local matches = type(answer.memory_result) == "table" and answer.memory_result.matches or nil
+          local found = {}
+          for index = 1, #(matches or {}) do
+            local match = matches[index]
+            if type(match) == "table" and wanted[tostring(match.key)] then
+              -- A TRUNCATED value is dropped, not shortened: half an email address is a wrong contact, and a
+              -- wrong value in a submitted quote is worse than asking the user for it.
+              if match.truncated ~= true and type(match.excerpt) == "string" and match.excerpt ~= "" then
+                found[#found + 1] = tostring(match.key) .. "=" .. match.excerpt
+              end
+            end
+          end
+          table.sort(found)
+          -- ONE SCALAR, never a table: a tool-validated state field rejects an empty Lua table outright and
+          -- receives a non-empty one as a JSON object — §13 records four separate incidents of exactly that.
+          if #found == 0 then return { next = "done" } end
+          return { next = "done", recalled_contact = table.concat(found, " · ") }
+        end
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        # The engine injects `userMessages` into EVERY action node's state, so a tool with
+        # `additionalProperties: false` has to tolerate it — measured: with an empty properties map the call was
+        # rejected outright, `Unrecognized key: "userMessages"`, before the script ran. Declared and ignored.
+        userMessages: { type: array, items: { type: string } }
+    output:
+      next: result.next
+      recalled_contact: result.recalled_contact
+
   capture_memory_clause:
     description: Read the user's own message and, only when it carries an explicit remember/save clause, report
       the values beside that clause. Deterministic; no model call, no browser op.

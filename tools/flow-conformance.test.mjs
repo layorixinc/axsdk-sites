@@ -426,7 +426,17 @@ test('the user can decline at the quote approval gate', () => {
   // refusal — otherwise "취소할게요" is answered with "which service do you want?".
   assert.equal(quote.nodes.entry_guard.id, 'detect_cancellation');
   assert.equal(quote.nodes.entry_guard.next.cancel, 'quote_cancelled');
-  assert.equal(quote.nodes.entry_guard.next.continue, 'collect_request');
+  // The continue path must REACH the collection gate, not necessarily BE it: a deterministic hop may sit in
+  // between (the saved-contact recall does). A MODEL node on that path would be a place a refusal could get
+  // lost, so only `action_contract` hops are allowed to intervene.
+  let hop = quote.nodes.entry_guard.next.continue;
+  for (let step = 0; step < 4 && hop !== 'collect_request'; step += 1) {
+    const node = quote.nodes[hop];
+    assert.ok(node !== undefined, `entry_guard continues to ${hop}, which does not exist`);
+    assert.equal(node.kind, 'action_contract', `${hop} sits between the guard and the gate and must be deterministic`);
+    hop = node.next?.done ?? node.next?.continue;
+  }
+  assert.equal(hop, 'collect_request', 'the continue path must reach the collection gate');
   // The guard only runs on a fresh entry; a flow already parked on the collection question must accept a
   // refusal too (live: a greeting had parked it there, and "취소할게요" was answered with another question).
   assert.equal(quote.nodes.collect_request.next.cancel, 'quote_cancelled');
@@ -1820,6 +1830,11 @@ test('a contract tool declares only state some node hands over', () => {
     for (const [toolId, selected] of selectedPerTool) {
       for (const property of Object.keys(tools[toolId]?.parameters?.properties ?? {})) {
         if (selected.has(property)) continue;
+        // The engine injects `userMessages` into EVERY action node's state, so a tool with
+        // `additionalProperties: false` MUST declare it whether or not a node selects it — measured: an empty
+        // properties map was rejected with `Unrecognized key: "userMessages"` before the script ran. Declaring
+        // an engine-injected field is not the drift this check exists to catch.
+        if (property === "userMessages") continue;
         if (UNEXERCISED_PLAYGROUND_FIXTURES[`${toolId}.${property}`] === true) continue;
         stray.push(`${path} ${toolId} declares ${property}`);
       }

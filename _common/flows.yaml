@@ -258,7 +258,7 @@ flows:
           delete: delete_memory
           set: prepare_memory
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
       list_memory:
         inputSelector: []
         kind: action_contract
@@ -324,7 +324,7 @@ flows:
             cancelled: cancelled,
             error: error
           }
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
       delete_memory:
         inputSelector: [ delete_keys, confirmed ]
         kind: action_contract
@@ -958,7 +958,7 @@ flows:
           ask: collect_shopping
           done: open_amazon
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 3, stalledNext: error }
 
       open_amazon:
         kind: action_contract
@@ -1032,7 +1032,7 @@ flows:
           pick: add_item
           skip: next_product
           error: next_product
-        fallback: { invalidNext: skip, exhaustedNext: skip }
+        fallback: { invalidNext: skip, exhaustedNext: skip, maxStalledSteps: 2, stalledNext: skip }
 
       add_item:
         kind: action_contract
@@ -1073,7 +1073,7 @@ flows:
           checkout: do_checkout
           done: shopping_done
           error: shopping_done
-        fallback: { invalidNext: done, exhaustedNext: done }
+        fallback: { invalidNext: done, exhaustedNext: done, maxStalledSteps: 2, stalledNext: done }
 
       do_checkout:
         kind: action_contract
@@ -1970,7 +1970,7 @@ flows:
           navigate: resolve
           ask: assist
           error: error
-        fallback: { invalidNext: ask, exhaustedNext: ask }
+        fallback: { invalidNext: ask, exhaustedNext: ask, maxStalledSteps: 2, stalledNext: error }
 
       resolve:
         kind: action_unit
@@ -1986,7 +1986,7 @@ flows:
         next:
           go: go_page
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
 
       go_page:
         kind: action_unit
@@ -2002,7 +2002,7 @@ flows:
         next:
           go: served
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
 
       served:
         kind: terminal

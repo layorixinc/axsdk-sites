@@ -62,7 +62,7 @@ flows:
           navigate: resolve
           ask: assist
           error: error
-        fallback: { invalidNext: ask, exhaustedNext: ask }
+        fallback: { invalidNext: ask, exhaustedNext: ask, maxStalledSteps: 2, stalledNext: error }
       resolve:
         kind: action_unit
         description: Resolve the BlueMoonSoft page for the request from the live site sitemap (bluemoonsoft/sitemap.md).
@@ -94,7 +94,7 @@ flows:
         next:
           go: go_page
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
       go_page:
         kind: action_unit
         description: Navigate to the BlueMoonSoft page path that best matches the request, chosen from the sitemap hits.
@@ -118,7 +118,7 @@ flows:
         next:
           go: served
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
       served:
         kind: terminal
         inputSelector: []

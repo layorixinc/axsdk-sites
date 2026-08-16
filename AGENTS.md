@@ -1131,10 +1131,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   (`ax sync <site>` repairs it). It now calls `syncSitesIndex` — the same path `ax sync` uses — and
   asserts the publication. 35/35, 286s → 64s. `price_unavailable` counts as a classified answer there
   (Walmart), alongside the access-wall codes.
-- **Every model node has a stall guard.** `fallback.maxStalledSteps` + `stalledNext` on each
-  `action_unit`, because a repeating tool error used to burn the step budget in silence (one live turn
-  spent 176s repeating `choose_offer → browse_offers` seven times and said nothing). A lost listing now
-  routes to the `comparison_lost` terminal, which explains itself.
+- **Every model node has a stall guard — and this entry was FALSE for eight of them until 2026-08-16.**
+  `fallback.maxStalledSteps` + `stalledNext` on each `action_unit`, because a repeating tool error used to
+  burn the step budget in silence (one live turn spent 176s repeating `choose_offer → browse_offers` seven
+  times and said nothing). A lost listing routes to the `comparison_lost` terminal, which explains itself.
+  Measured when the claim was finally checked: **14 `action_unit` nodes, 6 guarded, 8 not**, with no
+  `defaults.fallback` to cover them — and twelve nodes once the bluemoonsoft site OVERLAY's three copies and
+  the playground's one are counted, because an overlay owns its flow wholesale so no base fix reaches it.
+  Two of the unguarded were gates that HOLD the user (`refine_item`, `checkout_confirm`). All twelve already
+  declared `invalidNext`/`exhaustedNext`, so they were **half**-guarded: a stall is the same class of failure
+  as an invalid or exhausted answer, and the fix is the target the node already names — except
+  `bluemoonsoft.assist`, whose `invalidNext: ask` is a SELF-LOOP (`ask → assist`), where routing a stalled
+  node back to itself is precisely the burn being guarded against. `check:flows` now pins it, across the site
+  overlays and the playground, and pins that the target is a **branch key of the node's own `next` map** —
+  never a node name: every fallback in the document is a branch key and most name no node at all
+  (`invalidNext: done` where `next.done: shopping_done`). **A false settled finding is worse than no finding,
+  because nobody re-checks it** — this one sat here while eight nodes were exposed.
 - **Store outcomes are part of the answer.** `C.store_status` renders one line naming every store that
   failed and what the user must do ("네이버쇼핑: 보안 확인 필요 …"); it rides in the comparison window,
   in `report_cart`, and in `no_results`. Counts come from the WHOLE listing, so folding a row away never

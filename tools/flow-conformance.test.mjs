@@ -1639,3 +1639,39 @@ test('no node repeats the default model block', () => {
       `${path}: ${repeats.length} node(s) repeat defaults.model verbatim — delete them and let the default carry it`);
   }
 });
+
+// §13 recorded "Every model node has a stall guard" as settled, and it was not true: measured 14
+// `action_unit` nodes with 6 guarded, 8 unguarded, and no `defaults.fallback` to cover them. The bug the
+// guard exists for is on the record — a repeating tool error burned the step budget in silence, one live turn
+// spending 176s repeating `choose_offer → browse_offers` seven times and saying nothing — and two of the
+// unguarded nodes are gates that HOLD the user (`refine_item`, `checkout_confirm`). A false settled finding
+// is worse than no finding, because nobody re-checks it.
+test('every model node has a stall guard that names a real node', () => {
+  const files = ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+    'playground/_common/flows.yaml'];
+  const missing = [];
+  const dangling = [];
+  for (const path of files) {
+    if (!existsSync(new URL(path, root))) continue;
+    const document = parseFlow(path);
+    if (document.defaults?.fallback !== undefined) continue; // a document-wide guard covers its nodes
+    for (const [flowName, flow] of Object.entries(document.flows ?? {})) {
+      const nodes = flow?.nodes ?? {};
+      for (const [nodeName, node] of Object.entries(nodes)) {
+        if (node?.kind !== 'action_unit') continue;
+        const target = node.fallback?.stalledNext;
+        const where = `${path} ${flowName}.${nodeName}`;
+        if (target === undefined || node.fallback?.maxStalledSteps === undefined) { missing.push(where); continue; }
+        // A fallback target is a BRANCH KEY of this node's own `next` map, never a node name — measured
+        // across every existing fallback in the document: all of them are branch keys and most name no node
+        // at all (`invalidNext: done` where `next.done: shopping_done`). A guard pointing nowhere is worse
+        // than none: it looks handled and fails the whole document.
+        if (!Object.prototype.hasOwnProperty.call(node.next ?? {}, target)) {
+          dangling.push(`${where} -> ${target}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(missing, [], 'model nodes with no stall guard');
+  assert.deepEqual(dangling, [], 'stall guards naming a node that does not exist');
+});

@@ -238,7 +238,7 @@ flows:
           ask: collect
           done: search_stores
           error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 3, stalledNext: error }
       search_stores:
         kind: action_contract
         id: shopping_search_sites

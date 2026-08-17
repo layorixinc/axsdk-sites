@@ -1858,3 +1858,44 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   workspace on ONE machine — but it is not a cross-machine identifier, so never quote a digest as proof
   that two checkouts carry the same workspace. It is deterministic locally (verified: three consecutive
   builds, identical), and `generatedAt` is not part of it.
+- **A conditional free-shipping offer is not free shipping, and the parser read it as zero for as long as it
+  existed.** `parse_shipping` scanned FREE_PHRASES over the WHOLE text before extracting a fee, so
+  `배송비 3,000원 · 30,000원 이상 무료배송` answered **0** with the fee sitting right there, and
+  `Shipping: $5.99 · Free shipping over $35` answered **0** — both executed through the fengari harness, not
+  read. The threshold form is the NORMAL rendering on a Korean store. Two things make this worth keeping: the
+  function's own comment already forbade it by name ("reading the second as the first makes a store the
+  cheapest on the page for free"), and the fragment path below already handled the case — it was simply
+  UNREACHABLE behind the early scan. A rule can be written, commented, and still never run. Free phrases are
+  threshold-aware now; the fee is looked for only BEFORE the free phrase, so a threshold with no fee stays
+  UNKNOWN and a threshold word misread on an unconditional row costs an unknown, never a number.
+- **Four adapters reopened the cart-confirmation hole through config after the code closed it.** `cart_contains`
+  consults `confirmation_selector` OFF the cart page, where the only honest evidence is a per-add panel — and
+  amazon (`#sc-active-cart, .sc-list-item[data-asin]`), walmart (`cart-drawer`/`cart-item`), etsy
+  (`[data-cart-listing-id]` plus a page-wide `[aria-live="polite"]`) and coupang (`[data-cart-item-id]`) each
+  named cart STRUCTURE there. A persistent mini-cart holding a PREVIOUS item therefore made the probe true on
+  arrival, the add block was skipped, and the tool reported `added = true` with no click. `check:flows` now
+  refuses cart structure in either confirmation key, and a name that says SUCCESS stays allowed (gmarket's
+  `[data-cart-layer="success"]`, ssg's `[data-layer-name="cart_success"]`). **A code fix that leaves the same
+  mistake expressible in data is half a fix.**
+- **Naming a post-add REDIRECT landing page as a cart marker told the user their 67-item cart was empty.** A real
+  amazon add lands on `/cart/smart-wagon?newItems=<uuid>,N` and that page redirects to `/gp/cart/view.html`,
+  which the existing markers already name and where the 18 rows and their `data-asin` actually live. Adding the
+  landing page made `68_rpc_checkout.review` believe it was already on the cart, skip the navigation, match none
+  of the cart selectors, and answer `cart_empty`. Only the live scenario caught it — every offline gate stayed
+  green — which is what "verify the effect of a behavioural change" means in this repo. With the structural
+  fallback gone from `confirmation_selector`, an unconfirmed add navigates to `cart_url` and the id probe runs on
+  the canonical page, so the marker was never needed.
+- **The quote wizard classified buttons by LABEL and pressed them by POSITION.** `W.classify_advance` returns the
+  moment it sees an advance word and drops the fact that a submit-like button shares the step
+  (`reached_submit_step = false`); `advance_click` clicked `[data-test="request-flow-step--active"]
+  button:not([aria-label])`, the first such button in document order. A step rendering "Send request" before
+  "Next" therefore had its submit pressed by the wizard's own advance, with `dom.submit_form`'s `requestSubmit()`
+  as the follow-up — against §11's first constraint. `Q.advance_target` computes which button the selector will
+  hit from the batch already in hand (no extra round trip) and the labels must agree before anything is pressed;
+  disagreement stalls the step, which the stop report already explains. Never observed live, fixed anyway: the
+  constraint is "never auto-submit", and a wrongly-sent quote has no second chance.
+- **`set_value` answers false for a control that EXISTS and refuses the value**, and the cart discarded that
+  boolean — three approved units became one added unit with a `done` answer. The suite covered only a MISSING
+  control because `rpc-stub.mjs` could not express the other half; a `<select>` whose options stop below the
+  requested quantity is the live shape, so the stub grew `rejectSetValue`. **A guard tested on only one of its
+  two failure shapes is a guard tested on the shape that was easy to fake.**

@@ -1053,9 +1053,14 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   flow-exec) — don't redesign unasked; revert any instrumentation you add there, leaving only the
   user's changes.
 - **Result pagination is opt-in per site and capped at 2 pages** (`44_pagination.lua`). A site declares
-  `pagination = { mode, param, start, step, max_pages }`; a site without it reads one page. Verified live:
-  `page` on **ssg / walmart / aliexpress / amazon**, `_pgn` on **eBay** (22 rows on page 1 and 22 entirely
-  different rows on page 2 once its card selector was fixed). **Coupang and Naver Shopping stay single-page on purpose**:
+  `pagination = { mode, param, start, step, max_pages }`; a site without it reads one page. **Correction
+  (2026-08-16): the "verified live" part of this entry did not survive re-measurement.** It read that `page`
+  worked on ssg/walmart/aliexpress/amazon and `_pgn` on eBay, with 22 rows on page 1 and 22 entirely
+  different rows on page 2 — but `already_showing` took no page argument, so a page-2 request while standing
+  on page 1 of the same query skipped the navigation entirely and re-read page 1. That observation cannot be
+  reproduced through the shipped path. Fixed; and note that only amazon and eBay declare `next_selector`, so
+  ssg/walmart/aliexpress could not reach a second page for a second reason.
+  **Coupang and Naver Shopping stay single-page on purpose**:
   every deep-linked coupang `?page=2` renders an empty grid and its on-page control is a hashed-class
   button (§10 bans those), and Naver's bot wall prevented observing a second page. Don't add a paging
   parameter you have not seen work.
@@ -1936,3 +1941,46 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   unreachable. What actually happened is worse than the latent crash it was filed as: a dropped op left the href
   nil and the store was reported `site_not_ported` — a claim about the SITE — when the channel is what never
   answered. Consult the refusal count, not `pcall`.
+- **A guard that GUESSES what it guards never guarded the thing that needed it.** The cancel gate detected
+  "this flow can mutate" from node names (`/add_.*cart|submit_quote|checkout|…/`) while `effect: mutation` is
+  DECLARED and compiler-enforced. `shopping_multi_store_total_cost` mutates through
+  `shopping_add_selected_store_offer`, matched none of those words, and was therefore never examined — which is
+  exactly the flow whose `collect_request` held the user with no cancel branch, no enum value and no prompt
+  rule while the planner promised "the flow owns its own cancel path". Read the declaration, never the name.
+- **A cancel exit one hop away is still a cancel exit.** A renderer pauses on its own `ask` and hands the REPLY
+  to a classifier in the SAME turn — `present_results` routes `refine` to `browse_candidates`, which cancels —
+  so requiring the branch on the renderer itself is a wrong accusation. What is not answered is a node whose
+  successors cannot cancel either. The node-level rule with one hop of reach is the one that holds.
+- **A cancel terminal may only claim what is true at EVERY node that reaches it.** The multi-store one read
+  "비교만 완료했고" — the comparison WAS completed — while it is reachable from `choose_product` before any store
+  is searched, and now from the collector before anything at all. The not-added half was always true; the
+  outcome half was a claim about work that may never have happened.
+- **Category memory deletion could never reach its chooser.** `find_delete_candidates` branched on
+  `result.keys.0`; `AX_RPC_MEMORY.search` answers `memory_result.matches = {{key, excerpt, truncated}}` — the
+  shape `recall_saved_contact` reads and was live-verified against — so every successful search took
+  `not_found` while matches existed. The stale top-level `keys` is still described in `MEMORY_DESIGN.md` §19.5
+  from when these were `kind: remote` adapters, and a doc left describing a retired shape is where the next
+  wrong path comes from. All six memory tools still publish `memory_result: result` (the envelope), which
+  MODEL nodes tolerate because they read the state as prose — a deterministic branch does not.
+- **A Korean mobile number was never captured, in the product's primary locale.** The phone pattern was 3-3-4,
+  the US shape the reserved test data uses; `010-1234-5678` is 3-4-4 and matched nothing, so an explicit
+  "기억해줘" saved nothing and — the hook being fire-and-continue — said nothing either. Match the longer shape
+  FIRST, because 3-3-4 matches its own prefix. The ZIP probe beside it also claimed amounts: `30000원` was
+  written as the user's postal code and `recall_saved_contact` feeds that into a quote form. A US ZIP never
+  carries a unit, so a unit after the digits refuses the match.
+- **Pagination never advanced, and the correct url was built one line before being dropped.**
+  `already_showing` took no page, so standing on page 1 of a query a page-2 request matched on the query
+  alone, skipped the navigation, re-read page 1, labelled it page 2, and the dedupe removed every row — the
+  loop stopping on `no_new_results` after reading one page twice. This CONTRADICTS the §13 line above claiming
+  eBay page 2 was live-verified with 22 different rows; that observation cannot be reproduced through this
+  path. An absent page parameter is page ONE, not "unknown".
+- **Read the live window, not only the test output.** The comparison printed "월마트(walmart):
+  `rpc_unavailable`" at the user — a wire code they can do nothing with. The unknown-code fallback is
+  deliberate (a NEW code must still name its store rather than vanish), but a code we ship ourselves gets a
+  sentence. No test would have caught it; the assertion only existed after the window was read.
+- **A degraded live window makes negative results unusable, and saying so is the finding.** The all-site sweep
+  ran 41/41 → 39/41 → 36/40 → 32/38 across four consecutive runs while `rpc_unavailable`/`unsearched` moved
+  between stores, with browser probes attached in between. Every failure shape was a session or channel one
+  and none was a wrong answer, and an isolated three-site batch searched normally with the same edits in
+  place — so the honest claim is "not attributable either way", not "unrelated". A success cannot be caused by
+  an intermittent stall, so positive observations survive a degraded window; negative ones are void.

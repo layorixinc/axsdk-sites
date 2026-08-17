@@ -60,6 +60,8 @@ CWS_LAUNCH_PLAN.md            # Chrome Web Store launch blockers + owners, quote
 AFFILIATE_DESIGN.md           # M1 affiliate: the link-first design and the gates that keep it compliant
 SITE_DATA_SPLIT_DESIGN.md     # selectors as remote DATA so a store fix does not need a review
 COMPETITIVE_RESEARCH.md       # agentic extensions measured from their store listings
+CODE_REVIEW.md                # structural review of flows.yaml + the Lua layers, severity-ordered
+CWS_ONE_STOP_INQUIRIES.md     # the two policy-reading inquiries, written to send
 ```
 
 ---

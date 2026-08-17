@@ -1899,3 +1899,40 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   control because `rpc-stub.mjs` could not express the other half; a `<select>` whose options stop below the
   requested quantity is the live shape, so the stub grew `rejectSetValue`. **A guard tested on only one of its
   two failure shapes is a guard tested on the shape that was easy to fake.**
+- **`check:flows` now asks the question that had never been asked: is a field the flow PUBLISHES a field its
+  script can produce?** The old check ran on ONE tool in ONE direction (script → `output`), and the undefended
+  direction is the one that loses data — a key mapped from `result.X` that the script never answers is null on
+  every turn, silently. Ten offenders, four of them missed by a careful manual review of the same files:
+  `O.rank` never returned the `failures` its tool declares (three nodes select it) nor `incomplete_count`;
+  `O.refine` never returned `view_sort`, `store_status`, `refine_error` or `rescope_request`; `search_service`
+  published a `status` its script does not have. **Two findings filed separately turned out to be this one
+  bug**: the store-outcome line vanishing after the first page (`notes_for` rebuilds it from `args.failures`)
+  and a chosen sort reverting (`AX_refine_store_offers` reads `args.view_sort`). Write the gate before the
+  fixes — the fixes were never the point.
+- **A conformance gate's SCOPE is set by its false positives, and each one is worth a comment.** Three shaped
+  this one, all measured: a tool's own entry lua can assemble the answer (`capture_memory_clause` adds
+  `confirmed`, `recall_saved_contact` builds `recalled_contact`); a function that hands a table straight back is
+  a pass-through whose keys belong to the module it wrapped (`return shown` had `question` reported missing
+  while it is produced one call away); and a shared dispatcher answers the UNION of every command routed
+  through it, so `AX_RPC_PURE.run` is exempt by name. A gate that cries wolf is one nobody reads.
+- **An identifier scan cannot see a RENAME, so the exact rule is worth its extra branch.** When the dispatched
+  function returns only literal tables, the tool's answer IS those tables and membership is decidable:
+  `page_stop_reason: result.stop_reason` was reading the right-hand side of a rename the entry had already
+  applied (`page_stop_reason = result.stop_reason`), so the identifier was present and the key was null on
+  every page. The value survived nested inside `store_result`, which is why nothing looked broken.
+- **A key no flow state declares is not a contract — delete it, do not forward it.** `complete_count`,
+  `base_currency` and `service_options` were mapped from real command values into keys nothing declares and
+  nothing reads, so they wrote nowhere. Forwarding them would have restored a contract that never had a
+  consumer; the window already states both facts in its own text.
+- **The folded-row count must count only rows the FOLD removed.** `hidden = #all_offers - #list` counted every
+  row absent from the window whatever hid it, so a site filter that hid three rows told the user three rows had
+  been folded for unknown shipping — a false statement about prices inside a window whose whole job is
+  comparing them. Only cost-incomplete absentees count now, in both the browse and refine paths, and a window
+  that itself holds an incomplete row is not folding at all. The test asserts ONE rather than zero on purpose:
+  that row really is unpriced and really does come back with "미확인 포함", so the sentence keeps its promise.
+- **A dead limb can hide a live wrong answer.** `run_open_site_search` wrapped `dom.get_location_href` in
+  `pcall` and reported `rpc_unavailable` on failure — but the tolerant proxy had already swallowed the refusal
+  and answered nil, so `pcall` could never fail and the limb (which named an undefined `config`) was
+  unreachable. What actually happened is worse than the latent crash it was filed as: a dropped op left the href
+  nil and the store was reported `site_not_ported` — a claim about the SITE — when the channel is what never
+  answered. Consult the refusal count, not `pcall`.

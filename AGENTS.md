@@ -1380,11 +1380,11 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   A storefront fix has one implementation and one parser now. `build:rpc:sites` plus the committed-output
   gate keeps adapter data and the runtime module identical.
 - **A selector is only ever validated against the live page.** 11st's cards render
-  `dd.c-card-item__price-delivery` with an `sr-only` label glued to the value ("배송비무료"); the config asked
-  for `.c-card-item__delivery`, which exists nowhere. A selector matching nothing reads as "this store
-  says nothing about shipping", so 11st rows arrived with unknown totals and were folded out of the very
-  comparison they were searched for. Measured: of 6 cards, exactly ONE states shipping at all — the other
-  five genuinely say nothing, and guessing zero there would make 11st look like the cheapest store.
+  `dd.c-card-item__price-delivery` with an `sr-only` label glued to the value ("배송비2,500원"); the old
+  `.c-card-item__delivery` / `.c-card-item__shipping` classes exist nowhere. On the current live search,
+  one persistent-session `query_all` read shipping through BOTH configured fields on 3 of the first 8
+  cards (2,500 / 2,500 / 3,500 KRW). The top three relevant offers in a separate flow stated no shipping
+  and correctly kept unknown totals — guessing zero would make 11st look like the cheapest store.
 - **`ax reset` starts a clean conversation** (messages + session state + deferred calls + a new session id).
   A paused flow lives in all three; clearing only the messages leaves the node paused. Use it instead of
   `취소` before a live scenario — the cancel workaround only works while cancel itself works.
@@ -1944,8 +1944,14 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   deliberate (a NEW code must still name its store rather than vanish), but a code we ship ourselves gets a
   sentence. No test would have caught it; the assertion only existed after the window was read.
 - **A degraded live window makes negative results unusable, and saying so is the finding.** The all-site sweep
-  ran 41/41 → 39/41 → 36/40 → 32/38 across four consecutive runs while `rpc_unavailable`/`unsearched` moved
-  between stores, with browser probes attached in between. Every failure shape was a session or channel one
-  and none was a wrong answer, and an isolated three-site batch searched normally with the same edits in
-  place — so the honest claim is "not attributable either way", not "unrelated". A success cannot be caused by
-  an intermittent stall, so positive observations survive a degraded window; negative ones are void.
+  ran 41/41 → 39/41 → 36/40 → 32/38, and after the runtime was restored another run answered **38/41** while
+  `rpc_unavailable`/`unsearched` moved between stores. Every failure shape was a session/channel/attribution
+  one and none was a wrong answer. The changed stores then passed **19/19** in valid two-store batches:
+  11st returned three candidates, eBay rendered three product titles, and a persistent 11st card read found
+  shipping on 3/8 rows. So the honest claim is "not attributable either way" for a degraded negative;
+  positive observations survive because an intermittent stall cannot cause a success.
+- **The affiliate branch is fail-closed live, but its new button label is not live-proven.** Selecting a
+  Coupang offer in one persistent session reached `shopping_affiliate_link` and returned
+  `affiliate_no_link:404.0`; it did not fall through to cart mutation. Because no link/widget was produced,
+  `"쿠팡에서 보기"` never reached the visible surface. The site-based label is offline contract-tested; do
+  not call it live-verified until the conversion endpoint returns a link.

@@ -130,11 +130,13 @@
 > `test:scenarios` 77 · commerce 25/25 + site contracts 19/19 · `dead:lua` 39 alive / 0 dead ·
 > bundle/Lua/schema checks 모두 통과.
 >
-> **라이브 스모크는 외부 blocker로 완료하지 못했다.** shipping CDP extension은 workspace digest
-> `2251483add70`과 13 layers를 저장했지만 backend session이 열리지 않았다. 전-site sweep 두 번과 harness
-> bring-up이 같은 60s backend-open timeout을 답했다. 첫 실패는 FATAL을 출력한 뒤 attached Chrome handle을
-> 놓지 않아 3600s까지 프로세스를 붙잡는 별도 runner 결함도 드러냈다; acquisition 실패도 CDP를 닫고
-> 자신이 띄운 child만 `unref`하도록 고쳤고, 같은 backend refusal이 69.75s에 종료됨을 확인했다.
+> **라이브 스모크 재개 완료.** runtime 복구 후 전-site sweep은 38/41이었다: Walmart
+> `rpc_unavailable`과 11st `unsearched`가 한 번의 degraded window에 남았다. 변경 사이트를 유효한
+> multi-store batch로 격리한 재실행은 **19/19**였고 11st가 3 candidates를 반환했다. eBay live window는
+> 실제 상품 제목 3개를 표시해 broad image-link fallback 제거 효과를 확인했다. persistent 11st page에서
+> 새 selector는 첫 8 cards 중 배송비 3건을 읽었다. Coupang 선택은 affiliate branch까지 도달했지만 link
+> API가 `affiliate_no_link:404.0`을 반환해 fail-closed 했고 cart는 건드리지 않았다; 버튼 label 자체는
+> link가 생성되지 않아 live surface에서 확인하지 못했고 offline contract test만 통과했다.
 
 ---
 

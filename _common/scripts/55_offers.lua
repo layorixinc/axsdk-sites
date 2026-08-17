@@ -145,9 +145,32 @@ function AX_refine_store_offers(args)
 
   -- Store outcomes and the folded-row note describe the listing, not one page of it, so every window the
   -- user browses to carries them.
+  --
+  -- The fold count is the number of rows the user is not seeing BECAUSE their cost is unknown, and it used
+  -- to be `#all_offers - #list` — every row absent from the window, whatever hid it. So a site filter that
+  -- hid three rows reported three rows folded for unknown shipping whenever any incomplete row existed
+  -- anywhere: a false statement about prices, inside a window whose whole job is comparing them. Counting
+  -- only the cost-incomplete absentees keeps every number in that sentence real, and keeps its promise
+  -- ("'미확인 포함'이라고 하면 함께 보여드려요") answerable. A window that itself holds an incomplete row is
+  -- not folding at all, so it reports nothing.
+  local function folded_count(list)
+    if C.has_incomplete(list) then return 0 end
+    local shown = {}
+    for index = 1, #list do
+      local offer = list[index]
+      shown[tostring(offer.id or offer.product_id or index)] = true
+    end
+    local folded = 0
+    for index = 1, #all_offers do
+      local offer = all_offers[index]
+      local key = tostring(offer.id or offer.product_id or "")
+      if not shown[key] and offer.cost_complete ~= true then folded = folded + 1 end
+    end
+    return folded
+  end
+
   local function notes_for(list)
-    local hidden = #all_offers - #list
-    return C.comparison_notes(args.failures, all_offers, hidden > 0 and C.has_incomplete(all_offers) and hidden or 0)
+    return C.comparison_notes(args.failures, all_offers, folded_count(list))
   end
 
   -- A refinement that did not apply must say so in the window, not only in a state field the model may
@@ -215,8 +238,9 @@ function AX_refine_store_offers(args)
       -- An empty result would strand the user with nothing to pick, so the previous listing stands.
       return window_of(offers, comparison_id, { refine_error = "no_matches" })
     end
-    local hidden = filters.complete_cost_only and (#all_offers - #visible) or 0
-    local notes, status = C.comparison_notes(args.failures, all_offers, hidden)
+    -- Same rule as `folded_count`: only rows whose cost is unknown are reported as folded, never rows a
+    -- site or price condition removed. `#all_offers - #visible` counted both.
+    local notes, status = C.comparison_notes(args.failures, all_offers, folded_count(visible))
     local snapshot = C.open_comparison(visible, identity_id, {
       all_offers = all_offers,
       filters = filters,

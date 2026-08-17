@@ -115,6 +115,86 @@ test('a refinement that changes WHICH offers are listed reissues the listing', (
   assert.equal(typeof refined.comparison_state, 'string');
 });
 
+test("the sort the user chose comes back, so the next refinement keeps it", () => {
+  // `AX_refine_store_offers` reads the active sort from `args.view_sort` and falls to `total_asc` without
+  // it. The wrapper did not return the field its tool declares, so the flow had nothing to hand back: a
+  // chosen "평점 높은 순" silently reverted to cheapest-first the moment any filter followed it.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  first.close();
+
+  const later = runtime();
+  const sorted = later.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: '평점 높은 순',
+  });
+  later.close();
+
+  assert.equal(sorted.error, undefined, `refine failed: ${sorted.error}`);
+  assert.equal(sorted.view_sort, 'rating_desc', 'the chosen sort must travel back to the flow');
+});
+
+test('the store that failed is still named after the user pages or filters', () => {
+  // The window carries the store outcomes, and `notes_for` rebuilds them from `args.failures` on every
+  // browsing turn. `rank` did not publish `failures`, so the channel was empty from the second turn on and
+  // a comparison where naver-shopping hit a bot wall started reading as if every store had answered.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', {
+    verified_offers: OFFERS,
+    failures: [{ site: 'naver-shopping', status: 'access_denied' }],
+  });
+  first.close();
+
+  assert.ok(ranked.failures, 'rank must hand the failures back for the next turn to reuse');
+
+  const later = runtime();
+  const paged = later.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    failures: ranked.failures,
+    page_command: 'next',
+  });
+  later.close();
+
+  assert.equal(paged.error, undefined, `paging failed: ${paged.error}`);
+  assert.match(paged.question ?? '', /네이버쇼핑/, 'the failing store must still be named in the window');
+});
+
+test('rows a FILTER hid are not reported as rows folded for unknown shipping', () => {
+  // `hidden` counted every row absent from the visible list, whatever hid it, and reported the total as the
+  // incomplete-cost fold whenever any incomplete row existed anywhere. So a site filter that hides six rows
+  // told the user six rows had been folded for unknown shipping — a false statement about prices, inside a
+  // window whose whole job is comparing them.
+  const mixed = [
+    ...OFFERS,
+    {
+      site: 'coupang', product_id: 'C4', id: 'C4', name: '로지텍 M185 마우스',
+      price: 12900, currency: 'KRW', price_base: 8.9, base_currency: 'USD',
+      shipping_cost: null, shipping_base: null, total_base: null, cost_complete: false,
+    },
+  ];
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: mixed });
+  first.close();
+
+  const later = runtime();
+  // Keeps one store: three rows leave the window and NONE of them for an unknown total.
+  const filtered = later.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: 'amazon만',
+  });
+  later.close();
+
+  assert.equal(filtered.error, undefined, `refine failed: ${filtered.error}`);
+  // Three rows left the window and exactly ONE of them for an unknown total, so the sentence may claim one.
+  // Claiming three would be a false statement about prices; claiming none would hide a row the user can
+  // still ask for with "미확인 포함", which is the promise the sentence itself makes.
+  const fold = (filtered.question ?? '').match(/미확인 (\d+)건은 접었습니다/);
+  assert.equal(fold?.[1], '1', `only the cost-incomplete row may be counted, got: ${fold?.[0] ?? 'no note'}`);
+});
+
 test('a refinement that changes nothing keeps the listing', () => {
   // The default sort is already cheapest-first, so asking for it again lists the same offers in the same
   // order. Reissuing there would invalidate numbers the user can still see on screen.

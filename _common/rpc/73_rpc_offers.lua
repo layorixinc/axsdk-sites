@@ -124,6 +124,12 @@ function O.rank(args)
     view_pages = result.view_pages,
     view_total = result.view_total,
     store_status = result.store_status,
+    -- Declared by the tool and produced by the command, so the wrapper has to carry them or they are null
+    -- on every turn. `failures` is the channel `notes_for` reads to name the store that hit a wall, and
+    -- three nodes select it (`normalize_rank`, `browse_offers`, `no_results`); without it the comparison
+    -- reads as if every store answered. `incomplete_count` is the folded-row count the flow declares.
+    failures = result.failures,
+    incomplete_count = result.incomplete_count,
   }
 end
 
@@ -228,6 +234,15 @@ function O.refine(args)
     view_page = result.view_page,
     view_pages = result.view_pages,
     view_total = result.view_total,
+    -- Declared by the tool and produced by the command, and dropping them cost the user's own choices.
+    -- `view_sort` is read back by the NEXT refine (`AX_refine_store_offers` falls to `total_asc` without
+    -- it), so a chosen "평점 높은 순" silently reverted the moment a price filter followed it.
+    -- `store_status` is the line naming the store that failed; `refine_error` is why a condition did not
+    -- apply; `rescope_request` is the re-search the user asked for, which the flow maps to `requestText`.
+    view_sort = result.view_sort,
+    store_status = result.store_status,
+    refine_error = result.refine_error,
+    rescope_request = result.rescope_request,
   }
 end
 

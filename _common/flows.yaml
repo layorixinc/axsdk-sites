@@ -2870,7 +2870,10 @@ flowTools:
       query: result.query
       tried_queries: result.tried_queries
       collected: result.collected
-      page_stop_reason: result.stop_reason
+      # The entry already applies the rename (`page_stop_reason = result.stop_reason`), so reading
+      # `result.stop_reason` here read a key the script does not answer and the state field was null on
+      # every page. The value survived nested inside `store_result`, which is why nothing looked broken.
+      page_stop_reason: result.page_stop_reason
       store_result: result.store_result
     parameters:
       type: object
@@ -3189,8 +3192,9 @@ flowTools:
       comparison_text: result.question
       store_status: result.store_status
       incomplete_count: result.incomplete_count
-      complete_count: result.complete_count
-      base_currency: result.base_currency
+      # `complete_count` and `base_currency` were mapped here and declared by NO flow state key, so they
+      # wrote nowhere and the command's values were unreachable. The window already states both facts in
+      # its own text. Deleted rather than forwarded: a key nothing reads is not a contract.
       view_page: result.view_page
       view_pages: result.view_pages
       view_total: result.view_total
@@ -4600,10 +4604,14 @@ flowTools:
       # finished search back into the node that had just run it.
       next: result.next
       query: result.query
-      search_status: result.status
+      # `T.search_service` never returns a `status`, so this read `null` on success AND on failure while
+      # the quote flow declared the key. Derived from the error the way `shopping_search_product` does.
+      search_status:
+        if: [ { var: result.error }, { var: result.error }, "ok" ]
       candidates: result.candidates
       total_count: result.total_count
-      service_options: result.service_options
+      # `service_options` was mapped from a key the script never returns and named by no prompt or
+      # selector. Deleted rather than invented: the candidate list IS the options.
       error: result.error
     parameters:
       type: object

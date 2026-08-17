@@ -885,8 +885,16 @@ end
 --- flow reads it the same way.
 function S.run_open_site_search(args)
   args = type(args) == "table" and args or {}
-  local ok, href = pcall(dom.get_location_href)
-  if not ok then return { next = "error", error = "rpc_unavailable", site = config.site } end
+  __refused = 0
+  local href = dom.get_location_href()
+  -- The proxy above already swallowed any refusal and answered nil, so `pcall` here could never fail — the
+  -- limb that reported `rpc_unavailable` was dead code, and it named `config.site` where no `config` local
+  -- exists, so had it ever run it would have raised instead of routing. What DID happen is worse than a
+  -- crash: a dropped op left `href` nil and the store was reported `site_not_ported`, a claim about the
+  -- SITE, when the channel is what never answered. Those send the operator to different places.
+  if href == nil and __refused > 0 then
+    return { next = "error", error = "rpc_unavailable" }
+  end
 
   local site = S.site_for_url(href)
   if not site then

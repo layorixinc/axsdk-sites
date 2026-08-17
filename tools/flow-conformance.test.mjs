@@ -1334,6 +1334,105 @@ test('a branch value the presenter computes actually reaches the next node', () 
   assert.deepEqual(lost, [], `computed but never published: ${lost.join(', ')}`);
 });
 
+/** The module file and dotted name a tool's entry Lua dispatches to, or null when it is not a single call. */
+function entryTarget(tool) {
+  const body = typeof tool?.execute?.lua === 'string' ? tool.execute.lua : '';
+  const call = body.match(/\b(AX_RPC_[A-Z_]+)\.(\w+)\s*\(/);
+  if (!call) return null;
+  const [, global, fn] = call;
+  for (const directory of ['rpc', 'scripts']) {
+    const dir = fileURLToPath(new URL(`../_common/${directory}/`, import.meta.url));
+    for (const name of readdirSync(dir)) {
+      if (!name.endsWith('.lua')) continue;
+      const source = readFileSync(dir + name, 'utf8');
+      if (!source.includes(`${global} = ${global} or {}`)) continue;
+      const alias = source.match(new RegExp(`local (\\w+) = ${global}\\b`));
+      const dotted = `${alias ? alias[1] : global}.${fn}`;
+      if (!source.includes(`function ${dotted}(`)) return null;
+      return { file: `_common/${directory}/${name}`, name: dotted, source };
+    }
+  }
+  return null;
+}
+
+/** The body of one Lua function, for asking whether an identifier is produced there at all. */
+function functionBody(source, name) {
+  const start = source.indexOf(`function ${name}(`);
+  if (start < 0) return '';
+  const end = source.indexOf('\nend', start);
+  return source.slice(start, end < 0 ? undefined : end);
+}
+
+/**
+ * Where to look for the key a tool publishes. Three sources, in order of how directly they answer:
+ *
+ * 1. The tool's OWN entry lua. Some entries are a `function run(args)` wrapper that calls a module and then
+ *    assembles their answer — `capture_memory_clause` adds `confirmed`, `recall_saved_contact` builds
+ *    `recalled_contact`. Scoping past the wrapper reported both as impossible when the wrapper produces them.
+ * 2. The dispatched function's body, which is the whole truth when it returns literal tables.
+ * 3. Every declared module, but ONLY when the function hands a table straight back (`return shown`,
+ *    `return result`) — the keys then belong to whatever it wrapped, and scoping to its own body reported
+ *    `question` and `selected_offer` missing while both are produced one call away.
+ *
+ * A gate that cries wolf is one nobody reads, so each widening here is a measured false positive removed.
+ */
+function producedIn(tool, target) {
+  const entry = typeof tool.execute?.lua === 'string' ? tool.execute.lua : '';
+  const body = functionBody(target.source, target.name);
+  if (!/return\s+[A-Za-z_]\w*\s*$/m.test(body)) return [entry, body].join('\n');
+  const modules = [...moduleSources(tool.execute?.modules ?? []).values()];
+  return [entry, body, ...modules].join('\n');
+}
+
+// A shared dispatcher answers the UNION of every command routed through it, so each tool publishing only
+// its own subset is by design — `AX_RPC_PURE.run` returns `command`/`error` for all eight. Direction A is
+// therefore a judgement call and stays a targeted test (the presenter, above). Direction B is not: a key
+// the map names and the script cannot produce is ALWAYS NULL, and no design choice makes that fine.
+const UNION_DISPATCHERS = ['P.run'];
+
+test('a field the flow publishes is a field its script can actually produce', () => {
+  // The one-tool, one-DIRECTION version of this sat right above and passed while three fields were dropped
+  // one wrapper up. `output` is a projection: only mapped `result.*` keys reach state, so a key the map
+  // names and the script never returns is null on every turn, silently. Each of these has cost a live turn
+  // — `view_sort` reverted the user's chosen sort on every refine, `page_stop_reason` was null on every
+  // page, `failures` starved the line that names which store hit a wall.
+  //
+  // Only single-dispatch tools are checkable (`return AX_RPC_X.y(args)`) and only `result.<one segment>`
+  // mappings; the checked count is asserted so shrinking coverage fails here instead of going unnoticed.
+  const common = parseFlow('_common/flows.yaml');
+  const nulls = [];
+  let checked = 0;
+  let skipped = 0;
+
+  for (const [id, tool] of Object.entries(common.flowTools ?? {})) {
+    if (tool?.execute?.kind !== 'runtime' || typeof tool.output !== 'object' || tool.output === null) continue;
+    const target = entryTarget(tool);
+    if (!target || UNION_DISPATCHERS.includes(target.name)) { skipped += 1; continue; }
+    checked += 1;
+    const scope = producedIn(tool, target);
+    // When the dispatched function returns only literal tables AND the entry does not assemble the key
+    // itself, the tool's answer IS those tables, so membership is decidable exactly. That catches the
+    // RENAME case the identifier scan cannot: `page_stop_reason: result.stop_reason` mentioned
+    // `stop_reason` in the body — on the right-hand side of the rename the entry had already applied.
+    const body = functionBody(target.source, target.name);
+    const entry = typeof tool.execute?.lua === 'string' ? tool.execute.lua : '';
+    const exact = !/return\s+[A-Za-z_]\w*\s*$/m.test(body) ? new Set(returnedKeys(target.file, target.name)) : null;
+    for (const [key, value] of Object.entries(tool.output)) {
+      if (typeof value !== 'string' || !/^result\.\w+$/.test(value)) continue;
+      const source = value.slice('result.'.length);
+      const assembled = new RegExp(`\\b${source}\\s*=`).test(entry);
+      if (exact && !assembled && !exact.has(source)) {
+        nulls.push(`${id}.output.${key} reads result.${source}, ${target.name} returns [${[...exact].join(', ')}]`);
+      } else if (!new RegExp(`\\b${source}\\b`).test(scope)) {
+        nulls.push(`${id}.output.${key} reads result.${source}, ${target.name} never produces it`);
+      }
+    }
+  }
+
+  assert.deepEqual(nulls, [], `published but never computed (always null):\n  ${nulls.join('\n  ')}`);
+  assert.ok(checked >= 15, `only ${checked} tools were checkable (skipped ${skipped}) — coverage shrank`);
+});
+
 /** Every module file a tool loads, as source text keyed by module id. */
 function moduleSources(moduleIds) {
   const sources = new Map();

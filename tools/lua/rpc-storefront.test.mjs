@@ -979,6 +979,20 @@ test('searching the open store needs only a query', () => {
   assert.equal(value.store_result.site, '11st');
 });
 
+test('a refused href on the open-store search is the routed error, not a raised one', () => {
+  // The channel can drop any op while it re-attaches, and the module header says so: a raised error becomes
+  // a TOOL error and the comparison continues without that store, instead of the `error` branch the node
+  // routes. This limb answered `site = config.site` where no `config` local exists, so the one path written
+  // to report a refusal raised "attempt to index a nil value" instead.
+  const page = makePage({ href: 'https://search.11st.co.kr/pc/total-search?kwd=old', refuseOps: ['dom.get_location_href'] });
+  installRpcStub(lua, page);
+
+  const value = lua.call('AX_RPC_STOREFRONT.run_open_site_search', { query: '마우스' });
+
+  assert.equal(value.next, 'error');
+  assert.equal(value.error, 'rpc_unavailable');
+});
+
 test('the single-site search answers in the shape that flow already reads', () => {
   // Its `output:` maps `result.candidates` and `result.error` directly — the tool predates the worker's
   // `store_result` envelope. Reshaping the flow to match the reader would be the tail wagging the dog.

@@ -1554,6 +1554,56 @@ function affiliatePrograms() {
   return found;
 }
 
+/** One site block of the generated site data, keyed by site. */
+function siteBlocks() {
+  const source = readFileSync(fileURLToPath(new URL('../_common/rpc/62_rpc_sites.lua', import.meta.url)), 'utf8');
+  const blocks = {};
+  let site = null;
+  for (const line of source.split('\n')) {
+    const header = line.match(/^RPC_SITES\["([\w-]+)"\]/);
+    if (header) { site = header[1]; blocks[site] = []; continue; }
+    if (site) blocks[site].push(line);
+  }
+  return Object.fromEntries(Object.entries(blocks).map(([key, lines]) => [key, lines.join('\n')]));
+}
+
+// A cart drawer holding SOMEONE ELSE'S item is not evidence that this add happened. Measured 2026-08-16:
+// `cart_contains` consults `confirmation_selector` OFF the cart page, where the only honest evidence is a
+// per-add panel — and amazon, walmart, etsy and coupang each listed cart STRUCTURE there
+// (`#sc-active-cart, .sc-list-item[data-asin]`, `[data-testid="cart-drawer"] [data-testid="cart-item"]`,
+// `[data-cart-listing-id]`, `[data-cart-item-id]`).
+// A persistent mini-cart therefore made the probe true on ARRIVAL, `add_to_cart` skipped its whole block
+// (67_rpc_cart.lua guards it with `if not cart_contains(...)`), and the tool reported `added = true` with
+// no click. That is the same defect the id-probe fix closed in the code, coming back through the config.
+//
+// `confirmation_text_selectors` is held to the same rule: on the cart page it is the fallback consulted
+// when the id does NOT match, so a structural or generic selector there confirms a cart holding anything.
+// A name that says SUCCESS is per-add and stays allowed — gmarket's `[data-cart-layer="success"]` and
+// ssg's `[data-layer-name="cart_success"]` are the panels this branch was written for. What is banned is a
+// selector naming a cart's CONTENTS or its container, plus a generic live region that exists page-wide.
+const CART_STRUCTURE = [
+  /cart-item/i, /cart_item/i, /cart-listing/i, /cart-line/i,
+  /cart-drawer/i, /sc-list-item/i, /sc-active-cart/i, /aria-live/i,
+];
+
+test('an off-cart confirmation selector names a per-add panel, never cart structure', () => {
+  const offenders = [];
+  for (const [site, block] of Object.entries(siteBlocks())) {
+    for (const key of ['confirmation_selector', 'confirmation_text_selectors']) {
+      // Either a single string or a table; both end at the next top-level key of the site block.
+      const at = block.indexOf(`${key} = `);
+      if (at < 0) continue;
+      const rest = block.slice(at + key.length + 3);
+      const value = rest.startsWith('{') ? rest.slice(0, rest.indexOf('}') + 1) : rest.slice(0, rest.indexOf('\n'));
+      for (const pattern of CART_STRUCTURE) {
+        if (pattern.test(value)) offenders.push(`${site}.${key} matches ${pattern} in ${value.replace(/\s+/g, ' ').trim()}`);
+      }
+    }
+  }
+
+  assert.deepEqual(offenders, [], `cart structure used as per-add evidence:\n  ${offenders.join('\n  ')}`);
+});
+
 test('only a site with a real program carries one, and never amazon', () => {
   // Amazon's Operating Agreement forbids Special Links in client-side software (browser extensions
   // included, with an Approved Mobile App carve-out). Its offers still appear in the comparison — they

@@ -441,6 +441,26 @@ function Q.read_buttons()
   return rows_of(Q.ACTIVE .. ' button', Q.BUTTON_FIELDS, 20)
 end
 
+--- The button the positional advance selector will actually hit: the first one its filter keeps, in
+--- document order. `dom` resolves standard CSS only, so a click cannot be aimed by label — but the batch
+--- already reads every button's text, aria-label and title, so WHICH button the selector lands on is
+--- computable without an extra round trip.
+---
+--- This exists because the two halves disagreed. `W.classify_advance` decides by LABEL and returns the
+--- moment it sees an advance word, dropping the fact that a submit-like button shares the step; the click
+--- was positional. A step rendering "Send request" before "Next" therefore had its submit pressed by the
+--- wizard's own advance, and `Q.submit_step_form` would have followed with `requestSubmit()`. A quote is
+--- never auto-submitted, so the labels have to agree before anything is pressed.
+function Q.advance_target(buttons, skip)
+  for index = 1, #(buttons or {}) do
+    local button = buttons[index]
+    if type(button) == "table" and not trim(button.aria) and (not skip or not trim(button.title)) then
+      return button
+    end
+  end
+  return nil
+end
+
 function Q.has_text()
   local rows = rows_of(Q.ACTIVE .. ' textarea', { value = { attr = "value" }, text = true }, 20)
   for index = 1, #rows do
@@ -543,8 +563,19 @@ function Q.ctx()
     extra_control_count = function() return #controls() end,
     read_buttons = buttons,
     advance_click = function(decision)
+      local skip = decision.kind == "skip"
+      -- Verified before pressed, from the batch already in hand (`Q.advance_target`). A click that fires is
+      -- not a click on the button the DECISION named: the classification is label-based and this selector is
+      -- positional, so a step rendering a submit-like button first would have its submit pressed here. When
+      -- the two disagree nothing is pressed and the step stalls, which the stop report already explains by
+      -- name — a wrongly-sent quote does not get a second chance.
+      local target = Q.advance_target(buttons(), skip)
+      local wanted = B.normalize_text(decision.label)
+      if not target or (wanted ~= "" and B.normalize_text(target.text) ~= wanted) then
+        return false
+      end
       local selector = Q.ACTIVE .. ' button:not([aria-label])'
-      if decision.kind == "skip" then selector = selector .. ':not([title])' end
+      if skip then selector = selector .. ':not([title])' end
       local clicked = click(selector) == true
       -- The click is what MOVES the step, so everything read about the old one is now stale. This did not
       -- matter while the batch held only option lists — nothing re-read them after the click. It matters

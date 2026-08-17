@@ -232,8 +232,8 @@ RPC_SITES["amazon"] = {
   quantity_selectors = {
     "#quantity"
   },
-  add_ready_selector = "#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin], #attach-warranty-pane:not(.aok-hidden), #authportal-main-section, #ap_email, #ap_password, form[action*=\"validateCaptcha\"]",
-  confirmation_selector = "#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin]",
+  add_ready_selector = "#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #attach-warranty-pane:not(.aok-hidden), #authportal-main-section, #ap_email, #ap_password, form[action*=\"validateCaptcha\"]",
+  confirmation_selector = "#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text",
   confirmation_text_selectors = {
     "#NATC_SMART_WAGON_CONF_MSG_SUCCESS",
     "#attachDisplayAddBaseAlert",
@@ -345,7 +345,7 @@ RPC_SITES["coupang"] = {
   required_option_selectors = {
     "select[required]"
   },
-  confirmation_selector = ".cart-message, [data-cart-item-id]",
+  confirmation_selector = ".cart-message",
   confirmation_text_selectors = {
     ".cart-message",
     ".prod-atf-notice"
@@ -501,10 +501,9 @@ RPC_SITES["etsy"] = {
   required_option_selectors = {
     "select[required]"
   },
-  confirmation_selector = "[data-cart-listing-id], [data-add-to-cart-success]",
+  confirmation_selector = "[data-add-to-cart-success]",
   confirmation_text_selectors = {
-    "[data-add-to-cart-success]",
-    "[aria-live=\"polite\"]"
+    "[data-add-to-cart-success]"
   },
   add_ready_selector = "[data-add-to-cart-success], [data-cart-listing-id], form[action*=\"signin\"], iframe[src*=\"captcha\"]",
   cart_url = "https://www.etsy.com/cart",
@@ -908,10 +907,9 @@ RPC_SITES["walmart"] = {
     "select[id*=\"quantity\"]",
     "select[aria-label*=\"Quantity\"]"
   },
-  confirmation_selector = "[data-testid=\"add-to-cart-success\"], [data-testid=\"cart-drawer\"] [data-testid=\"cart-item\"]",
+  confirmation_selector = "[data-testid=\"add-to-cart-success\"]",
   confirmation_text_selectors = {
-    "[data-testid=\"add-to-cart-success\"]",
-    "[data-testid=\"cart-drawer\"]"
+    "[data-testid=\"add-to-cart-success\"]"
   },
   add_ready_selector = "[data-testid=\"add-to-cart-success\"], [data-testid=\"cart-drawer\"], form[action*=\"login\"]",
   cart_url = "https://www.walmart.com/cart",

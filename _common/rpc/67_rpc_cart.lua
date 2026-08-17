@@ -309,9 +309,13 @@ function R.add_to_cart(args)
     local quantity = math.max(1, math.floor(tonumber(args.quantity) or 1))
     if quantity > 1 then
       local selector = first_existing(config.quantity_selectors or {})
-      -- Adding one unit when three were approved is the wrong order, quietly.
+      -- Adding one unit when three were approved is the wrong order, quietly. Both halves count: a control
+      -- that is ABSENT and a control that EXISTS and refuses the value — a `<select>` whose options stop
+      -- below the requested quantity answers false. The boolean was discarded, so the second half added one.
       if not selector then return refuse({ product_id = product_id, error = "quantity_unavailable" }) end
-      set_value(selector, tostring(quantity))
+      if set_value(selector, tostring(quantity)) ~= true then
+        return refuse({ product_id = product_id, error = "quantity_unavailable", quantity = quantity })
+      end
     end
 
     local before = R.cart_count(config)

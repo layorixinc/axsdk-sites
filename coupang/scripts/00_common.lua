@@ -40,7 +40,10 @@ local CONFIG = {
   add_selectors = { 'button.prod-cart-btn', 'button[data-button-name="add-to-cart"]' },
   quantity_selectors = { 'select.prod-quantity__input', 'input[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
-  confirmation_selector = '.cart-message, [data-cart-item-id]',
+  -- Per-add message ONLY. `[data-cart-item-id]` names a row ALREADY IN THE CART, and `cart_contains`
+  -- consults this list off the cart page — so a cart holding anything answered "this add happened", the
+  -- guard skipped the click, and the tool reported `added = true`.
+  confirmation_selector = '.cart-message',
   confirmation_text_selectors = { '.cart-message', '.prod-atf-notice' },
   add_ready_selector = '.cart-message, [data-cart-item-id], form[action*="login"], .captcha',
   cart_url = "https://cart.coupang.com/cartView.pang",

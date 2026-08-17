@@ -31,8 +31,11 @@ local CONFIG = {
   add_selectors = { 'button[data-add-to-cart-button]', 'button[name="add_to_cart"]' },
   quantity_selectors = { 'select[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
-  confirmation_selector = '[data-cart-listing-id], [data-add-to-cart-success]',
-  confirmation_text_selectors = { '[data-add-to-cart-success]', '[aria-live="polite"]' },
+  -- Per-add panel ONLY. `[data-cart-listing-id]` names a LISTING ALREADY IN THE CART and
+  -- `[aria-live="polite"]` is a page-wide live region — either one made `cart_contains` true off the cart
+  -- page for a cart holding anything at all, so the guard skipped the click and reported `added = true`.
+  confirmation_selector = '[data-add-to-cart-success]',
+  confirmation_text_selectors = { '[data-add-to-cart-success]' },
   add_ready_selector = '[data-add-to-cart-success], [data-cart-listing-id], form[action*="signin"], iframe[src*="captcha"]',
   cart_url = "https://www.etsy.com/cart",
   cart_url_markers = { "/cart" },

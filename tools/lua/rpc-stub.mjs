@@ -58,6 +58,8 @@ export function makePage(spec) {
     opCostMs: spec.opCostMs ?? 460,
     // Ops the CLIENT refuses outright — `page.eval` without its opt-in answers `op_not_permitted`.
     refuseOps: spec.refuseOps ?? [],
+    // Selectors that EXIST but refuse a value — a `<select>` without the requested option.
+    rejectSetValue: spec.rejectSetValue ?? [],
     // Ops the client never REGISTERED. The platform can ship an op before the extension implements it, and
     // `executeRpcOp` answers `command_unresolved` for one it has no handler for. That is a different string
     // from `op_not_permitted`, and a script that only knows the latter retries the op forever.
@@ -214,6 +216,10 @@ export function installRpcStub(lua, page, { allow } = {}) {
     'dom.set_value': (selector, value) => {
       page.tick();
       if (rowsFor(selector).length === 0) return false;
+      // An element can EXIST and still refuse the value: a `<select>` whose options do not include the
+      // requested quantity is the live shape, and `dom.set_value` answers false for it. Without this the
+      // stub could only express "no such element", so a script that ignored the return value passed.
+      if (page.rejectSetValue.includes(selector)) return false;
       page.filled.push({ selector, value });
       return true;
     },

@@ -187,6 +187,30 @@ test('the final submit is never clicked while driving', () => {
   assert.equal(page.dom[ACTIVE][0].text, 'Review and send your request', 'the wizard is parked on the final step');
 });
 
+test('a step rendering a submit-like button BEFORE its Next is never pressed', () => {
+  // Two halves of one hazard, both in the code today. `W.classify_advance` decides by LABEL and returns
+  // `advance` the moment it sees "Next" — discarding the fact that a submit-like button was also on the
+  // step (10_form_wizard.lua sets `reached_submit_step = false` on that return). `advance_click` then
+  // clicks by POSITION: `[data-test="request-flow-step--active"] button:not([aria-label])`, the first such
+  // button in document order. When the submit-like button comes first, the wizard's own advance presses it
+  // — and `Q.submit_step_form` would follow with `requestSubmit()` if the SPA ignored the click.
+  //
+  // AGENTS.md §11's first constraint is that a quote is never auto-submitted, so the labels must agree
+  // before anything is pressed. Disagreement stalls the step, which the stop report already explains;
+  // pressing the wrong control does not get a second chance.
+  const mixed = step('Anything else to add?', { buttons: [{ text: 'Send request' }, { text: 'Next' }], textarea: true });
+  const page = quotePage({ steps: [mixed, finalStep()] });
+
+  drive(page);
+
+  const pressed = clicks(page);
+  assert.ok(!pressed.some((selector) => selector.includes('button:not([aria-label])')),
+    `the positional advance must not fire when it would hit the submit-like button: ${pressed.join(' | ')}`);
+  assert.deepEqual(page.ops.filter((entry) => entry.op === 'dom.submit_form'), [],
+    'and the form must not be submitted either');
+  assert.equal(page.dom[ACTIVE][0].text, 'Anything else to add?', 'the wizard stays on the step it could not advance');
+});
+
 test('the CTA is polled, not decided on one scan', () => {
   // The aside sidebar hydrates AFTER nav readiness. A single scan raced it, so a quotable pro came back
   // `quote_unavailable` and was silently skipped.

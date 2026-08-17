@@ -539,6 +539,19 @@ test('free shipping is zero, not unknown', () => {
   assert.equal(costOf({ shipping_text: 'Free shipping' }).shipping_cost, 0);
 });
 
+test('a free-shipping THRESHOLD is not free shipping', () => {
+  // The normal rendering on a Korean store, and the one this parser answered 0 for: the fee IS stated and
+  // the free offer is conditional on a basket total this comparison knows nothing about. Reading it as an
+  // unconditional zero is what the comment above `parse_shipping` forbids by name — it makes that store
+  // the cheapest on the page for free, which is a wrong number in a total-cost comparison.
+  assert.equal(costOf({ shipping_text: '배송비 3,000원 · 30,000원 이상 무료배송' }).shipping_cost, 3000);
+  assert.equal(costOf({ shipping_text: 'Shipping: $5.99 · Free shipping over $35', price_text: '$12.99' }).shipping_cost, 5.99);
+  // Threshold wording with NO fee beside it states no cost at all: unknown, never zero, because the fee
+  // below the threshold is exactly what the row is not saying.
+  assert.equal(costOf({ shipping_text: '30,000원 이상 무료배송' }).shipping_cost, undefined);
+  assert.equal(costOf({ shipping_text: 'Free shipping on orders over $35', price_text: '$12.99' }).shipping_cost, undefined);
+});
+
 test('no shipping information is unknown, never zero', () => {
   // A row with nothing to say about shipping must not be ranked as if it shipped for nothing.
   const c = costOf({ shipping_text: '내일 도착' });

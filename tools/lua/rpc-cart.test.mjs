@@ -219,6 +219,20 @@ test('a quantity that cannot be set is refused rather than adding one', () => {
   assert.deepEqual(clicks(page), []);
 });
 
+test('a quantity control that refuses the value is refused too, not silently added as one', () => {
+  // The other half of the same rule, and the half that was missing: the control EXISTS, so
+  // `first_existing` finds it, and `dom.set_value` answers false — a `<select>` whose options stop below
+  // the requested quantity is the live shape. The boolean was discarded, so three approved units became
+  // one added unit with a `done` answer. That is the wrong order, quietly, which the test above forbids
+  // only for the case where the control is missing entirely.
+  const page = shop();
+  page.rejectSetValue = ['#quantity'];
+  const result = add(page, { quantity: 3 });
+
+  assert.equal(result.error, 'quantity_unavailable');
+  assert.deepEqual(clicks(page), [], 'nothing may be added when the approved quantity could not be set');
+});
+
 test('a store with no cart is refused by name', () => {
   const page = shop();
   const result = add(page, { config: { ...CONFIG, cart_supported: false } });

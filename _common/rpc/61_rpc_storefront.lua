@@ -314,6 +314,9 @@ end
 local SHIPPING_WORDS = { "shipping", "delivery", "postage", "배송비", "배송료" }
 local FREE_PHRASES = { "free shipping", "free delivery", "free postage", "shipping: free",
   "무료배송", "무료 배송", "배송비 무료" }
+--- A free-shipping promise that depends on a basket total. Measured normal renderings:
+--- "배송비 3,000원 · 30,000원 이상 무료배송", "Shipping: $5.99 · Free shipping over $35".
+local THRESHOLD_MARKS = { "이상", "초과", "이상부터", " over ", "over $", "above", "orders of" }
 
 --- The shipping figure a row states, or nil when it states none.
 ---
@@ -329,19 +332,39 @@ local function parse_shipping(text, fallback_currency, from_row_text)
   if not value then return nil, non_empty(fallback_currency) end
   local lowered = value:lower()
 
+  local free_at = nil
   for index = 1, #FREE_PHRASES do
-    if lowered:find(FREE_PHRASES[index], 1, true) then return 0, non_empty(fallback_currency) end
+    local at = lowered:find(FREE_PHRASES[index], 1, true)
+    if at and (not free_at or at < free_at) then free_at = at end
   end
 
+  -- An UNCONDITIONAL free-shipping promise is zero. A CONDITIONAL one is not: it says nothing about what
+  -- this row ships for, and this scan used to run over the whole text before any fee was extracted, so
+  -- "배송비 3,000원 · 30,000원 이상 무료배송" answered 0 with the fee sitting right there. That is the
+  -- failure the comment above forbids by name — the store becomes cheapest on the page for free — and the
+  -- threshold form is the NORMAL rendering on a Korean store, not an edge case.
+  --
+  -- Everything from the threshold word on belongs to the condition, so the fee is looked for only BEFORE
+  -- the free phrase. A threshold word misread on an unconditional row costs an UNKNOWN, never a number.
+  local conditional = false
+  if free_at then
+    for index = 1, #THRESHOLD_MARKS do
+      if lowered:find(THRESHOLD_MARKS[index], 1, true) then conditional = true break end
+    end
+    if not conditional then return 0, non_empty(fallback_currency) end
+  end
+
+  local scan_end = (conditional and free_at) and (free_at - 1) or #value
   local first = nil
   for index = 1, #SHIPPING_WORDS do
     local at = lowered:find(SHIPPING_WORDS[index], 1, true)
-    if at and (not first or at < first) then first = at end
+    if at and at <= scan_end and (not first or at < first) then first = at end
   end
-  -- A number with no shipping word near it is a reward point, a rating count, anything.
+  -- A number with no shipping word near it is a reward point, a rating count, anything. And under a
+  -- threshold, no shipping word before it means the row states a condition and no fee at all.
   if not first then return nil, non_empty(fallback_currency) end
 
-  local fragment = value:sub(first, first + 60)
+  local fragment = value:sub(first, math.min(first + 60, scan_end))
   local fragment_lowered = fragment:lower()
   local amount, currency = parse_money(fragment, fallback_currency)
 

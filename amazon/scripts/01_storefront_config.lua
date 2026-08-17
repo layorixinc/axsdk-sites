@@ -20,7 +20,12 @@ AX_SITE_CONFIGS = AX_SITE_CONFIGS or {}
 -- composition happens exactly once, at read time.
 local LOGIN_SELECTOR = '#authportal-main-section, #ap_email, #ap_password'
 local RESULT_SELECTOR = '[data-component-type="s-search-result"][data-asin]'
-local ADD_TO_CART_CONFIRM_SELECTOR = '#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text, #sc-active-cart, .sc-list-item[data-asin]'
+-- Per-add panels ONLY. This used to end `, #sc-active-cart, .sc-list-item[data-asin]` — the cart page's own
+-- container and its rows — and `cart_contains` consults this list OFF the cart page, where the cart holding
+-- ANY item then answered "this add happened": the guard skipped the click and reported `added = true`.
+-- Measured 2026-08-16: a real add lands on `/cart/smart-wagon`, which the markers below did not name, so the
+-- landing page was treated as off-cart and confirmed through exactly that structural fallback.
+local ADD_TO_CART_CONFIRM_SELECTOR = '#sw-atc-confirmation, #NATC_SMART_WAGON_CONF_MSG_SUCCESS, #huc-v2-order-row-confirm-text'
 local ATTACH_PANE_SELECTOR = '#attach-warranty-pane:not(.aok-hidden)'
 
 local CONFIG = {
@@ -87,6 +92,13 @@ local CONFIG = {
   upsell_pane_selector = ATTACH_PANE_SELECTOR,
   upsell_decline_selector = ATTACH_PANE_SELECTOR .. ' #attachSiNoCoverage input, ' .. ATTACH_PANE_SELECTOR .. ' #attachSiNoCoverage .a-button-input, ' .. ATTACH_PANE_SELECTOR .. ' #attachSiNoCoverage',
   cart_url = "https://www.amazon.com/gp/cart/view.html",
+  -- `/cart/smart-wagon` is deliberately NOT a marker. A real add lands there (`?newItems=<uuid>,N`) and it
+  -- REDIRECTS to `/gp/cart/view.html`, which the first marker already names and where the 18 rows and their
+  -- `data-asin` actually live (measured 2026-08-16). Naming the landing page made `review` believe it was
+  -- already on the cart, skip the navigation, find none of the cart selectors, and tell the user the cart
+  -- was EMPTY while it held 67 items. The add path needs no marker there either: with the structural
+  -- fallback gone from `confirmation_selector`, an unconfirmed add navigates to `cart_url` and the id probe
+  -- runs on the canonical page.
   cart_url_markers = { "/gp/cart/view.html", "/cart/view.html", "/cart?" },
   cart_count_selectors = { "#nav-cart-count", "#sc-subtotal-label-activecart" },
   -- Checkout REVIEW only. `place_order_selectors` is read to tell the user whether the button is there;

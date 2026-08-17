@@ -36,8 +36,12 @@ local CONFIG = {
   product_price_selectors = { '[itemprop="price"][data-seo-id="hero-price"]', '[data-testid="price-wrap"] [itemprop="price"]' },
   add_selectors = { 'main button[data-automation-id="atc"]', 'button[data-automation-id="atc"]' },
   quantity_selectors = { 'select[id*="quantity"]', 'select[aria-label*="Quantity"]' },
-  confirmation_selector = '[data-testid="add-to-cart-success"], [data-testid="cart-drawer"] [data-testid="cart-item"]',
-  confirmation_text_selectors = { '[data-testid="add-to-cart-success"]', '[data-testid="cart-drawer"]' },
+  -- Per-add panel ONLY. The cart DRAWER and its rows are structure: `cart_contains` consults this list off
+  -- the cart page, so a drawer holding a previous item answered "this add happened", the guard skipped the
+  -- click, and the tool reported `added = true`. `add_ready_selector` below may still name the drawer — that
+  -- one only decides when to stop waiting, it is not evidence.
+  confirmation_selector = '[data-testid="add-to-cart-success"]',
+  confirmation_text_selectors = { '[data-testid="add-to-cart-success"]' },
   add_ready_selector = '[data-testid="add-to-cart-success"], [data-testid="cart-drawer"], form[action*="login"]',
   cart_url = "https://www.walmart.com/cart",
   cart_url_markers = { "/cart" },

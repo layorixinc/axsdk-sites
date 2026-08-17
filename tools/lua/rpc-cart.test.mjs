@@ -241,6 +241,38 @@ test('a store with no cart is refused by name', () => {
   assert.deepEqual(clicks(page), []);
 });
 
+test('with no site named, the OPEN PAGE decides which store this is', () => {
+  // `shopping_add_to_cart`'s entry read `args.site = args.site or "amazon"` while its schema declares no
+  // `site` and sets `additionalProperties: false` — a hard projection, so the left side was always nil and
+  // the fallback always fired. The adapter was therefore guaranteed by the projection rather than decided by
+  // anything, and correct only while that flow happens to open amazon. The page already says which store it
+  // is; nothing has to be assumed.
+  const sites = loadLuaModules(['_common/rpc/62_rpc_sites.lua', '_common/rpc/67_rpc_cart.lua']);
+  const onAmazon = makePage({
+    href: 'https://www.amazon.com/dp/B0TEST1234',
+    dom: {
+      body: [{ text: 'Amazon' }],
+      '#productTitle': [{ text: 'Logitech M185 Wireless Mouse' }],
+      '.a-price .a-offscreen': [{ text: '$29.99' }],
+      '#add-to-cart-button': [{ text: 'Add to Cart' }],
+      '#sw-atc-confirmation': [{ text: 'Added to Cart' }],
+    },
+  });
+  // Everything the gate needs EXCEPT the site: that is the shape the projection actually delivers.
+  const { site: _named, ...unnamed } = APPROVED;
+  installRpcStub(sites, onAmazon);
+  const resolved = sites.call('AX_RPC_CART.add_to_cart', unnamed);
+
+  // An unported host must still refuse rather than fall back to a store nobody named.
+  const elsewhere = makePage({ href: 'https://www.example.com/p/1', dom: { body: [{ text: 'nowhere' }] } });
+  installRpcStub(sites, elsewhere);
+  const refused = sites.call('AX_RPC_CART.add_to_cart', unnamed);
+  sites.close();
+
+  assert.notEqual(resolved.error, 'missing_site', 'the open amazon page names the store');
+  assert.equal(refused.error, 'missing_site', 'an unported host names no store, and none may be assumed');
+});
+
 test('a login wall is reported, not treated as a failed click', () => {
   const page = shop({ extra: { '#ap_email': [{ text: '' }] } });
   const result = add(page);

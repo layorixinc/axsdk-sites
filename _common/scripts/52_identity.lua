@@ -80,6 +80,24 @@ local function joined_query(brand, model, category)
   return non_empty(table.concat(parts, " "))
 end
 
+-- A measurement is digits followed by a UNIT, and a model code is not: M185, S27C390 and RF285 all start
+-- with letters, while 500ml, 60Hz, 1.5L, 1200mah and 2P do not. The old guard was a five-entry substring
+-- blacklist (`ghz mah gb tb dpi`), so every other letter+digit token won and a bottled-water listing
+-- resolved to model `500ml` — which then becomes the discovery GROUPING key and can be locked as an
+-- identity, so two listings of the same water verify as different products. The blacklist stays as well:
+-- it also rejects a unit sitting mid-token, which the shape rule alone would keep.
+local UNIT_SUFFIXES = {
+  ml = true, l = true, kg = true, g = true, mg = true, mm = true, cm = true, m = true,
+  w = true, wh = true, v = true, hz = true, khz = true, mhz = true, ghz = true,
+  ah = true, mah = true, kb = true, mb = true, gb = true, tb = true, dpi = true,
+  p = true, k = true, ea = true, pcs = true, pack = true, inch = true, oz = true, lb = true,
+}
+
+--- True when the token reads as a quantity: leading digits and nothing after them but a known unit.
+local function measurement_token(normalized)
+  local tail = normalized:match("^%d+(%a+)$")
+  return tail ~= nil and UNIT_SUFFIXES[tail] == true
+end
 local function infer_model(value)
   local text = clean(value)
   -- A LEADING bracket is merchandising, not the product. Korean storefronts put one on nearly every
@@ -103,6 +121,7 @@ local function infer_model(value)
       or normalized:find("gb", 1, true)
       or normalized:find("tb", 1, true)
       or normalized:find("dpi", 1, true)
+      or measurement_token(normalized)
     if has_letter and has_digit and not unit and #token >= 2 then return token end
   end
   return nil

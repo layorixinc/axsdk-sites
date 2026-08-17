@@ -62,6 +62,27 @@ test('a model after a leading bracket is still found', () => {
   );
 });
 
+test('a measurement is not a model', () => {
+  // The unit blacklist was five entries (`ghz mah gb tb dpi`), so any other letter+digit token of length ≥2
+  // won: a bottled-water listing resolved to model `500ml`, a monitor to `60Hz` (only `ghz` was listed, not
+  // `hz`), and a two-pack to `2P`. The inferred model feeds the discovery GROUPING key, `identity_confidence`
+  // and 53_verify's `model_mismatch` — so two listings of the same water verify as different products, and a
+  // locked identity can be a capacity. §13's bracket fix covered merchandising prefixes; this is the sibling.
+  for (const [title, unit] of [
+    ['삼다수 무라벨 500ml 20병', '500ml'],
+    ['LG 27형 게이밍 모니터 60Hz IPS', '60Hz'],
+    ['프릴 세탁세제 1.5L 리필', '1.5L'],
+    ['건전지 AA 8개입 1200mah 충전지', '1200mah'],
+  ]) {
+    const model = modelOf(discovered(title));
+    assert.notEqual(String(model ?? '').toLowerCase(), unit.toLowerCase(), `${unit} is a measurement: ${title}`);
+  }
+
+  // And a real model containing digits and a unit-looking tail is still a model.
+  assert.equal(modelOf(discovered('Logitech M185 Compact Wireless Mouse')), 'M185');
+  assert.equal(modelOf(discovered('삼성 모니터 S27C390 27형')), 'S27C390');
+});
+
 test('an unbracketed title is unaffected', () => {
   assert.equal(
     modelOf(discovered('Logitech M185 Compact Ambidextrous Wireless Mouse')),

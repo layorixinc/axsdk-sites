@@ -53,6 +53,20 @@ local function here()
   return probe(function() return dom.get_location_href() end, 3)
 end
 
+--- The ported store whose host this href belongs to, or nil. The page is the one source that cannot be
+--- wrong about which store the user is looking at, and an unported host resolves to NOTHING rather than
+--- to whichever store happened to be hardcoded.
+function R.site_for_href(href)
+  local current = tostring(href or ""):lower()
+  if current == "" or type(RPC_SITES) ~= "table" then return nil end
+  for site, config in pairs(RPC_SITES) do
+    for index = 1, #(config.hosts or {}) do
+      if current:find(tostring(config.hosts[index]):lower(), 1, true) then return site end
+    end
+  end
+  return nil
+end
+
 --- The first selector in `list` that resolves, or nil.
 local function first_existing(list)
   for index = 1, #(list or {}) do
@@ -237,6 +251,12 @@ function R.add_to_cart(args)
   local config = type(args.config) == "table" and args.config or nil
   if not config then
     local site = trim(args.site)
+    -- The page already says which store this is, so nothing has to be assumed. `shopping_add_to_cart`'s entry
+    -- used to read `args.site = args.site or "amazon"` while its schema declares no `site` and sets
+    -- `additionalProperties: false` — a hard projection, so the left side was always nil, the fallback always
+    -- fired, and the adapter was GUARANTEED by the projection rather than decided by anything. Correct only
+    -- while that flow happens to open amazon; wrong the moment it does not, and silently so.
+    if not site then site = R.site_for_href(here()) end
     config = site and type(RPC_SITES) == "table" and RPC_SITES[site] or nil
   end
   -- Two callers, two gates, and BOTH are gates. The multi-store flow approves a compared OFFER, so it must

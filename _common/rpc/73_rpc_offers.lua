@@ -56,6 +56,12 @@ local function encode(snapshot)
     -- snapshot drops is simply gone. `uniform_currency` picks this when the listing is built; without it
     -- a Korean shopper comparing Korean stores read "총 USD 10.79" beside "상품가 KRW 12,900".
     display_currency = snapshot.display_currency,
+    -- The CONDITIONS that produced this listing, not just its rows. Without them each refinement started
+    -- from nothing: "무료배송만" then "10달러 이하" re-listed the paid-shipping rows the user had just
+    -- excluded — in the window whose numbers they were about to pick from. `sort` rides along for the same
+    -- reason the tool publishes `view_sort`.
+    filters = snapshot.filters,
+    sort = snapshot.sort,
   })
   if not ok then return nil end
   return text
@@ -213,6 +219,10 @@ function O.refine(args)
   call.offers = snapshot.offers
   call.all_offers = snapshot.all_offers or snapshot.offers
   call.identity_id = snapshot.identity_id or call.identity_id
+  -- The conditions already in force, so a new one is added to them rather than replacing them. The flow
+  -- also carries `view_sort` back, but the snapshot is the fallback when it does not.
+  call.active_filters = snapshot.filters
+  call.view_sort = call.view_sort or snapshot.sort
   local result = AX_refine_store_offers(call)
   if type(result) ~= "table" or result.error then
     return {

@@ -389,8 +389,11 @@ local function render_at_level(items, bounds, level, options)
   else
     header = string.format("%d개 중 %d-%d (%d/%d)", #items, bounds.first, bounds.last, bounds.page, bounds.pages)
   end
+  -- Conditions COMPOSE now, so the way out of them has to be on screen: before, restating a filter replaced
+  -- the previous one and starting over needed no instruction. The full form only appears at the level that
+  -- still has room for a condition hint at all.
   local footer = level.condition
-    and "번호로 선택 · '다음'/'이전' · '무료배송만' 같은 조건 · '취소'"
+    and "번호로 선택 · '다음'/'이전' · '무료배송만' 같은 조건 · '필터 해제' · '취소'"
     or "번호 선택 · 다음/이전 · 취소"
 
   -- Notes (store outcomes, folded rows) sit above the list: they change what the list MEANS, so they must

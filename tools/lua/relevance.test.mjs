@@ -59,6 +59,31 @@ test('a listing of another brand is refused even when the model code collides', 
   assert.equal(kept.length, 0);
 });
 
+test('a brand token only matches as a WORD, never inside one', () => {
+  // The model anchor is byte-boundary aware (`anchor_present`); the brand half was a bare substring `find`.
+  // A short brand therefore matched inside any word containing it, and "GE" is the case that makes it real:
+  // it sits inside Range, Storage, Vintage, Package — the exact vocabulary of the appliance listings a GE
+  // search returns. The brand anchor decides INCLUSION, so a competitor's product enters the comparison and
+  // the (유사) label then presents it as a near match of the requested one.
+  //
+  // Korean is unaffected by design: its bytes are not ASCII alphanumerics, so a Korean token surrounded by
+  // Korean already satisfies the boundary — which is why every test above keeps passing.
+  const wrong = comparison(
+    [{ product_id: 'x', name: 'Samsung Range with Storage Drawer RF285', price: 900, currency: 'USD', shipping_cost: 0 }],
+    'GE RF285',
+    { identity_model: 'RF285', identity_brand: 'GE', brand_aliases: ['GE'] },
+  );
+  assert.equal(wrong.length, 0, '"ge" inside Range/Storage is not the brand GE');
+
+  // The real thing still matches, in a different case and beside punctuation.
+  const right = comparison(
+    [{ product_id: 'y', name: 'ge RF285 french door refrigerator', price: 900, currency: 'USD', shipping_cost: 0 }],
+    'GE RF285',
+    { identity_model: 'RF285', identity_brand: 'GE', brand_aliases: ['GE'] },
+  );
+  assert.deepEqual(right.map((entry) => entry.product_id), ['y']);
+});
+
 test('every kept candidate is labelled exact or partial', () => {
   // "ergonomic" is in the query and in one title only, which is exactly what separates an exact title
   // from a similar one.

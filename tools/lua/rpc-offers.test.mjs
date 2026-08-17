@@ -59,6 +59,76 @@ const OFFERS = [
   },
 ];
 
+// One paid-shipping row cheap enough to pass a price threshold. "무료배송만" excludes it; a following
+// "10달러 이하" must not bring it back.
+const WITH_PAID_SHIPPING = [
+  ...OFFERS,
+  {
+    site: 'coupang', product_id: 'C4', id: 'C4', name: '로지텍 M185 마우스',
+    price: 9000, currency: 'KRW', price_base: 6.2, base_currency: 'USD',
+    shipping_cost: 3000, shipping_base: 2.1, total_base: 8.3, cost_complete: true,
+  },
+];
+
+test('a second refinement keeps the first — filters compose', () => {
+  // The snapshot carried the OFFERS but not the FILTERS that produced them, and `AX_refine_store_offers`
+  // applies `parsed.filters` to `all_offers` with no memory of what was already active. So a user who says
+  // "무료배송만" and then "10달러 이하" is shown paid-shipping rows again — rows they believe they excluded,
+  // in a window whose numbers they are about to pick from. `reset`/"처음부터" stays the way to clear them.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: WITH_PAID_SHIPPING });
+  first.close();
+
+  const second = runtime();
+  const free = second.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: '무료배송만',
+  });
+  second.close();
+  assert.equal(free.error, undefined, `first refine failed: ${free.error}`);
+  assert.doesNotMatch(free.question ?? '', /coupang|쿠팡/, 'the paid-shipping row is out after 무료배송만');
+
+  const third = runtime();
+  const cheap = third.call('AX_RPC_OFFERS.refine', {
+    comparison_state: free.comparison_state,
+    comparison_id: free.comparison_id,
+    view_sort: free.view_sort,
+    refine_request: '10달러 이하',
+  });
+  third.close();
+
+  assert.equal(cheap.error, undefined, `second refine failed: ${cheap.error}`);
+  assert.doesNotMatch(cheap.question ?? '', /coupang|쿠팡/,
+    `a price filter must not un-apply free shipping: ${cheap.question}`);
+});
+
+test('reset clears the filters that composed', () => {
+  // Composition needs an escape hatch or the user is stuck with everything they ever asked for.
+  const first = runtime();
+  const ranked = first.call('AX_RPC_OFFERS.rank', { verified_offers: WITH_PAID_SHIPPING });
+  first.close();
+
+  const second = runtime();
+  const free = second.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: '무료배송만',
+  });
+  second.close();
+
+  const third = runtime();
+  const all = third.call('AX_RPC_OFFERS.refine', {
+    comparison_state: free.comparison_state,
+    comparison_id: free.comparison_id,
+    refine_request: '필터 해제',
+  });
+  third.close();
+
+  assert.equal(all.error, undefined, `reset failed: ${all.error}`);
+  assert.match(all.question ?? '', /쿠팡|coupang/, 'reset brings every offer back');
+});
+
 test('ranking hands back the comparison as one scalar', () => {
   // A table would arrive as a JSON object where the schema expects an array, and flow state validated by
   // a tool schema is exactly where that bites. One string, split by the consumer.

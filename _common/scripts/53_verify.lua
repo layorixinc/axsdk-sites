@@ -1,8 +1,12 @@
 --- 고른 오퍼를 클릭 직전에 다시 읽어 신원과 가격을 재확인한다.
 local B = AX_BASE
 local C = AX_COMMERCE
-if not (B and C) then
-  error("_common/scripts/50_commerce_core.lua must be loaded before 53_verify.lua")
+-- The guard names what this file actually READS at load time, not the namespace's root. It said
+-- `50_commerce_core` while taking `worker_value`/`identity_text`/`candidate_model` off 52 — so a tool listing
+-- 50 and 53 without 52 passed every check and died at call time on a nil upvalue. Testing one of the symbols
+-- turns that into a named load error.
+if not (B and C and C.worker_value) then
+  error("_common/scripts/52_identity.lua must be loaded before 53_verify.lua")
 end
 local non_empty = B.non_empty
 local copy_table, array, worker_value, identity_text, candidate_model = C.copy_table, C.array, C.worker_value, C.identity_text, C.candidate_model

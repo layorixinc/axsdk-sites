@@ -1,8 +1,10 @@
 --- 순위·표시·정제·해석 — 사용자가 번호로 고르는 표면.
 local B = AX_BASE
 local C = AX_COMMERCE
-if not (B and C) then
-  error("_common/scripts/50_commerce_core.lua must be loaded before 55_offers.lua")
+-- Names what this file READS at load time: `compare_offers`/`uniform_currency`/`persist_comparison` from 54,
+-- `worker_value` from 52, and the view layer as its own namespace. The old guard named `50_commerce_core`.
+if not (B and C and C.compare_offers and C.worker_value and AX_OFFER_VIEW) then
+  error("_common/scripts/54_comparison.lua and 45_offer_view.lua must be loaded before 55_offers.lua")
 end
 local non_empty = B.non_empty
 local copy_table, array, worker_value, compare_offers, uniform_currency, persist_comparison = C.copy_table, C.array, C.worker_value, C.compare_offers, C.uniform_currency, C.persist_comparison
@@ -216,7 +218,18 @@ function AX_refine_store_offers(args)
       return window_of(offers, comparison_id, { refine_error = "unparsed" })
     end
 
-    local filters = parsed.reset and {} or parsed.filters
+    -- Conditions COMPOSE. Each refinement used to start from nothing, so "무료배송만" followed by
+    -- "10달러 이하" re-listed every paid-shipping row the user had just excluded — and they were about to
+    -- pick a number out of that window. New keys overlay old ones, so a second price threshold replaces the
+    -- first rather than fighting it, and `필터 해제` is the escape hatch.
+    local filters = {}
+    if not parsed.reset then
+      for key, value in pairs(type(args.active_filters) == "table" and args.active_filters or {}) do
+        -- `complete_cost_only` is re-derived below from the CURRENT listing, never inherited.
+        if key ~= "complete_cost_only" then filters[key] = value end
+      end
+      for key, value in pairs(parsed.filters or {}) do filters[key] = value end
+    end
     -- "미확인 포함" is the one filter expressed as a removal: it clears the default fold instead of
     -- adding a condition, so the listing grows back to everything that survived ranking.
     local unfold = filters.include_incomplete == true

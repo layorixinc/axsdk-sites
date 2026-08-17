@@ -89,6 +89,18 @@ test('an empty list is refused, not encoded as an object', () => {
   assert.ok(!result.value);
 });
 
+test('absent data is refused, not shipped as an empty envelope', () => {
+  // `local data = type(args.data) == "table" and args.data or {}` — so a nil `data` became `{}` and the
+  // envelope went out carrying `data: {}`. The template's own schema then refuses it on RECEIPT, silently,
+  // and the user is shown nothing with no explanation: the same failure `widget_empty_list` above exists to
+  // prevent, one level up. A widget with no data is not a widget.
+  for (const absent of [undefined, null, 'not a table', 42]) {
+    const result = lua.call('AX_RPC_WIDGET.render', { template_id: 'table', data: absent });
+    assert.equal(result.error, 'widget_missing_data', `data=${JSON.stringify(absent)} -> ${result.error}`);
+    assert.ok(!result.value, 'and nothing is rendered');
+  }
+});
+
 test('an unknown template is refused before anything is rendered', () => {
   const result = render(TABLE, 'nope');
 

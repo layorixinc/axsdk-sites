@@ -70,8 +70,56 @@ end
 --- thing written several ways ("Logitech|로지텍"), so it substitutes only for a token that is one of those
 --- spellings: applying it to every token let the brand's presence vouch for descriptor words too, and a
 --- listing that never mentioned "ergonomic" was reported as an exact match for it.
-local function token_matches(haystack, token, aliases)
-  if haystack:find(token, 1, true) then return true end
+-- Punctuation is dropped so "M-185" reads as one token, but whitespace is KEPT: gluing the whole title
+-- together turned "Logitech M185" into "logitechm185" and the model code then looked like the tail of
+-- another word, so an exact English listing was rejected.
+local function flatten_for_anchor(value)
+  return (lower(value):gsub("%p", ""))
+end
+local function alphanumeric_byte(byte)
+  if byte == nil then return false end
+  -- A multi-byte (Korean) neighbour is a word boundary for a latin model code: "로지텍m185" matches.
+  if byte >= 128 then return false end
+  return string.char(byte):match("%w") ~= nil
+end
+
+--- A word boundary between `neighbour` and the token's own adjacent byte `edge`. Two ASCII alphanumerics are
+--- the same word; anything else is a boundary, INCLUDING a script change. Both halves are needed: reading
+--- only the neighbour said "로지텍m185" has no boundary after `로지텍` (the neighbour `m` is alphanumeric) and
+--- refused every Korean listing whose brand is glued to a latin model code — while reading only the edge
+--- would let "ge" inside "Range" pass.
+local function boundary_at(neighbour, edge)
+  if not alphanumeric_byte(neighbour) then return true end
+  return not alphanumeric_byte(edge)
+end
+
+--- True when `anchor` occurs in `haystack` as a whole token (M185 matches "M-185", never "M185R").
+local function anchor_present(haystack, anchor)
+  if anchor == "" then return false end
+  local flat = flatten_for_anchor(haystack)
+  local from = 1
+  while true do
+    local first, last = flat:find(anchor, from, true)
+    if not first then return false end
+    local before = first > 1 and flat:byte(first - 1) or nil
+    if boundary_at(before, flat:byte(first)) and boundary_at(flat:byte(last + 1), flat:byte(last)) then
+      return true
+    end
+    from = first + 1
+  end
+end
+--- `whole` requires the token to appear as a WORD. The descriptors do not ask for it — they only score, and
+--- a substring hit there costs at most an `(유사)` label. The BRAND anchor decides inclusion, and a short
+--- brand is inside ordinary words: "ge" sits in Range, Storage, Vintage, Package, which is the vocabulary of
+--- the very listings a GE search returns, so a Samsung refrigerator satisfied the brand anchor. Korean is
+--- unaffected: its bytes are not ASCII alphanumerics, so `anchor_present` already treats them as boundaries.
+local function token_matches(haystack, token, aliases, whole)
+  local present = function(needle)
+    if needle == "" then return false end
+    if whole then return anchor_present(haystack, needle) end
+    return haystack:find(needle, 1, true) ~= nil
+  end
+  if present(token) then return true end
   local count = #(aliases or {})
   if count == 0 then return false end
 
@@ -83,7 +131,7 @@ local function token_matches(haystack, token, aliases)
 
   for index = 1, count do
     local alias = aliases[index]
-    if alias ~= "" and alias ~= token and haystack:find(alias, 1, true) then return true end
+    if alias ~= token and present(alias) then return true end
   end
   return false
 end
@@ -137,37 +185,11 @@ local function normalize_anchor(value)
   return (lower(value):gsub("[%s%p]", ""))
 end
 
--- Punctuation is dropped so "M-185" reads as one token, but whitespace is KEPT: gluing the whole title
--- together turned "Logitech M185" into "logitechm185" and the model code then looked like the tail of
--- another word, so an exact English listing was rejected.
-local function flatten_for_anchor(value)
-  return (lower(value):gsub("%p", ""))
-end
 
 local function is_model_token(token)
   return token:find("%d") ~= nil and token:find("%a") ~= nil and #normalize_anchor(token) >= 3
 end
 
-local function alphanumeric_byte(byte)
-  if byte == nil then return false end
-  -- A multi-byte (Korean) neighbour is a word boundary for a latin model code: "로지텍m185" matches.
-  if byte >= 128 then return false end
-  return string.char(byte):match("%w") ~= nil
-end
-
---- True when `anchor` occurs in `haystack` as a whole token (M185 matches "M-185", never "M185R").
-local function anchor_present(haystack, anchor)
-  if anchor == "" then return false end
-  local flat = flatten_for_anchor(haystack)
-  local from = 1
-  while true do
-    local first, last = flat:find(anchor, from, true)
-    if not first then return false end
-    local before = first > 1 and flat:byte(first - 1) or nil
-    if not alphanumeric_byte(before) and not alphanumeric_byte(flat:byte(last + 1)) then return true end
-    from = first + 1
-  end
-end
 
 --- The model code and brand words a comparison must not compromise on.
 function C.relevance_anchors(query, options)
@@ -205,7 +227,9 @@ function C.relevance_match(candidate, query, options)
 
   if not anchor_present(haystack, normalize_anchor(anchors.model)) then return nil end
   for index = 1, #anchors.brand_tokens do
-    if not token_matches(haystack, anchors.brand_tokens[index], aliases) then return nil end
+    -- `true` = whole word. The brand decides INCLUSION, so a short brand found inside an ordinary word put
+    -- a competitor's product in the comparison: "ge" is inside Range, Storage, Vintage and Package.
+    if not token_matches(haystack, anchors.brand_tokens[index], aliases, true) then return nil end
   end
 
   local missing = array()

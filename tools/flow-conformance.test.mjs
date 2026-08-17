@@ -1455,6 +1455,91 @@ test('a field the flow publishes is a field its script can actually produce', ()
   assert.ok(checked >= 15, `only ${checked} tools were checkable (skipped ${skipped}) — coverage shrank`);
 });
 
+// The commerce layer builds one `AX_COMMERCE` in filename order and each file grabs its helpers off it at
+// LOAD time, so intra-set ordering is a hard contract. AGENTS.md §13 says the module-dependency gate reads
+// "each module's own `error(...)` guard — the one statement that cannot drift". It had drifted: 53, 54, 55 and
+// 56 all name `50_commerce_core` while reading `worker_value`/`split_list`/`stable_hash` from 51 and 52, and
+// 54/55 call `AX_OFFER_VIEW` with no guard at all. A tool listing 50+53 without 52 therefore passes every
+// check and dies at call time with `attempt to call a nil value (upvalue 'worker_value')`.
+const COMMERCE_FILES = ['44_pagination', '45_offer_view', '46_candidate_browser', '50_commerce_core',
+  '51_relevance', '52_identity', '53_verify', '54_comparison', '55_offers', '56_store_io'];
+
+test('a load-order guard names the module it actually needs', () => {
+  const wrong = [];
+  const exportedBy = new Map();
+  const sources = new Map();
+  for (const name of COMMERCE_FILES) {
+    const source = read(`_common/scripts/${name}.lua`).replace(/\r\n/g, '\n');
+    sources.set(name, source);
+    // `C.a, C.b = a, b` — the trailing share line each file leaves for the ones below it.
+    for (const line of source.split('\n')) {
+      if (!/^C\.\w+/.test(line)) continue;
+      for (const symbol of line.split('=')[0].matchAll(/C\.(\w+)/g)) exportedBy.set(symbol[1], name);
+    }
+  }
+
+  for (const [index, name] of COMMERCE_FILES.entries()) {
+    const source = sources.get(name);
+    const guard = source.match(/error\("([^"]+)"\)/);
+    // The header is everything before the first function: what the file reads at LOAD time.
+    const header = source.slice(0, source.search(/\nlocal function |\nfunction /));
+    const needed = new Set();
+    for (const symbol of header.matchAll(/C\.(\w+)/g)) {
+      const from = exportedBy.get(symbol[1]);
+      if (from && from !== name && COMMERCE_FILES.indexOf(from) < index) needed.add(from);
+    }
+    if (needed.size === 0) continue;
+    const latest = [...needed].sort((a, b) => COMMERCE_FILES.indexOf(a) - COMMERCE_FILES.indexOf(b)).pop();
+    if (!guard) { wrong.push(`${name}: reads from ${latest} and has no guard`); continue; }
+    if (!guard[1].includes(latest)) {
+      wrong.push(`${name}: guard names "${guard[1].split(' must')[0]}" but reads from ${latest}`);
+    }
+  }
+
+  assert.deepEqual(wrong, [], `load-order guards that do not name the real dependency:\n  ${wrong.join('\n  ')}`);
+});
+
+test('a module that calls another namespace guards on it', () => {
+  // `AX_OFFER_VIEW` and `AX_PAGINATION` are separate globals, so the `AX_COMMERCE` guard says nothing about
+  // them: 54 and 55 called the view layer with no check, which is a nil-index at call time rather than a
+  // named load error. The conformance module-gap test keys on `AX_RPC_*`, so these sit outside its net.
+  const wrong = [];
+  for (const name of COMMERCE_FILES) {
+    const source = read(`_common/scripts/${name}.lua`).replace(/\r\n/g, '\n');
+    const guard = source.slice(0, source.search(/\nlocal function |\nfunction /));
+    for (const global of ['AX_OFFER_VIEW', 'AX_PAGINATION', 'AX_CANDIDATE_BROWSER']) {
+      if (!source.includes(`${global}.`)) continue;
+      if (source.includes(`${global} = ${global}`)) continue;
+      if (!guard.includes(global)) wrong.push(`${name}: calls ${global} without guarding on it`);
+    }
+  }
+  assert.deepEqual(wrong, [], `namespaces used without a load guard:\n  ${wrong.join('\n  ')}`);
+});
+
+test('an entry does not substitute a value its schema refuses to accept', () => {
+  // `parameters.properties` with `additionalProperties: false` is a hard projection: an undeclared key is
+  // dropped before the script runs. So `args.site = args.site or "amazon"` in an entry whose schema does not
+  // declare `site` is not a default — the left side is ALWAYS nil, so the fallback always fires and the
+  // choice of adapter is guaranteed by the projection rather than decided by anything. The single-site cart
+  // and the checkout both did this, and both are only correct while their flow happens to open amazon.
+  const common = parseFlow('_common/flows.yaml');
+  const silent = [];
+  for (const [id, tool] of Object.entries(common.flowTools ?? {})) {
+    // Comments stripped first: the fixed entry EXPLAINS the removed default in prose, and a scanner that
+    // reads prose as code re-reports the thing that was fixed.
+    const body = (typeof tool?.execute?.lua === 'string' ? tool.execute.lua : '')
+      .split('\n').map((line) => line.replace(/--.*$/, '')).join('\n');
+    if (!body.trim() || tool.parameters?.additionalProperties !== false) continue;
+    const declared = tool.parameters?.properties ?? {};
+    for (const match of body.matchAll(/args\.(\w+)\s*=\s*[^\n]*args\.\1\s*or\s*("[^"]*"|'[^']*'|[\d.]+)/g)) {
+      if (!Object.hasOwn(declared, match[1])) {
+        silent.push(`${id}: defaults args.${match[1]} to ${match[2]}, which the schema never lets through`);
+      }
+    }
+  }
+  assert.deepEqual(silent, [], `entries guaranteeing a value instead of deciding one:\n  ${silent.join('\n  ')}`);
+});
+
 /** Every module file a tool loads, as source text keyed by module id. */
 function moduleSources(moduleIds) {
   const sources = new Map();

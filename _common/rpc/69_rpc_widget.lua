@@ -48,7 +48,14 @@ function W.render(args)
     return { next = "error", error = "json_encode_unavailable" }
   end
 
-  local data = type(args.data) == "table" and args.data or {}
+  -- Absent data is a REFUSAL, not an empty envelope. This read `args.data or {}`, so a nil arrived as `{}`
+  -- and the envelope shipped `data: {}`; the template's own schema then refuses it on RECEIPT, silently, and
+  -- the user sees nothing with no explanation — the same failure the empty-list check below prevents, one
+  -- level up.
+  if type(args.data) ~= "table" then
+    return { next = "error", error = "widget_missing_data", template_id = template }
+  end
+  local data = args.data
   -- Rebuild the two list fields so they cannot decay into objects on the way out.
   local payload = {}
   for key, value in pairs(data) do payload[key] = value end

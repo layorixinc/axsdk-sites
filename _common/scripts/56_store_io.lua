@@ -1,8 +1,10 @@
 --- 스토어별 페이지 수집과 장바구니 담기. 브라우저에 실제로 닿는 층.
 local B = AX_BASE
 local C = AX_COMMERCE
-if not (B and C) then
-  error("_common/scripts/50_commerce_core.lua must be loaded before 56_store_io.lua")
+-- Names what this file READS at load time: `matches_query` from 51, `infer_model` from 52, and the paging
+-- planner as its own namespace. The old guard named `50_commerce_core` and tested only `C`.
+if not (B and C and C.matches_query and C.infer_model and AX_PAGINATION) then
+  error("_common/scripts/52_identity.lua and 44_pagination.lua must be loaded before 56_store_io.lua")
 end
 local non_empty = B.non_empty
 local copy_table, array, matches_query, infer_model = C.copy_table, C.array, C.matches_query, C.infer_model

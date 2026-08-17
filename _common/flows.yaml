@@ -4391,7 +4391,11 @@ flowTools:
           -- The gate for this flow is `refine_item`, where the user picked THIS product out of the searched
           -- list. Naming it here is what lets the shared cart refuse a call that carries no approval at all
           -- while still serving a flow that has no comparison to approve.
-          args.site = args.site or "amazon"
+          --
+          -- `args.site = args.site or "amazon"` used to sit here. `site` is not declared below and
+          -- `additionalProperties: false`, so the left side was ALWAYS nil: the fallback always fired and the
+          -- adapter was guaranteed by the projection rather than decided. The cart derives the store from the
+          -- open page now, and an unported host refuses instead of borrowing amazon's selectors.
           return AX_RPC_CART.add_to_cart(args)
         end
     output:

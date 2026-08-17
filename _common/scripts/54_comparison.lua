@@ -1,8 +1,11 @@
 --- 비교 창(윈도) · 스토어 결과 문구 · 관련성 스크리닝.
 local B = AX_BASE
 local C = AX_COMMERCE
-if not (B and C) then
-  error("_common/scripts/50_commerce_core.lua must be loaded before 54_comparison.lua")
+-- Names what this file READS at load time: `split_list` from 51, `worker_value`/`stable_hash` from 52, and the
+-- view layer as its own namespace. The old guard named `50_commerce_core` and tested only `C`, so a tool that
+-- omitted 51, 52 or 45 passed every check and died at call time on a nil upvalue.
+if not (B and C and C.split_list and C.worker_value and AX_OFFER_VIEW) then
+  error("_common/scripts/52_identity.lua and 45_offer_view.lua must be loaded before 54_comparison.lua")
 end
 local non_empty = B.non_empty
 local lower, copy_table, array, split_list, worker_value, stable_hash = C.lower, C.copy_table, C.array, C.split_list, C.worker_value, C.stable_hash

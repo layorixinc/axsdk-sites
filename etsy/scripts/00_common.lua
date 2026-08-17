@@ -10,7 +10,6 @@ local CONFIG = {
   search_url = "https://www.etsy.com/search",
   search_param = "q",
   search_path_marker = "/search",
-  search_input_selector = 'input[name="search_query"]',
   result_selector = '[data-listing-id]',
   result_id_attr = "data-listing-id",
   result_url_selector = 'a[href*="/listing/"]',

@@ -11,7 +11,6 @@ local CONFIG = {
   search_param = "kwd",
   search_extra = { tabId = "TOTAL_SEARCH" },
   search_path_marker = "/pc/total-search",
-  search_input_selector = 'input[type="search"]',
   result_selector = 'li.c-search-list__item, li:has(> .c-card-item)',
   result_url_selector = 'a.c-card-item__anchor[href*="/products/"]',
   -- 11st routes every result card through its ad server, so the anchor href carries no product id; the
@@ -32,7 +31,8 @@ local CONFIG = {
   result_shipping_selector = '.c-card-item__price-delivery, .c-card-item__price-delivery .value',
   result_rating_selector = '.c-starrate, [aria-label*="평점"]',
   result_reviews_selector = '.c-starrate, [data-review-count]',
-  result_delivery_selector = '.c-card-item__delivery, .c-card-item__shipping',
+  -- Live card text is in this delivery cell ("배송비무료"); the older delivery/shipping classes match 0.
+  result_delivery_selector = 'dd.c-card-item__price-delivery',
   shipping_from_text = true,
   result_ready_selector = 'li.c-search-list__item, li:has(> .c-card-item)',
   search_timeout = 5000,

@@ -30,6 +30,44 @@ test('values come from the adapter, not from a pattern', () => {
   assert.deepEqual(configs.ssg.pagination, { mode: 'query', param: 'page', start: 1, step: 1, max_pages: 2 });
 });
 
+test('storefront configs carry only keys the RPC reader consumes', () => {
+  for (const [site, config] of Object.entries(configs)) {
+    assert.ok(!Object.hasOwn(config, 'search_input_selector'), `${site}.search_input_selector is dead`);
+  }
+});
+
+test('selectors that carry measured meaning do not fall back to unrelated elements', () => {
+  assert.equal(configs['11st'].result_delivery_selector, 'dd.c-card-item__price-delivery');
+  assert.doesNotMatch(
+    configs.ebay.result_title_selector,
+    /(?:^|,\s*)a(?:\[|[.#:\s>+~])/,
+    'a broad item link can select the image anchor before the title; image alt is a separate field',
+  );
+});
+
+test('storefront selectors never name build-generated class hashes', () => {
+  const selectors = [];
+  const collect = (value, path = []) => {
+    if (typeof value === 'string') {
+      if (path.some((part) => /selector/i.test(part))) selectors.push([path.join('.'), value]);
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => collect(item, [...path, String(index)]));
+      return;
+    }
+    if (value && typeof value === 'object') {
+      for (const [key, item] of Object.entries(value)) collect(item, [...path, key]);
+    }
+  };
+  collect(configs);
+
+  const generatedClass = /(?:^|[\s,>+~])\.(?:css-[a-z0-9_-]{4,}|_[A-Za-z0-9_-]{5,})(?=[.#:[\s,>+~]|$)|\[class[*^$]?=["'][^"']*(?:css-|_[A-Za-z0-9]{4})/i;
+  for (const [path, selector] of selectors) {
+    assert.doesNotMatch(selector, generatedClass, `${path} must use a stable selector`);
+  }
+});
+
 test('site declarations are self-contained: the durable layer is not needed to read them', () => {
   // The CDP extension never injects the stored-Lua site layer, so a site's scripts may not depend on
   // it. Loading ONLY the site files — no `_common` module at all — must yield every config, and may

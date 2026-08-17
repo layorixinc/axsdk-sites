@@ -12,16 +12,15 @@
 // reader fields no site selector could produce).
 //
 // Load order, derived from the module guards:
-//   50_commerce_core raises "00_base.lua must be loaded before 50_commerce_core.lua";
-//   51/52/56 each raise "50_commerce_core.lua must be loaded before <file>"; and 56_store_io's header
-//   captures C.matches_query (assigned by 51_relevance) and C.infer_model (assigned by 52_identity),
-//   so both must precede it. The rpc modules guard nothing at load time: 61/67 resolve dom/nav and
-//   RPC_SITES at CALL time, 62 is pure data, and 63_pure_entries calls the globals 56 defines.
+//   50_commerce_core needs 00_base; 51 and 52 build on 50; 56 consumes the relevance/identity exports
+//   plus AX_PAGINATION from 44. The rpc modules resolve page capabilities at call time, 62 is pure data,
+//   and 63_pure_entries calls the globals 56 defines.
 import { loadLuaModules } from './lua/harness.mjs';
 import { installRpcStub, makePage } from './lua/rpc-stub.mjs';
 
 const lua = loadLuaModules([
   '_common/scripts/00_base.lua',
+  '_common/scripts/44_pagination.lua',
   '_common/scripts/50_commerce_core.lua',
   '_common/scripts/51_relevance.lua',
   '_common/scripts/52_identity.lua',

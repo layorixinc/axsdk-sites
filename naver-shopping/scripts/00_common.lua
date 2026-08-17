@@ -10,7 +10,6 @@ local CONFIG = {
   search_url = "https://search.shopping.naver.com/search/all",
   search_param = "query",
   search_path_marker = "/search/",
-  search_input_selector = 'input[type="search"]',
   -- The rendered grid carries only tracking ids (data-shp-contents-id holds a link, not a product) and
   -- routes every offer through a cr.shopping.naver.com redirect, so the price-comparison records are
   -- read from the hydration payload instead. DOM selectors stay as the fallback path.

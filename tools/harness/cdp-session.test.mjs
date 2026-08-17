@@ -880,6 +880,18 @@ test('close releases the browser it launched so the process can exit', async () 
   assert.equal(killed, 0, 'and the browser stays up for the next run to reuse');
 });
 
+test('a failed open releases the browser handle before it throws', async () => {
+  const fake = fakeExtension();
+  let released = 0;
+  fake.chromeChild = { unref: () => { released += 1; } };
+  fake.chromeReused = false;
+  fake.lib.ensureExtension = async () => { throw new Error('extension setup failed'); };
+
+  await assert.rejects(() => openSession(fake), /extension setup failed/);
+  assert.equal(fake.cdpToken.closed, true, 'the debugger channel is closed on acquisition failure');
+  assert.equal(released, 1, 'an attached child cannot keep the failed runner alive');
+});
+
 // A browser this session did not launch is not this session's to touch.
 test('close leaves a browser it did not launch alone', async () => {
   const fake = fakeExtension();

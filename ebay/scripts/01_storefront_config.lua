@@ -30,7 +30,9 @@ local CONFIG = {
   result_id_attr = "data-listingid",
   result_ready_selector = "li.s-card, .srp-river-results, .srp-results, .su-item-card, .srp-save-null-search, #signin-main, #captcha_form",
   result_url_selector = "a[href*='/itm/'], .su-link.su-item-card__title, .su-item-card__title",
-  result_title_selector = ".s-card__title, .su-item-card__title .su-styled-text, .su-item-card__title, a[href*='/itm/']",
+  -- Do not append the broad item link here: the image link can precede the title in document order.
+  -- Its alt text is already read independently through result_image_selector.
+  result_title_selector = ".s-card__title, .su-item-card__title .su-styled-text, .su-item-card__title",
   result_image_selector = ".s-card__image, img.s-item__image-img, .su-card-container__media img, img",
   result_price_selector = ".s-card__price, .su-item-card__price, .s-item__price",
   -- The delivery line rides in the attribute row, not in a field of its own.

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Which Lua files nothing can reach.
 //
-// There are exactly two ways in. A DURABLE command is invoked by a flowTool declared `kind: remote`; a
-// RUNTIME module is named in a tool's `modules:` list. `<dir>/scripts/*.lua` and `<dir>/rpc/*.lua` share
-// one namespace (`build-rpc-flows.mjs`), so a file under `scripts/` can be either kind — which is why a
-// heuristic that only counts `AX_*` definitions calls `10_form_wizard.lua` dead while the quote tool
-// loads it every step.
+// There are four ways in: a durable `kind: remote` command, a runtime tool's `modules:` entry, a command
+// called by dev tooling, and registration/generator input whose load-time side effect is the product.
+// `<dir>/scripts/*.lua` and `<dir>/rpc/*.lua` share one namespace (`build-rpc-flows.mjs`), so path or
+// `AX_*` definitions alone cannot decide reachability. From those four roots the checker walks referenced
+// globals transitively.
 //
 // From those entry points the graph is walked over GLOBALS: a file is alive if something alive references
 // a global it defines. Libraries define no command and are reached that way, not by name.

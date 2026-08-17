@@ -10,7 +10,6 @@ local CONFIG = {
   search_path_prefix = "https://www.aliexpress.com/w/wholesale-",
   search_path_suffix = ".html",
   search_path_marker = "/w/wholesale-",
-  search_input_selector = 'input[type="search"]',
   result_selector = 'a.search-card-item[href*="/item/"]',
   result_url_from_root = true,
   result_title_selector = 'img[alt]',

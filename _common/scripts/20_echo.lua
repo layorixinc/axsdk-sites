@@ -2,7 +2,6 @@
 -- No flow invokes this. It is the smallest possible probe of the stored-Lua command channel —
 -- standalone (no AX_BASE), it console.log's every argument and echoes them back, so a broken
 -- round-trip is visible in one call. Named callers:
---   _common/scripts/test_echo.mjs (live test of the channel)
 --   playground REPL docs/tests (`.call AX_echo {...}` — tools/playground/cli.test.mjs)
 -- Invoked as a command via lua.run("AX_echo", args) (args arrives as a single table) or directly
 -- with varargs: AX_echo(a, b, c).

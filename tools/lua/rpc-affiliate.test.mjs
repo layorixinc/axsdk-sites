@@ -96,6 +96,17 @@ test('the widget carries the link as a click the user makes', () => {
   assert.equal(payload.data.action.target, '_blank');
 });
 
+test('the affiliate button names the configured site, even when the product has no name', () => {
+  const { out } = link({
+    site: 'coupang',
+    selected_offer: { ...OFFER, name: undefined },
+    comparison_state: SNAPSHOT,
+  });
+
+  const payload = JSON.parse(String(out.widget).split('\n').slice(1, -1).join('\n'));
+  assert.equal(payload.data.label, '쿠팡에서 보기');
+});
+
 test('a conversion that fails keeps the comparison and says why', () => {
   // The comparison is the user's, and it was earned by real navigations. A dead conversion service must
   // cost the link, not the result — and the reason travels raw, because "server down" and "this store is

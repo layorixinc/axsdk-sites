@@ -53,16 +53,19 @@ export const COMPOSED = {
   'nav.wait_for_navigation': 'dom.get_location_href',
 };
 
-const CALL = /\b(dom|nav|page|memory|sitemap)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+const DIRECT_CALL = /\b(dom|nav|page|memory|sitemap)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+const PROTECTED_CALL = /\b(?:pcall|xpcall)\s*\(\s*(dom|nav|page|memory|sitemap)\.([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/g;
 
 /** Every op a script needs granted: what it calls, with composed helpers resolved to the op they poll. */
 function requiredOps(lua) {
   const needed = new Set();
-  for (const [, namespace, fn] of String(lua ?? '').matchAll(CALL)) {
-    const called = `${namespace}.${fn}`;
-    const polled = COMPOSED[called];
-    if (polled) needed.add(polled);
-    else if (OPS.includes(called)) needed.add(called);
+  for (const pattern of [DIRECT_CALL, PROTECTED_CALL]) {
+    for (const [, namespace, fn] of String(lua ?? '').matchAll(pattern)) {
+      const called = `${namespace}.${fn}`;
+      const polled = COMPOSED[called];
+      if (polled) needed.add(polled);
+      else if (OPS.includes(called)) needed.add(called);
+    }
   }
   return needed;
 }

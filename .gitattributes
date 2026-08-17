@@ -1,0 +1,2 @@
+# Keep generated Lua, workspace bundles, and byte-comparison gates stable across platforms.
+* text=auto eol=lf

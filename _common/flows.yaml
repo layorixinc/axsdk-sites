@@ -2781,8 +2781,8 @@ flowTools:
       implementation: lua
       modules: [ "_common.61_rpc_storefront", "_common.62_rpc_sites" ]
       rpc:
-        # Read-only. No write op is reachable from this tool, and the audit in `check:flows` fails the
-        # build if the script ever calls one that is not listed here.
+        # Read-only. No write op is granted. The runtime refuses an omitted op immediately; the exact
+        # static allow audit is currently limited to tools whose module call graph is unambiguous.
         allow:
           [
             nav.navigate,

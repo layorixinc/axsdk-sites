@@ -11,7 +11,6 @@ local CONFIG = {
   search_param = "query",
   search_extra = { target = "all" },
   search_path_marker = "/search.ssg",
-  search_input_selector = 'input[name="query"]',
   -- The result grid is a Chakra/emotion build: every class is a hash, so rows are located by their
   -- product link and prices are read from the row text ("… 판매가격 53,100원 무료배송"), last amount
   -- before the shipping fragment. The hydration payload below is the selector-free fallback.

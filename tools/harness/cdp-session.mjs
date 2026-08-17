@@ -206,6 +206,12 @@ export async function openCdpSession(options = {}, lib = undefined) {
   const { cdp, chrome: launched, reused } = await sdk.launchChrome({
     profileName: sdk.profileName, profileRoot: sdk.profileRoot, port,
   });
+  const release = () => {
+    cdp.close();
+    if (reused !== true && launched !== undefined) launched.unref?.();
+  };
+
+  try {
   const { extensionId, options: optionsPage, installed } = await sdk.ensureExtension(cdp, sdk.extensionDir);
   const optionsSession = optionsPage.sessionId;
 
@@ -591,10 +597,13 @@ export async function openCdpSession(options = {}, lib = undefined) {
      * already running is not ours — `reused` says so — and is never touched.
      */
     async close() {
-      cdp.close();
-      if (reused !== true && launched !== undefined) launched.unref?.();
+      release();
     },
   };
 
   return session;
+  } catch (error) {
+    release();
+    throw error;
+  }
 }

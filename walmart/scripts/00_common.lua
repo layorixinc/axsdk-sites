@@ -10,7 +10,6 @@ local CONFIG = {
   search_url = "https://www.walmart.com/search",
   search_param = "q",
   search_path_marker = "/search",
-  search_input_selector = 'input[type="search"][name="q"]',
   result_selector = '[data-item-id][data-dca-id]',
   result_id_attr = "data-dca-id",
   result_url_selector = 'a[link-identifier][href*="/ip/"]',

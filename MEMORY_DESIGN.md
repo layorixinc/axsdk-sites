@@ -509,12 +509,13 @@ Turn 1: find_delete_candidates({regex:"address|주소"})
 Pause: choose_delete_keys asks which returned key or keys to delete.
 User: 배송 주소
 Turn 2: delete_memory({delete_keys:["shipping_address"]})
-AX: AX_delete_memory({keys:["shipping_address"]})
+AX: AX_RPC_MEMORY.delete({delete_keys:["shipping_address"], confirmed:true})
 ```
 
 The asking node self-loops, so `activeFlow=memory`, `activeNode=choose_delete_keys`, and the complete
-`memory_result` survive until the next user turn. The chooser treats `memory_result.keys` as the
-authoritative candidates. Cancellation and ambiguous replies never call `AX_delete_memory`.
+`memory_result` survive until the next user turn. The chooser treats
+`memory_result.matches[*].key` as the authoritative candidates. Cancellation and ambiguous replies
+never call the deletion adapter.
 
 ## 14. SDK context changes
 
@@ -745,45 +746,45 @@ the list replaces the inherited hook field.
 
 ```text
 memory.handle
-  list        -> list_memory -> AX_get_memory({})
-  get         -> get_memory -> AX_get_memory({key})
-  search      -> search_memory -> AX_search_memory({regex})
-  delete      -> delete_memory -> AX_delete_memory({keys})
-  set         -> prepare_memory -> set_memory -> AX_set_memory_bulk({memory})
+  list        -> list_memory -> AX_RPC_MEMORY.get({})
+  get         -> get_memory -> AX_RPC_MEMORY.get({key})
+  search      -> search_memory -> AX_RPC_MEMORY.search({regex})
+  delete      -> delete_memory -> AX_RPC_MEMORY.delete({delete_keys, confirmed})
+  set         -> prepare_memory -> set_memory -> AX_RPC_MEMORY.set_bulk({memory, confirmed})
   find_delete -> find_delete_candidates -> choose_delete_keys
                                               ask -> self-loop / pause
                                               delete -> delete_memory
                                               cancelled -> terminal
 ```
 
-Exact one/many delete requests call `AX_delete_memory` directly. Category deletion searches candidates
-on the first user turn, then pauses in `choose_delete_keys`; the resumed turn copies the user's chosen
-exact key or keys into `delete_keys` and calls `AX_delete_memory`. The flow does not construct a
-deletion map or validate memory storage.
-
-The existing deterministic `prepare_memory` remains only for save and mixed save/delete requests sent
-to `AX_set_memory_bulk`.
+All adapters are `kind: runtime` tools loading `_common.70_rpc_memory`; `rpc.allow` grants the exact
+local `memory.*` op. Exact one/many delete requests call `delete_memory` directly. Category deletion
+searches candidates on the first user turn, then pauses in `choose_delete_keys`; the resumed turn copies
+the user's chosen exact key or keys into `delete_keys`. `prepare_memory` remains only for save and mixed
+save/delete requests sent to `set_memory`.
 
 ### 19.5 Flow-tool adapters
 
-`find_delete_candidates` executes `AX_search_memory`, stores the complete result as `memory_result`,
-and routes empty results to `not_found`. `choose_delete_keys` reads the authoritative candidates from
-`memory_result.keys`; it is a passthrough action-unit tool whose `ask` transition self-loops and pauses
-the flow. `delete_memory` projects only the selected array:
+`find_delete_candidates` publishes the op payload at `memory_result` and branches on
+`result.memory_result.matches.0`. Each match is `{key, excerpt, truncated}`. `choose_delete_keys` reads
+only `memory_result.matches[*].key`; it is a passthrough action-unit tool whose `ask` transition
+self-loops and pauses the flow. `delete_memory` projects only the selected keys plus the confirmation:
 
 ```yaml
 delete_memory:
-  execute: { kind: remote, tool: AX_delete_memory }
-  input:
-    keys: tool.args.delete_keys
+  execute:
+    kind: runtime
+    implementation: lua
+    modules: [ "_common.70_rpc_memory" ]
+    rpc: { allow: [ memory.set_bulk ] }
   effect: mutation
   consent: required
   idempotent: true
   require: { confirmed: true }
 ```
 
-The SDK receives exactly `{keys}` and returns the standard `saved`/`removed`/`not_found` receipt.
-`set_memory` remains the separate mixed-mutation adapter for `AX_set_memory_bulk({memory})`.
+The module receives `{delete_keys, confirmed}` and returns the standard removal/not-found receipt.
+`set_memory` is the separate bulk adapter for `{memory, confirmed}`.
 
 ### 19.6 Remove memory from ordinary flows
 

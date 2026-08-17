@@ -23,8 +23,8 @@
 |---|---|---|---|
 **P0** | **2** | ✅ **해결** `36db09d` | 사용자 돈에 닿았다. 하나는 총액 비교에 **틀린 숫자**를, 하나는 **일어나지 않은 추가**를 보고했다 |
 **P1** | **12** | ✅ **12건 전부 해결** `36db09d`·`9e48f11`·`793f913` | 결과가 틀리거나 조용히 사라진다 |
-**P2** | 14 | ✅ **6건 해결** `fff5bfc`, 1건 검토 후 유지, 7건 미해결 | 지금은 잠재적이지만 P1로 자라는 부류 |
-**P3** | 16 | 미해결 | 죽은 코드·죽은 키·오탈자급 |
+**P2** | 14 | **13건 해결**, 1건 검토 후 유지 | 잠재 결함을 테스트/게이트로 닫았고 승인 마커 중복 1건은 동일 리터럴 + 독립 재검사라 유지 |
+**P3** | 16 | **문서·위생 정리** | 죽은 키·고아 러너·줄바꿈 정책·낡은 아키텍처 설명 처리 |
 
 > **1단계(§8) 완료 — `36db09d`.** P0 둘 + P1-10(수량) + P1-11(라벨 확인 클릭)을 TDD로 고쳤다: 각 항목 실패
 > 테스트 먼저(메시지 기록), 수정, 초록, 그리고 **라이브 스모크**. `test:lua` 530 · `check:flows` 138(새 게이트
@@ -110,6 +110,31 @@
 > (RPC 도구의 `modules:`가 오는 곳). **그래서 더 값나가는 발견은 이것이다: 라이브 시나리오가 모듈의 낡은
 > 사본을 돌면서도 8/8을 통과할 수 있다** — 바뀐 문구를 단정하는 검사가 없기 때문이다. 어느 계층을 읽는지는
 > 이 세션에서 확정하지 못했고, 확정하지 못한 것을 확정한 것처럼 적지 않는다.
+>
+> **4단계 완료 — 남은 P2 + 문서·위생.** 어필리에이트 버튼은 상품명 유무가 아니라 사이트로 라벨을
+> 정하고, eBay 제목은 이미지 앵커를 잡는 광범위 링크 폴백을 제거했으며, 11st 배송은 실측된
+> `dd.c-card-item__price-delivery`를 쓴다. `pcall(sitemap.search_site, …)`도 RPC allow 감사가 호출로
+> 인식한다. 셀렉터 해시 금지와 죽은 설정 키는 새 게이트가 막는다.
+>
+> 8개 사이트의 미사용 `search_input_selector`를 지우고 생성물을 재생성했다. `.gitattributes`가 텍스트를
+> LF로 고정한다. 승인받아 어떤 npm 스크립트도 닿지 않던 `.mjs` 러너 12개(2,617줄)를 삭제했다 — 일부는
+> 이미 삭제된 `AX_open_site`/`AX_search_product`/`AX_checkout`을 호출했다. `AGENTS.md`, `DEVTOOLS.md`,
+> `MEMORY_DESIGN.md`, `tools/dead-lua.mjs`의 낡은 두-stack/remote-memory/두-entry 설명도 현재 runtime
+> 구조로 교체했다.
+>
+> **남은 정확한 한계**: 프로덕션 `rpc.allow`의 전체 모듈 정적 감사는 공유 디스패처의 함수별 호출 그래프를
+> 구분하지 못해 여전히 정밀 게이트가 아니다. 거짓으로 보호된다고 쓰던 flows 주석은 고쳤고, 직접 호출 +
+> `pcall` 감지는 정확해졌다. `net.fetch`는 `rpc.allow` 대상이 아니라 도구별 `net:` egress 계약이다.
+>
+> **최종 검증**: `test:lua` 546 · `check:flows` 146 · `test:playground` 84 ·
+> `test:scenarios` 77 · commerce 25/25 + site contracts 19/19 · `dead:lua` 39 alive / 0 dead ·
+> bundle/Lua/schema checks 모두 통과.
+>
+> **라이브 스모크는 외부 blocker로 완료하지 못했다.** shipping CDP extension은 workspace digest
+> `2251483add70`과 13 layers를 저장했지만 backend session이 열리지 않았다. 전-site sweep 두 번과 harness
+> bring-up이 같은 60s backend-open timeout을 답했다. 첫 실패는 FATAL을 출력한 뒤 attached Chrome handle을
+> 놓지 않아 3600s까지 프로세스를 붙잡는 별도 runner 결함도 드러냈다; acquisition 실패도 CDP를 닫고
+> 자신이 띄운 child만 `unref`하도록 고쳤고, 같은 backend refusal이 69.75s에 종료됨을 확인했다.
 
 ---
 
@@ -368,50 +393,34 @@ graph TD
 
 **강제되지 않는데 load-bearing인 것 — 이 목록이 이 리뷰에서 가장 값이 나가는 부분이다:**
 
-| 규칙 | 상태 | 이번에 대가를 치른 항목 |
+| 규칙 | 현재 상태 | 막는 회귀 |
 |---|---|---|
-`output` 선언 ↔ Lua 반환 **양방향** 일치 | `present_store_offers` **한 도구, 한 방향**만 | P1-4, P1-9 |
-일시정지하는 **모든** 노드에 취소 경로 | **플로우당 한 노드**만 확인 | P1-7 |
-off-cart 확인 셀렉터에 카트 구조 금지 | 없음 | **P0-2** |
-`rpc.allow` 감사가 프로덕션 문서 대상 | **playground만** (프로덕션은 59건 이슈, 대부분 합집합 노이즈) | 잠재 |
-§10 셀렉터 규율(해시 클래스 금지) | 없음(사람이 리뷰) | 지금은 깨끗 |
-CSS 리스트 **문서 순서** 안전성 | amazon 제목만 | eBay 제목 리스트 잠재 |
-죽은 설정 키 위생 | 없음 | `search_input_selector` **8사이트 선언 · 0곳 사용** |
-줄바꿈(`.gitattributes` 부재) | 없음 | 이번 세션에 게이트 2개 오탐 |
+`output` 선언 ↔ Lua 반환 **양방향** 일치 | ✅ 전 도구 게이트 | P1-4, P1-9 |
+일시정지하는 **모든** 노드에 취소 경로 | ✅ 노드 + 한 홉 게이트 | P1-7 |
+off-cart 확인 셀렉터에 카트 구조 금지 | ✅ 설정 게이트 | **P0-2** |
+`rpc.allow` 직접/`pcall` 호출 감지 | ✅ playground exact audit; production dispatcher scope는 아래 한계 | 누락 부여·거짓 unused |
+§10 셀렉터 규율(해시 클래스 금지) | ✅ 모든 storefront selector 재귀 검사 | 배포마다 깨지는 클래스 |
+CSS 리스트 **문서 순서** 안전성 | ✅ amazon + eBay 실측 타깃, 특정 계약 테스트 | 제목 대신 브랜드/이미지 |
+죽은 설정 키 위생 | ✅ `search_input_selector` 제거 + 부재 게이트 | 읽히지 않는 설정 축적 |
+줄바꿈 | ✅ `.gitattributes` `eol=lf` | checkout별 byte-gate 오탐 |
 
-`rpc.allow` 감사에는 별개 결함도 있다: `tools/rpc-allow.mjs:57`의 `CALL` 정규식이 이름 뒤 `(`를 요구하므로
-`pcall(sitemap.search_site, …)`(`72_rpc_sitemap.lua:37`)와 `pcall(net.fetch, …)`(`71_rpc_zip.lua:51`)를
-보지 못한다. 그래서 **실제로 쓰이는 부여를 삭제하라고 가르친다.** 감사가 거짓말하기 가장 나쁜 방향이다.
-그리고 `flows.yaml:2773-2774`는 이 감사가 프로덕션을 막아준다고 **주장한다** — 사실이 아니다.
+프로덕션 전체 allow 감사는 한 모듈의 모든 함수를 한 도구가 호출한다고 보는 합집합 노이즈가 있어 아직
+정밀하지 않다. 그 한계를 숨기지 않는다. 반면 호출 검출 자체의 거짓 음성은 닫았다:
+`pcall(sitemap.search_site, …)`를 잡고, `net.fetch`는 별도 `net:` egress 계약이라 RPC op 감사에서 제외한다.
 
 ---
 
-## 5. 문서 어긋남 — `AGENTS.md`가 더 이상 사실이 아닌 곳
+## 5. 문서 어긋남 — 해결
 
-§4(명령 인벤토리)에서 32개 `AX_*` 주장 중 **7개가 유령**이다. **[실측]**
+리뷰 당시 `AGENTS.md` §4는 삭제된 `60_storefront.lua`, Amazon/eBay durable commands,
+`AX_STOREFRONT`, 두 storefront stack, 두 shipping parser를 현재형으로 설명했다. `DEVTOOLS.md`도 삭제된
+`AX_search_product`/`AX_open_quote` 명령을 실행 절차로 제시했고, `MEMORY_DESIGN.md`는 category 삭제를
+`kind: remote` + `memory_result.keys` 형태로 설명했다.
 
-| 항목 | 문서 | 실제 |
-|---|---|---|
-`_common/scripts/60_storefront.lua` | §4 표에 등재 | **파일 없음** |
-`amazon/scripts/{00_common,search,add_to_cart,update_product,checkout}.lua` | §4에 5개 등재 | **전부 없음** (남은 것은 `01_storefront_config.lua` 하나) |
-`ebay/scripts/00_common.lua` | §4에 등재 | **없음** |
-`AX_STOREFRONT` | §4에 등재 | 정의된 곳 없음 |
-"어댑터가 `AX_COMMERCE`에 등록하고 `AX_search_product`를 노출" | §4 | 어댑터는 **설정 전용** |
-"storefront 스택이 **둘**이니 양쪽을 확인하라" | §13 | **하나**다 |
-"shipping 파서가 **둘**이라 동일 응답으로 고정" | §13 | 한쪽이 삭제됨. 고정은 단일 파서 케이스 표로 해소 |
-"라이브 검증: eBay 2페이지에 다른 22행" | §13 | 현재 경로로 재현 불가 (P1-1) |
-"스냅샷이 notes를 나른다 — 해결됨" | §13 | refine이 읽지 않는다 (P1-5) |
-"관련성은 토큰 경계를 안다" | §13 | **모델 코드만.** 브랜드는 경계 없는 부분 문자열 |
-"`sitemap_search`는 remote로 남긴다" | §13 | 지금 `kind: runtime` |
-"취소 규칙을 `check:flows`가 예외 없이 고정" | §13 | **플로우 단위**다 (P1-7) |
-"빈 목록 수정이 세 곳에 들어갔다" | §13 | 세 곳은 여전히 `{}`. 실제 방어는 `63_pure_entries` 출구 |
-
-추가로: `tools/dead-lua.mjs:4` 헤더가 *"들어오는 길은 정확히 둘"* 이라고 적었는데 **자기 구현은 넷**을
-센다(§13은 넷이라고 옳게 적었다). 진입 경로 수를 아는 것이 유일한 임무인 파일의 주석이 틀렸다.
-
-그리고 어떤 npm 스크립트에서도 닿지 않는 **`.mjs` 러너 12개 · 2,617줄** 이 남아 있다. **[실측]**
-`_common/scripts/test_open_site.mjs`는 삭제된 `AX_open_site`를, `amazon/scripts/test_shopping_chain.mjs`는
-삭제된 `AX_search_product`를 구동한다. 고아 스위트 게이트는 `tools/` 아래만 본다.
+현재 문서는 하나의 runtime storefront(`61` + generated `62`), config-only site scripts,
+`memory_result.matches`, `npm run cdp -- send` production path를 설명한다. `tools/dead-lua.mjs` 헤더도
+구현과 같은 네 진입 경로를 말한다. 어떤 npm 스크립트도 닿지 않던 사이트-level `.mjs` 러너 12개는 사용자
+승인 후 삭제했다; 현재 shim 진단은 `npm run cdp -- run AX_resolve_zip` / `npm run cdp -- page`로 한다.
 
 ---
 
@@ -441,28 +450,17 @@ CSS 리스트 **문서 순서** 안전성 | amazon 제목만 | eBay 제목 리�
 
 ---
 
-## 7. P2 — 지금은 잠재적이지만 P1로 자라는 것
+## 7. P2 — 해결 상태
 
-- **로드 순서 가드가 실제 의존성을 가리키지 않는다.** `53`/`54`/`55`/`56`이 모두 `50_commerce_core`를
-  이름으로 확인하는데, 실제 import는 `52_identity`(`worker_value`, `identity_text`), `51_relevance`(`split_list`,
-  `matches_query`), `45_offer_view`, `44_pagination`에서 온다. `AGENTS.md:1449`는 이 가드를 *"드리프트할 수
-  없는 유일한 문장"* 이라 부르지만 **드리프트했다.** 현재 14개 모듈 리스트가 전부 완전해서 잠재 상태다.
-- **스냅샷이 `filters`/`sort`를 버린다** → 정제가 합성되지 않는다. "무료배송만" 다음 "3만원 이하"가
-  무료배송 조건을 조용히 해제한다.
-- **`infer_model`의 단위 블랙리스트가 5개**(`ghz mah gb tb dpi`)뿐 → `500ml`, `60Hz`, `2P`가 모델이 된다.
-  잠긴 identity가 용량이 될 수 있다.
-- **브랜드 앵커가 경계 없는 부분 문자열** → `lg`가 `algorithm`에 매치된다. 모델 앵커는 경계를 아는데
-  브랜드는 아니다.
-- **`shopping_add_to_cart`가 `args.site`를 선언 없이 읽는다** → 항상 nil → 항상 amazon 어댑터. 오늘은
-  엔트리 노드가 `open_amazon`이라 안전하지만, **투영이 결정을 대신하고 있다.**
-- **승인 마커의 작성자가 둘** — `locked_product_identity`(`52_identity.lua:210` + `55_offers.lua:284`),
-  `current_comparison`(`flows.yaml:3184` + `55_offers.lua:285`). §13이 "승인 하나에 작성자 하나"를 이미
-  대가를 치르고 배웠다.
-- **어필리에이트가 `쿠팡에서 보기` 라벨을 하드코딩**(`74:183`)하고 사이트가 아니라 상품명 존재로 게이트한다.
-- **`69_rpc_widget:52`가 `args.data` 부재를 `{}`로 채워 보낸다** — 모듈 자신이 문서화한 실패 형태.
-- **eBay 제목 셀렉터 리스트가 `a[href*='/itm/']`로 끝난다** — 이미지 앵커가 문서 순서상 먼저다.
-  amazon `"h2, h2 a"`가 브랜드를 집었던 것과 **같은 형태**(image_alt 폴백이 완화한다).
-- **11st `result_delivery_selector`가 자기 파일이 "존재하지 않는다"고 적은 클래스를 가리킨다.**
+- 해결: load-order guard가 실제 symbol provider를 검사하고, 누락 dependency를 게이트한다.
+- 해결: comparison snapshot이 `filters`/`sort`를 나르며 정제가 합성되고 `필터 해제`가 노출된다.
+- 해결: `infer_model`이 단위 suffix를 구조적으로 거부한다.
+- 해결: model/brand anchor가 단어 경계를 지키며 한국어↔ASCII script transition은 경계로 인정한다.
+- 해결: 단일-site cart는 undeclared `site`를 default하지 않고 열린 페이지 host에서 도출한다.
+- 유지: 승인 마커 중복 1건은 동일 리터럴 + cart 독립 재검사라 검토 후 유지했다.
+- 해결: affiliate label은 site로 결정한다; widget은 absent `data`를 거부한다.
+- 해결: eBay title selector는 broad image link를 제거했고 11st delivery selector는 live-measured cell이다.
+- 해결: selector hash, dead config key, protected RPC call은 회귀 게이트가 있다.
 
 ---
 
@@ -480,8 +478,8 @@ CSS 리스트 **문서 순서** 안전성 | amazon 제목만 | eBay 제목 리�
 ⑩ P1-7 멀티스토어 취소(4부 규칙) + 게이트를 노드 단위로 · ⑪ P1-8 카테고리 삭제 · ⑫ P1-12 한국 전화번호 ·
 ⑬ P1-1 페이징(고치거나, 못 고치면 §13 기록을 은퇴시킨다).
 
-**4단계 — 문서와 위생.** §5 전체(§4 인벤토리 재작성, §13 낡은 항목 은퇴) · 고아 `.mjs` 12개 처리 ·
-죽은 설정 키 · `.gitattributes`.
+**4단계 — 문서와 위생(완료).** §5 전체 현재화 · 고아 `.mjs` 12개 삭제 ·
+죽은 설정 키 제거 + 게이트 · `.gitattributes` LF 정책.
 
 > **순서의 근거**: 1단계는 사용자가 손해를 보는 항목, 2단계는 사용자가 **틀린 정보를 받는** 항목,
 > 3단계는 사용자가 **하려는 일을 못 하는** 항목, 4단계는 **다음 사람이 잘못 배우는** 항목이다.

@@ -10,7 +10,6 @@ local CONFIG = {
   search_url = "https://www.gmarket.co.kr/n/search",
   search_param = "keyword",
   search_path_marker = "/n/search",
-  search_input_selector = 'input[name="keyword"]',
   result_selector = '.box__item-container, [data-montelena-goodscode]',
   result_id_attr = "data-montelena-goodscode",
   result_url_selector = 'a[href*="goodscode="], a[href*="goodsCode="]',

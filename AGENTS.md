@@ -134,10 +134,17 @@ Design rules:
 | `54_comparison.lua` | `AX_build_offer_screening`, `AX_apply_offer_screening` | comparison window (page/budget/persistence), store-outcome lines, LLM relevance screening |
 | `55_offers.lua` | `AX_rank_store_offers`, `AX_present_store_offers`, `AX_refine_store_offers`, `AX_resolve_store_offer` | deterministic ranking and the numbered surface the user chooses from |
 | `56_store_io.lua` | `AX_search_store_product`, `AX_collect_store_page`, `AX_normalize_store_product_result`, `AX_add_store_product_to_cart` | per-store page collection and the guarded cart add |
-| `60_storefront.lua` | `AX_STOREFRONT` (no command) | selector-configured product/search/cart adapter core shared by representative commerce sites; preserves optional brand/model metadata and normalizes price, shipping, ratings, access challenges, identity revalidation, stale-price guards, and `page`/`has_more` result paging |
 
 The extension also ships **default form tools** present on every site: `AX_get_form`, `AX_set_form`,
 `AX_submit_form`, `AX_navigate` (scriptId `axsdk-default-form-tools`).
+
+### `_common/rpc/` — shipped flow runtime
+Every production commerce, memory, navigation, sitemap, affiliate, and Thumbtack action is a
+`kind: runtime` flow tool whose `modules:` list names these files. `61_rpc_storefront.lua` is the one
+storefront reader; `62_rpc_sites.lua` is generated from the ten site configs; `67_rpc_cart.lua` and
+`68_rpc_checkout.lua` own cart mutation and order-free checkout review; `64`/`65` own Thumbtack;
+`66`, `69`–`74` own navigation, widgets, memory, ZIP, sitemap, offer persistence, and affiliate links.
+There is no second site-local command stack.
 
 ### `thumbtack/scripts/` — **gone.** Thumbtack runs entirely in the runtime
 Nothing durable is left on thumbtack.com. The page detector, the search, the results filter, the quote
@@ -146,24 +153,15 @@ driven by flow tools declared in `_common/flows.yaml`. The eight durable Lua fil
 (4,053 lines) were deleted once nothing reached them; `check:flows` pins the directory empty of Lua so a
 durable command cannot quietly reappear beside its runtime replacement.
 
-### `amazon/scripts/` (on amazon.com)
-`00_common.lua` + `01_storefront_config.lua` (registers with `AX_STOREFRONT`) + `search.lua`
-(`AX_search_product`), `add_to_cart.lua`, `update_product.lua`, `checkout.lua` (`AX_checkout` — stops at
-checkout, **never places an order**; warranty/protection upsell auto-declined, still driven by
-`tools/scenarios/checkout.mjs`). The cart READS went with the port: viewing a cart or a product is
-`_common/rpc/67_rpc_cart.lua` and `68_rpc_checkout.lua` now.
-
-### `ebay/scripts/` (on ebay.com)
-`00_common.lua` + `AX_search_product`, `AX_add_to_cart`; reads stable search-card fields, item/shipping
-cost, condition, seller signal, and return text, then revalidates product-page price before a cart add.
-
-### Representative storefront adapters
-`walmart`, `aliexpress`, `etsy`, `coupang`, `naver-shopping`, `gmarket`, `11st`, and `ssg` each
-provide `scripts/00_common.lua`, register with `AX_COMMERCE`, and expose site-local
-`AX_search_product` / `AX_add_to_cart`. `naver-shopping` is read-only because it is a comparison
-portal without one unified cart. Access/login/CAPTCHA surfaces are returned as explicit classified
-errors instead of fabricated empty results. Together with the specialized Amazon and eBay adapters,
-these are the ten representative commerce sites accepted by the multi-store flow.
+### Storefront site scripts — config only
+`amazon/scripts/01_storefront_config.lua`, `ebay/scripts/01_storefront_config.lua`, and each of
+`walmart`, `aliexpress`, `etsy`, `coupang`, `naver-shopping`, `gmarket`, `11st`, and `ssg`
+`scripts/00_common.lua` declare `AX_SITE_CONFIGS[CONFIG.site] = CONFIG`. They define no site-local
+`AX_search_product` or `AX_add_to_cart` command. `tools/build-rpc-sites.mjs` generates
+`_common/rpc/62_rpc_sites.lua`, and the runtime storefront/cart/checkout modules consume that data.
+`naver-shopping` remains read-only because it is a comparison portal without one unified cart.
+Access/login/CAPTCHA surfaces are returned as explicit classified errors instead of fabricated empty
+results. These are the ten representative commerce sites accepted by the multi-store flow.
 
 Broad multi-store requests discover live listings on a deterministic frontier of at most three
 user-selected stores, group only grounded manufacturer models, and pause for an explicit model choice.
@@ -410,41 +408,17 @@ page. `check:flows` 121 and `test:playground` 50 unchanged.
    way this class survives a green suite. The stub now refuses a second argument, which turned 102 tests red
    before the migration.
 
-Also: `ls`/`run`/`call` reach the **stored-Lua durable commands** (`_common/scripts` + site adapters) —
-the second storefront stack of §13, which no flow tool declares. Production behaviour is **`send`**,
-through the flow engine. Don't read a green `run AX_search_product` as evidence about the shipped path.
+Also: `ls`/`run`/`call` can expose `_common/scripts` globals, including the three labelled dev shims,
+but no site-local storefront command stack remains. Production behaviour is **`send`**, through the flow
+engine; a green direct `run` is not evidence about the shipped flow path.
 
-### 6.2 Why the durable stack had to go (the incompatibility that forced §6.4)
+### 6.2 Why the durable stack had to go (historical)
 
-`npm run test:commerce:live:all` drives `AX_search_store_product` — the durable stack — and on the CDP
-extension it fails for **all ten** storefronts at **13/35**, with one identical error per site. The
-cause is a class, not a bug: **the CDP runtime raises where the in-page runtime returned nil.** Two
-found so far, each blocking the next:
-
-| capability | in-page | CDP |
-|---|---|---|
-| `nav.clear_beforeunload` | present, works | **on the `nav` table and RAISES** — the op only existed because the in-page build shipped a MAIN-world script to null `window.onbeforeunload`, and the CDP build injects no MAIN world |
-| `dom.get_attr` on a missing element | nil | **raises `no_element`** |
-
-The first is fixed: `B.clear_beforeunload()` in `00_base.lua` calls it and survives the raise, and all
-four call sites (`50_commerce_core` ×1, `60_storefront` ×3) go through it. **A capability that EXISTS is
-not a capability that WORKS** — every one of those sites guarded with
-`type(nav.clear_beforeunload) == "function"`, the single check that cannot tell the two apart. Pinned by
-`tools/lua/nav-capability.test.mjs`. The sweep then moved on to `dom.get_attr`, which is the same class.
-
-**Do not harden the rest of it without deciding it is worth hardening.** `61_rpc_storefront` already
-carries exactly this tolerance (§13, "Tolerance must not fabricate"), because the RPC path was written
-for this runtime. The durable stack was written for the in-page one and **no flow tool declares it** —
-its only callers are `ax run` and this sweep. The useful change is probably to make
-`commerce-all-sites.mjs` exercise the shipped path (`send`) instead of `run`, not to port a second
-storefront implementation onto a runtime it was never written for. **That is a scope call, not a fix.**
-
-What the shipped path actually does, measured the same afternoon:
-`npm run test:commerce:live:discovery` → **9/14**, with live 11st returning **6 grounded product
-options**, provenance naming real sites, the identity gate holding before ranking, discovery unable to
-mutate a cart, and `취소` leaving every cart untouched. The five failures are the known-honest ones §13
-records: the scenario picks option 1, that option carries no model name, and the system correctly
-refuses to compare it. **9/14 is the correct number here, not a regression.**
+The deleted durable storefront stack targeted the legacy in-page runtime, where missing DOM reads
+returned nil; the CDP runtime raises for the same refused/missing operations. Porting that second
+implementation would have duplicated the tolerance already present in `61_rpc_storefront.lua`.
+§6.4 records the deletion and the contract-coverage increase. Current live commerce scenarios drive
+the runtime flow path; do not use this retired incompatibility as a reason to recreate site commands.
 
 ### 6.3 Live sweep: what a paused flow does to a runner (2026-08-15)
 
@@ -523,6 +497,13 @@ call, and measured across two passes in one process the browser is alive 3 s aft
 `openCdpSession` reuses it in **0.2 s against 8.1 s** cold. A browser this session did not launch is never
 touched. **Blaming a runner for hanging when it has already printed its answer costs whole afternoons —
 check whether the work finished before looking for where it stopped.**
+
+**A failed OPEN owes the same release as a finished session** (2026-08-17). The sweep printed
+`Timed out after 60000ms waiting for the backend to open a session`, but `openCdpSession` threw before
+it returned the object whose `close()` owned the release; the attached Chrome child then kept Node alive
+until a 3600s outer timeout. Resource acquisition now wraps every step after `launchChrome`: any failure
+closes CDP and `unref`s only a browser this call launched. The same backend refusal now exits in 69.75s,
+and the fake harness pins both the closed debugger channel and one released child handle.
 
 **The distribution, seven runs** (once the exit leak was fixed the wall time is the turn time): worst per
 store **7.5–9.2 s**, total 69.5–78.7 s, wall **86–95 s**, and §13's ~4× LLM swing does **not** appear at
@@ -845,15 +826,11 @@ console (cache-sticky `raw.githubusercontent.com` → **test from the store with
   `status:"error", output:"timeout"`. It had killed the whole Thumbtack quote flow, `checkout`,
   `bluemoonsoft`, and both Playground diagnostics. An entry must be a model node or an in-engine
   (`kind: runtime`) tool; put the first remote call one hop later. Enforced by `check:flows`.
-- **A command that DEFERS cannot complete inside a flow — it is re-executed, never resumed.** Live
-  timeline for `AX_resolve_zip` in the quote flow: `execution:start → deferred` (+4ms), redelivered at
-  +18.7s → `execution:start → deferred` again, and so on until the tool deadline. The same `ax run
-  AX_resolve_zip '{"address":"San Francisco, CA"}'` answers `94102` in **0.5s** (the harness drives the
-  durable loop itself). `AX_open_site` behaves the same across a domain change (deferred at +6ms, first
-  completion at +63s). So any flow step that awaits `net`/`nav` inside one call is currently dead:
-  the quote flow's ZIP step, `checkout`, and `bluemoonsoft`. Re-entrant fire-and-return tools (every
-  storefront search, `AX_search_service`) are unaffected — one more reason the doctrine in §3 exists.
-  **This one is SDK/backend side (`../axsdk-sdk-js`, `axsdk-backend`), not fixable from this repo.**
+- **A durable command that DEFERS cannot complete inside a flow — it is re-executed, never resumed.**
+  This measured failure is why production ZIP, navigation, checkout, Thumbtack, and storefront work
+  moved to `kind: runtime` tools. The old `AX_open_site`/site-command examples are deleted; do not
+  recreate a flow hop that awaits a durable `net`/`nav` command. Re-entrant runtime navigation and
+  same-context work are the supported paths.
 - **One inline action backs exactly one node.** Reusing a `kind: runtime, implementation: lua` tool id
   for two nodes fails the whole document with `inline action duplicates existing action: <id>`.
 - **A dangling `next` target fails the WHOLE document**, not one flow: every intent then answers
@@ -969,8 +946,8 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **Public data only** in committed files. Never commit secrets, tokens, cookies, internal URLs,
   customer data, credentials, or PII. Treat the repo as public on GitHub.
 - **Never auto-submit / send a quote.** Flows stop before final submission; only `Next`/`Continue`/
-  optional `Skip` are clicked automatically. `AX_submit_quote` requires explicit `confirm:true`.
-  `AX_checkout` never places an order.
+  optional `Skip` are clicked automatically. The runtime quote submit requires explicit confirmation,
+  and `68_rpc_checkout.lua` only reads checkout review — it never places an order.
 - **Test data:** use only reserved/fake values in dev — `thumbtack-test@example.com`, `415-555-01xx`,
   a public ZIP like `94101`. Never real PII.
 - **Factual + source-based.** Don't invent URLs/metadata/capabilities. Prefer canonical, stable URLs;
@@ -1016,13 +993,12 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   dominate a turn; a search nav is ~7s (near the SPA hydration floor); non-LLM per-step work is
   sub-second. Speed levers: shrink `action_unit` prompt context (node prompts inject the full flow
   state ~3× — global/local/selected — plus summaries), fewer LLM nodes, a faster model — **not** nav
-  micro-optimization. (Confirmed via `debug` prompt dumps + interference-free timing.) Cross-flow
-  corroboration (amazon shopping, one item): tools are stable ~13s (`AX_search_product` ~5s +
-  `AX_add_to_cart` ~7s, isolated via `ax run`) while the full-flow total swings 17 → 49 → ~79s for the
-  SAME query — the entire swing is the LLM turns (intent-classify + `collect_shopping` + terminal
-  respond) = `openrouter` provider routing / cold-start variance (even a small `gpt-5.4-mini` spikes to
-  12–20s/turn). Decompose latency by isolating tool time with `ax run AX_*` vs the full `ax send` flow
-  (`readChat` strips per-part timing).
+  micro-optimization. (Confirmed via `debug` prompt dumps + interference-free timing.) Historical
+  measurements on the deleted durable Amazon commands isolated ~13s of stable tool work while the
+  same full flow swung 17 → 49 → ~79s; the swing was the LLM turns (intent classify, request
+  collection, terminal response), including 12–20s provider spikes. Current production measurements
+  must use runtime tool-part timing from one `send` session, not deleted `AX_search_product`/
+  `AX_add_to_cart` commands.
 - **`dom.wait_for_selector` / `dom.wait_for` re-drive on DOM mutation (SDK), not only the poll.** The
   durable step arms a scoped `MutationObserver` and wakes the scheduler the instant the element /
   condition appears (measured ~12ms detection on the live page); the ~2000ms deferred poll is only a
@@ -1080,9 +1056,10 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **Relevance anchors on the model code, descriptors only score.** A storefront titles the same product
   without the English brand or the category word, and a search for one model returns its neighbours. So
   `C.relevance_match` REQUIRES the model code (token-boundary aware: `M185` matches `M-185`, never
-  `M185R`) plus the brand, and treats the remaining words as the exact/partial signal. Partial rows are
-  labelled `(유사)` in the window. Measured before the change: `Logitech M185 mouse` matched 0 of 3 real
-  SSG listings, `Logitech M185` matched 3.
+  `M185R`) plus a boundary-matched brand token. Script transitions are boundaries, so Korean
+  `로지텍m185` remains valid while `ge` inside `Range`/`Storage` does not. Remaining words are the
+  exact/partial signal; partial rows are labelled `(유사)` in the window. Measured before the change:
+  `Logitech M185 mouse` matched 0 of 3 real SSG listings, `Logitech M185` matched 3.
 - **Equivalent words come from the MODEL, never from a table in the Lua.** `collect_request` emits two
   `"|"`-separated strings with the request: `query_variants` (other phrasings of the SAME product, tried
   by `AX_collect_store_page` only when a store found NOTHING, capped at 3 because each costs a
@@ -1398,20 +1375,10 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   INTO the generated file — under its own "do not edit" header — so regenerating erased it. The adapter
   is the source. `build:rpc` now runs `build:rpc:sites` first, and `check:flows` compares the committed
   file to what the generator produces now.
-- **There are TWO storefront stacks, and they serve different callers.** RPC flows go through
-  `61_rpc_storefront` + `62_rpc_sites`; the stored-Lua site layer gives each site a local
-  `AX_search_product`/`AX_add_to_cart` through `60_storefront`. `60_storefront` is in NO flow tool's
-  `modules:` but is still live for the site layer the all-site sweep exercises — check BOTH before
-  calling either one dead.
-- **A session id is server-issued (`ses_...`) and not ours to write.** `ax reset` first minted `ax-<base36>`,
-  and every following send came back EMPTY — a 928-second timeout against a session the backend had
-  never heard of. Close the session instead and let the SDK open a real one. The clear is also
-  best-effort: persisted chat rehydrates past `setMessages([])`, and `sendMessage` settles on the message
-  COUNT, so a stale count returned the PREVIOUS turn's reply to a new request. `reset` reports `remaining`.
-- **Two statements of one rule drift, and the drift is invisible.** There are TWO shipping parsers —
-  `S.parse_shipping` in `60_storefront.lua` and a private one in `61_rpc_storefront.lua`, which is what
-  production runs. A fix for "배송비무료" landed in the other copy, every test passed, and the live path
-  stayed broken. Until one is deleted they are pinned to answer identically.
+- **The duplicate storefront stack and duplicate shipping parser are gone.** Production flows use
+  `61_rpc_storefront.lua` + generated `62_rpc_sites.lua`; site scripts are config-only generator input.
+  A storefront fix has one implementation and one parser now. `build:rpc:sites` plus the committed-output
+  gate keeps adapter data and the runtime module identical.
 - **A selector is only ever validated against the live page.** 11st's cards render
   `dd.c-card-item__price-delivery` with an `sr-only` label glued to the value ("배송비무료"); the config asked
   for `.c-card-item__delivery`, which exists nowhere. A selector matching nothing reads as "this store
@@ -1491,10 +1458,10 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   stores failed discovery with `site: expected string, received undefined` — one word in one mapping.
   `check:flows` now refuses `store_result: result` on any runtime tool.
 - **An empty list must be ABSENT at every boundary that validates it, not just the first one you find.**
-  Same encoding trap in three places: `collected`, the normalizer`s `candidates`, and the searcher`s.
-  Fixing one moved the failure to the next. And an error return must still name its store — `required:
-  [site]` means a store that could not be reached has to say WHICH store, or it becomes a schema
-  violation instead of the fact it was reporting.
+  Raw Lua may still encode an empty table as `{}`; the `53`/`54`/`56` producers and
+  `63_pure_entries.lua` exit guards ensure no schema expecting an array receives it. An error return must
+  still name its store — `required: [site]` means a store that could not be reached has to say WHICH store,
+  or it becomes a schema violation instead of the fact it was reporting.
 - **A runtime tool is projected by `parameters.properties`; `input:` is for REMOTE tools and is now a
   compile error on a runtime one.** Undeclared state is DROPPED before the script sees it — that is why
   `localState` showed `query`/`tried_queries` while the tool printed nil, and why discovery re-asked one
@@ -1549,12 +1516,11 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **The flow compiler refuses `rpc.allow: []`.** A tool that touches no page still needs a grant; ours name
   `dom.get_location_href` and never call it.
 - **There are FOUR ways into a Lua file, and a check that knows fewer proposes deletions that break
-  things** (`npm run dead:lua`). A `kind: remote` flowTool names a durable command; a runtime tool names
-  a module in `modules:`; the dev CLI and scenario runners call commands no flow mentions (`ax page` is
-  `AX_read_page`, `tools/scenarios/checkout.mjs` is `AX_checkout`); and registration is a load-time SIDE
-  EFFECT — a storefront config exists to run `S.register(CONFIG)` and nothing references it. Counting
-  `AX_*` definitions alone called `10_form_wizard.lua` dead while the quote tool loads it every step, and
-  every storefront config dead. Knowing all four took the answer from a wrong 30 files to a real 5.
+  things** (`npm run dead:lua`). The generic checker recognises a durable `kind: remote` command, a
+  runtime module in `modules:`, a command called by dev tooling (`AX_read_page`, `AX_resolve_zip`,
+  `AX_echo`), and registration/generator input (`AX_SITE_CONFIGS[CONFIG.site] = CONFIG`). From those roots
+  it follows globals transitively. Runtime modules and config-only adapters are therefore live even when
+  no flow names one of their globals directly.
 - ``SCHEMA.md`` is GENERATED from the flows (`npm run build:schema`), never edited.** A hand-kept mirror
   of a machine-readable source drifts, and this one had: 40 entries against 85 real tools, still
   advertising the whole durable command set the RPC port replaced — `AX_open_quote`, `AX_search_service`,
@@ -1777,12 +1743,11 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   place-order button is not present either. That is a reader gap on the newer pipeline, not a failure — and
   it is reported as unknown rather than guessed. Re-survey before claiming the totals are readable.
 - **Same op name, different data — check WHAT it reads before adopting it.**
-  `implementation: sitemap.search` searches the APP PACKAGE's sitemap; `AX_sitemap_search` searches
-  `sitesStore.currentSitemap`, the sitemap of the site the browser is on. Measured on production, the
-  package's sitemap is the extension's own three pages, so adopting the runtime one answered
-  `sitemap_hits: []` for every request while the flow fell back to the home page and looked like it had
-  worked. A silent wrong answer is the worst shape, so `sitemap_search` stays remote until the runtime can
-  reach the SITE's sitemap.
+  `implementation: sitemap.search` searches the APP PACKAGE's sitemap; `sitemap.search_site` searches
+  `sitesStore.currentSitemap`, the sitemap of the site the browser is on. The first was once adopted and
+  returned the extension's own pages. The shipped `72_rpc_sitemap.lua` now calls the second as a local op
+  in the session worker — the realm that rehydrates site state — and publishes `sitemap_source` so a
+  missing site sitemap is distinguishable from a valid search with no matches.
 - **A PLATFORM implementation answers in its own `next` vocabulary; our lua scripts answer in the node's.**
   Passing `result.next` straight through from `sitemap.search` died live on "final tool result next must be
   one of: go, error". The two rules are opposite: derive the branch for a platform implementation, pass it

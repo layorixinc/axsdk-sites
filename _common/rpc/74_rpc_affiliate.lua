@@ -180,7 +180,7 @@ function A.link(args)
 
   local snapshot = decode(args.comparison_state)
   local saving = A.saving(snapshot, selected)
-  local label = non_empty(selected.name) and ("쿠팡에서 보기") or "상품 보기"
+  local label = (site == "coupang") and "쿠팡에서 보기" or "상품 보기"
   local widget = W.render({
     template_id = "link_button",
     data = { label = label, action = { type = "link", url = url, target = "_blank" } },

@@ -38,6 +38,15 @@ test('calling a wait helper with its polled op granted is clean', () => {
   assert.deepEqual(auditRpcAllow(tool('function run() return { ok = dom.wait_for_selector("h1", 2000) } end', ['dom.exists'])), []);
 });
 
+test('an op passed to pcall is still a call that needs a grant', () => {
+  const source = 'function run() local ok, value = pcall(sitemap.search_site, "x", 5); return { ok = ok, value = value } end';
+  assert.deepEqual(auditRpcAllow(tool(source, ['sitemap.search_site'])), []);
+  assert.deepEqual(
+    auditRpcAllow(tool(source, [])).map((issue) => [issue.code, issue.op]),
+    [['op_not_allowed', 'sitemap.search_site']],
+  );
+});
+
 test('a grant the script never uses is reported', () => {
   const issues = auditRpcAllow(tool('function run() return { x = dom.get_text("h1") } end', ['dom.get_text', 'dom.click']));
   assert.deepEqual(issues.map((issue) => [issue.code, issue.op]), [['unused_grant', 'dom.click']]);

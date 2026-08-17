@@ -20,7 +20,6 @@ local CONFIG = {
   search_url = "https://www.coupang.com/np/search",
   search_param = "q",
   search_path_marker = "/np/search",
-  search_input_selector = 'input[name="q"]',
   result_selector = 'li[data-id]:has(a[href*="/vp/products/"])',
   result_url_selector = 'a[href*="/vp/products/"]',
   result_title_selector = 'img[alt]',

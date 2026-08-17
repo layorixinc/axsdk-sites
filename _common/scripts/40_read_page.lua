@@ -3,7 +3,6 @@
 -- the situational read of the dev tooling, and every caller is named:
 --   SDK harness `page` command (axsdk-extension-cdp/scripts/harness.mjs — `npm run cdp -- page`)
 --   node tools/ax.mjs page          tools/playground.mjs `.page`
---   _common/scripts/test_read_page.mjs (live test)
 -- It is a one-line delegation to B.read_page in 00_base.lua (RPC module source that stays); it
 -- carries no logic of its own. Converts the CURRENT page to Markdown so an operator or LLM can see
 -- the on-screen situation without bespoke per-site scraping. Needs the live page DOM

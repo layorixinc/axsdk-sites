@@ -123,13 +123,31 @@ function S.search_url(config, query, page)
   return url
 end
 
---- True when the browser is already showing this site's results for this query. Re-searching costs a
---- full page load, so the cheapest correct move is to notice we are already there.
-local function already_showing(config, href, query)
+--- True when the browser is already showing this site's results for this query AND for this page.
+--- Re-searching costs a full page load, so the cheapest correct move is to notice we are already there.
+---
+--- The page half was missing, and it cost paging entirely: standing on page 1 of a query, a request for
+--- page 2 matched on the query alone, skipped the navigation, re-read page 1 and labelled it page 2. The
+--- dedupe then removed every row and the loop stopped on `no_new_results` having read one page twice —
+--- while `S.search_url` had already built the correct page-2 url one line earlier, only to have it dropped.
+local function showing_page(config, href, page)
+  local wanted = math.max(1, math.floor(tonumber(page) or 1))
+  local paging = config.pagination
+  if not (paging and paging.param) then return wanted == 1 end
+  local start = tonumber(paging.start) or 1
+  local expected = start + (wanted - 1) * (tonumber(paging.step) or 1)
+  local current = tonumber(tostring(href or ""):match("[?&]" .. paging.param .. "=(%d+)"))
+  -- Page one is the bare url on every site here, so an ABSENT parameter is page one — not "unknown".
+  if current == nil then return expected == start end
+  return current == expected
+end
+
+local function already_showing(config, href, query, page)
   local current = tostring(href or "")
   if not config.search_path_marker or not current:find(config.search_path_marker, 1, true) then
     return false
   end
+  if not showing_page(config, current, page) then return false end
   local encoded = url_encode(query)
   if config.search_path_prefix then
     return current:find(encoded:gsub("%%20", "-"):gsub("+", "-"), 1, true) ~= nil
@@ -677,7 +695,7 @@ function S.search(config, args)
   if not ok then return { next = "error", error = "rpc_unavailable", site = config.site } end
   local target = S.search_url(config, query, tonumber(args.page))
   if not target then return { next = "error", error = "search_url_unavailable", site = config.site } end
-  if not already_showing(config, from, query) then
+  if not already_showing(config, from, query, tonumber(args.page)) then
     -- CAUGHT, not retried: a navigation that already fired would move the page twice. A raise here is the
     -- channel, not the site, and it used to take the whole store down with it.
     local moved = pcall(function() return nav.navigate(target) end)

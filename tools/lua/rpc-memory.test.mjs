@@ -195,6 +195,27 @@ test('email, phone and zip are recognised, and several in one message are all ca
   assert.equal(result.next, 'save');
 });
 
+test('a Korean mobile number is a phone number', () => {
+  // The pattern was 3-3-4, the US shape the reserved test data uses. A Korean mobile is 3-4-4, so
+  // `010-1234-5678` matched nothing: the user gave an explicit clause, nothing was saved, and the hook is
+  // fire-and-continue so nothing was said either. An instruction silently dropped is worse than a refusal,
+  // and this is the product's own primary locale.
+  const kr = capture('제 번호는 010-1234-5678 이에요. 기억해줘.');
+  const byKey = Object.fromEntries((kr.memory_entries ?? []).map((entry) => [entry.key, entry.value]));
+  assert.equal(kr.next, 'save');
+  assert.equal(byKey.phone, '010-1234-5678');
+  assert.equal(byKey.zip_code, undefined, 'a phone number is not a postal code');
+});
+
+test('a price is not a postal code', () => {
+  // The ZIP probe takes any 5-digit run outside a matched phone, so a comma-less amount beside a save clause
+  // was written as the user's postal code — a wrong value that `recall_saved_contact` then feeds into a
+  // quote form. A Korean amount carries its unit; a US ZIP never does.
+  const result = capture('이 상품 30000원이야. 기억해줘.');
+  const byKey = Object.fromEntries((result.memory_entries ?? []).map((entry) => [entry.key, entry.value]));
+  assert.equal(byKey.zip_code, undefined, `an amount must not be saved as a zip: ${result.next}`);
+});
+
 test('English clauses count too', () => {
   assert.equal(capture('remember my email is hong@test.com').next, 'save');
   assert.equal(capture('please save my phone 415-555-0199').next, 'save');

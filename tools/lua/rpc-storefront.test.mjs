@@ -269,6 +269,38 @@ test('page one is the bare search url', () => {
   assert.ok(!/[?&]page=/.test(ops.find((entry) => entry.op === 'nav.navigate').params.url));
 });
 
+test('page two navigates even when page one of the same query is already open', () => {
+  // `already_showing` took no page, so it matched on the query alone: standing on page 1 of `마우스`, a
+  // request for page 2 skipped the navigation entirely, re-read page 1, labelled it page 2, and the
+  // dedupe then removed every row as a duplicate — the loop stopped on `no_new_results` having read the
+  // same page twice. §13 records a live check of eBay's page 2 returning 22 entirely different rows; that
+  // cannot happen through this path, so the entry is what has to move.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4',
+    dom: { 'li.card': [card('1', 'x', '1원')] },
+    afterNavigate: { 'li.card': [card('2', 'y', '2원')] },
+  });
+
+  const { ops } = search(page, { page: 2 }, PAGED);
+
+  const nav = ops.find((entry) => entry.op === 'nav.navigate');
+  assert.ok(nav, 'a page-two request must move the browser');
+  assert.match(nav.params.url, /[?&]page=2\b/, `and it must ask for page two: ${nav?.params.url}`);
+});
+
+test('the same page of the same query is still not re-fetched', () => {
+  // The other half of the rule, and the reason `already_showing` exists: re-searching costs a full page
+  // load, so standing on page 2 and being asked for page 2 must read what is there.
+  const page = makePage({
+    href: 'https://search.11st.co.kr/pc/total-search?kwd=%EB%A7%88%EC%9A%B0%EC%8A%A4&page=2',
+    dom: { 'li.card': [card('1', 'x', '1원')] },
+  });
+
+  const { ops } = search(page, { page: 2 }, PAGED);
+
+  assert.equal(ops.find((entry) => entry.op === 'nav.navigate'), undefined, 'already there: no navigation');
+});
+
 test('a next control that is present says there is more', () => {
   const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')], 'a.next': [{}] } });
   assert.equal(search(page, {}, PAGED).value.has_more, true);

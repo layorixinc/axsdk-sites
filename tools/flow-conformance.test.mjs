@@ -1427,6 +1427,28 @@ test('a field the flow publishes is a field its script can actually produce', ()
         nulls.push(`${id}.output.${key} reads result.${source}, ${target.name} never produces it`);
       }
     }
+    // A branch expression reads the same result, and there is no model to be forgiving about a wrong path:
+    // `find_delete_candidates` routed on `{var: result.keys.0}` while its script answers
+    // `memory_result.matches`, so every successful search took the `not_found` branch. Only the FIRST
+    // segment is checkable — the rest is the op's own payload shape — and that is exactly the segment that
+    // was wrong.
+    const vars = new Set();
+    const collect = (value) => {
+      if (Array.isArray(value)) return value.forEach(collect);
+      if (typeof value !== 'object' || value === null) return;
+      for (const [key, inner] of Object.entries(value)) {
+        if (key === 'var' && typeof inner === 'string' && inner.startsWith('result.')) {
+          vars.add(inner.slice('result.'.length).split('.')[0]);
+        } else collect(inner);
+      }
+    };
+    collect(tool.output);
+    collect(tool.next);
+    for (const source of vars) {
+      if (!new RegExp(`\\b${source}\\b`).test(scope) && !new RegExp(`\\b${source}\\s*=`).test(entry)) {
+        nulls.push(`${id} branches on result.${source}, ${target.name} never produces it`);
+      }
+    }
   }
 
   assert.deepEqual(nulls, [], `published but never computed (always null):\n  ${nulls.join('\n  ')}`);
@@ -1888,26 +1910,47 @@ test('every self-looping model gate has decided about active_node_only', () => {
 //
 // The rule needs no allowlist: a flow that cannot mutate has nothing to cancel (bluemoonsoft pauses and only
 // navigates), and a flow that never pauses never holds a user to say no.
-test('a flow that pauses and can mutate has a cancel route to a terminal', () => {
-  const MUTATION = /add_.*cart|submit_quote|checkout|delete_memory|set_memory|resolve_offer/i;
+test('every node that HOLDS the user in a mutating flow can be told no', () => {
+  // This was written per FLOW — any one node with a cancel branch satisfied the whole document — and that is
+  // one node protected, not a rule. Measured 2026-08-16: `shopping_multi_store_total_cost.collect_request`
+  // holds the user with `enum: [ask, done]`, no `cancel` branch and no cancel instruction in its prompt,
+  // while the planner prompt promises "the flow owns its own cancel path". A refusal routed back there can
+  // only be answered `ask` (re-question) or `done` (start comparing) — the user's no does nothing. The flow
+  // passed the old check because `choose_product` and `present_offers` do have cancel branches.
+  //
+  // A pausing node is one its own `next` map routes back to itself. No allowlist: a flow that cannot mutate
+  // has nothing to cancel (bluemoonsoft pauses and only navigates), and a node that never pauses never holds
+  // a user to say no.
+  // Mutation is DECLARED (`effect: mutation`, which the compiler enforces), and this used to guess it from
+  // node names: `/add_.*cart|submit_quote|checkout|…/`. The multi-store flow mutates through
+  // `shopping_add_selected_store_offer` and matched none of those words, so the flow holding the actual gap
+  // was never examined at all — and any rename would have taken another flow out of scope silently.
   const gaps = [];
   for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml']) {
     if (!existsSync(new URL(path, root))) continue;
     const document = parseFlow(path);
+    const declaresMutation = (node) => [node?.id, ...(node?.allowedTools ?? [])]
+      .filter(Boolean)
+      .some((tool) => document.flowTools?.[tool]?.effect === 'mutation');
     for (const [flowName, flow] of Object.entries(document.flows ?? {})) {
       const nodes = flow?.nodes ?? {};
-      const pauses = Object.entries(nodes).some(([name, node]) =>
-        Object.values(node?.next ?? {}).includes(name));
-      if (!pauses) continue;
-      const mutates = Object.values(nodes).some((node) =>
-        MUTATION.test(`${node?.id ?? ''} ${(node?.allowedTools ?? []).join(' ')}`));
-      if (!mutates) continue;
-      const cancels = Object.values(nodes).some((node) => Object.entries(node?.next ?? {})
-        .some(([branch, target]) => /^cancel/.test(branch) && nodes[target]?.kind === 'terminal'));
-      if (!cancels) gaps.push(`${path} ${flowName}`);
+      if (!Object.values(nodes).some(declaresMutation)) continue;
+      const cancelExit = (target) => Object.entries(nodes[target]?.next ?? {})
+        .some(([branch, to]) => /^cancel/.test(branch) && nodes[to]?.kind === 'terminal');
+      for (const [name, node] of Object.entries(nodes)) {
+        const routes = Object.entries(node?.next ?? {});
+        if (!routes.some(([, target]) => target === name)) continue;
+        // One hop is enough, and it has to be: a renderer pauses on its own `ask` and hands the REPLY to a
+        // classifier on the next pass — `present_results` routes `refine` to `browse_candidates`, which has
+        // the cancel branch. That happens inside the same user turn, so the refusal is answered. What is not
+        // answered is a node whose successors cannot cancel either, which is where the collector sat.
+        const covered = cancelExit(name)
+          || routes.some(([branch, target]) => target !== name && branch !== 'error' && cancelExit(target));
+        if (!covered) gaps.push(`${path} ${flowName}.${name} holds the user and no cancel branch is reachable`);
+      }
     }
   }
-  assert.deepEqual(gaps, [], 'flows that hold the user before a mutation with no way to say no');
+  assert.deepEqual(gaps, [], `nodes that hold the user before a mutation with no way to say no:\n  ${gaps.join('\n  ')}`);
 });
 
 // The other direction of the three-parallel-lists problem. Selected-but-not-declared is already gated (§13: a

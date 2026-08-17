@@ -65,7 +65,12 @@ local STORE_ERRORS = {
   store_search_failed = "검색 실패",
   search_unsupported = "이 사이트는 검색을 지원하지 않음",
   pagination_unsupported = "추가 페이지를 지원하지 않음",
-  missing_query = "검색어를 만들지 못함"
+  missing_query = "검색어를 만들지 못함",
+  -- OURS, and frequent. A live window printed "월마트(walmart): rpc_unavailable" at the user, which is a
+  -- string they can do nothing with. The unknown-code fallback stays as it is — a NEW code must still name
+  -- its store rather than vanish — but a code we ship ourselves gets a sentence.
+  rpc_unavailable = "사이트와 통신하지 못했습니다 (잠시 후 다시 시도)",
+  navigation_stuck = "사이트가 검색 결과로 이동하지 않았습니다 (잠시 후 다시 시도)"
 }
 
 function C.store_label(site)

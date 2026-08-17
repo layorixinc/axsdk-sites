@@ -139,14 +139,21 @@ local function values_in(text)
 
   add("email", text:match("[%w%.%_%%%+%-]+@[%w%.%-]+%.%a%a+"))
 
-  -- A US phone with separators, so a bare run of digits is never mistaken for one. The ZIP below is matched
-  -- only outside a phone for the same reason: "415-555-0199" contains three digit groups.
-  local phone = text:match("%d%d%d[%-%.%s]%d%d%d[%-%.%s]%d%d%d%d")
+  -- A phone with separators, so a bare run of digits is never mistaken for one. Two shapes: 3-3-4 (US, what
+  -- the reserved test data uses) and 3-4-4 (a Korean mobile, `010-1234-5678`). Only the first was matched,
+  -- so a Korean user's explicit "기억해줘" saved NOTHING and, the hook being fire-and-continue, said nothing
+  -- either — in the product's own primary locale. Longer shape first: 3-3-4 would match its own prefix.
+  local phone = text:match("%d%d%d[%-%.%s]%d%d%d%d[%-%.%s]%d%d%d%d")
+    or text:match("%d%d%d[%-%.%s]%d%d%d[%-%.%s]%d%d%d%d")
   add("phone", phone)
 
+  -- The ZIP is matched only outside a phone, because "415-555-0199" contains three digit groups. And it is
+  -- refused when a unit follows it: a bare `30000원` was being written as the user's postal code, which
+  -- `recall_saved_contact` then feeds into a quote form. A US ZIP never carries a unit.
   local scrubbed = phone and text:gsub(phone:gsub("([%-%.%+%*%?%[%]%^%$%(%)%%])", "%%%1"), " ") or text
-  local zip = scrubbed:match("%f[%d](%d%d%d%d%d)%f[%D]")
-  add("zip_code", zip)
+  local zip, after = scrubbed:match("%f[%d](%d%d%d%d%d)%f[%D]()")
+  local unit = after and scrubbed:sub(after):match("^%s*([%a원달러won]+)")
+  if zip and not unit then add("zip_code", zip) end
 
   return found
 end

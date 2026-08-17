@@ -53,6 +53,19 @@ test('every failure code maps to an action the user can take', () => {
   }
 });
 
+test('a channel failure is told in words, not as its wire code', () => {
+  // Measured live 2026-08-16: the comparison window printed "월마트(walmart): rpc_unavailable" at the user.
+  // The unknown-code fallback below is deliberate — a new code must still name its store rather than vanish
+  // — but these two are OURS and they are frequent, so leaving them unmapped hands the user a string they
+  // can do nothing with. Same rule as the `table: 0x2af` incident: the sentence is for the reader, and when
+  // there is no action to offer, say that plainly instead of printing the code.
+  for (const code of ['rpc_unavailable', 'navigation_stuck']) {
+    const status = lua.call('AX_COMMERCE.store_status', [{ site: 'walmart', error: code }], []);
+    assert.doesNotMatch(status.text, new RegExp(code), `the wire code must not reach the user: ${status.text}`);
+    assert.match(status.text, /walmart|월마트/, 'and the store still has to be named');
+  }
+});
+
 test('an unknown code still names the store instead of vanishing', () => {
   const status = lua.call('AX_COMMERCE.store_status', [{ site: 'gmarket', error: 'weird_new_code' }], []);
   assert.match(status.text, /gmarket/);

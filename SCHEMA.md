@@ -545,7 +545,8 @@
           "type": "string",
           "enum": [
             "ask",
-            "done"
+            "done",
+            "cancel"
           ]
         },
         "question": {

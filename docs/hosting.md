@@ -129,13 +129,11 @@ CORS 헤더는 이 설치 경로의 핵심 요건이 아닙니다. 확장 servic
 - [ ] 실제 CWS 확장에서 Look it up → install/update → Enable → 페이지 새로고침 → 명령 실행을 확인했다
 - [ ] 토큰·쿠키·개인정보·내부 URL을 저장소나 결과에 넣지 않았다
 
-## 현재 이 저장소에서 사람이 해야 하는 마지막 일
+## 이 저장소의 배포 상태
 
-파일은 이 변경으로 준비됩니다. 아직 파일 밖에서 필요한 일은 두 가지입니다.
+`main /docs` 배포가 설정되어 있고 첫 Pages 빌드가 성공했습니다.
 
-1. 변경을 승인해 `main` 에 commit/push
-2. GitHub 저장소 **Settings → Pages → main /docs** 를 Save
-
-그 뒤에는 `https://layorixinc.github.io/axsdk-sites/` 가 매뉴얼 주소입니다.
+- 매뉴얼: [https://layorixinc.github.io/axsdk-sites/](https://layorixinc.github.io/axsdk-sites/)
+- 이후 `main` 의 `docs/` 변경을 push하면 같은 Pages workflow가 자동으로 다시 배포합니다.
 
 [← 설치하고 확인하기](using.html) · [← 저작하기](authoring.html)

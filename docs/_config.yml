@@ -1,0 +1,6 @@
+# GitHub Pages 설정. Settings → Pages → Source: "Deploy from a branch" → main / /docs 로 두면
+# 이 디렉터리가 그대로 사이트가 됩니다. 워크플로는 필요 없습니다.
+title: AXSDK 커뮤니티 스크립트
+description: 확장을 설치한 사람이 읽는 사용·저작·디버깅 안내
+theme: minima
+lang: ko

@@ -819,6 +819,50 @@ fetch signed index
 - removal/revocation preserves unrelated providers and state;
 - no-Pack baseline remains byte/behaviour compatible.
 
+### 9.6 Measured Phase 2 result — 2026-08-24
+
+Phase 2 is implemented in the CDP extension and React package:
+
+- `src/packs/registry.ts` verifies packaged registry origins, monotonic signed index/revocation
+  sequences, Ed25519 trust windows, exact release identity, and every content-addressed asset before
+  returning a candidate. The production registry/trust-root list is deliberately empty, so a release
+  cannot currently be installed from the Options page.
+- `artifact-store-idb.ts` is a Pack-only content-addressed IndexedDB. `store.ts`, `installer.ts`,
+  `composer.ts`, `manager.ts`, and `recovery.ts` implement installed-disabled staging, canonical
+  approval receipts, exact approval diffs, immutable composition records, replace/rollback,
+  revocation, pre/post-pointer recovery, reset, and reference-aware garbage collection.
+- Publisher id, registry id, verified trust-key id, exact release digest, commands, effects, sites,
+  fixed services, Provider identities, disclosures, and every added/removed update capability are
+  user-visible before approval. An approval for the prior release cannot authorize the replacement.
+- `messages.ts` admits only closed options-page lifecycle requests. The service worker rehydrates
+  Pack state only when the Pack key exists, refreshes revocations, and exposes no Pack authority to
+  pages. Shared reset first disables and garbage-collects Pack state, then removes only the existing
+  reset-owned keys.
+- `@axsdk/react/packs` is a callback-only local lifecycle surface. Importing it grants no storage,
+  registry, installation, or execution authority.
+
+The activation pointer is lifecycle metadata only in this phase. The Options page states that Pack
+execution remains inactive. No Pack task/provider JavaScript is imported, no role tab is created, no
+`chrome.userScripts` registration is added, and no session graph consumes the pointer until the
+Phase 3 executor and Phase 4 negotiated session path exist.
+
+Measured gates:
+
+- focused extension lifecycle: **38 pass / 0 fail**;
+- pure `@axsdk/packs` contracts: **73 pass / 0 fail**;
+- full SDK regression: **2,523 pass / 0 fail**;
+- extension and `@axsdk/react` production builds: pass;
+- `test:packs:phase2:live`: two independently signed exact releases ran through
+  install-disabled → explicit approval → compose/activate → exact update diff → stale-approval
+  refusal → replace → rollback → replace → exact revocation → remove in real Chromium with real
+  WebCrypto and IndexedDB. Artifact counts were **3 staged / 5 active / 0 remaining**. A task asset
+  containing an observable top-level side effect never executed.
+- The same probe observed the shipping extension before/after and found its Pack keys, permissions,
+  DNR rules, User Script registrations, and tab set unchanged. `test:packs:phase1:live` remains green.
+
+This closes Phase 2 only. Production registry publication, Pack code execution, Pack role tabs,
+Broker v2, and Pack-mode core/platform sessions remain later-phase work.
+
 ## 10. Phase 3 — Exact executor, Broker v2, tab roles, and recovery
 
 ### 10.1 Objective

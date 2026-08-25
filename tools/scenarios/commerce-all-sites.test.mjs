@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   allSites,
+  assertRunnableBatches,
   batchRequestText,
   classifyStoreResult,
   collectStoreResults,
@@ -31,7 +32,7 @@ test('live candidates classify as an answered outcome', () => {
 });
 
 test('access walls, price_unavailable and no_results count as classified answers', () => {
-  for (const error of ['access_denied', 'captcha_required', 'security_verification_required', 'price_unavailable', 'no_results']) {
+  for (const error of ['access_denied', 'captcha_required', 'security_verification_required', 'price_unavailable', 'no_results', 'no_relevant_offers']) {
     const { outcome, responseValid } = classifyStoreResult({ site: 'walmart', error });
     assert.equal(outcome, error);
     assert.equal(responseValid, true, `${error} must count as classified`);
@@ -102,6 +103,15 @@ test('batching groups sites by query, up to the comparison frontier', () => {
   assert.deepEqual(subset.map(batch => batch.sites.length), [1, 1]);
 });
 
+test('a targeted run refuses singleton query batches instead of measuring the single-site flow', () => {
+  assert.doesNotThrow(() => assertRunnableBatches(groupByQuery(allSites)));
+  const singletons = groupByQuery(selectSites(allSites, new Set(['walmart', '11st'])));
+  assert.throws(
+    () => assertRunnableBatches(singletons),
+    /needs at least two stores.*walmart.*11st/i,
+  );
+});
+
 test('the batch request names the query and every store by its proven label', () => {
   const [batch] = groupByQuery(selectSites(allSites, new Set(['amazon', 'walmart'])));
   const text = batchRequestText(batch);
@@ -134,6 +144,41 @@ test('per-site collection: keyed by store_result.site, last output wins, suffix 
   assert.equal(bySite.get('amazon').candidates[0].price, 12.99);
   assert.equal(bySite.get('amazon').candidates[0].currency, 'USD');
   assert.equal(bySite.get('walmart').error, 'price_unavailable');
+});
+
+test('dedicated compact outcomes recover attribution and one normalized sample after trace truncation', () => {
+  const bySite = collectStoreResults([{
+    name: 'shopping_summarize_store_outcomes',
+    status: 'completed',
+    output: {
+      store_outcomes: [
+        {
+          site: '11st',
+          status: 'candidates',
+          candidate_count: 6,
+          sample: {
+            site: '11st',
+            product_id: '9170626560',
+            name: '로지텍 M185',
+            price: 17900,
+            currency: 'KRW',
+            url: 'https://www.11st.co.kr/products/9170626560',
+          },
+        },
+        {
+          site: 'walmart',
+          status: 'access_denied',
+          error: 'access_denied',
+          candidate_count: 0,
+        },
+      ],
+    },
+  }]);
+
+  assert.equal(bySite.get('11st').candidates.length, 1);
+  assert.equal(bySite.get('11st').candidate_count, 6);
+  assert.equal(isNormalizedCandidates('11st', bySite.get('11st').candidates), true);
+  assert.equal(bySite.get('walmart').error, 'access_denied');
 });
 
 test('the read-only guard flags every cart or checkout mutation and nothing else', () => {

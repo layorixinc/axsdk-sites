@@ -17,6 +17,12 @@ local function trim(value)
   return text ~= "" and text or nil
 end
 
+local function href_or_nil()
+  local ok, value = pcall(dom.get_location_href)
+  if ok then return value end
+  return nil
+end
+
 local function url_encode(value)
   return (tostring(value or ""):gsub("[^%w%-%._~]", function(char)
     return string.format("%%%02X", string.byte(char))
@@ -154,7 +160,7 @@ function N.navigate_page(args)
   -- and this wait then costs its whole ceiling before `landed` below decides the same thing anyway.
   nav.wait_for_navigation({ url = target, timeout = 12000, interval = 250 })
 
-  local landed = pcall(dom.get_location_href) and dom.get_location_href() or nil
+  local landed = href_or_nil()
   if not landed or same_page(landed, here) then
     return { next = "error", error = "navigation_failed", href = landed or here, target = target }
   end
@@ -200,14 +206,14 @@ function N.open_site(args)
     return { next = "error", error = trim(args.site) and "unknown_site" or "missing_target" }
   end
 
-  local from = pcall(dom.get_location_href) and dom.get_location_href() or nil
+  local from = href_or_nil()
   if from and N.same_site(target, from) then
     return { next = "search", site = args.site, url = target, href = from, navigated = false }
   end
 
   nav.navigate(target)
   nav.wait_for_navigation({ url = target, timeout = 15000, interval = 250 })
-  local landed = pcall(dom.get_location_href) and dom.get_location_href() or nil
+  local landed = href_or_nil()
   if not landed or not N.same_site(target, landed) then
     return { next = "error", site = args.site, url = target, href = landed,
              error = "navigation_failed" }

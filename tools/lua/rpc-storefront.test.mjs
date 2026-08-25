@@ -63,6 +63,20 @@ test('a search that must move navigates, waits for the href, then waits for the 
     'the href must be observed before the readiness selector');
 });
 
+test('a navigation acknowledgement timeout does not discard a page that landed', () => {
+  const page = makePage({
+    href: 'https://www.amazon.com/s?k=mouse',
+    navigateThrowsAfterFire: 'rpc nav.navigate failed: rpc_timeout',
+    afterNavigate: { 'li.card': [card('1', '무선 마우스', '10,000원')] },
+  });
+
+  const { value } = search(page);
+
+  assert.equal(value.next, 'ok');
+  assert.equal(value.candidates.length, 1);
+  assert.match(page.href, /search\.11st\.co\.kr/);
+});
+
 test('the query the site was asked is carried into the url', () => {
   const page = makePage({ href: 'https://www.google.com/', afterNavigate: { 'li.card': [card('1', 'x', '1원')] } });
   const { ops } = search(page, { query: '로지텍 M185' });

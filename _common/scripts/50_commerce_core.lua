@@ -57,6 +57,110 @@ local function array()
   return {}
 end
 
+-- Fresh multi-store requests used to let the collection model decide whether an explicit site scope was
+-- complete. The same proven three-store wording occasionally came back as a clarification and the turn
+-- stopped before one store was searched. Site names are a closed vocabulary, so that part of the request
+-- is deterministic: resolve it before the model and use a tool whose READY branch cannot ask again.
+local TOTAL_COST_SITES = {
+  { site = "amazon", aliases = { "amazon", "아마존" } },
+  { site = "walmart", aliases = { "walmart", "월마트" } },
+  { site = "ebay", aliases = { "ebay", "이베이" } },
+  { site = "aliexpress", aliases = { "aliexpress", "알리익스프레스", "알리" } },
+  { site = "etsy", aliases = { "etsy", "엣시" } },
+  { site = "coupang", aliases = { "coupang", "쿠팡" } },
+  { site = "naver-shopping", aliases = { "naver shopping", "naver-shopping", "네이버 쇼핑", "네이버쇼핑" } },
+  { site = "gmarket", aliases = { "gmarket", "g마켓", "지마켓" } },
+  { site = "11st", aliases = { "11st", "11번가" } },
+  { site = "ssg", aliases = { "ssg.com", "ssg", "쓱" } },
+}
+
+local TOTAL_COST_GROUPS = {
+  {
+    markers = { "all global stores", "모든 글로벌 스토어", "글로벌 스토어 전체" },
+    sites = { "amazon", "walmart", "ebay", "aliexpress", "etsy" },
+  },
+  {
+    markers = { "all korean stores", "모든 한국 스토어", "한국 스토어 전체" },
+    sites = { "coupang", "naver-shopping", "gmarket", "11st", "ssg" },
+  },
+  {
+    markers = { "all representative stores", "모든 대표 스토어", "대표 스토어 전체" },
+    sites = {
+      "amazon", "walmart", "ebay", "aliexpress", "etsy",
+      "coupang", "naver-shopping", "gmarket", "11st", "ssg",
+    },
+  },
+}
+
+local function remove_plain(text, needle)
+  local value = text
+  while needle ~= "" do
+    local first, last = value:find(needle, 1, true)
+    if not first then break end
+    value = value:sub(1, first - 1) .. " " .. value:sub(last + 1)
+  end
+  return value
+end
+
+local function site_rows(slugs)
+  local rows = array()
+  for index = 1, #slugs do rows[#rows + 1] = { site = slugs[index] } end
+  return rows
+end
+
+function C.prefill_total_cost_request(args)
+  args = type(args) == "table" and args or {}
+  local text = clean(args.requestText or args.request_text)
+  local lowered = text:lower()
+  local sites
+  local residual = lowered
+
+  for group_index = 1, #TOTAL_COST_GROUPS do
+    local group = TOTAL_COST_GROUPS[group_index]
+    for marker_index = 1, #group.markers do
+      local marker = group.markers[marker_index]
+      if lowered:find(marker, 1, true) then
+        sites = group.sites
+        residual = remove_plain(residual, marker)
+        break
+      end
+    end
+    if sites then break end
+  end
+
+  if not sites then
+    local hits = {}
+    for site_index = 1, #TOTAL_COST_SITES do
+      local definition = TOTAL_COST_SITES[site_index]
+      local earliest
+      for alias_index = 1, #definition.aliases do
+        local alias = definition.aliases[alias_index]
+        local position = lowered:find(alias, 1, true)
+        if position and (not earliest or position < earliest) then earliest = position end
+        residual = remove_plain(residual, alias)
+      end
+      if earliest then hits[#hits + 1] = { site = definition.site, position = earliest } end
+    end
+    table.sort(hits, function(left, right) return left.position < right.position end)
+    sites = {}
+    for index = 1, #hits do sites[#sites + 1] = hits[index].site end
+  end
+
+  for _, phrase in ipairs({
+    "배송비 포함 총액으로", "배송비 포함 총액", "배송비 포함", "총액으로",
+    "비교해주세요", "비교해줘", "비교", "찾아주세요", "찾아줘", "에서",
+    "compare", "across", "with shipping", "including shipping", "total cost", "please",
+  }) do
+    residual = remove_plain(residual, phrase)
+  end
+  residual = residual:gsub("[%s%p]+", "")
+
+  if #sites < 2 or residual == "" then
+    return { next = "collect", stores = #sites > 0 and site_rows(sites) or nil }
+  end
+  return { next = "ready", stores = site_rows(sites) }
+end
+
 function C.register_adapter(site, adapter)
   local slug = lower(site)
   if slug == "" or type(adapter) ~= "table" then

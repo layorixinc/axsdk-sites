@@ -188,14 +188,18 @@ export async function openCdpSession(options = {}, lib = undefined) {
     port = DEFAULT_PORT,
     reuse = true,
     provision = true,
+    extensionDir: requestedExtensionDir,
   } = options ?? {};
+  if (![true, false, 'config-only'].includes(provision)) {
+    throw new Error(`provision must be true, false, or "config-only"; received ${String(provision)}`);
+  }
   const sdk = lib ?? await realLibrary();
+  const provisionConfig = provision === true || provision === 'config-only';
+  const provisionStores = provision === true;
 
-  // Read before Chrome is touched: a workspace that does not load is worth reporting before a
-  // browser is on screen configured for it. Not read at all when not provisioning — reading it is how a
-  // run gets a digest to write, and a workspace that fails to load must not stop a session that was
-  // never going to use it.
-  const loaded = provision
+  // Config-only is the exact-artifact smoke: credentials may be supplied, but the workspace stores
+  // must come from the extracted package. `false` reads neither workspace nor credentials.
+  const loaded = provisionConfig
     ? await sdk.loadWorkspace(workspaceRoot)
     : { root: workspaceRoot, digest: '', domains: [] };
 
@@ -206,24 +210,28 @@ export async function openCdpSession(options = {}, lib = undefined) {
   const { cdp, chrome: launched, reused } = await sdk.launchChrome({
     profileName: sdk.profileName, profileRoot: sdk.profileRoot, port,
   });
+  let released = false;
   const release = () => {
+    if (released) return;
+    released = true;
     cdp.close();
     if (reused !== true && launched !== undefined) launched.unref?.();
   };
-
   try {
-  const { extensionId, options: optionsPage, installed } = await sdk.ensureExtension(cdp, sdk.extensionDir);
+  const extensionDir = requestedExtensionDir ?? sdk.extensionDir;
+  const { extensionId, options: optionsPage, installed } = await sdk.ensureExtension(cdp, extensionDir);
   const optionsSession = optionsPage.sessionId;
 
-  // `provision: false` drives what the PACKAGE installed. M1 needs a turn against stores the extension
-  // wrote from its own `workspace-bundle.json`, and a write from here would prove this driver instead.
-  // The build is still installed, because that is what carries the artifact.
+  // `provision: false` drives only what the package resolved. `config-only` supplies credentials
+  // and local-source switches while leaving all five legacy source stores untouched.
   let settings = 'unchanged';
   let stores = 'unchanged';
-  if (provision) {
+  if (provisionConfig) {
     const found = credentials(sdk, loaded.root);
     const config = { ...sdk.harnessConfig(found, process.env, { local: true }), credentialsFrom: found.from };
     settings = await sdk.writeConfig(cdp, optionsSession, config, { overwrite: true });
+  }
+  if (provisionStores) {
     stores = await sdk.writeWorkspaceStores(cdp, optionsSession, sdk.storeEnvelopes(loaded));
   }
 
@@ -355,7 +363,9 @@ export async function openCdpSession(options = {}, lib = undefined) {
     sessionId: opened.sessionId,
     extensionId,
     port,
-    workspace: { root: loaded.root, digest: loaded.digest, domains: [...loaded.domains] },
+    workspace: {
+      root: loaded.root, digest: loaded.digest, domains: [...loaded.domains], settings, stores,
+    },
 
     /** Move the session and re-resolve which site is current. */
     async open(target) {
@@ -386,6 +396,13 @@ export async function openCdpSession(options = {}, lib = undefined) {
         .filter((id) => typeof id === 'string' && id !== '')
         .sort();
       return { url, site, scriptIds };
+    },
+
+    /** Immutable identity from `release-manifest.json`; absent on an ordinary developer build. */
+    async releaseInfo() {
+      const response = await sendToWorker({ type: 'axsdk.cdp.release-info' });
+      if (response?.error) throw new Error(String(response.error));
+      return response?.release;
     },
 
     /** Durable-style run of an AX_* command; resolves the command payload, not an envelope. */
@@ -515,7 +532,12 @@ export async function openCdpSession(options = {}, lib = undefined) {
       for (const message of turn.fresh) {
         for (const part of partsOf(message)) {
           if (part?.type !== 'tool') continue;
-          toolCalls.push({ name: part.tool, status: part.state?.status, output: parseOutput(part.state?.output) });
+          toolCalls.push({
+            name: part.tool,
+            status: part.state?.status,
+            output: parseOutput(part.state?.output),
+            ...(part.debug === undefined ? {} : { debug: part.debug }),
+          });
         }
       }
       const spoken = partsOf(turn.answer)
@@ -599,8 +621,16 @@ export async function openCdpSession(options = {}, lib = undefined) {
     async close() {
       release();
     },
-  };
 
+    /**
+     * Stops the whole dedicated Chrome instance. Use only for an isolated temporary profile; ordinary
+     * CLI callers use `close()` so a shared dev browser stays alive and warm.
+     */
+    async shutdown() {
+      await cdp.send('Browser.close').catch(() => {});
+      release();
+    },
+  };
   return session;
   } catch (error) {
     release();

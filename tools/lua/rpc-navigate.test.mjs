@@ -207,6 +207,23 @@ test('already being on the site is not a navigation', () => {
   assert.deepEqual(navigated(page), []);
 });
 
+test('opening an already-active site does not repeat a successful href read outside pcall', () => {
+  // The exact artifact hit rpc_timeout on the duplicate second read: the protected probe succeeded, then
+  // the expression discarded its value and called the same op again unprotected.
+  const page = makePage({
+    href: 'https://www.amazon.com/s?k=mouse',
+    dom: {},
+    afterNavigate: {},
+    flakyEvery: 2,
+  });
+  installRpcStub(lua, page);
+
+  const result = lua.call('AX_RPC_NAV.open_site', { site: 'amazon' });
+  assert.equal(result.next, 'search');
+  assert.deepEqual(navigated(page), []);
+  assert.equal(hrefReads(page), 1);
+});
+
 test('a site nobody published is refused by name', () => {
   const page = makePage({ href: 'https://www.google.com/', dom: {}, afterNavigate: {} });
   installRpcStub(lua, page);

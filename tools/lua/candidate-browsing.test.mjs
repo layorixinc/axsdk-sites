@@ -181,6 +181,17 @@ test('a cancellation is not mistaken for a criterion', () => {
   assert.equal(cancelled.next, 'cancel');
 });
 
+test('start-over language is not mistaken for first-page navigation', () => {
+  for (const request_text of ['처음부터 다시', '다시 시작', 'start over', 'restart']) {
+    assert.equal(browse({ request_text }).next, 'restart', request_text);
+  }
+});
+
+test('the raw current message wins over stale flow requestText at a paused listing', () => {
+  const cancelled = browse({ request_text: '3번', user_messages: ['취소'] });
+  assert.equal(cancelled.next, 'cancel');
+});
+
 test('an empty reply just re-renders the current window', () => {
   const view = browse({ request_text: '   ' });
   assert.equal(view.next, 'ask');

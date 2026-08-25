@@ -73,7 +73,8 @@ local STORE_ERRORS = {
   -- string they can do nothing with. The unknown-code fallback stays as it is — a NEW code must still name
   -- its store rather than vanish — but a code we ship ourselves gets a sentence.
   rpc_unavailable = "사이트와 통신하지 못했습니다 (잠시 후 다시 시도)",
-  navigation_stuck = "사이트가 검색 결과로 이동하지 않았습니다 (잠시 후 다시 시도)"
+  navigation_stuck = "사이트가 검색 결과로 이동하지 않았습니다 (잠시 후 다시 시도)",
+  unsearched = "검색 작업이 실행되지 않았습니다 (다시 시도)"
 }
 
 function C.store_label(site)
@@ -335,15 +336,75 @@ local function each_store_result(results, visit)
   end
 end
 
+--- Complete the user-selected frontier before screening. `flow.map` can return without one child result;
+--- omitting that store makes a session failure look like the user never asked for it. `unsearched` says
+--- exactly what happened and lets every downstream renderer preserve the missing store as a failure.
+function AX_complete_store_results(args)
+  args = args or {}
+  local requested = args.stores or {}
+  local completed, seen = array(), {}
+  each_store_result(args.store_results or args.results, function(record, _, site)
+    local slug = lower(site)
+    if slug ~= "" then seen[slug] = true end
+    completed[#completed + 1] = record
+  end)
+  for index = 1, #requested do
+    local item = requested[index]
+    local site = non_empty(type(item) == "table" and item.site or item)
+    local slug = lower(site)
+    if slug ~= "" and not seen[slug] then
+      seen[slug] = true
+      completed[#completed + 1] = {
+        key = slug,
+        status = "failed",
+        error = "unsearched",
+        value = { site = slug, error = "unsearched" }
+      }
+    end
+  end
+  return {
+    next = #requested > 0 and "done" or "error",
+    store_results = completed
+  }
+end
+
 --- The numbered list of live listings a model screens for relevance, and the ids that back the numbers.
 --- Stores take turns so a store listed later is not starved by one that returned more rows.
+local function summarize_store_outcomes(results)
+  local per_store = array()
+  local outcomes = array()
+  each_store_result(results, function(record, value, site)
+    local candidates = value and value.candidates or {}
+    if value then per_store[#per_store + 1] = { site = site, candidates = candidates } end
+
+    local failure = non_empty(value and value.error) or non_empty(record.error)
+    local claimed = non_empty(value and value.status)
+    local status = #candidates > 0 and "candidates"
+      or failure
+      or (claimed ~= "candidates" and claimed)
+      or (record.status ~= "completed" and non_empty(record.status))
+      or "no_results"
+    local outcome = { site = site, status = status, candidate_count = #candidates }
+    if failure then outcome.error = failure end
+    local sample = candidates[1]
+    if sample then
+      outcome.sample = {
+        site = site,
+        product_id = AX_OFFER_VIEW.clip(sample.product_id or sample.id, 96),
+        name = AX_OFFER_VIEW.clip(sample.name or sample.title, 160),
+        price = tonumber(sample.price),
+        currency = AX_OFFER_VIEW.clip(sample.currency, 12),
+        url = AX_OFFER_VIEW.clip(sample.url, 512)
+      }
+    end
+    outcomes[#outcomes + 1] = outcome
+  end)
+  return outcomes, per_store
+end
+
 function AX_build_offer_screening(args)
   args = args or {}
-  local per_store = array()
-  each_store_result(args.store_results or args.results, function(_, value, site)
-    if value then per_store[#per_store + 1] = { site = site, candidates = value.candidates or {} } end
-  end)
-
+  local store_outcomes, per_store = summarize_store_outcomes(args.store_results or args.results)
   local lines = array()
   local ids = array()
   local rank = 1
@@ -375,8 +436,20 @@ function AX_build_offer_screening(args)
     next = #ids > 0 and "judge" or "empty",
     screening_text = table.concat(lines, "\n"),
     screening_ids = table.concat(ids, "|"),
-    screening_count = #ids
+    screening_count = #ids,
+    -- One bounded row per store. Chat truncates large candidate payloads at 4120 characters; this is
+    -- the durable attribution/contract evidence the sweep can still parse.
+    store_outcomes = store_outcomes
   }
+end
+
+--- Compact post-screening attribution in its own tool result. `screening_text` can push the builder's
+--- otherwise-small outcome rows past the chat trace limit; this answer carries no prompt text and therefore
+--- remains parseable even when every store returned the full screening budget.
+function AX_summarize_store_outcomes(args)
+  args = args or {}
+  local store_outcomes = summarize_store_outcomes(args.store_results or args.results)
+  return { next = "done", store_outcomes = store_outcomes }
 end
 
 --- Applies a screening verdict: keeps the numbered rows, caps each store at the comparison limit, and

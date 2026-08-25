@@ -48,8 +48,15 @@ function envelope(state, version = 0) {
 function fakeExtension() {
   const storage = new Map();
   const pageGlobal = {}; // the options page's globalThis
-  const cdpToken = { closed: false, close() { this.closed = true; } };
-  const calls = { writeConfig: [], writeWorkspaceStores: [], cleared: 0, luaRequests: [] };
+  const cdpToken = {
+    closed: false,
+    sent: [],
+    close() { this.closed = true; },
+    async send(method) { this.sent.push(method); return {}; },
+  };
+  const calls = {
+    ensureExtension: [], writeConfig: [], writeWorkspaceStores: [], cleared: 0, luaRequests: [],
+  };
 
   let group; // the single AXSDK session group: { id, url, sessionId, turnQueue }
   let nextGroupId = 7;
@@ -59,6 +66,13 @@ function fakeExtension() {
     storage, pageGlobal, cdpToken, calls,
     // Tests override this to script the Lua runtime's answers (a LuaRunAnswer per request).
     onLua: () => { throw new Error('no scripted lua behaviour'); },
+    releaseInfo: {
+      releaseId: 'sha256:release',
+      extensionDigest: 'sha256:extension',
+      workspaceDigest: 'workspace',
+      backendAppId: 'local-artifact-smoke',
+      backendRevision: 0,
+    },
     // Queue of turns; each turn is a list of chat-store snapshots served one per read.
     turns: [],
     // What `launchChrome` hands back. Default: a browser that was already running, so nothing is ours.
@@ -146,6 +160,10 @@ function fakeExtension() {
         return null;
       }
       return undefined;
+    }
+
+    if (message.type === 'axsdk.cdp.release-info') {
+      return { release: fake.releaseInfo };
     }
 
     if (message.type === 'axsdk.cdp.send-message') {
@@ -248,6 +266,7 @@ function fakeExtension() {
     },
     async ensureExtension(cdp, extensionDir) {
       assertCdp(cdp);
+      calls.ensureExtension.push(extensionDir);
       if (typeof extensionDir !== 'string' || extensionDir === '') {
         throw new Error(`No build at ${String(extensionDir)}.`);
       }
@@ -455,6 +474,8 @@ test('openCdpSession provisions the profile and reports the session', async () =
     root: '/ws',
     digest: 'abc123def456',
     domains: ['amazon', 'bluemoonsoft', 'thumbtack'],
+    settings: 'written',
+    stores: 'written',
   });
   assert.equal(fake.calls.writeConfig.length, 1);
   assert.equal(fake.calls.writeConfig[0].options.overwrite, true);
@@ -747,10 +768,10 @@ test('an ordinary completed tool does not resolve an unfinished turn', async () 
 
 // ── provision: false — drive what the PACKAGE installed ──────────────────────
 //
-// M1 needs a turn driven against stores the extension wrote from its own `workspace-bundle.json`, and any
-// write from here would be proving this driver instead. Measured while establishing that: with the stores
-// cleared and the extension reloaded, it repopulated all five itself and recorded the artifact's digest —
-// but every route to a SESSION went through provisioning, so the end-to-end half stayed unproven.
+// The archive smoke must drive assets the extension resolved from `workspace-manifest.json`; any
+// workspace store write from this driver would prove the harness instead. `provision: false` leaves
+// the package-selected config and empty legacy caches untouched so the session worker has to request
+// and install the verified package graph in its own realm.
 //
 // The workspace is not even read in this mode: reading it is how a run gets a digest to write, and a
 // workspace that fails to load must not stop a session that was never going to use it.
@@ -761,6 +782,8 @@ test('provision false writes neither the settings nor the stores', async () => {
 
   assert.equal(fake.calls.writeConfig.length, 0, 'the config the package forced must stand');
   assert.equal(fake.calls.writeWorkspaceStores.length, 0, 'the layers the package installed must stand');
+  assert.equal(session.workspace.settings, 'unchanged');
+  assert.equal(session.workspace.stores, 'unchanged');
   assert.ok(session.sessionId, 'a session is still started');
   await session.close();
 });
@@ -773,6 +796,30 @@ test('provision false still installs the build and starts a session', async () =
 
   assert.ok(session.extensionId, 'the build is installed — it is what carries the artifact');
   assert.ok(session.workspace.root, 'the root is still reported, for the banner');
+  await session.close();
+});
+
+test('config-only provisioning installs an extracted artifact but never writes workspace stores', async () => {
+  const fake = fakeExtension();
+
+  const session = await openSession(fake, {
+    provision: 'config-only',
+    extensionDir: '/verified/archive/extracted',
+  });
+
+  assert.deepEqual(fake.calls.ensureExtension, ['/verified/archive/extracted']);
+  assert.equal(fake.calls.writeConfig.length, 1, 'credentials and local source switches are supplied');
+  assert.equal(fake.calls.writeWorkspaceStores.length, 0, 'the extracted package must install its own stores');
+  assert.equal(session.workspace.settings, 'written');
+  assert.equal(session.workspace.stores, 'unchanged');
+  await session.close();
+});
+
+test('releaseInfo reports the immutable identity embedded in the installed archive', async () => {
+  const fake = fakeExtension();
+  const session = await openSession(fake, { provision: false });
+
+  assert.deepEqual(await session.releaseInfo(), fake.releaseInfo);
   await session.close();
 });
 
@@ -903,6 +950,17 @@ test('close leaves a browser it did not launch alone', async () => {
   await session.close();
 
   assert.equal(touched, 0, 'a reused browser is never ours to release or kill');
+});
+
+test('shutdown closes the dedicated browser rather than merely releasing its handle', async () => {
+  const fake = fakeExtension();
+  fake.chromeReused = true;
+
+  const session = await openSession(fake);
+  await session.shutdown();
+
+  assert.deepEqual(fake.cdpToken.sent, ['Browser.close']);
+  assert.equal(fake.cdpToken.closed, true);
 });
 
 // One sample is not enough to fix a hang, but it is enough to make the NEXT one conclusive. "The turn ran no

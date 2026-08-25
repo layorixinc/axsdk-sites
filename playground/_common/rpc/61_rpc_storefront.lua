@@ -696,10 +696,10 @@ function S.search(config, args)
   local target = S.search_url(config, query, tonumber(args.page))
   if not target then return { next = "error", error = "search_url_unavailable", site = config.site } end
   if not already_showing(config, from, query, tonumber(args.page)) then
-    -- CAUGHT, not retried: a navigation that already fired would move the page twice. A raise here is the
-    -- channel, not the site, and it used to take the whole store down with it.
+    -- Fire once. A timeout can arrive after Chrome accepted the navigation; measured live, the op
+    -- raised `rpc_timeout` and the tab still landed on Walmart. Never re-fire. Let the target-aware
+    -- wait establish the postcondition, and use the acknowledgement only if the address never moved.
     local moved = pcall(function() return nav.navigate(target) end)
-    if not moved then return { next = "error", error = "rpc_unavailable", site = config.site } end
     -- href first. A document that is still alive answers a selector check from the OLD page, so an
     -- element probe here is a false positive waiting to happen.
     --
@@ -721,7 +721,8 @@ function S.search(config, args)
       local landed = dom.get_location_href()
       if landed == nil then return { next = "error", error = "rpc_unavailable", site = config.site } end
       if landed == from then
-        return { next = "error", error = "navigation_stuck", site = config.site, href = landed }
+        return { next = "error", error = moved and "navigation_stuck" or "rpc_unavailable",
+                 site = config.site, href = landed }
       end
     end
   end

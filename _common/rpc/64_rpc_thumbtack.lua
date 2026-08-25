@@ -19,6 +19,9 @@ T.HOME_URL = "https://www.thumbtack.com/"
 -- some A/B variants and data-testid in others.
 T.CARD_SELECTOR = 'div:has(> [data-test="pro-list-result"]), div:has(> [data-testid="pro-list-result"])'
 T.ZIP_REJECTED_SELECTOR = '[data-test="invalid-zip"], [data-test="zip-error"]'
+-- A results URL can still carry an access wall. These are stable semantic attributes/forms; no
+-- build-generated class is treated as evidence.
+T.ACCESS_SELECTOR = '[data-test*="captcha" i], [data-testid*="captcha" i], iframe[src*="captcha" i], form[action*="login" i] input[type="password"]'
 T.RESULT_LIMIT = 24
 
 local function trim(value)
@@ -36,13 +39,29 @@ local function array(value)
   return value or {}
 end
 
+local function href_or_nil(attempts)
+  for _ = 1, (attempts or 1) do
+    local ok, value = pcall(dom.get_location_href)
+    if ok and type(value) == "string" and value ~= "" then return value end
+  end
+  return nil
+end
+
+local function exists_or_nil(selector, attempts)
+  for _ = 1, (attempts or 1) do
+    local ok, value = pcall(dom.exists, selector)
+    if ok then return value == true end
+  end
+  return nil
+end
+
 local function url_encode(value)
   return (tostring(value or ""):gsub("[^%w%-%._~]", function(char)
     return string.format("%%%02X", string.byte(char))
   end))
 end
 
---- Category results live at `/k/<slug>/near-me/`. The slug is the service query lowercased with every
+--- Category results live at `/k/<slug>/near-me`. The slug is the service query lowercased with every
 --- run of non-alphanumerics collapsed to one hyphen — "House Cleaning" becomes "house-cleaning".
 function T.category_slug(query)
   local slug = tostring(query or ""):lower():gsub("[^%w]+", "-")
@@ -52,7 +71,7 @@ end
 function T.search_url(query, zip_code)
   local slug = T.category_slug(query)
   if slug == "" then return nil end
-  return T.HOME_URL .. "k/" .. slug .. "/near-me/" .. (zip_code and ("?zip_code=" .. url_encode(zip_code)) or "")
+  return T.HOME_URL .. "k/" .. slug .. "/near-me" .. (zip_code and ("?zip_code=" .. url_encode(zip_code)) or "")
 end
 
 local function fields()
@@ -125,7 +144,8 @@ local function candidate_from(row)
 end
 
 local function read_cards()
-  local rows = dom.query_all(T.CARD_SELECTOR, fields(), T.RESULT_LIMIT)
+  local ok, rows = pcall(dom.query_all, T.CARD_SELECTOR, fields(), T.RESULT_LIMIT)
+  if not ok or type(rows) ~= "table" then return nil end
   local candidates = {}
   local seen = {}
   for index = 1, #rows do
@@ -144,17 +164,26 @@ end
 --- identical counts in a row count as settled. A single stable reading is not enough: the first and
 --- second polls of a list that has not started rendering are both zero.
 function T.settle(attempts, quiet)
-  local last, stable, candidates = nil, 0, {}
+  local last, stable, candidates, successes = nil, 0, {}, 0
   for _ = 1, (attempts or 8) do
-    candidates = read_cards()
-    if #candidates == last then
-      stable = stable + 1
-      if stable >= (quiet or 1) then return candidates end
+    local current = read_cards()
+    if current then
+      candidates = current
+      successes = successes + 1
+      if #candidates == last then
+        stable = stable + 1
+        if stable >= (quiet or 1) then return candidates end
+      else
+        stable = 0
+      end
+      last = #candidates
     else
+      -- A refused read is a channel fact, not an empty page. Retry within this invocation and never let
+      -- it contribute to the quiet count.
       stable = 0
     end
-    last = #candidates
   end
+  if successes == 0 then return candidates, "rpc_unavailable" end
   return candidates
 end
 
@@ -168,29 +197,60 @@ function T.search_service(args)
   local zip_code = trim(args.zip_code)
   if not query then return { next = "error", error = "query_required" } end
 
-  local ok = pcall(dom.get_location_href)
-  if not ok then return { next = "error", error = "rpc_unavailable" } end
+  local from = href_or_nil(3)
+  if not from then return { next = "error", error = "rpc_unavailable" } end
 
   local target = T.search_url(query, zip_code)
   if not target then return { next = "error", error = "query_not_sluggable" } end
-  nav.navigate(target)
-  -- The TARGET is named, or the port asks "has the address changed since I started" and reads that
-  -- baseline through a round trip: a navigation that commits first can never look like a change, so the
-  -- wait polls its whole ceiling. Measured: a handful of href reads against 42 of them, ~19s live.
-  nav.wait_for_navigation({ url = target, timeout = 8000, interval = 200 })
+  -- Fire exactly once. Shipping-CDP measurement: this acknowledgement raised rpc_timeout after Chrome
+  -- had already landed on a result page containing 61 pros. The page postcondition decides whether the
+  -- navigation worked; retrying the fire would only reload a successful search.
+  local fired_ok, fired = pcall(nav.navigate, target)
+  if fired_ok and type(fired) == "table" and fired.ok == false then
+    return { next = "error", error = "navigation_refused", reason = fired.reason, href = from }
+  end
+  -- Canonical target has no trailing slash because Thumbtack removes it. Naming the slash form makes the
+  -- port's `now:includes(target)` check miss a page that is already open and burn its whole ceiling.
+  pcall(nav.wait_for_navigation, { url = target, timeout = 8000, interval = 200 })
 
-  local candidates = T.settle(8, 2)
-
-  -- A bad postcode answers with a banner and an empty list. Reporting `no_results` would send the user
-  -- looking for another service when the ZIP is what Thumbtack disliked.
-  if dom.exists(T.ZIP_REJECTED_SELECTOR) then
-    return { next = "invalid_zip", query = query, zip_code = zip_code,
-             candidates = array({}), error = "invalid_zip" }
+  local landed = href_or_nil(3)
+  if not landed then return { next = "error", error = "rpc_unavailable" } end
+  local slug = T.category_slug(query)
+  local result_path = "/k/" .. slug .. "/near-me"
+  if not string.find(landed, result_path, 1, true) then
+    local lower = string.lower(landed)
+    if string.find(lower, "/login", 1, true) or string.find(lower, "/signin", 1, true)
+       or string.find(lower, "captcha", 1, true) or string.find(lower, "challenge", 1, true)
+       or exists_or_nil(T.ACCESS_SELECTOR, 2) == true then
+      return { next = "access_refused", error = "access_refused", query = query, zip_code = zip_code, href = landed }
+    end
+    if landed == from then
+      return { next = "error", error = fired_ok and "navigation_stuck" or "rpc_unavailable",
+               query = query, zip_code = zip_code, href = landed }
+    end
+    return { next = "error", error = "wrong_landing", query = query, zip_code = zip_code, href = landed }
+  end
+  if exists_or_nil(T.ACCESS_SELECTOR, 2) == true then
+    return { next = "access_refused", error = "access_refused", query = query, zip_code = zip_code, href = landed }
   end
 
+  local candidates, read_error = T.settle(8, 2)
+  if read_error then
+    return { next = "error", error = read_error, query = query, zip_code = zip_code, href = landed }
+  end
+
+  -- A bad postcode answers with a banner and an empty list. Reporting `no_results` would send the user
+  -- looking for another service when the postcode is what it disliked. Clear the rejected value before
+  -- returning to collection, or the finish gate immediately searches the same ZIP again.
   if #candidates == 0 then
-    return { next = "no_results", query = query, zip_code = zip_code,
-             candidates = array({}), error = "no_results" }
+    local zip_rejected = exists_or_nil(T.ZIP_REJECTED_SELECTOR, 2)
+    if zip_rejected == nil then
+      return { next = "error", error = "rpc_unavailable", query = query, zip_code = zip_code, href = landed }
+    end
+    if zip_rejected then
+      return { next = "invalid_zip", query = query, zip_status = "invalid_zip", error = "invalid_zip", href = landed }
+    end
+    return { next = "no_results", query = query, zip_code = zip_code, error = "no_results", href = landed }
   end
 
   -- `next` is the flow's branch key, and the quote node enumerates `done`. Answering "ok" — a word the
@@ -202,7 +262,7 @@ function T.search_service(args)
     query = query,
     service_query = query,
     zip_code = zip_code,
-    href = dom.get_location_href(),
+    href = landed,
     total_count = #candidates,
     candidates = array(candidates),
   }

@@ -30,6 +30,7 @@ const WRITE_OPS = new Set([
  * @param {Record<string, object[]>} [spec.afterNavigate]  selector → rows visible after a navigation
  * @param {boolean} [spec.navigationFails]   the navigation is accepted but the href never changes
  * @param {string}  [spec.navigateRefusal]   `nav.navigate` answers `{ok:false, reason}` and nothing moves
+ * @param {string}  [spec.navigateThrowsAfterFire] navigation fires, then its acknowledgement raises
  * @param {number}  [spec.settleAfter]        polls the new document needs before it answers (default 1)
  * @param {number}  [spec.fragmentLivesFor]  polls a navigated-to `#fragment` stays readable (default 1)
  */
@@ -91,6 +92,7 @@ export function makePage(spec) {
     // classify where it ACTUALLY is, not where it aimed.
     page.pendingHref = spec.landsAt ?? url;
     page.pendingDom = { ...(spec.afterNavigate ?? {}) };
+    if (spec.navigateThrowsAfterFire) throw new Error(spec.navigateThrowsAfterFire);
     return null;                                    // the runtime answers nil for a fired navigation
   };
 

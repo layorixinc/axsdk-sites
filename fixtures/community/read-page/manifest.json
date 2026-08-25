@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "artifactPath": "index.js",
+  "script": {
+    "id": "fixture.read-page",
+    "name": "Fixture Page Reader",
+    "summary": "Read the heading from the local community-script fixture page.",
+    "version": "1.0.0",
+    "publisherId": "axsdk-fixtures",
+    "sourceUrl": "https://github.com/layorixinc/axsdk-sites/tree/main/fixtures/community/read-page",
+    "license": "MIT"
+  },
+  "execution": {
+    "matches": [
+      "http://127.0.0.1/fixture*"
+    ],
+    "runAt": "document_idle",
+    "world": "USER_SCRIPT",
+    "autorun": false,
+    "minimumChromeVersion": 138,
+    "minimumRuntimeVersion": 1
+  },
+  "commands": [
+    {
+      "name": "read_heading",
+      "description": "Read the visible H1 text from the open fixture page.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "heading": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "heading"
+        ],
+        "additionalProperties": false
+      },
+      "effect": "read",
+      "requiresUserConfirmation": false
+    },
+    {
+      "name": "remember",
+      "description": "Store a short note in this script's own extension-backed storage.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "note"
+        ],
+        "additionalProperties": false
+      },
+      "effect": "read",
+      "requiresUserConfirmation": false
+    },
+    {
+      "name": "recall",
+      "description": "Read back the note this script stored.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "effect": "read",
+      "requiresUserConfirmation": false
+    },
+    {
+      "name": "ping_api",
+      "description": "Fetch the declared health endpoint.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "effect": "read",
+      "requiresUserConfirmation": false
+    },
+    {
+      "name": "probe_forbidden",
+      "description": "Attempt an undeclared host and report the refusal.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "effect": "read",
+      "requiresUserConfirmation": false
+    }
+  ],
+  "disclosures": {
+    "pageData": [
+      "Visible H1 text"
+    ],
+    "localStorage": [],
+    "backendData": [],
+    "modelData": [
+      "Command result when invoked by the AXSDK agent"
+    ]
+  },
+  "release": {
+    "publishedAt": "2026-08-18T00:00:00.000Z",
+    "changelog": "Initial deterministic fixture release."
+  },
+  "review": {
+    "status": "approved",
+    "reviewerId": "axsdk-fixture-reviewer",
+    "reviewedAt": "2026-08-18T00:00:00.000Z"
+  },
+  "network": {
+    "hosts": [
+      "api.axsdk.ai"
+    ]
+  }
+}

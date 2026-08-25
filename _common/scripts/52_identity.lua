@@ -343,27 +343,63 @@ function AX_build_product_options(args)
     return tostring(left.display_name or "") < tostring(right.display_name or "")
   end)
 
+  -- A number is an executable promise: choosing it must lock an identity on the very next deterministic
+  -- step. Real listings without a grounded manufacturer model remain visible as unnumbered observations,
+  -- but they cannot consume a number that the resolver will answer with `enrich`.
+  local selectable, unresolved_names, unresolved_seen = array(), array(), {}
+  for index = 1, #options do
+    local option = options[index]
+    if option.model and option.needs_enrichment ~= true and option.identity_confidence ~= "low"
+       and #(option.source_refs or {}) > 0 then
+      selectable[#selectable + 1] = option
+    else
+      local name = non_empty(option.display_name)
+      if name and not unresolved_seen[name] and #unresolved_names < 3 then
+        unresolved_seen[name] = true
+        unresolved_names[#unresolved_names + 1] = name
+      end
+    end
+  end
+  options = selectable
+
   local limit = math.max(1, math.min(tonumber(args.max_options) or 5, 10))
   while #options > limit do table.remove(options) end
   for index = 1, #options do
     options[index].option_id = "D" .. tostring(index)
     options[index].group_key = nil
   end
+
+  local summary_lines = array()
+  for index = 1, #options do
+    local option = options[index]
+    local sites = table.concat(option.source_sites or {}, ", ")
+    local provenance = sites ~= "" and (" — found at " .. sites) or ""
+    summary_lines[#summary_lines + 1] = tostring(index) .. ". " .. tostring(option.display_name) .. provenance
+  end
+  local product_option_summaries = non_empty(table.concat(summary_lines, "\n"))
+  local unresolved_product_names = nil
+  if #unresolved_names > 0 then
+    unresolved_product_names = "- " .. table.concat(unresolved_names, "\n- ")
+  end
+
   local version_snapshot = {
     query = non_empty(args.query or args.discovery_query),
     product_category = non_empty(args.product_category),
     requested_brand = requested_brand,
     hard_constraints = copy_table(args.hard_constraints),
     soft_preferences = copy_table(args.soft_preferences),
-    options = options
+    options = options,
+    unresolved_product_names = unresolved_product_names,
   }
   local version = "disc-" .. stable_hash(canonical_value(version_snapshot))
   for index = 1, #options do options[index].options_version = version end
 
   return {
-    next = #options > 0 and "choose" or "empty",
+    next = (#options > 0 or unresolved_product_names) and "choose" or "empty",
     options = options,
     options_version = version,
+    product_option_summaries = product_option_summaries,
+    unresolved_product_names = unresolved_product_names,
     failures = failures
   }
 end

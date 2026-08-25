@@ -134,7 +134,7 @@ function O.rank(args)
     -- on every turn. `failures` is the channel `notes_for` reads to name the store that hit a wall, and
     -- three nodes select it (`normalize_rank`, `browse_offers`, `no_results`); without it the comparison
     -- reads as if every store answered. `incomplete_count` is the folded-row count the flow declares.
-    failures = result.failures,
+    failures = type(result.failures) == "table" and #result.failures > 0 and result.failures or nil,
     incomplete_count = result.incomplete_count,
   }
 end
@@ -142,7 +142,7 @@ end
 --- Renders the listing, pauses on it, and reads the answer — because the node that pauses is the only
 --- node that sees the user's new message.
 ---
---- Live, twice: the user typed "취소" and the offer was ADDED TO CART. The model gate downstream re-sent
+--- A prior `action_unit` between this presenter and the resolver re-sent the SAME requestText on every loop:
 --- the previous turn's "3번"; `currentUserText: active_node_only` hands an `action_unit` the text of the
 --- turn IT was active for, and the flow pauses here. The Thumbtack shortlist hit the same failure and
 --- answered it by keeping no model node in the loop at all. A cancel that buys something is the worst
@@ -163,9 +163,12 @@ function O.present(args)
   end
 
   if args.choice_stage == "asked" then
-    local reply = N.classify_reply(args.requestText)
+    local reply = N.classify_reply(N.current_user_text(args))
     if reply.kind == "cancel" then
       return { next = "cancel", ok = true, comparison_id = snapshot.comparison_id }
+    end
+    if reply.kind == "restart" then
+      return { next = "restart", ok = true, comparison_id = snapshot.comparison_id }
     end
     if reply.kind == "page" then
       return {

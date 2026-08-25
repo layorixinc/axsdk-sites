@@ -41,6 +41,15 @@
             "null"
           ]
         },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
         "candidates": {
           "type": [
             "array",
@@ -219,7 +228,7 @@
   },
   {
     "name": "choose_product_identity",
-    "description": "Ask for, cancel, or record one current grounded product option or an exact user-supplied model.",
+    "description": "Ask again, cancel, or record an exact user-supplied manufacturer model.",
     "parameters": {
       "type": "object",
       "additionalProperties": true,
@@ -231,7 +240,6 @@
           "type": "string",
           "enum": [
             "ask",
-            "select",
             "model",
             "cancel"
           ]
@@ -240,25 +248,6 @@
           "type": "string"
         },
         "product_choice_stage": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "product_choice_index": {
-          "type": [
-            "integer",
-            "number",
-            "null"
-          ]
-        },
-        "product_choice_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "choice_options_version": {
           "type": [
             "string",
             "null"
@@ -487,6 +476,106 @@
     }
   },
   {
+    "name": "collect_ready_total_cost_request",
+    "description": "Capture product identity and constraints for a deterministically complete multi-store scope.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "next",
+        "query",
+        "product_category",
+        "quantity",
+        "stores",
+        "query_variants",
+        "brand_aliases"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "done",
+            "cancel"
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "product_category": {
+          "type": "string"
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query_variants": {
+          "type": "string"
+        },
+        "brand_aliases": {
+          "type": "string"
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "soft_preferences": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "quantity": {
+          "type": [
+            "integer",
+            "number"
+          ]
+        },
+        "stores": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string",
+                "enum": [
+                  "amazon",
+                  "walmart",
+                  "ebay",
+                  "aliexpress",
+                  "etsy",
+                  "coupang",
+                  "naver-shopping",
+                  "gmarket",
+                  "11st",
+                  "ssg"
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "collect_shopping",
     "description": "Fill the shopping list (shop_plan — an array of { query, quantity }) and choose the next step (ask the user to clarify, or finish).",
     "parameters": {
@@ -636,41 +725,107 @@
     }
   },
   {
-    "name": "confirm_quote_decision",
-    "description": "Record the user's approval decision before any quote is requested — proceed, return to refine the selection, or keep asking.",
+    "name": "community_classify",
+    "description": "Decide, without a model, whether the user named a community command this page offers. Names only; the values come next.",
     "parameters": {
       "type": "object",
-      "additionalProperties": true,
-      "required": [
-        "next"
-      ],
+      "additionalProperties": false,
       "properties": {
-        "next": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "proceed",
-            "refine",
-            "cancel"
-          ]
-        },
-        "question": {
-          "type": "string"
-        },
-        "refine_stage": {
+        "requestText": {
           "type": [
             "string",
             "null"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "community_confirm",
+    "description": "Render the confirm button for a community command the model proposed, plus the sentence beside it naming the script, the publisher, the effect and the values. Renders only; the click is the user's and the broker re-checks it.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "script_id",
+        "version",
+        "command",
+        "effect"
+      ],
+      "properties": {
+        "script_id": {
+          "type": "string"
+        },
+        "script_name": {
+          "type": "string"
+        },
+        "publisher_id": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "effect": {
+          "type": "string"
+        },
+        "arguments_json": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "community_propose",
+    "description": "Propose one community command for the user to run, with the values it should carry. Renders nothing and runs nothing — the user presses a button, and the extension checks everything again before it does.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command"
+      ],
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "arguments_json": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
+    "name": "confirm_quote_decision",
+    "description": "Classify the current quote approval reply without model judgement.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "quote_confirm_stage": {
           "type": [
             "string",
             "null"
           ]
-        },
-        "message": {
-          "type": "string"
         }
       }
     }
@@ -1640,6 +1795,167 @@
     }
   },
   {
+    "name": "present_memory_result",
+    "description": "Render one memory result as localized consumer text without exposing the wire envelope.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "memory_result": {
+          "type": [
+            "object",
+            "boolean",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "operation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "confirmed": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "regex": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "delete_keys": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "present_product_options",
+    "description": "Present safe discovery choices and classify a current number without model judgement.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "product_option_summaries": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unresolved_product_names": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "options_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_choice_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "present_quote_collection",
+    "description": "Present one quote-collection question and pause until the user answers it.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "collect_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "present_refined_results",
     "description": "Present the rendered refined-shortlist widget and ask once for explicit quote approval.",
     "parameters": {
@@ -1708,6 +2024,15 @@
             "string",
             "null"
           ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         },
         "choice_stage": {
           "type": [
@@ -2103,42 +2428,6 @@
     }
   },
   {
-    "name": "shopping_affiliate_link",
-    "description": "Convert the selected offer into its affiliate deep link. Never navigates; the user opens the link.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [],
-      "properties": {
-        "comparison_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "comparison_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "selected_offer": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
-        },
-        "site": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      }
-    }
-  },
-  {
     "name": "shopping_apply_offer_screening",
     "description": "Keep only the judged-relevant listings, apply the per-store comparison cap, and report how many rows were removed.",
     "parameters": {
@@ -2344,6 +2633,45 @@
             "string",
             "null"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_complete_store_results",
+    "description": "Add an explicit unsearched failure for any selected store missing from the fan-out.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stores"
+      ],
+      "properties": {
+        "stores": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "site"
+            ],
+            "properties": {
+              "site": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "store_results": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
         }
       }
     }
@@ -2568,6 +2896,22 @@
         "store_result": {
           "type": "object",
           "additionalProperties": true
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_prefill_total_cost_request",
+    "description": "Resolve an explicitly named multi-store scope deterministically before request normalization.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "requestText"
+      ],
+      "properties": {
+        "requestText": {
+          "type": "string"
         }
       }
     }
@@ -3124,6 +3468,26 @@
     }
   },
   {
+    "name": "shopping_summarize_store_outcomes",
+    "description": "Emit a bounded post-screening outcome and sample for every searched store.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "store_results"
+      ],
+      "properties": {
+        "store_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "shopping_verify_product_offers",
     "description": "Classify live offers against the locked model and hard variants before ranking.",
     "parameters": {
@@ -3208,46 +3572,6 @@
           "type": [
             "integer",
             "number"
-          ]
-        }
-      }
-    }
-  },
-  {
-    "name": "submit_quote",
-    "description": "Send the quote request from the final step with the collected contact details, and report the Thumbtack popover or outcome that results.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "zip_code": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "submit_phone": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "submit_email": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "submit_first_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "submit_last_name": {
-          "type": [
-            "string",
-            "null"
           ]
         }
       }

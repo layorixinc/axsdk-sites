@@ -97,6 +97,15 @@ test('a constant in the mapping is passed through', () => {
   assert.ok(value.next);
 });
 
+test('the compact post-screening summary is reachable through the runtime dispatcher', () => {
+  const value = lua.call('AX_RPC_PURE.run', 'AX_summarize_store_outcomes', {
+    store_results: [{ key: '11st', status: 'completed', value: { store_result: STORE_RESULT } }],
+  });
+  assert.equal(value.next, 'done');
+  assert.equal(value.store_outcomes[0].site, '11st');
+  assert.equal(value.store_outcomes[0].status, 'candidates');
+});
+
 test('a command nobody mapped is refused, not called blind', () => {
   const value = lua.call('AX_RPC_PURE.run', 'AX_not_a_command', {});
   assert.equal(value.next, 'error');

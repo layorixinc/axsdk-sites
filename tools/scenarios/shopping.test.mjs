@@ -60,9 +60,17 @@ test('step 2 passes when the add SUCCEEDED and checkout confirmation asks', () =
   assert.equal(addThenConfirmAsks(step(['shopping_add_to_cart'], '체크아웃 할까요?')), false);
 });
 
-test('step 3 passes when a checkout node ran and the reply talks checkout', () => {
-  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, '체크아웃 페이지입니다')), true);
-  assert.equal(checkoutRunsNoOrder(step(['do_checkout'], 'checkout review reached')), true);
-  assert.equal(checkoutRunsNoOrder(step(['shopping_search_product'], '체크아웃')), false);
-  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, 'hello')), false);
+test('step 3 passes only when checkout ran and the reply says no order was placed', () => {
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, '체크아웃 페이지이며 주문은 완료되지 않았습니다.')), true);
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, '아직 주문이 이루어지지 않았습니다.')), true);
+  assert.equal(checkoutRunsNoOrder(step(['do_checkout'], 'Checkout review reached; no order has been placed.')), true);
+  assert.equal(checkoutRunsNoOrder(step(['shopping_search_product'], '주문은 완료되지 않았습니다.')), false);
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, '체크아웃 페이지입니다')), false);
+});
+
+test('checkout verification requires an explicit no-order statement', () => {
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, '체크아웃 페이지에 도착했고 주문은 완료되지 않았습니다.')), true);
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, 'Your checkout is ready; no order has been placed.')), true);
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, '주문이 완료되었습니다.')), false);
+  assert.equal(checkoutRunsNoOrder(step(CHECKOUT, 'Order placed successfully.')), false);
 });

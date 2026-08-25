@@ -16,6 +16,10 @@ function variants(options) {
   return Array.isArray(result) ? result : [];
 }
 
+function prefill(requestText) {
+  return lua.call('AX_COMMERCE.prefill_total_cost_request', { requestText });
+}
+
 // The wordings come from the model, which knows the product and the stores in scope. This module owns
 // only the mechanics: the user's own query leads, the model's alternatives follow in the order it gave
 // them, nothing is repeated, and the list is bounded because each extra wording costs a navigation.
@@ -61,6 +65,39 @@ test('nothing is invented when the model stayed silent', () => {
 
 test('an empty query yields nothing to try', () => {
   assert.deepEqual(variants({ query: '', query_variants: '로지텍' }), []);
+});
+
+test('an explicit three-store comparison is ready before the model runs', () => {
+  const result = prefill('Logitech M185를 Amazon, Walmart, eBay에서 배송비 포함 총액으로 비교해줘');
+  assert.equal(result.next, 'ready');
+  assert.deepEqual(result.stores, [
+    { site: 'amazon' },
+    { site: 'walmart' },
+    { site: 'ebay' },
+  ]);
+});
+
+test('site groups expand deterministically in the documented order', () => {
+  const result = prefill('Compare Logitech M185 across all global stores');
+  assert.equal(result.next, 'ready');
+  assert.deepEqual(result.stores, [
+    { site: 'amazon' },
+    { site: 'walmart' },
+    { site: 'ebay' },
+    { site: 'aliexpress' },
+    { site: 'etsy' },
+  ]);
+});
+
+test('an incomplete request stays on the clarification path', () => {
+  assert.equal(prefill('Logitech M185를 Amazon에서 찾아줘').next, 'collect');
+  assert.equal(prefill('Amazon, Walmart에서 비교해줘').next, 'collect');
+});
+
+test('11st is a store name, never a quantity', () => {
+  const result = prefill('로지텍 M185를 11번가와 SSG에서 비교해줘');
+  assert.equal(result.next, 'ready');
+  assert.deepEqual(result.stores, [{ site: '11st' }, { site: 'ssg' }]);
 });
 
 // ── brand equivalence for matching, also from the model ──────────────────────

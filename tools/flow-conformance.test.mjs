@@ -59,7 +59,6 @@ test('production mutations use the current mutation contract', () => {
     identity_approval: 'locked_product_identity',
     comparison_approval: 'current_comparison',
   });
-  assertMutation(common.flowTools?.submit_quote, 'submit_quote');
 });
 
 test('thumbtack shortlisting ranks from site data, never from the model', () => {
@@ -111,6 +110,109 @@ test('thumbtack shortlisting ranks from site data, never from the model', () => 
   }
 });
 
+test('Thumbtack search outcomes keep invalid location, empty results, and channel failure distinct', () => {
+  // Shipping-CDP reproduction: nav.navigate timed out after the browser had already rendered 61 pros.
+  // The runtime error followed search.next.error to no_results, whose prose blamed the valid 94101 ZIP.
+  // A channel failure is not a statement about the location or the site's inventory.
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.request_service_quote;
+  const search = flow.nodes.search;
+
+  assert.notEqual(search.next.invalid_zip, search.next.no_results);
+  assert.notEqual(search.next.error, search.next.no_results);
+  assert.notEqual(search.next.access_refused, search.next.no_results);
+  assert.doesNotMatch(flow.nodes.no_results.respond, /ZIP.{0,30}(?:invalid|unsupported)|ZIP.{0,30}(?:잘못|유효|지원)/i);
+
+  assert.equal(search.next.invalid_zip, 'collect_request');
+  const searchTool = common.flowTools.search_service;
+  assert.equal(searchTool.output.zip_code, 'result.zip_code');
+  assert.equal(searchTool.output.zip_status, 'result.zip_status');
+});
+
+test('a contact answer resumes active quote collection instead of replacing its state', () => {
+  // Shipping-CDP reproduction: the first turn collected house cleaning + 94101 and asked for contact.
+  // The contact-only reply started a fresh request_service_quote flow, then asked for the service again.
+  const planner = parseFlow('_common/flows.yaml').planner.prompt;
+  assert.match(planner, /SERVICE COLLECTION FOLLOW-UP/);
+  assert.match(planner, /activeFlow=request_service_quote[\s\S]{0,300}activeNode=present_collection_question/);
+  assert.match(planner, /continue_current[\s\S]{0,300}state\.requestText/);
+});
+
+test('quote collection pauses on a deterministic presenter before accepting the answer', () => {
+  // A model tool that merely returns `question` completes its message; the engine then has no active node
+  // to resume, so planner wording cannot preserve the state. The question must come from a pausing contract.
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.request_service_quote;
+  const collect = flow.nodes.collect_request;
+  const presenter = flow.nodes.present_collection_question;
+
+  assert.equal(collect.next.ask, 'present_collection_question');
+  assert.equal(presenter.kind, 'action_contract');
+  assert.equal(presenter.id, 'present_quote_collection');
+  assert.equal(presenter.next.ask, 'present_collection_question');
+  assert.equal(presenter.next.resume, 'collect_request');
+  assert.equal(presenter.next.cancel, 'quote_cancelled');
+  assert.ok(presenter.inputSelector.includes('userMessages'));
+  assert.ok(Object.hasOwn(flow.state, 'collect_stage'));
+});
+
+test('explicit multi-store scope is resolved before the collection model can re-ask', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const route = common.router.routes.find(entry => entry.intent === 'shopping_multi_store_total_cost');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const prefill = flow.nodes.prefill_request;
+  const ready = flow.nodes.collect_ready_request;
+
+  assert.equal(route.entry, 'shopping_multi_store_total_cost.prefill_request');
+  assert.equal(prefill.kind, 'action_contract');
+  assert.equal(prefill.id, 'shopping_prefill_total_cost_request');
+  assert.equal(prefill.next.ready, 'collect_ready_request');
+  assert.equal(prefill.next.collect, 'collect_request');
+  assert.ok(prefill.inputSelector.includes('requestText'));
+  assert.equal(ready.kind, 'action_unit');
+  assert.deepEqual(ready.allowedTools, ['collect_ready_total_cost_request']);
+  assert.ok(ready.inputSelector.includes('stores'));
+  assert.ok(!common.flowTools.collect_ready_total_cost_request.parameters.properties.next.enum.includes('ask'),
+    'a deterministically complete site scope cannot be turned back into a clarification');
+});
+
+test('post-screening store outcomes are emitted in a dedicated compact result', () => {
+  const flow = parseFlow('_common/flows.yaml');
+  const shopping = flow.flows.shopping_multi_store_total_cost.nodes;
+  const summary = shopping.summarize_store_outcomes;
+
+  assert.equal(shopping.apply_screening.next.done, 'summarize_store_outcomes');
+  assert.equal(summary.kind, 'action_contract');
+  assert.equal(summary.id, 'shopping_summarize_store_outcomes');
+  assert.equal(summary.next.done, 'verify_offers');
+  assert.ok(summary.inputSelector.includes('store_results'));
+  assert.equal(flow.flowTools.shopping_summarize_store_outcomes.output.store_outcomes, 'result.store_outcomes');
+});
+
+test('paused deterministic listings can restart without reusing a stale choice or approval', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const shopping = common.flows.shopping_multi_store_total_cost.nodes;
+  const quote = common.flows.request_service_quote.nodes;
+
+  assert.equal(shopping.present_offers.next.restart, 'restarted');
+  assert.match(shopping.restarted.respond, /초기화/);
+  assert.match(shopping.restarted.respond, /장바구니/);
+  assert.equal(quote.browse_candidates.next.restart, 'quote_restarted');
+  assert.match(quote.quote_restarted.respond, /초기화/);
+  assert.match(quote.quote_restarted.respond, /연락/);
+});
+
+test('paused deterministic listings read the raw current user message', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const shopping = common.flows.shopping_multi_store_total_cost.nodes;
+  const quote = common.flows.request_service_quote.nodes;
+
+  assert.ok(shopping.present_offers.inputSelector.includes('userMessages'));
+  assert.ok(common.flowTools.present_store_offers.parameters.properties.userMessages);
+  assert.ok(quote.browse_candidates.inputSelector.includes('userMessages'));
+  assert.ok(common.flowTools.browse_service_candidates.parameters.properties.userMessages);
+});
+
 test('multi-store shopping discovers and locks product identity before ranking', () => {
   const common = parseFlow('_common/flows.yaml');
   const flow = common.flows?.shopping_multi_store_total_cost;
@@ -124,25 +226,30 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.equal(nodes.discover_products.id, 'shopping_discover_products');
   assert.equal(nodes.discover_products.next.done, 'build_product_options');
   assert.equal(nodes.build_product_options.id, 'shopping_build_product_options');
-  assert.equal(nodes.build_product_options.next.choose, 'choose_product');
+  assert.equal(nodes.build_product_options.next.choose, 'present_product_options');
+  assert.equal(nodes.present_product_options.next.select, 'resolve_product');
   assert.deepEqual(nodes.choose_product.allowedTools, ['choose_product_identity']);
-  assert.equal(nodes.choose_product.next.select, 'resolve_product');
   assert.equal(nodes.resolve_product.id, 'shopping_resolve_product_option');
   assert.equal(nodes.resolve_product.next.lock, 'search_stores');
   assert.equal(nodes.choose_product.messagePolicy?.currentUserText, 'active_node_only');
-  // Search feeds a two-stage relevance decision before anything is verified or ranked: the deterministic
-  // recall list, one model verdict on it, then the cap. Every hop is enforced because a missing one would
-  // silently restore token-only filtering (accessories in the comparison) or drop the fail-open path.
-  assert.equal(nodes.search_stores.next.done, 'screen_offers');
-  assert.equal(nodes.search_stores.next.partial, 'screen_offers');
+
+  // Search first completes the user-selected frontier: a missing fan-out child is an explicit `unsearched`
+  // record, never a silently omitted store. The complete list then feeds the two-stage relevance decision.
+  assert.equal(nodes.search_stores.next.done, 'complete_store_results');
+  assert.equal(nodes.search_stores.next.partial, 'complete_store_results');
+  assert.equal(nodes.search_stores.next.empty, 'complete_store_results');
+  assert.equal(nodes.complete_store_results.id, 'shopping_complete_store_results');
+  assert.equal(nodes.complete_store_results.next.done, 'screen_offers');
   assert.equal(nodes.screen_offers.id, 'shopping_build_offer_screening');
   assert.equal(nodes.screen_offers.next.judge, 'judge_relevance');
   assert.equal(nodes.screen_offers.next.empty, 'no_results');
   assert.deepEqual(nodes.judge_relevance.allowedTools, ['screen_store_offers']);
   assert.equal(nodes.judge_relevance.next.done, 'apply_screening');
   assert.equal(nodes.apply_screening.id, 'shopping_apply_offer_screening');
-  assert.equal(nodes.apply_screening.next.done, 'verify_offers');
-  assert.equal(nodes.apply_screening.next.empty, 'no_results');
+  assert.equal(nodes.apply_screening.next.done, 'summarize_store_outcomes');
+  assert.equal(nodes.summarize_store_outcomes.next.done, 'verify_offers');
+  assert.equal(nodes.apply_screening.next.empty, 'summarize_empty_store_outcomes');
+  assert.equal(nodes.summarize_empty_store_outcomes.next.done, 'no_results');
   // Precision is worth one model call; it is never worth the whole turn. Every way the judgement can go
   // wrong (stall, invalid answer, tool error) lands on apply_screening, which keeps every row.
   for (const exit of ['stalledNext', 'invalidNext', 'exhaustedNext']) {
@@ -330,6 +437,81 @@ function assertStallGuard(flow, flowName, nodeName) {
   assert.notEqual(target, nodeName, `${flowName}.${nodeName} must not stall into itself`);
 }
 
+test('broad product choices expose only consumer-safe lockable numbers', () => {
+  // Live, the gate printed identity_confidence, source_sites JSON and sample-price internals, then gave
+  // number 1 to a low-confidence listing that the next deterministic node refused to lock.
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const classifier = flow.nodes.choose_product;
+  const presenter = flow.nodes.present_product_options;
+  const prompt = classifier.prompt;
+  const builder = common.flowTools.shopping_build_product_options;
+
+  assert.ok(Object.hasOwn(flow.state, 'product_option_summaries'));
+  assert.ok(Object.hasOwn(flow.state, 'unresolved_product_names'));
+  assert.equal(flow.nodes.build_product_options.next.choose, 'present_product_options');
+  assert.equal(presenter.kind, 'action_contract');
+  assert.ok(presenter.inputSelector.includes('product_option_summaries'));
+  assert.ok(presenter.inputSelector.includes('userMessages'));
+  assert.equal(presenter.next.select, 'resolve_product');
+  assert.ok(!classifier.inputSelector.includes('product_options'), 'raw option records never enter a model prompt');
+  assert.equal(builder.output.product_option_summaries, 'result.product_option_summaries');
+  assert.equal(builder.output.unresolved_product_names, 'result.unresolved_product_names');
+  assert.doesNotMatch(prompt, /identity_confidence|source_sites|source_refs|sample[_ ]prices?/i);
+  assert.match(prompt, /without a number|번호를 부여하지/i);
+  assert.match(prompt, /product_option_summaries/);
+  assert.match(prompt, /unresolved_product_names/);
+  assert.equal(common.flowTools.present_product_options.execute.implementation, 'lua');
+  assert.equal(common.flowTools.present_product_options.parameters.properties.next, undefined);
+  assert.equal(presenter.next.model, 'choose_product');
+  assert.equal(presenter.next.cancel, 'cancelled');
+  assert.equal(presenter.next.ask, 'present_product_options');
+  assert.equal(presenter.next.error, 'error');
+  assert.equal(presenter.fallback.invalidNext, 'error');
+  assert.equal(presenter.fallback.exhaustedNext, 'error');
+  assert.equal(presenter.kind, 'action_contract');
+});
+
+test('memory results reach a deterministic consumer response instead of the terminal model', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.memory;
+  const nodes = flow.nodes;
+  const presenter = nodes.present_result;
+  const tool = common.flowTools.present_memory_result;
+
+  assert.ok(Object.hasOwn(flow.state, 'memory_response'));
+  for (const nodeName of ['list_memory', 'get_memory', 'search_memory', 'delete_memory', 'set_memory']) {
+    assert.equal(nodes[nodeName].next.report, 'present_result', `${nodeName} success must use the presenter`);
+    assert.equal(nodes[nodeName].next.error, 'present_result', `${nodeName} failure must use the presenter`);
+  }
+  assert.equal(nodes.prepare_memory.next.error, 'present_result');
+  assert.equal(nodes.find_delete_candidates.next.error, 'present_result');
+  assert.equal(nodes.find_delete_candidates.next.not_found, 'present_result');
+  assert.equal(nodes.choose_delete_keys.next.cancelled, 'present_result');
+  assert.equal(presenter.kind, 'action_contract');
+  assert.equal(presenter.id, 'present_memory_result');
+  assert.deepEqual(presenter.next, { done: 'report', cancelled: 'cancelled', error: 'error' });
+  assert.ok(presenter.inputSelector.includes('memory_result'));
+  assert.ok(presenter.inputSelector.includes('operation'));
+  assert.ok(presenter.inputSelector.includes('confirmed'));
+  assert.equal(tool.execute.implementation, 'lua');
+  assert.equal(tool.output.memory_response, 'result.memory_response');
+  assert.equal(common.flowTools.set_memory.output.memory, 'result.memory');
+  assert.equal(common.flowTools.delete_memory.output.delete_keys, 'result.delete_keys');
+  assert.deepEqual(nodes.report.respond, {
+    from: 'memory_response',
+    fallback: '메모리 요청을 완료했지만 결과를 표시할 수 없습니다.',
+  });
+  assert.doesNotMatch(JSON.stringify(nodes.report), /Reply briefly|Flow state JSON|memory_result/);
+  assert.deepEqual(nodes.error.respond, {
+    from: 'memory_response',
+    fallback: '메모리 요청을 완료하지 못했습니다. 아무것도 저장하거나 삭제하지 않았습니다. / Memory request failed; nothing was saved or deleted.',
+  });
+  assert.deepEqual(nodes.cancelled.respond, {
+    from: 'memory_response',
+    fallback: '메모리 삭제를 취소했습니다. 아무것도 삭제하지 않았습니다. / Memory deletion was cancelled. Nothing was deleted.',
+  });
+});
 test('every model-driven node can exit a stall into something the user sees', () => {
   const common = parseFlow('_common/flows.yaml');
   for (const flowName of ['shopping_multi_store_total_cost', 'request_service_quote']) {
@@ -444,14 +626,29 @@ test('the user can decline at the quote approval gate', () => {
   assert.ok(collectTools.includes('cancel_quote_request'));
   assert.equal(common.flowTools.cancel_quote_request.output.next, 'cancel');
   assert.equal(common.flowTools.detect_cancellation.execute.implementation, 'lua');
-  assert.deepEqual(common.flowTools.confirm_quote_decision.parameters.properties.next.enum,
-    ['ask', 'proceed', 'refine', 'cancel']);
-  assert.match(quote.nodes.confirm_quote.prompt, /cancel/);
   const terminal = quote.nodes.quote_cancelled;
   assert.equal(terminal.kind, 'terminal');
   assert.match(terminal.respond, /견적|quote/);
   // The planner must keep a refusal inside the flow rather than treating it as a new topic.
   assert.match(common.planner.prompt, /취소|declin|cancel/);
+});
+
+test('the quote approval reply is classified deterministically from the current message', () => {
+  // Shipping-CDP: the pausing presenter handed the literal "예" to an action_unit, and the model returned
+  // `refine`; the flow re-rendered the same selected pro instead of opening it. A yes/no gate has no model
+  // judgement to make, and the raw current message is the only admissible source.
+  const common = parseFlow('_common/flows.yaml');
+  const node = common.flows.request_service_quote.nodes.confirm_quote;
+  const tool = common.flowTools.confirm_quote_decision;
+
+  assert.equal(node.kind, 'action_contract');
+  assert.ok(node.inputSelector.includes('userMessages'));
+  assert.equal(node.next.proceed, 'select_pros');
+  assert.equal(node.next.refine, 'browse_candidates');
+  assert.equal(node.next.cancel, 'quote_cancelled');
+  assert.equal(node.next.ask, undefined);
+  assert.equal(tool.execute.implementation, 'lua');
+  assert.equal(tool.parameters.properties.next, undefined, 'the model cannot choose the gate branch');
 });
 
 test('every branch names a node that exists', () => {
@@ -642,27 +839,29 @@ test('the quote dialog is driven in the runtime, with no step-by-step self-loop'
 
   assert.ok(!nodes.answer_quote, 'the per-step node must be gone');
   assert.ok(!common.flowTools.answer_quote, 'and so must its tool');
-  assert.equal(nodes.open_quote.next.submit, 'submit_quote');
+  assert.equal(nodes.open_quote.next.submit, 'quote_ready_for_submit');
   assert.equal(nodes.open_quote.next.error, 'pick_quote');
 });
 
-test('sending the request stays a separate, confirmed node', () => {
-  // Driving a form and contacting a person are different acts. Collapsing the submit into the driver
-  // would remove the only place the flow can still stop.
+test('the quote journey stops before final Submit and exposes no send tool', () => {
+  // The P1 journey is a safe dry run: choose a pro, drive every answerable step, and stop at the final
+  // irreversible button. Opening the dialog is not permission to contact a real person.
   const common = parseFlow('_common/flows.yaml');
-  const tool = common.flowTools?.submit_quote ?? {};
+  const nodes = common.flows.request_service_quote.nodes;
 
-  assert.equal(tool.execute?.implementation, 'lua');
-  assert.ok(tool.execute?.modules?.includes('_common.65_rpc_quote'));
-  assert.equal(common.flows.request_service_quote.nodes.submit_quote.next.done, 'pick_quote');
-  const source = read('_common/rpc/65_rpc_quote.lua');
-  assert.match(source, /args\.confirm ~= true/, 'the confirmation gate lives in the script, not the prompt');
+  assert.equal(nodes.open_quote.next.submit, 'quote_ready_for_submit');
+  assert.equal(nodes.quote_ready_for_submit.kind, 'terminal');
+  assert.match(nodes.quote_ready_for_submit.respond, /Submit|제출/);
+  assert.match(nodes.quote_ready_for_submit.respond, /not sent|보내지|연락하지/);
+  assert.equal(nodes.submit_quote, undefined);
+  assert.equal(common.flowTools.submit_quote, undefined);
 });
+
 
 test('every branch the quote script can answer is a branch its node routes', () => {
   const common = parseFlow('_common/flows.yaml');
   const nodes = common.flows?.request_service_quote?.nodes ?? {};
-  const routed = new Set([...Object.keys(nodes.open_quote?.next ?? {}), ...Object.keys(nodes.submit_quote?.next ?? {})]);
+  const routed = new Set(Object.keys(nodes.open_quote?.next ?? {}));
   const answered = [...read('_common/rpc/65_rpc_quote.lua').matchAll(/next = "([a-z_]+)"/g)].map((match) => match[1]);
 
   assert.ok(answered.length >= 3);
@@ -930,9 +1129,7 @@ test('the quote budget stays under the deadline the flow declares', () => {
   assert.ok(Number.isFinite(budget), 'the module must declare a time budget');
 
   const common = parseFlow('_common/flows.yaml');
-  // Only the tool that RUNS the wizard loop. `submit_quote` loads the same module for a handful of ops
-  // and declares a much shorter deadline (90s); holding the driver's budget against that one would fail
-  // for a tool that never consults it.
+  // Only the tool that RUNS the wizard loop consults this budget.
   const deadlines = Object.values(common.flowTools ?? {})
     .filter((tool) => String(tool.execute?.lua ?? '').includes('request_quote'))
     .map((tool) => tool.execute?.rpc?.deadlineMs)
@@ -1296,6 +1493,10 @@ test('every field a contract node selects is one its tool declares', () => {
         const declared = tool?.parameters?.properties;
         if (!declared) continue;
         for (const field of node.inputSelector ?? []) {
+          // A context is not flow state and is deliberately stripped from args; it arrives as a Lua
+          // global declared by `contextAccess`. The gate below owns that rule — declaring a context
+          // here would be the same fact under two names with no write path.
+          if (String(field).startsWith('contexts.')) continue;
           if (!Object.hasOwn(declared, field)) dropped.push(`${layer} ${flowId}.${nodeId}: selects ${field}, ${node.id} never declares it`);
         }
       }
@@ -1810,77 +2011,21 @@ test('an off-cart confirmation selector names a per-add panel, never cart struct
   assert.deepEqual(offenders, [], `cart structure used as per-add evidence:\n  ${offenders.join('\n  ')}`);
 });
 
-test('only a site with a real program carries one, and never amazon', () => {
-  // Amazon's Operating Agreement forbids Special Links in client-side software (browser extensions
-  // included, with an Approved Mobile App carve-out). Its offers still appear in the comparison — they
-  // just must never be monetised from the extension, and the way to guarantee that is to make it
-  // impossible to declare rather than remembering not to.
-  //
-  // Naver Shopping is excluded for a different reason: its adapter answers `access_denied` by design,
-  // so there is no listing to link to.
-  const programs = affiliatePrograms();
 
-  assert.equal(programs.amazon, undefined, 'an Amazon affiliate link may not exist in the extension');
-  assert.equal(programs['naver-shopping'], undefined, 'a bot-walled store has no offer to monetise');
-  assert.deepEqual(Object.keys(programs).sort(), ['coupang'], 'PoC monetises Coupang only');
-  for (const [site, program] of Object.entries(programs)) {
-    assert.equal(program, 'coupang', `${site} declares an unknown program: ${program}`);
-  }
-});
+test('an unavailable affiliate feature is absent from the launch surface', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const declaredModules = Object.values(common.flowTools)
+    .flatMap((tool) => tool.execute?.modules ?? []);
 
-test('the affiliate tool cannot navigate, and reaches only our own server', () => {
-  // Two policy rules made structural instead of remembered. Coupang forbids forced redirects, so the
-  // tool is granted no `nav.*` and therefore cannot move the tab at all. And the signing keys live
-  // server-side, so the extension's only egress is our conversion endpoint — a key in the bundle is a
-  // key anyone can lift and earn on.
-  const tool = parseFlow('_common/flows.yaml').flowTools.shopping_affiliate_link;
-
-  for (const op of tool.execute.rpc.allow) {
-    assert.doesNotMatch(op, /^nav\./, `a link tool granted ${op} can force a redirect`);
-  }
-  assert.deepEqual(tool.execute.net.allow, ['api.axsdk.ai'], 'the extension never calls an affiliate API directly');
-  assert.equal(tool.execute.net.maxCalls, 1);
-});
-
-test('an affiliate link is only reachable after the user picked an offer', () => {
-  // CWS requires the link to follow a user action and to attach to a direct benefit at that moment. The
-  // action is the number typed at the comparison window, so every path into the tool must pass the
-  // presenter's `select` branch — reachability, not a comment saying so.
-  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
-  const holder = Object.entries(flow.nodes).find(([, n]) => n.id === 'shopping_affiliate_link');
-  assert.ok(holder, 'the affiliate node must exist');
-  const [affiliateNode] = holder;
-
-  const feeders = Object.entries(flow.nodes)
-    .filter(([, n]) => Object.values(n.next ?? {}).includes(affiliateNode))
-    .map(([id]) => id);
-  assert.deepEqual(feeders, ['resolve_offer'], 'only the resolved pick may reach it');
-  assert.equal(flow.nodes.present_offers.next.select, 'resolve_offer');
-});
-
-test('the terminal cannot show a link without its disclosure', () => {
-  // A link without the disclosure is the violation. The Lua produces the two together, and the terminal
-  // that renders them is instructed to print the disclosure verbatim — checked here because the wording
-  // is the only place a reviewer would otherwise have to trust.
-  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
-  const terminal = flow.nodes.report_link;
-
-  assert.equal(terminal.kind, 'terminal');
-  assert.ok(terminal.inputSelector.includes('affiliate_disclosure'));
-  assert.match(terminal.respond, /disclosure/i);
-  assert.match(terminal.respond, /verbatim/i);
-  // It must never claim a purchase: the user opens the link themselves and buys on the store.
-  assert.match(terminal.respond, /Never claim anything was purchased/i);
-});
-
-test('a store with no program still reaches the cart path it had before', () => {
-  // Nine of the ten stores are not monetisable. The affiliate hop must be transparent for them, or this
-  // feature quietly removes a working one.
-  const flow = parseFlow('_common/flows.yaml').flows.shopping_multi_store_total_cost;
-  const node = Object.values(flow.nodes).find((n) => n.id === 'shopping_affiliate_link');
-
-  assert.equal(node.next.no_program, 'add_selected_offer');
-  assert.equal(node.fallback.invalidNext, 'no_program', 'an unexpected answer must not strand the pick');
+  assert.deepEqual(affiliatePrograms(), {}, 'no storefront may advertise an unavailable affiliate program');
+  assert.equal(flow.nodes.resolve_offer.next.add, 'add_selected_offer',
+    'an approved offer must reach the existing guarded cart path directly');
+  assert.equal(flow.nodes.affiliate_link, undefined);
+  assert.equal(flow.nodes.report_link, undefined);
+  assert.equal(common.flowTools.shopping_affiliate_link, undefined);
+  assert.deepEqual(Object.keys(flow.state).filter((key) => key.startsWith('affiliate_')), []);
+  assert.ok(!declaredModules.includes('_common.74_rpc_affiliate'));
 });
 
 // A node that repeats `defaults.model` verbatim is 16 copies of one decision, and the copies are what
@@ -2149,4 +2294,114 @@ test('a require never demands true of a property declared as something else', ()
     }
   }
   assert.deepEqual(contradictions, [], 'requirements that no value of the declared type can satisfy');
+});
+
+test('the community-script flow declares and reads its own context', () => {
+  const flows = parseFlow('_common/flows.yaml');
+
+  // The context is declared or the backend has nothing to fill: a flow that selects an undeclared
+  // name reads an empty string on every turn, silently.
+  assert.ok(Object.hasOwn(flows.contexts ?? {}, 'community'), 'contexts must declare community');
+
+  const route = (flows.router?.routes ?? []).find((entry) => entry.intent === 'community_script');
+  assert.ok(route, 'router must route community_script');
+  assert.ok(Array.isArray(route.examples) && route.examples.length >= 3, 'the route needs examples');
+
+  const flow = flows.flows?.community_script;
+  assert.ok(flow, 'the community_script flow must exist');
+  const [entryFlow, entryNode] = String(route.entry).split('.');
+  assert.equal(entryFlow, 'community_script', 'the route entry must name its own flow');
+  assert.ok(flow.nodes?.[entryNode], );
+
+  // A flow that declares the context and never selects it is carrying dead weight, and the
+  // catalog it was built for never reaches a model.
+  const selectors = Object.values(flow.nodes).flatMap((node) => node.inputSelector ?? []);
+  assert.ok(selectors.includes('contexts.community'), 'a node must select contexts.community');
+});
+
+test('the community-script flow grants no platform op it cannot have', () => {
+  const flows = parseFlow('_common/flows.yaml');
+  const text = JSON.stringify(flows.flows?.community_script ?? {});
+
+  // The direct model tool call needs ops the platform does not publish. Until it does, this flow
+  // reaches scripts through the catalog and the extension, never through a granted community op.
+  assert.doesNotMatch(text, /community\.(catalog|invoke)/, 'must not grant a community.* op');
+});
+
+test('a presentation tool is never offered to a model', () => {
+  const flows = parseFlow('_common/flows.yaml');
+
+  // Measured, not theorised: offered the confirm renderer in `allowedTools`, the model answered in
+  // prose instead of proposing — twice, before and after sharpening the prompt. The model decides;
+  // the deterministic node renders. A gate, because no other check catches a runtime shape.
+  const renderers = ['community_confirm'];
+  for (const [flowName, flow] of Object.entries(flows.flows ?? {})) {
+    for (const [nodeName, node] of Object.entries(flow.nodes ?? {})) {
+      for (const offered of node.allowedTools ?? []) {
+        assert.ok(
+          !renderers.includes(offered),
+          `${flowName}.${nodeName} offers the renderer ${offered} to a model`,
+        );
+      }
+    }
+  }
+});
+
+test('a prompt never names a tool its node does not offer', () => {
+  const flows = parseFlow('_common/flows.yaml');
+  const problems = [];
+
+  // Cost two live runs: the node was repointed to a new tool and the prompt kept naming the old
+  // one, so the model was told to call something it could not see and answered in prose instead.
+  // Nothing else catches it — the document compiles, and every branch target still resolves.
+  for (const [flowName, flow] of Object.entries(flows.flows ?? {})) {
+    for (const [nodeName, node] of Object.entries(flow.nodes ?? {})) {
+      const prompt = typeof node.prompt === 'string' ? node.prompt : '';
+      if (!prompt) continue;
+      const offered = new Set(node.allowedTools ?? []);
+      for (const named of prompt.match(/`([a-z][a-z0-9_]{4,})`/g) ?? []) {
+        const tool = named.slice(1, -1);
+        if (!Object.hasOwn(flows.flowTools ?? {}, tool)) continue;
+        if (offered.has(tool)) continue;
+        problems.push(`${flowName}.${nodeName} names ${tool}, which it does not offer`);
+      }
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n'));
+});
+
+test('a context is selected by the node AND declared by the tool, and is never a parameter', () => {
+  const flows = parseFlow('_common/flows.yaml');
+  const problems = [];
+
+  // Three declarations, not two. The node's `inputSelector` decides which contexts the VIEW is built
+  // from; the tool's `contextAccess` decides which of those it may read or write. Either one alone
+  // delivers nothing. And the runtime strips context keys from args on purpose — a copy in `parameters`
+  // would be the
+  // same fact under two names with no write path. Contexts arrive as Lua globals, declared by
+  // `contextAccess`. Rule suggested by the runtime team after this bit us: our own name-agreement
+  // gate was green while the runtime dropped the value.
+  for (const [flowName, flow] of Object.entries(flows.flows ?? {})) {
+    for (const [nodeName, node] of Object.entries(flow.nodes ?? {})) {
+      const selected = (node.inputSelector ?? []).filter((name) => String(name).startsWith('contexts.'));
+      if (selected.length === 0) continue;
+      const toolName = node.id ?? node.run;
+      const tool = toolName ? flows.flowTools?.[toolName] : undefined;
+      if (!tool) continue;
+      const declared = new Set([
+        ...(tool.contextAccess?.read ?? []),
+        ...(tool.contextAccess?.write ?? []),
+      ]);
+      for (const path of selected) {
+        const name = String(path).slice('contexts.'.length);
+        if (Object.hasOwn(tool.parameters?.properties ?? {}, path)) {
+          problems.push(`${flowName}.${nodeName}: ${toolName} declares ${path} as a parameter`);
+        }
+        if (!declared.has(name)) {
+          problems.push(`${flowName}.${nodeName}: ${toolName} must declare contextAccess.read ${name}`);
+        }
+      }
+    }
+  }
+  assert.deepEqual(problems, [], problems.join('\n'));
 });

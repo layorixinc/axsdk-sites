@@ -2,7 +2,14 @@
 // --cancel read-only path and store selection), decode, and tool-trace lookup.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseScenarioArgs, decode, findToolCall, lastToolOutput } from './multi-store-total-cost.mjs';
+import {
+  parseScenarioArgs,
+  decode,
+  findToolCall,
+  lastToolOutput,
+  discoveryChoiceSurface,
+  sitesFromWindow,
+} from './multi-store-total-cost.mjs';
 
 test('defaults: amazon+ebay, exact product query, choice 1, mutating path', () => {
   const args = parseScenarioArgs([]);
@@ -54,4 +61,28 @@ test('lastToolOutput decodes the matched output', () => {
   ];
   assert.deepEqual(lastToolOutput(calls, 'shopping_rank_store_offers'), { offers: [{ site: 'amazon' }] });
   assert.equal(lastToolOutput(calls, 'missing_tool'), null);
+});
+
+test('discovery choice proof requires a visible numbered list without internal fields', () => {
+  const safe = {
+    text: '비교 가능한 모델과 확인된 판매처:\n1. Logitech G304 — found at 11st',
+    toolCalls: [{
+      name: 'present_product_options',
+      status: 'completed',
+      output: {
+        next: 'ask',
+        question: '비교 가능한 모델과 확인된 판매처:\n1. Logitech G304 — found at 11st',
+      },
+    }],
+  };
+  assert.equal(discoveryChoiceSurface(safe), true);
+  safe.toolCalls[0].output.question += '\nidentity_confidence: medium';
+  assert.equal(discoveryChoiceSurface(safe), false);
+});
+
+test('comparison attribution reads offer tags and classified failure labels', () => {
+  assert.deepEqual(
+    sitesFromWindow('1. [11st] G304\n월마트(walmart): 검색 결과 없음', ['11st', 'walmart', 'amazon']),
+    ['11st', 'walmart'],
+  );
 });

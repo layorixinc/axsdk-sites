@@ -110,11 +110,11 @@ test('a listing that carries its own model is trusted over the title', () => {
   assert.equal(modelOf(options), 'M240');
 });
 
-test('an option nobody can compare does not lead the list', () => {
-  // Once the promo tag stopped being read as a model, the listing that carries no model at all became
-  // option 1 — and picking it is answered, correctly, with "this lacks a clear manufacturer model, so it
-  // can't be reliably compared across stores". A list whose first entry is a dead end wastes the choice
-  // it asked for. Model-bearing options come first; the rest keep their order behind them.
+test('every numbered discovery option is immediately lockable', () => {
+  // Measured live, the unmodelled listing came back first. It was numbered as option 1 and selecting the
+  // default correctly refused to lock it, so the broad journey stopped before any store comparison. Real
+  // but unresolved listings may be explained without a number; every numbered choice is a promise that the
+  // next deterministic step can lock it.
   const built = lua.call('AX_build_product_options', {
     requested_brand: '로지텍',
     product_category: '마우스',
@@ -124,7 +124,6 @@ test('an option nobody can compare does not lead the list', () => {
       value: {
         site: '11st',
         candidates: [
-          // Measured live, in this order — the unmodelled listing came back first.
           { site: '11st', product_id: '1', name: '[11Pay3%포인트] 로지텍 코리아 정품 리프트 LIFT 버티컬 무선 마우스', price: 87440, currency: 'KRW', url: 'https://www.11st.co.kr/products/1' },
           { site: '11st', product_id: '2', name: '로지텍 G304 무선 게이밍 마우스', price: 48420, currency: 'KRW', url: 'https://www.11st.co.kr/products/2' },
           { site: '11st', product_id: '3', name: '로지텍 M170 무선 마우스', price: 12780, currency: 'KRW', url: 'https://www.11st.co.kr/products/3' },
@@ -136,9 +135,18 @@ test('an option nobody can compare does not lead the list', () => {
     }],
   });
 
-  const ordered = Object.values(built?.options ?? {});
-  assert.ok(ordered.length >= 2, `expected several options, got ${ordered.length}`);
-  assert.ok(ordered[0].model, `the first option must be comparable, got ${JSON.stringify(ordered[0]).slice(0, 120)}`);
-  // The unmodelled listing is still offered — it is a real product — just not first.
-  assert.ok(ordered.some((option) => !option.model), 'a listing without a model is still worth showing');
+  const numbered = Object.values(built?.options ?? {});
+  assert.ok(numbered.length >= 2, `expected several options, got ${numbered.length}`);
+  assert.ok(numbered.every((option) => option.model && option.needs_enrichment !== true
+    && option.identity_confidence !== 'low'), `every number must be lockable: ${JSON.stringify(numbered)}`);
+  assert.match(String(built?.unresolved_product_names ?? ''), /LIFT/,
+    'the real unresolved listing remains visible without taking a number');
+
+  const selected = lua.call('AX_resolve_product_option', {
+    product_options: built.options,
+    options_version: built.options_version,
+    choice_options_version: built.options_version,
+    choice_index: 1,
+  });
+  assert.equal(selected.next, 'lock', `the default first choice must continue to comparison: ${JSON.stringify(selected)}`);
 });

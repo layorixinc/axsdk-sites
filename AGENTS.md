@@ -44,8 +44,7 @@ _common/                      # site-agnostic layer (loads on EVERY host, before
   flows.legacy.yaml           # backup (gitignored)
   scripts/*.lua               # AX_BASE + shared commands (see §4)
 <site>/                       # one per supported site (amazon, thumbtack, bluemoonsoft, ...)
-  scripts/*.lua               # site layer: builds on AX_BASE, exposes AX_<SITE> + AX_* commands
-  scripts/*.mjs               # live/offline test harnesses for that site
+  scripts/*.lua               # storefront config/registration input (runtime commands live in _common/rpc)
   CONTRACT.md                 # (thumbtack) live-measured ground truth for the rebuild
   flows.yaml                  # site-scoped flow overlay (thumbtack's is a 14-byte placeholder)
   knowledge/, sitemap.md      # (bluemoonsoft) sitemap/knowledge data
@@ -57,7 +56,8 @@ AUTHORING.md                  # RPC Lua + flows authoring traps: the boundaries 
 RPC_LUA_REFERENCE.md          # RPC ops, module shape, and the smallest complete flow tool
 FLOWS_IMPROVEMENTS.md         # measured authoring review of both flow documents + ordered proposals
 CWS_LAUNCH_PLAN.md            # Chrome Web Store launch blockers + owners, quoted from current policy
-AFFILIATE_DESIGN.md           # M1 affiliate: the link-first design and the gates that keep it compliant
+CWS_PRODUCT_READINESS_REVIEW.md # end-user CWS readiness verdict, live evidence, and TDD gate order
+AFFILIATE_DESIGN.md           # retired M1 affiliate design; historical until server + policy gates exist
 SITE_DATA_SPLIT_DESIGN.md     # selectors as remote DATA so a store fix does not need a review
 COMPETITIVE_RESEARCH.md       # agentic extensions measured from their store listings
 CODE_REVIEW.md                # structural review of flows.yaml + the Lua layers, severity-ordered
@@ -139,12 +139,12 @@ The extension also ships **default form tools** present on every site: `AX_get_f
 `AX_submit_form`, `AX_navigate` (scriptId `axsdk-default-form-tools`).
 
 ### `_common/rpc/` — shipped flow runtime
-Every production commerce, memory, navigation, sitemap, affiliate, and Thumbtack action is a
+Every production commerce, memory, navigation, sitemap, and Thumbtack action is a
 `kind: runtime` flow tool whose `modules:` list names these files. `61_rpc_storefront.lua` is the one
 storefront reader; `62_rpc_sites.lua` is generated from the ten site configs; `67_rpc_cart.lua` and
-`68_rpc_checkout.lua` own cart mutation and order-free checkout review; `64`/`65` own Thumbtack;
-`66`, `69`–`74` own navigation, widgets, memory, ZIP, sitemap, offer persistence, and affiliate links.
-There is no second site-local command stack.
+`68_rpc_checkout.lua` own cart mutation and order-free checkout review; `64`/`65` own Thumbtack; `66` and
+`69`–`73` own navigation, widgets, memory, ZIP, sitemap, and offer persistence. The unavailable affiliate
+module was removed from the launch surface. There is no second site-local command stack.
 
 ### `thumbtack/scripts/` — **gone.** Thumbtack runs entirely in the runtime
 Nothing durable is left on thumbtack.com. The page detector, the search, the results filter, the quote
@@ -191,7 +191,9 @@ Nothing reached it. The defaults apply there now, as on every other site.
 ### The CDP extension — what ships, and the default dev target
 
 A **session worker** runs the Lua; `dom`/`nav` reach the page over the DevTools protocol from the
-service worker. One session per **tab group**, several at once. Config lives in
+service worker. One session per **agent tab group**, several at once. A normal browser group is never
+adopted wholesale: starting from one member moves that tab into a new dedicated group; only an already-live
+AXSDK group is reused, and additional tabs join through the user's visible drag. Config lives in
 `../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/` (`harness-config.mjs`, `browser-session.mjs`):
 
 | thing | value |
@@ -304,12 +306,12 @@ page. `check:flows` 121 and `test:playground` 50 unchanged.
 
 ### 6.1 One delivery gap you must close yourself, and one that is now fixed
 
-1. **`_common/rpc/` is not read.** Only the five paths above are. Production flows declare **26
-   modules, 14 of them from `_common/rpc`**, and those arrive as the app package's `luaModules`. So an
+1. **`_common/rpc/` is not read.** Only the five paths above are. Production flows declare **25
+   modules, 13 of them from `_common/rpc`**, and those arrive as the app package's `luaModules`. So an
    RPC flow needs `npm run build:rpc` +
    `node tools/rpc-package.mjs push . --app=<app> --modules-only` **before** the harness run, or every
    runtime tool answers as if its module were missing (§9's "authored flows carry module NAMES" trap).
-   `npm run build:bundle` prints the 14 names on every run so the list cannot drift silently.
+   `npm run build:bundle` prints the 13 names on every run so the list cannot drift silently.
 2. ~~`<site>/sitemap.md` is not delivered~~ — **fixed 2026-08-06, in two places.** `loadWorkspace`
    now reads each `<domain>/sitemap.md` and `storeEnvelopes` seeds a C1-shaped record per site so
    core's site refresh takes its cached-record branch. **That alone was not enough**:
@@ -588,62 +590,90 @@ which is why it was not. Until then a guarded add on eBay answers `add_to_cart_p
 happens, the confirmation cannot be read, and nothing is claimed. That fails safe, and **a selector is
 only ever validated against the live page** — do not fill these in from memory.
 
-### 6.5 M1: shipping the workspace inside the package (`build:bundle`)
+### 6.5 M1: content-addressed package workspace
 
-`npm run build:bundle` writes `dist/workspace-bundle.json` — `storeEnvelopes()` output verbatim under
-`{ version: 1, digest, generatedAt, stores }`. The extension parses it at install/startup, writes the
-four envelopes and forces the stored sources; a missing artifact is a no-op, so a build without it
-behaves exactly as today. `npm run check:bundle` fails on real drift and **never** on `generatedAt`
-alone — a permanently red check is one nobody reads.
+`npm run build:bundle` now writes a **reference manifest**, not persisted-store envelopes:
 
-Measured (2026-08-06): digest `2b95acc54f57`, 15 sites declared / 12 with layers,
-`axsdk:sites` 5.3 KiB + `axsdk:flows` 222.7 KiB + `axsdk:lua` 323.0 KiB + `axsdk:widgets` 0.0 KiB =
-**551.0 KiB**; largest single layer `flows[:]` 208.1 KiB = **81.3% of the 256 KiB per-layer ceiling**.
-That last number is the one to watch — the ceiling is per layer, not per bundle.
-
-**To ship it, the artifact has to reach the extension package**, which nothing does automatically:
-`copy-static.mjs` copies `workspace-bundle.json` from the CDP **package root**, and we write it into
-`SITES/dist/`. Use the `--out` flag rather than a manual copy:
-
-```bash
-npm run build:bundle -- --out=../axsdk-sdk-js/packages/axsdk-extension-cdp/workspace-bundle.json
-cd ../axsdk-sdk-js/packages/axsdk-extension-cdp && bun run build   # copy-static picks it up
+```text
+dist/workspace-manifest.json
+dist/workspace-assets/<sha256>.txt
 ```
 
-The bundle carries **all 26 declared modules** — the 12 `_common/scripts` ones in the Lua layers and the
-14 `_common/rpc` ones in `axsdk:lua-modules`. (An earlier note here said it carried none of the rpc set;
-that was true before the module store was wired.)
+Format **C3** is `{version:2,digest,generatedAt,assets,workspace}`. `workspace` maps the sites index,
+each flow layer, the common Lua layer, each runtime module, each sitemap and future widget layers to
+`sha256:<64 hex>` references; `assets[ref].bytes` is the only descriptor, and the filename is derived
+from the digest. The workspace digest hashes the canonical reference graph, not `generatedAt`. The
+producer refuses a missing declared module; the package validator refuses a missing, extra, wrong-sized
+or hash-mismatched asset. There is no pathname in the manifest to redirect a read elsewhere.
 
-**M1's package-only provisioning is PROVEN, and proving it found the trigger bug.** Measured 2026-08-16:
-the stores were cleared to zero and the extension reloaded with **no harness write of any kind**, and it
-repopulated them itself — `axsdk:sites` 3,890 · `axsdk:flows` 223,248 · `axsdk:lua` 215,964 (11 layers) ·
-`axsdk:lua-modules` 237,335 (**14 modules**) — recording
-`axsdk:extension-cdp:workspace-bundle-digest = f4a5db917edd`, the artifact's own digest, with the sites
-index reading `source: local`.
+**Runtime source path:**
 
-It did not work on the first attempt, and the failure shape is worth keeping: **the artifact was reachable
-and valid the whole time while nothing installed it.** From inside the service worker the bundle answered
-`status 200` and parsed as `v1 f4a5db917edd` with all five stores; what was missing was the trigger.
-`onInstalled` does not repeat for a load of a build already installed, and `onStartup` had passed before
-the extension existed — so on a running browser with the extension already there, neither listener fires.
-The install now runs at **module scope**, which happens on every worker start and subsumes `onStartup`,
-and the digest check keeps the repeat free (an MV3 worker starts often enough that re-writing on every wake
-would be a storage write per idle timeout).
+1. `tools/build-workspace-assets.mjs` loads the authored workspace with `storeLimits:false`, hashes
+   source bytes, deduplicates identical bytes and writes the graph plus immutable files.
+2. `copy-static.mjs` copies `workspace-manifest.json` and `workspace-assets/` into the extension
+   package as one contract. A manifest without the directory fails the build.
+3. On every MV3 service-worker lifetime, `workspace-assets.ts` fetches the manifest and all unique
+   assets from `chrome.runtime.getURL`, verifies graph digest + byte count + SHA-256, and caches the
+   resolved graph in that realm. Verification is parallel and all-or-nothing.
+4. On a new digest the installer stores only that digest, source switches and **empty legacy source
+   caches**. On the same digest it reselects local sources if a switch drifted while preserving explicit
+   stored development overrides. Flow/Lua/module package text is never copied into `chrome.storage`.
+5. Each session worker requests the already-verified graph before `AXSDK.init`. Core keeps package
+   flow/Lua/module assets in its realm, projects only index/sitemap data into the existing sites
+   state, and resolves common/site layers synchronously. Explicit stored development layers still
+   override the package baseline; the package-only gate requires those stores to remain untouched.
 
-**A full turn from the package alone is PROVEN too.** `openCdpSession({ provision: false })` installs the
-build and starts a session while writing neither the settings nor the layers — so nothing the driver does
-can be mistaken for the thing under test. It does not even read the workspace: reading it is how a run gets
-a digest to write.
+Only `_common/scripts` is a package Lua layer. Storefront `<site>/scripts/*.lua` are generator-only
+`AX_SITE_CONFIGS` declarations: `build-rpc:sites` has already materialized their runtime data in
+`_common.62_rpc_sites`, so executing those declarations in the browser adds no command or capability.
+They are therefore not package runtime assets. All 26 runtime modules are separate assets; no
+name→source map needs physical 256 KiB slots.
 
-Live, on stores the extension installed itself:
-`scriptIds ["axsdk-default-form-tools","stored-lua:","stored-lua:11st"]`, and a multi-store comparison ran
-its whole pipeline — collect_request → identity → search_stores → two stores through
-search/normalize/collect → screening → judge_relevance → apply → verify → rank → present — answering
-`총 3개 중 1-3번 … 1. [amazon] … 총 KRW 19,830 · 무료배송`. **So P0-1's completion test is met: the
-extension provisions itself from its package and drives a real comparison with nothing fetched.**
+**Capacity consequence:** the confirmed 256 KiB cap in `flowsStore.setFlows` and remote-site flow
+fetching still protects persisted/remote development paths. Package flow, Lua and module sources bypass
+that store entirely. The package producer has a regression fixture with one valid flow asset larger
+than 256 KiB. This does **not** prove the final compiler accepts a composed document above 256 KiB;
+the per-tool compiled `execute.lua` limit (~64 KiB) also remains. A direct >256 KiB compiler probe is
+still the next experiment before treating package assets as unlimited compiler input.
 
-(The single-site flow answers that wording with its own clarifying gate instead of a price. That is the
-flow's design, not a packaging fact — use the multi-store wording to see a result.)
+Current measured package (2026-08-24):
+
+- digest `sha256:a395070c26fd3265089da5d9f99989b2ff5408771fb5470bd0c82d905ddead0f`;
+- **32** unique assets / 32 references / **873.2 KiB** source;
+- largest asset = common flow, **255.2 KiB** — a package file, not a store value;
+- 26 runtime module assets; all 26 flow-declared names carried;
+- no legacy `workspace-bundle.json`, embedded `stores`, or runtime-module chunk slots.
+
+To ship it:
+
+```bash
+npm run build:bundle -- --out=../axsdk-sdk-js/packages/axsdk-extension-cdp/workspace-manifest.json
+cd ../axsdk-sdk-js/packages/axsdk-extension-cdp && bun run build:cws
+```
+
+`build:cws` validates the source manifest, rebuilds `axsdk-core`, builds the extension, then validates
+the copied manifest and every copied asset again.
+
+**Package-only live proof, 2026-08-24:** `npm run test:cws:artifact` built a transient exact candidate
+without pushing the backend or production, extracted it to a fresh profile and wrote no workspace
+stores. Script ownership was `axsdk-default-form-tools,packaged-lua:` with no `stored-lua:*`. The
+26 package module assets drove Amazon+eBay comparison (22.7s), an Amazon-only refinement (9.0s), a
+cancel turn (6.5s, no mutation), a site-confirmed cart add (27.5s), and checkout review (49.1s, no
+order). Release SHA-256:
+`875d3b62202e0923652afb1b081e6f34f9a7df81e8ed86a85586272003bb325a`; archive SHA-256:
+`856551d2329945c440d7fb912ebe84b6fc1e0b15b268e211808be37989fbafe6`
+(8.02 MiB / 54 entries).
+
+The exact artifact is still a two-sided release: local extension files/package assets plus the
+backend runtime-module revision they were verified against. `release-manifest.json` binds every
+extension/asset hash to the backend app id, revision and module hashes; it is embedded before archive
+creation, extracted into a clean staging directory, and re-verified there. Module drift blocks release
+before the approved ZIP path is touched. `npm run release:cws` remains read-only until every backend
+module hash matches; no automatic package push or Chrome Web Store upload exists.
+
+An isolated artifact smoke must call `session.shutdown()`, not only `close()`. `close()` deliberately releases
+the launcher handle while leaving the shared dev browser reusable; deleting that browser's temporary profile
+then fails with `EBUSY` on Windows. `shutdown()` closes the dedicated browser and waits for exit before cleanup.
 
 **Site flows are a one-shot.** Core sends a site's client flows once after that site becomes current.
 Editing `<domain>/flows.yaml` and re-running re-stores it, but an open session will not resend until the
@@ -1251,7 +1281,7 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   prompted by `shopping.mjs` turning out to be blind). All four are instrument defects, which is the class that
   hides product defects behind a pass.
   1. **Five suites were unreachable from every npm script**: `checkout.test.mjs` (carrying two real failures),
-     `commerce-all-sites.test.mjs`, `multi-store-total-cost.test.mjs`, `tools/build-workspace-bundle.test.mjs`,
+     `commerce-all-sites.test.mjs`, `multi-store-total-cost.test.mjs`, `tools/build-workspace-assets.test.mjs`,
      and `tools/harness/cdp-session.test.mjs` — 30 tests covering the CDP driver, written and extended the same
      day. `check:flows` named six of the seven files in `tools/` and missed exactly one. §13's own lesson
      recurring, so `check:flows`, `test:playground` and the new `test:scenarios` are all **globs** now and
@@ -1419,6 +1449,27 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   "3번". `currentUserText: active_node_only` hands an `action_unit` the text of the turn IT was active for.
   The comparison loop now has NO model node at all — the presenter renders, pauses, and reads the reply
   through the same `AX_CANDIDATE_BROWSER.classify_reply` the Thumbtack shortlist uses.
+- **A deterministic paused node must read `userMessages`, not only flow `requestText`.** The planner can resume
+  the right action contract while preserving the old request text; exact-artifact smoke then sent `취소`, the
+  presenter re-read `M185` from the original query, classified the digits as a selection, and reached the cart
+  path. Both offer and service-candidate presenters now prefer the last raw `userMessages` entry, with
+  `requestText` only as a compatibility fallback. The smoke proves the cancel branch and zero mutation before
+  it runs a separate approved cart path.
+- **Compact evidence must have its own tool result.** Adding `store_outcomes` beside `screening_text` did not
+  make it compact: six candidate rows can push the entire JSON past the 4120-character chat trace limit.
+  `shopping_summarize_store_outcomes` runs after relevance screening and emits only one bounded status/sample
+  per searched store. With that and deterministic explicit-store prefill, three consecutive ten-site sweeps
+  are **43/43**, with no `unsearched`, timeout, or retry.
+- **An empty list can be reintroduced one wrapper AFTER the producer removed it.** Verification correctly
+  omitted empty `failures`, then `AX_RPC_OFFERS.rank` copied the rank command's empty Lua table back into its
+  envelope. The listing rendered once, but the next `amazon만 보여줘` crossed the tool schema as
+  `failures:{}` and died with `failures: Invalid input`. The rank wrapper now omits its empty list; exact
+  artifact proves Amazon+eBay → Amazon-only, a new comparison id, selection from the new id, cart confirmation,
+  and no order.
+- **`pcall(op) and op()` protects the first call and exposes the duplicate second one.** Navigation used that
+  expression for href reads; exact checkout saw the protected read succeed and the immediate duplicate raise
+  `rpc_timeout`. `href_or_nil` captures the protected value once and all three duplicate sites use it. The stub
+  refuses every second op so reintroducing this exact shape is red.
 - **A field selected but not DECLARED is dropped in silence, and both sides look right.** The presenter
   selected `requestText` and its schema never named it, so "취소" re-rendered the window instead of
   stopping. `check:flows` now fails any `action_contract` selecting a field its tool does not declare.
@@ -1950,8 +2001,145 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   11st returned three candidates, eBay rendered three product titles, and a persistent 11st card read found
   shipping on 3/8 rows. So the honest claim is "not attributable either way" for a degraded negative;
   positive observations survive because an intermittent stall cannot cause a success.
-- **The affiliate branch is fail-closed live, but its new button label is not live-proven.** Selecting a
-  Coupang offer in one persistent session reached `shopping_affiliate_link` and returned
-  `affiliate_no_link:404.0`; it did not fall through to cart mutation. Because no link/widget was produced,
-  `"쿠팡에서 보기"` never reached the visible surface. The site-based label is offline contract-tested; do
-  not call it live-verified until the conversion endpoint returns a link.
+- **An endpoint that returns 404 is not a launch feature.** The Coupang conversion path was fail-closed, but
+  that still left unreachable UI, state, schema, config and an 8.6 KiB encoded runtime module in the product.
+  The program declaration, flow branch/tool/state and `_common.74_rpc_affiliate` are deleted; an approved
+  offer reaches the existing guarded cart path directly. Reintroduction requires the server, partner
+  approval, all disclosure surfaces and exact-artifact proof together.
+- **A CWS build must fail before Chrome when a package graph is missing or incomplete.** Root
+  `npm run build:cws` creates `workspace-manifest.json` plus immutable `workspace-assets/` in the CDP
+  package, validates graph digest / reference closure / byte counts / every SHA-256, rebuilds core and
+  the extension, then validates the copied graph again. `copy-static` may omit the pair for an SDK-only
+  build; the guarded CWS command may not. The exact-artifact smoke proves the fresh session requests
+  those assets while the harness writes no source stores. ZIP creation, backend module verification
+  and the real-turn artifact smoke remain separate release gates.
+- **"Packaged sources are local" needs one assertion per source switch.** The package installer forced remote
+  sites and site flows off but left `remoteLuaEnabled` true, while the surrounding comments claimed all
+  executable sources were local. Fresh-profile QA caught the contradiction. The installer now forces all
+  three remote source families off, and its unit test names each flag; a collective claim without field-level
+  assertions is how one source silently stays remote.
+- **A start guard on the options page does not guard the toolbar.** The options button correctly refused empty
+  credentials while `startSessionForActiveTab` still grouped the active page and created session state before
+  the worker failed. The service worker now runs the same preflight before `chrome.tabs.group`; refusal opens
+  Settings and claims nothing. Real-browser QA exercises both entry points from a fresh profile.
+- **Form submission consent must use the submitter's words, not the operation name.** `dom.submit_form` used to
+  bypass the shared risky-action gate because only `dom.click` supplied a label. The page bundle now reads the
+  form's submit button label before mutation: ordinary `Next` remains ungated, `Place order` asks, refusal
+  prevents submission, and an unlabelled submit falls toward the risky path. This keeps consent meaningful
+  without training users to approve every form step.
+- **Browser `scriptIds` prove the durable Lua layer, not runtime module closure.** The harness said every
+  script was `stored-lua:` while flow tools loaded nine stale common modules from the backend: only the 14
+  `_common/rpc` files rode in `axsdk:lua-modules`, and the 12 declared `_common/scripts` files did not. Live,
+  the local comparison module translated `rpc_unavailable` while the runtime printed the raw code. The
+  workspace now copies every flow-declared local module into the module store byte-for-byte. The 25-source
+  common map is larger than one 256 KiB value, so it is stored as deterministic `:` / `:|2` chunks and core
+  merges chunks before site overrides. A real workspace test compares the closure against
+  `buildRpcFlows().__report.moduleSources`; a fresh runtime and the 44/44 sweep prove the client used it.
+- **A navigation acknowledgement can time out after the page moved.** Three of six instrumented
+  Amazon→Walmart turns raised `rpc_timeout` from `nav.navigate`, and the same failed turn's tab was already
+  on Walmart search. Returning `rpc_unavailable` from `pcall == false` discarded a successful side effect.
+  The storefront now fires once, never retries, and lets the target-aware wait establish arrival; only an
+  unchanged address uses the failed acknowledgement as channel evidence. The regression stub moves first
+  and raises second, which is the ordering that matters.
+- **A live gate needs a compact evidence channel, not a promise that chat will keep large JSON.** Chat trims
+  tool output at 4,120 characters. 11st had six real candidates, all its visible comparison rows were folded
+  for incomplete total cost, and every structured candidate array was truncated; the runner therefore called
+  it `unsearched`. `AX_build_offer_screening` now publishes one bounded outcome and normalized sample per
+  store, and the runner consumes that before any window fallback. The post-fix ten-site sweep attributes and
+  contract-checks every candidate store: **44/44**, 102.4 s, 0 timeout, 0 retry.
+- **A multi-store runner must refuse a singleton batch before Chrome.** Filtering to Walmart and 11st made
+  two one-store query groups; the planner correctly chose `shopping_single_site`, while the runner looked only
+  for multi-store tools and reported both `unsearched`. `assertRunnableBatches` now requires at least two
+  stores per query wording and explains which companion is missing. A diagnostic that silently switches the
+  product path is not a diagnostic of the path it names.
+- **A quote search can land with real pros after its navigation acknowledgement times out.** Shipping-CDP
+  raised `rpc_timeout` from `nav.navigate` while the canonical
+  `/k/house-cleaning/near-me?zip_code=94101` page already held **61 pros**; the flow mapped that technical
+  error to `no_results` and blamed the valid ZIP. Thumbtack search now fires once, tolerates the dropped
+  acknowledgement, matches the site's no-trailing-slash canonical URL, and derives success from the landed
+  page. Invalid ZIP, empty results, access refusal and RPC/navigation failure have separate branches.
+- **A model question does not leave a node to resume; a pausing contract does.** The quote collector asked
+  for contact, completed its model message, and the contact-only answer entered a fresh flow that had lost
+  service, requirements and ZIP. `present_quote_collection` now owns the question and pauses on it; the next
+  message resumes that node and hands the raw answer to collection with prior state intact. Live:
+  house-cleaning `94101` retained every first-turn field and searched after only the contact reply.
+- **A yes/no quote gate has no model judgement to make.** Live, the literal `예` reached
+  `confirm_quote` and the model returned `refine`, re-rendering the same pro. The gate is now a deterministic
+  `action_contract` over the last raw `userMessages` entry: explicit approval proceeds, refusal cancels,
+  and anything else returns to selection. No model stands between a numbered pro and the safe wizard.
+- **Thumbtack's last safe boundary arrives before a button labelled Submit.** After 8–11 successfully driven
+  steps the live form showed `Send a message to the pro … You don’t need to include contact info yet` with
+  only `Skip`/`Back`; auto-clicking `Skip` produced Thumbtack's request-flow error. Crossing it buys no read
+  capability and enters contact/lead handling, so the wizard now reports `contact_boundary` and leaves both
+  buttons untouched. The flow exposes no `submit_quote` tool. `npm run test:thumbtack:live` is **7/7** across
+  house cleaning `94101`, handyman `94103`, and lawn mowing `94101` in 146.08 s; cancellation traces contain
+  neither `open_quote` nor any send tool.
+- **A discovery number is an executable promise.** The identity builder used to number low-confidence,
+  no-model listings that the resolver could only reject; option 1 could therefore be a dead end. Numbering is
+  now reserved for grounded manufacturer models with source references, while unresolved real listings remain
+  visible in a separate unnumbered section. Every numbered discovery option resolves directly to identity lock.
+- **A model cannot choose from a list the user was never shown.** Broad discovery built `product_options`,
+  then its model gate asked for a number without rendering the options. A deterministic pausing presenter now
+  owns the visible choice surface and parses numbers and cancellation from the resumed raw message; the model
+  receives neither the raw option records nor `identity_confidence`, source references, JSON or sample prices.
+- **Large worker output is not evidence that a store did or did not run.** Chat truncates large fan-out
+  payloads, so a completed 11st+Walmart turn looked like only 11st ran. The compact post-screening store
+  outcomes are the definitive runner channel. Separately, `AX_complete_store_results` materializes any
+  genuinely absent selected child as `unsearched`, so it cannot vanish from screening or the user-visible
+  store outcomes.
+- **Broad discovery is live-proven on the shipping CDP extension.** `npm run
+  test:commerce:live:discovery` is **18/18** in 67.16 s: the preflight retains 11st+Walmart, the user sees
+  grounded choices from both stores, option 1 locks, searches, screens and ranks, and cancellation performs no
+  cart mutation.
+- **A terminal model given the whole memory state may print the wire instead of the answer.** Successful
+  set/update/delete turns rendered `memory_result`, `next`, `ok`, and `operation` verbatim. Every memory
+  outcome now passes through `AX_RPC_MEMORY.present`, and the terminal is a deterministic data terminal over
+  only `memory_response`; raw envelopes and failure reasons never enter the response model.
+- **Memory writes return only `true`, and top-level flow state is not a reliable receipt.** Successful
+  writes changed the store while the presenter intermittently answered failure because `memory` or
+  `delete_keys` was absent one node later. `AX_RPC_MEMORY.set_bulk`/`delete` now carry the validated request
+  fields inside the result envelope that already crosses the boundary, and the presenter falls back to that
+  envelope. Reads use the nested op payload: `keys`, exact `value`, or bounded search `matches`; no value is
+  invented from the request.
+- **`confirmed=false` is normal planning state, not proof that category deletion was cancelled.** A
+  no-match carried `confirmed=false` and was first rendered as a cancellation. The presenter classifies an
+  empty match set first, recognizes cancellation only from the current user's cancel text, and treats
+  `confirmed=true` plus exact `delete_keys` as the mutation. Live: no-match removed nothing, cancellation
+  preserved both candidates, and both replies were consumer text.
+- **A memory-reuse gate must stop at the deterministic memory boundary.** Across eight clean-session quote
+  measurements the identical six-field `recall_saved_contact` output reached `verify_request` three times,
+  an unrelated collection-model cancellation four times, and a contact re-ask once. Requiring the
+  downstream model to proceed made memory storage look flaky; the gate requires the complete recall output.
+- **Memory consumer responses are live-proven on the shipping CDP extension.** The response journey is
+  **20/20** in 240.80 s across save, update, delete, list, exact read, search, reset persistence, quote recall,
+  and wire-field refusal. Final focused probes re-proved save/delete and category no-match/cancellation after
+  the nested mutation-receipt fix.
+- **98.7% was a legacy packed module-store slot, not runtime-module capacity — and C3 removes that
+  slot from the package path.** The development harness still splits persisted module maps at 256 KiB
+  and core merges them by name, but the CWS package carries each of the 26 runtime modules as its own
+  content-addressed asset. Module headroom is now governed by individual tool/compiler constraints,
+  not one encoded name→source store value.
+- **The 256 KiB FLOW STORE boundary is confirmed but package-local now.** `_common/flows.yaml` is
+  261,319 B; `flowsStore.setFlows` and remote-site fetching still cap their individual values at
+  256 KiB. C3 never writes package flow/Lua/module sources through either path, and a regression builds
+  a >256 KiB flow asset successfully. No matching 256 KiB final compiler check was found. The open
+  proof is therefore narrower: pass a valid >256 KiB document directly from package assets to the
+  compiler. Canonical YAML remains useful for transport and review, not required to fit the package
+  into a persisted value.
+- **The exact User Script executor feasibility gate is GREEN, not production code — and reload
+  lifecycles are not interchangeable.** On Chrome 151, four inactive task/provider tabs in two
+  same-release groups executed only after frame-0 no-ops returned exact `documentId` values. The task
+  port survived two provider navigations. A service-worker stop/start preserved that task document and
+  reconnected it through a new worker instance and nonce. A real unpacked-extension reload invalidated
+  the old User Script worlds: re-executing against the old role document stalled, so both task and
+  provider documents are recycled before fresh exact execution; the task then requires a new worker,
+  document, nonce, and pong. Two concurrent task ports kept distinct
+  session/group/tab/document/nonce/world bindings while both tabs stayed inactive. Three consecutive
+  stress runs passed, and cleanup restored the structural no-Pack baseline. The proof lives in the
+  SDK's `scripts/pack-phase0{.test,.ts,-live.ts}`; it does not install or persist a Pack.
+- **Do not advertise a Pack compile capability without the production compiler behind it.** The
+  authenticated pre-session probe still returns HTTP 200 with only `app,appUser`, advertises no
+  versioned Pack/compile-only contract, and exits 2 without creating a session or model turn. The
+  available backend, SDK, and agent checkouts contain no production flow compiler or compile adapter;
+  the available backend `origin/main` also lacks the live package compiler route. The platform owner
+  must publish the capability and compile-only endpoint from the repository that owns that compiler.

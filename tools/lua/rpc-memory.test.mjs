@@ -66,6 +66,149 @@ test('an empty value is a delete, in the same call as the saves', () => {
   assert.deepEqual(sent.find((entry) => entry.key === 'work'), { key: 'work' });
 });
 
+test('successful writes carry their confirmed keys to the downstream presenter', () => {
+  const saved = lua.call('AX_RPC_MEMORY.set_bulk', { memory: { email: 'safe@example.test', address: '' } });
+  assert.deepEqual(saved.memory, { email: 'safe@example.test', address: '' });
+
+  const removed = lua.call('AX_RPC_MEMORY.delete', { keys: ['email'] });
+  assert.deepEqual(removed.delete_keys, ['email']);
+});
+
+test('memory results render as deterministic consumer text without wire fields', () => {
+  const saved = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '이메일을 기억하고 주소는 잊어줘',
+    operation: 'set',
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: true,
+      memory: { email: 'hong@test.com', address: '' },
+    },
+  });
+  assert.equal(saved.next, 'done');
+  assert.equal(saved.memory_response, '이메일을 기억했고 주소 기억을 삭제했습니다.');
+
+  const listed = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '기억한 내용 보여줘',
+    operation: 'list',
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: { keys: ['phone', 'email'] },
+    },
+  });
+  assert.equal(listed.memory_response, '기억하고 있는 항목: 이메일, 전화번호.');
+
+  const read = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '내 이메일이 뭐야',
+    operation: 'get',
+    key: 'email',
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: { key: 'email', value: 'hong@test.com' },
+    },
+  });
+  assert.equal(read.memory_response, '기억한 이메일: hong@test.com');
+
+  const missing = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '내 이메일이 뭐야',
+    operation: 'get',
+    key: 'email',
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: { key: 'email', value: null },
+    },
+  });
+  assert.equal(missing.memory_response, '저장된 이메일 정보가 없습니다.');
+
+  const missingPhone = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '내 전화번호가 뭐야',
+    operation: 'get',
+    key: 'phone',
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: { key: 'phone', value: null },
+    },
+  });
+  assert.equal(missingPhone.memory_response, '저장된 전화번호 정보가 없습니다.');
+
+  for (const result of [saved, listed, read, missing, missingPhone]) {
+    assert.doesNotMatch(result.memory_response, /memory_result|operation|next|ok|table:/i);
+    assert.doesNotMatch(result.memory_response, /^\s*[\[{]/);
+  }
+});
+
+test('memory search and failure responses remain grounded and hide raw errors', () => {
+  const searched = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '프로젝트 알파 관련 기억을 찾아줘',
+    operation: 'search',
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: {
+        matches: [{ key: 'project_alpha', excerpt: '# Alpha\nlaunch checklist', truncated: true }],
+      },
+    },
+  });
+  assert.equal(searched.next, 'done');
+  assert.match(searched.memory_response, /project_alpha/);
+  assert.match(searched.memory_response, /# Alpha\nlaunch checklist/);
+  assert.match(searched.memory_response, /일부가 잘렸습니다/);
+  assert.doesNotMatch(searched.memory_response, /memory_result|operation|next|ok|table:/i);
+
+  const failed = lua.call('AX_RPC_MEMORY.present', {
+    requestText: 'remember my email',
+    operation: 'set',
+    memory: { email: 'safe@example.test' },
+    memory_result: {
+      next: 'error',
+      ok: false,
+      error: 'memory_op_unavailable',
+      reason: 'command_unresolved: memory.set_bulk',
+    },
+  });
+  assert.equal(failed.next, 'done');
+  assert.equal(failed.memory_response, 'Memory request could not be completed. Nothing was saved or deleted.');
+  assert.doesNotMatch(failed.memory_response, /memory_op_unavailable|command_unresolved|set_bulk/);
+
+  const notFound = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '주소 관련 기억을 지워줘',
+    operation: 'delete_candidates',
+    confirmed: false,
+    memory_result: { matches: [] },
+  });
+  assert.equal(notFound.memory_response, '삭제할 일치하는 기억을 찾지 못했습니다. 아무것도 삭제하지 않았습니다.');
+
+  const cancelled = lua.call('AX_RPC_MEMORY.present', {
+    requestText: '취소',
+    operation: 'delete_candidates',
+    confirmed: false,
+    delete_keys: [],
+    memory_result: { matches: [{ key: 'address', excerpt: 'Seoul' }] },
+  });
+  assert.equal(cancelled.memory_response, '메모리 삭제를 취소했습니다. 아무것도 삭제하지 않았습니다.');
+  assert.equal(cancelled.next, 'cancelled');
+
+  const categoryDelete = lua.call('AX_RPC_MEMORY.present', {
+    requestText: 'address를 삭제해줘',
+    operation: 'delete_candidates',
+    confirmed: true,
+    memory_result: {
+      next: 'report',
+      ok: true,
+      memory_result: true,
+      delete_keys: ['address'],
+    },
+  });
+  assert.equal(categoryDelete.memory_response, '주소 기억을 삭제했습니다.');
+  for (const result of [notFound, cancelled, categoryDelete]) {
+    assert.doesNotMatch(result.memory_response, /memory_result|operation|next|ok|table:/i);
+  }
+});
+
 test('a client with no memory ops is reported, not crashed into', () => {
   // The ops were published before the extension implemented them. A flow that dies here tells the user
   // nothing; a flow that says the store could not be reached tells them what happened.

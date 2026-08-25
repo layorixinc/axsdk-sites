@@ -64,6 +64,23 @@ export function lastToolOutput(toolCalls, suffix) {
   return call === undefined ? null : decode(call.output) ?? null;
 }
 
+export function discoveryChoiceSurface(turn) {
+  const call = findToolCall(turn?.toolCalls, 'present_product_options');
+  const output = decode(call?.output);
+  const question = String(output?.question || turn?.text || '');
+  const forbidden = /identity_confidence|source_sites|source_refs|sample[_ ]prices?/i;
+  return call?.status === 'completed'
+    && output?.next === 'ask'
+    && /(?:^|\n)\s*1\.\s+\S/m.test(question)
+    && /found at|확인된 판매처|observed stores/i.test(question)
+    && !forbidden.test(question);
+}
+
+export function sitesFromWindow(text, requestedSites) {
+  const window = String(text || '');
+  return (requestedSites || []).filter((site) => window.includes(`[${site}]`) || window.includes(`(${site})`));
+}
+
 function check(checks, name, value, evidence = '') {
   const ok = Boolean(value);
   checks.push({ name, ok, evidence });
@@ -101,12 +118,16 @@ async function main() {
     check(checks, 'fresh flow session created', Boolean(fresh), `remaining=${fresh?.remaining ?? '?'}`);
 
     let compare = await session.send(requestText, { timeoutMs: Math.max(300000, requestedSites.length * 120000) });
+    const prefillOutput = lastToolOutput(compare.toolCalls, 'shopping_prefill_total_cost_request');
+    const prefilledSites = Object.values(prefillOutput?.stores ?? {}).map((item) => item?.site).filter(Boolean);
+    check(checks, 'deterministic preflight keeps every requested store', requestedSites.every((site) => prefilledSites.includes(site)), prefilledSites.join(','));
     if (discoveryMode) {
       const optionOutput = lastToolOutput(compare.toolCalls, 'shopping_build_product_options');
       const productOptions = Array.isArray(optionOutput?.product_options) ? optionOutput.product_options : [];
       const discoveryReply = String(compare.text || '');
       const numberedOptions = (discoveryReply.match(/(?:^|\n)\s*\d+\.\s+/g) || []).length;
       check(checks, 'broad request discovers grounded product options', productOptions.length > 0 || numberedOptions > 0, `options=${productOptions.length || numberedOptions}`);
+      check(checks, 'consumer sees a safe numbered product list', discoveryChoiceSurface(compare), discoveryReply.replace(/\s+/g, ' ').slice(0, 300));
       const sourceMetadataValid = productOptions.length > 0
         ? productOptions.every(option => {
             const sourceSites = Array.isArray(option.source_sites) ? option.source_sites : [];
@@ -122,7 +143,7 @@ async function main() {
       const claimedSourceCounts = [...String(compare.text || '').matchAll(/\b(\d+)\s+source\s+sites?\b/gi)]
         .map(match => Number(match[1]));
       check(checks, 'product option prose does not inflate source sites', claimedSourceCounts.every(count => count <= requestedSites.length), claimedSourceCounts.join(','));
-      check(checks, 'product identity is approved before store ranking', Boolean(findToolCall(compare.toolCalls, 'choose_product')) && !findToolCall(compare.toolCalls, 'shopping_rank_store_offers'));
+      check(checks, 'product identity is approved before store ranking', Boolean(findToolCall(compare.toolCalls, 'present_product_options')) && !findToolCall(compare.toolCalls, 'shopping_rank_store_offers'));
       check(checks, 'discovery cannot mutate a cart', !findToolCall(compare.toolCalls, 'shopping_add_selected_store_offer'));
       console.log(`DISCOVER  ${String(compare.text || '').replace(/\s+/g, ' ').slice(0, 500)}`);
       compare = await session.send(productChoice, { timeoutMs: Math.max(300000, requestedSites.length * 120000) });
@@ -136,15 +157,28 @@ async function main() {
     const rankOutput = lastToolOutput(compare.toolCalls, 'shopping_rank_store_offers');
     const offers = Array.isArray(rankOutput?.offers) ? rankOutput.offers : [];
     const reply = String(compare.text || '');
+    const windowSites = new Set(sitesFromWindow(reply, requestedSites));
+    const compactOutput = lastToolOutput(compare.toolCalls, 'shopping_summarize_store_outcomes');
+    const compactOutcomes = Array.isArray(compactOutput?.store_outcomes) ? compactOutput.store_outcomes : [];
+    const compactSites = new Set(compactOutcomes.map((outcome) => outcome.site).filter(Boolean));
+    const unsearchedSites = new Set(compactOutcomes
+      .filter((outcome) => outcome.status === 'unsearched')
+      .map((outcome) => outcome.site));
     const offerSites = new Set([
       ...offers.map(offer => offer.site),
-      ...(requestedSites.filter(site => reply.includes(`[${site}]`))),
+      ...windowSites,
     ]);
     const failureSites = new Set((rankOutput?.failures || []).map(failure => failure.site).filter(Boolean));
-    const outcomeSites = new Set([...stores, ...offerSites, ...failureSites]);
+    const outcomeSites = new Set([...stores, ...offerSites, ...failureSites, ...compactSites]);
+    console.log(`STORES    compact=${compactOutcomes.map((outcome) => `${outcome.site}:${outcome.status}`).join(',') || '-'} window=${[...windowSites].join(',') || '-'} workers=${[...stores].join(',') || '-'}`);
     const numberedCount = offers.length || (reply.match(/(?:^|\n)\d+\.\s+\[/g) || []).length;
 
-    check(checks, 'agentic task map searched every selected store', requestedSites.every(site => outcomeSites.has(site)), [...outcomeSites].join(','));
+    check(checks, 'every selected store has a classified outcome', requestedSites.every(site => outcomeSites.has(site)), [...outcomeSites].join(','));
+    check(checks, 'fan-out executes every selected store', requestedSites.every(site => !unsearchedSites.has(site)), [...unsearchedSites].join(','));
+    const nonCandidateSites = compactOutcomes
+      .filter((outcome) => outcome.status !== 'candidates')
+      .map((outcome) => outcome.site);
+    check(checks, 'comparison window names every non-candidate store', nonCandidateSites.every(site => windowSites.has(site)), [...windowSites].join(','));
     check(checks, 'live adapter results produce ranked offers', offerSites.size >= 1, [...offerSites].join(','));
     check(checks, 'comparison is bounded and numbered', numberedCount >= 1 && numberedCount <= 6, `offers=${numberedCount}`);
     // The gate named `choose_offer`, a model node that no longer exists: the comparison loop is

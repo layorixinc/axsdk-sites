@@ -69,7 +69,8 @@ test('a rejected ZIP is its own answer, never an empty service', () => {
   });
   const { value } = search(page);
   assert.equal(value.next, 'invalid_zip');
-  assert.equal(value.zip_code, '94101');
+  assert.equal(value.zip_code, undefined, 'the rejected ZIP must not loop back into the same search');
+  assert.equal(value.zip_status, 'invalid_zip');
 });
 
 test('the search is fired once, not on every poll', () => {
@@ -80,6 +81,26 @@ test('the search is fired once, not on every poll', () => {
   });
   const { ops } = search(page);
   assert.equal(ops.filter((entry) => entry.op === 'nav.navigate').length, 1);
+});
+
+test('a navigation acknowledgement timeout after landing does not discard live pros', () => {
+  // Measured on the shipping CDP extension: nav.navigate raised rpc_timeout, but the tab had already
+  // reached /k/house-cleaning/near-me?zip_code=94101 and rendered 61 pros. The flow turned that channel
+  // acknowledgement failure into "invalid ZIP". Fire once, establish the landing from the page, and read.
+  const page = makePage({
+    href: 'https://www.google.com/',
+    landsAt: 'https://www.thumbtack.com/k/house-cleaning/near-me?zip_code=94101',
+    navigateThrowsAfterFire: 'rpc nav.navigate failed: rpc_timeout',
+    afterNavigate: {},
+    sequence: { [CARD]: [[pro('Clean Co', 4.9)], [pro('Clean Co', 4.9)]] },
+  });
+  const { value, ops } = search(page);
+
+  assert.equal(value.next, 'done');
+  assert.equal(Object.values(value.candidates).length, 1);
+  assert.equal(ops.filter((entry) => entry.op === 'nav.navigate').length, 1, 'a timed-out fire is never retried');
+  const hrefReads = ops.filter((entry) => entry.op === 'dom.get_location_href').length;
+  assert.ok(hrefReads <= 20, `the canonical landing must not burn the arrival ceiling — got ${hrefReads}`);
 });
 
 test('a candidate carries what the shortlist ranks on', () => {
@@ -110,8 +131,8 @@ test('the entry reads the shape the quote node hands it', () => {
 });
 
 test('the search opens the category page the site actually serves', () => {
-  // Live, `/instant-results/?query=...` answered zero pros: results live at `/k/<slug>/near-me/`, and
-  // the slug is the query with every run of non-alphanumerics collapsed to one hyphen.
+  // Live, `/instant-results/?query=...` answered zero pros: results live at `/k/<slug>/near-me`,
+  // and Thumbtack canonicalizes away the trailing slash before the query string.
   const page = makePage({
     href: 'https://www.google.com/',
     afterNavigate: {},
@@ -120,7 +141,7 @@ test('the search opens the category page the site actually serves', () => {
   const { ops } = search(page, { query: 'House  Cleaning!' });
   const navigated = ops.find((entry) => entry.op === 'nav.navigate');
 
-  assert.equal(navigated.params.url, 'https://www.thumbtack.com/k/house-cleaning/near-me/?zip_code=94101');
+  assert.equal(navigated.params.url, 'https://www.thumbtack.com/k/house-cleaning/near-me?zip_code=94101');
 });
 
 test('a card with no service link is dropped, not shown as a pro nobody can pick', () => {

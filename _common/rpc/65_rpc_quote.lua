@@ -9,8 +9,8 @@
 --- The CTA is POLLED. The aside sidebar hydrates after nav readiness, so one scan raced it: a quotable
 --- pro was reported `quote_unavailable` and silently skipped.
 ---
---- The final Submit is NOT clicked. Reaching it is the answer this script gives; sending it belongs to
---- `submit_quote`, behind an explicit confirmation, because the click contacts a real person.
+--- The final Submit is NOT clicked. Reaching it is the answer this script gives; the flow reports that
+--- stop and exposes no action that can contact a professional.
 
 AX_RPC_QUOTE = AX_RPC_QUOTE or {}
 local Q = AX_RPC_QUOTE
@@ -263,6 +263,15 @@ function Q.read_error()
     else code = "email_error" end
   end
   return { error = code, message = text, retry_field = field, bad_value = email }
+end
+
+--- The measured last safe step before Thumbtack starts contact/lead handling. It rendered only Skip/Back,
+--- and auto-clicking Skip produced the site's request-flow error after 8-11 otherwise successful steps.
+--- Crossing this boundary buys no read capability, so the safe answer is the same as a final Submit:
+--- report the live step and leave every button untouched.
+function Q.is_contact_boundary(text)
+  local normalized = B.normalize_text(text or "")
+  return normalized:find("send a message to the pro", 1, true) ~= nil
 end
 
 -- The batch and the one-by-one reads must ask for exactly the same thing, so the selector and its field
@@ -927,6 +936,20 @@ function Q.request_quote(args)
   -- the page never came back" are different failures that read identically without it.
   local waits = 0
   local steps, stalled, flow = 0, 0, nil
+  local function contact_stop(context)
+    local text = context.current_text()
+    if not Q.is_contact_boundary(text) then return nil end
+    return {
+      next = "submit",
+      quote_status = "at_contact_boundary",
+      quote_reached_submit = false,
+      quote_advance_reason = "contact_boundary",
+      quote_steps = steps,
+      quote_clock = clock() ~= nil,
+      quote_answered = Q.answered(applied),
+      quote_last_step = text,
+    }
+  end
   while steps < Q.MAX_STEPS do
     if over_budget() then
       -- Out of round trips. Before calling that a failure, ask the page WHERE it stopped: the wizard's
@@ -949,7 +972,10 @@ function Q.request_quote(args)
                quote_message = Q.stall_snapshot() }
     end
     local before = #applied
-    flow = W.drive_step(Q.ctx(), drive, applied, before)
+    local context = Q.ctx()
+    local stopped = contact_stop(context)
+    if stopped then return stopped end
+    flow = W.drive_step(context, drive, applied, before)
     if not flow then
       -- The wizard answers nil when there is no ACTIVE step, and there are THREE reasons for that, not
       -- two. `classify_absence` names them; the fix for each is different.
@@ -969,7 +995,10 @@ function Q.request_quote(args)
         if why == "standing" then
           -- The frame is there and only the step marker is missing, between renders.
           if wait_for(Q.ACTIVE, 8000) then
-            flow = W.drive_step(Q.ctx(), drive, applied, #applied)
+            local context = Q.ctx()
+            local stopped = contact_stop(context)
+            if stopped then return stopped end
+            flow = W.drive_step(context, drive, applied, #applied)
           end
         elseif why == "transitional" then
           -- Nothing on the page at all: the document is mid-render. Measured live at step six, on "How
@@ -978,7 +1007,10 @@ function Q.request_quote(args)
           -- free and giving up on the first blank read is indefensible.
           pace(700)
           if exists(Q.ACTIVE) then
-            flow = W.drive_step(Q.ctx(), drive, applied, #applied)
+            local context = Q.ctx()
+            local stopped = contact_stop(context)
+            if stopped then return stopped end
+            flow = W.drive_step(context, drive, applied, #applied)
           end
         end
         if flow or why == "closed" then break end
@@ -1009,7 +1041,8 @@ function Q.request_quote(args)
     if flow.request_error then
       return { next = "error", quote_error = flow.request_error.error, quote_status = "request_flow_error",
                quote_message = flow.request_error.message, quote_retry_field = flow.request_error.retry_field,
-               quote_steps = steps, quote_clock = clock() ~= nil }
+               quote_steps = steps, quote_clock = clock() ~= nil, quote_advance_reason = flow.advance_reason,
+               quote_answered = Q.answered(applied), quote_last_step = last_step }
     end
     -- Reaching the submit step is the goal. `missing_answer` hands off too, because a required step this
     -- cannot answer will not answer itself on a retry. `advance_button_not_found` does NOT: that is
@@ -1041,49 +1074,8 @@ function Q.request_quote(args)
            quote_advance_reason = flow and flow.advance_reason or nil, quote_steps = steps, quote_clock = clock() ~= nil }
 end
 
---- Sends the request. Separate from driving the form on purpose: this click contacts a real person, so it
---- runs only with an explicit `confirm`, and the flow can stop at the node boundary.
-function Q.submit_quote(args)
-  args = type(args) == "table" and args or {}
-  if args.confirm ~= true then
-    return { next = "done", quote_submit_status = "confirmation_required",
-             quote_submit_message = "A quote is only sent with an explicit confirmation." }
-  end
-  if not exists(Q.ACTIVE) then
-    return { next = "done", quote_submit_status = "no_active_step", quote_submit_error = "dialog_closed" }
-  end
-
-  local applied = {}
-  Q.apply_contact(args, applied)
-
-  local buttons = rows_of(Q.ACTIVE .. ' button',
-    { text = true, aria = { attr = "aria-label" }, title = { attr = "title" } }, 20)
-  local decision = W.classify_advance(buttons)
-  if decision.reached_submit_step ~= true then
-    return { next = "done", quote_submit_status = "no_submit_button",
-             quote_submit_error = "submit_not_found", quote_submit_message = decision.label }
-  end
-
-  local clicked = click(Q.ACTIVE .. ' button:not([aria-label])') == true
-  pace(600)
-
-  -- A validation popover means the request did NOT go out. Reporting it as submitted would tell the user
-  -- a pro was contacted when none was.
-  local rejection = Q.read_error()
-  if rejection then
-    return { next = "done", quote_submit_status = "rejected", quote_submit_error = rejection.error,
-             quote_submit_message = rejection.message }
-  end
-  if not clicked then
-    return { next = "done", quote_submit_status = "submit_click_failed", quote_submit_error = "click_failed" }
-  end
-  return { next = "done", quote_submit_status = "submitted", quote_submit_button = decision.label,
-           quote_submit_message = trim(text_of(Q.ACTIVE)) }
-end
 
 --- The quote path lives in its own module because the search does not need the wizard, and a module is
---- what the runtime snapshots. Both entries stay reachable under the search namespace so the flow keeps
---- one Thumbtack name.
+--- what the runtime snapshots.
 AX_RPC_THUMBTACK = AX_RPC_THUMBTACK or {}
 AX_RPC_THUMBTACK.request_quote = Q.request_quote
-AX_RPC_THUMBTACK.submit_quote = Q.submit_quote

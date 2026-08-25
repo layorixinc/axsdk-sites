@@ -187,6 +187,26 @@ test('the final submit is never clicked while driving', () => {
   assert.equal(page.dom[ACTIVE][0].text, 'Review and send your request', 'the wizard is parked on the final step');
 });
 
+test('the measured pre-contact message step is a stop, not another automatic Skip', () => {
+  // Shipping-CDP: after 8-11 safe steps Thumbtack rendered
+  // "Send a message to the pro ... You don’t need to include contact info yet. Skip Back".
+  // Clicking Skip produced the site's generic request-flow error. More importantly, this is the boundary
+  // immediately before lead/contact handling, so crossing it automatically buys no safe capability.
+  const boundary = step(
+    'Send a message to the pro. Ask questions or describe what you need. You don’t need to include contact info yet.',
+    { buttons: ['Skip', 'Back'], textarea: true },
+  );
+  const page = quotePage({ steps: [boundary, finalStep()] });
+  const result = drive(page);
+
+  assert.equal(result.next, 'submit');
+  assert.equal(result.quote_reached_submit, false);
+  assert.equal(result.quote_advance_reason, 'contact_boundary');
+  assert.match(result.quote_last_step, /Send a message to the pro/);
+  assert.ok(!clicks(page).some((selector) => selector.includes(ACTIVE)),
+    'the boundary must remain visible and unpressed');
+});
+
 test('a step rendering a submit-like button BEFORE its Next is never pressed', () => {
   // Two halves of one hazard, both in the code today. `W.classify_advance` decides by LABEL and returns
   // `advance` the moment it sees "Next" — discarding the fact that a submit-like button was also on the
@@ -257,49 +277,21 @@ test("Thumbtack's own rejection is the answer, not a generic failure", () => {
   assert.match(result.quote_message, /ax@x/, "the site's own wording must reach the user");
 });
 
-test('submitting refuses without an explicit confirmation and clicks nothing', () => {
-  // `confirm` is what separates filling a form from contacting a person, and the node stays separate for
-  // the same reason: the flow must be able to stop right here.
-  const page = quotePage({ steps: [finalStep()] });
-  installRpcStub(lua, page);
-  const result = lua.call('AX_RPC_THUMBTACK.submit_quote', { submit_email: 'thumbtack-test@example.com' });
-
-  assert.equal(result.quote_submit_status, 'confirmation_required');
-  assert.equal(clicks(page).length, 0);
-});
-
-test('a confirmed submit fills the contact details and reports what Thumbtack answered', () => {
-  const page = quotePage({ steps: [finalStep()] });
-  page.dom = { ...page.dom, ...finalStep().dom };
-  installRpcStub(lua, page);
-  const result = lua.call('AX_RPC_THUMBTACK.submit_quote', {
-    confirm: true,
-    submit_email: 'thumbtack-test@example.com',
-    submit_first_name: 'AX',
-    submit_last_name: 'Tester',
-    submit_phone: '415-555-0123',
-    zip_code: '94101',
+test("a late Thumbtack rejection reports the steps driven before the site's error", () => {
+  const page = quotePage({
+    steps: [
+      step('What kind of cleaning?', { choices: ['One-time cleaning', 'Recurring cleaning'] }),
+      step('Your contact info', { contact: true, error: 'Sorry, looks like something went wrong. Please try again.' }),
+    ],
   });
+  const result = drive(page);
 
-  assert.equal(result.next, 'done');
-  const filled = page.filled.map((entry) => entry.value);
-  assert.ok(filled.includes('thumbtack-test@example.com'), `the email must be filled, saw ${filled.join(' | ')}`);
-  assert.ok(clicks(page).length > 0, 'the submit is clicked once confirmed');
+  assert.equal(result.quote_error, 'request_flow_error');
+  assert.match(result.quote_answered, /One-time cleaning/);
+  assert.match(result.quote_last_step, /What kind of cleaning/);
+  assert.equal(result.quote_advance_reason, 'request_flow_error');
 });
 
-test('a submit that Thumbtack rejected is not reported as sent', () => {
-  // A validation popover means the request did NOT go out. Reporting "submitted" there tells the user a
-  // pro was contacted when none was.
-  const rejected = finalStep();
-  rejected.dom['#request-flow-error'] = [{ text: 'Enter a valid phone number. Close alert' }];
-  const page = quotePage({ steps: [rejected] });
-  page.dom = { ...page.dom, ...rejected.dom };
-  installRpcStub(lua, page);
-  const result = lua.call('AX_RPC_THUMBTACK.submit_quote', { confirm: true, submit_phone: '1' });
-
-  assert.equal(result.quote_submit_status, 'rejected');
-  assert.match(result.quote_submit_message, /valid phone number/);
-});
 
 test('an op refused while the channel re-attaches does not cost the pro', () => {
   // Measured live: the navigation landed on the pro, the first `dom.query_all` came back `rpc_timeout`

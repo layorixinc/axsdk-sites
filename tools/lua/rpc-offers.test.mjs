@@ -142,6 +142,13 @@ test('ranking hands back the comparison as one scalar', () => {
   assert.match(ranked.question ?? '', /M185/);
 });
 
+test('ranking omits an empty failures table before the next-turn schema boundary', () => {
+  const lua = runtime();
+  const ranked = lua.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  lua.close();
+  assert.equal(ranked.failures, undefined);
+});
+
 test('a later turn pages the comparison the earlier turn built', () => {
   // The reason these three could not be ported. `rank` runs in one turn, `present` in the next, and the
   // runtime gives them separate session scopes — so the only channel is what the flow carries between
@@ -183,6 +190,38 @@ test('a refinement that changes WHICH offers are listed reissues the listing', (
   assert.equal(refined.error, undefined, `refine failed: ${refined.error}`);
   assert.notEqual(refined.comparison_id, ranked.comparison_id, 'a changed listing must be a new listing');
   assert.equal(typeof refined.comparison_state, 'string');
+});
+
+test('a site-filtered snapshot reopens in a fresh turn and invalidates the old listing id', () => {
+  const ranking = runtime();
+  const ranked = ranking.call('AX_RPC_OFFERS.rank', { verified_offers: OFFERS });
+  ranking.close();
+
+  const filtering = runtime();
+  const refined = filtering.call('AX_RPC_OFFERS.refine', {
+    comparison_state: ranked.comparison_state,
+    comparison_id: ranked.comparison_id,
+    refine_request: 'amazon만 보여줘',
+  });
+  filtering.close();
+
+  const presenting = runtime();
+  const reopened = presenting.call('AX_RPC_OFFERS.present', {
+    comparison_state: refined.comparison_state,
+    comparison_id: refined.comparison_id,
+  });
+  const stale = presenting.call('AX_RPC_OFFERS.present', {
+    comparison_state: refined.comparison_state,
+    comparison_id: ranked.comparison_id,
+  });
+  presenting.close();
+
+  assert.equal(refined.error, undefined, `refine failed: ${refined.error}`);
+  assert.notEqual(refined.comparison_id, ranked.comparison_id);
+  assert.equal(reopened.next, 'ask');
+  assert.match(reopened.question ?? '', /amazon/i);
+  assert.doesNotMatch(reopened.question ?? '', /walmart/i);
+  assert.equal(stale.error, 'stale_comparison');
 });
 
 test("the sort the user chose comes back, so the next refinement keeps it", () => {
@@ -442,6 +481,22 @@ test('the node that pauses is the node that reads the answer', () => {
 
   assert.equal(answer('취소').next, 'cancel', 'a cancel must stop, never select');
   assert.equal(answer('그만할래').next, 'cancel');
+  assert.equal(answer('처음부터 다시').next, 'restart', 'restart must clear the listing, never select');
+  assert.equal(answer('start over').next, 'restart');
+
+  const rawCancel = (() => {
+    const lua = runtime();
+    const out = lua.call('AX_RPC_OFFERS.present', {
+      comparison_state: ranked.comparison_state,
+      comparison_id: ranked.comparison_id,
+      choice_stage: 'asked',
+      requestText: '3번',
+      userMessages: ['취소'],
+    });
+    lua.close();
+    return out;
+  })();
+  assert.equal(rawCancel.next, 'cancel', 'the current raw message must beat stale flow state');
 
   const picked = answer('3번');
   assert.equal(picked.next, 'select');

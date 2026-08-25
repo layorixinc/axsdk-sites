@@ -84,7 +84,7 @@ function Y.set_bulk(args)
   end
   local value, err, why = write(entries)
   if err then return { next = "error", ok = false, error = err, reason = why } end
-  return { next = "report", ok = true, memory_result = value }
+  return { next = "report", ok = true, memory_result = value, memory = args.memory }
 end
 
 --- `memory.delete(key)` takes a SINGLE key. A list therefore goes through `set_bulk` with the values
@@ -104,7 +104,263 @@ function Y.delete(args)
   if err then
     return { next = "error", ok = false, error = err == "missing_memory" and "missing_keys" or err, reason = why }
   end
-  return { next = "report", ok = true, memory_result = value }
+  return { next = "report", ok = true, memory_result = value, delete_keys = keys }
+end
+
+
+--- Consumer response for one completed memory operation.
+---
+--- The old terminal handed the whole result envelope to a model and asked it to explain the JSON. Live,
+--- successful writes were therefore rendered as `memory_result`, `next`, `ok`, and `operation` instead of
+--- a confirmation. Render from the bounded result and the exact requested keys here, then use a data
+--- terminal so the whole flow state never enters a response model.
+local KR_LABEL = {
+  full_name = "이름", first_name = "이름", last_name = "성", email = "이메일",
+  phone = "전화번호", address = "주소", zip_code = "우편번호",
+}
+local KR_OBJECT = {
+  full_name = "이름을", first_name = "이름을", last_name = "성을", email = "이메일을",
+  phone = "전화번호를", address = "주소를", zip_code = "우편번호를",
+}
+local EN_LABEL = {
+  full_name = "name", first_name = "first name", last_name = "last name", email = "email",
+  phone = "phone number", address = "address", zip_code = "ZIP code",
+}
+
+local function latest_text(args)
+  local messages = type(args.userMessages) == "table" and args.userMessages or {}
+  for index = #messages, 1, -1 do
+    if type(messages[index]) == "string" and messages[index] ~= "" then return messages[index] end
+  end
+  return type(args.requestText) == "string" and args.requestText or ""
+end
+
+local function has_korean(text)
+  text = tostring(text or "")
+  for index = 1, #text do
+    local byte = text:byte(index)
+    if byte and byte >= 234 and byte <= 237 then return true end
+  end
+  return false
+end
+local function is_cancel(text)
+  local lowered = tostring(text or ""):lower()
+  local words = {
+    "취소", "그만", "됐어", "됐습니다", "안 할래", "안할래", "관두",
+    "cancel", "never mind", "nevermind", "no thanks", "stop",
+  }
+  for index = 1, #words do
+    if lowered:find(words[index], 1, true) then return true end
+  end
+  return false
+end
+
+
+local function label(key, korean)
+  key = tostring(key or "")
+  return (korean and KR_LABEL[key] or EN_LABEL[key]) or key
+end
+
+local function object_label(key)
+  key = tostring(key or "")
+  return KR_OBJECT[key] or (key .. " 항목을")
+end
+
+local function sorted_values(values)
+  local out, seen = {}, {}
+  for index = 1, #(values or {}) do
+    local value = values[index]
+    if type(value) == "string" and value ~= "" and not seen[value] then
+      seen[value] = true
+      out[#out + 1] = value
+    end
+  end
+  table.sort(out)
+  return out
+end
+
+local function requested_changes(memory)
+  local saved, removed = {}, {}
+  for key, value in pairs(type(memory) == "table" and memory or {}) do
+    if type(key) == "string" and key ~= "" then
+      if type(value) == "string" and value ~= "" then
+        saved[#saved + 1] = key
+      else
+        removed[#removed + 1] = key
+      end
+    end
+  end
+  table.sort(saved)
+  table.sort(removed)
+  return saved, removed
+end
+
+local function labels(keys, korean, objects)
+  local out = {}
+  for index = 1, #keys do
+    out[index] = objects and object_label(keys[index]) or label(keys[index], korean)
+  end
+  return table.concat(out, ", ")
+end
+
+local function failed_response(korean)
+  if korean then
+    return "메모리 요청을 완료하지 못했습니다. 저장되거나 삭제된 내용은 없습니다."
+  end
+  return "Memory request could not be completed. Nothing was saved or deleted."
+end
+
+function Y.present(args)
+  args = type(args) == "table" and args or {}
+  local korean = has_korean(latest_text(args))
+  local envelope = args.memory_result
+  local payload = envelope
+  if envelope == nil then
+    return { next = "done", memory_response = failed_response(korean) }
+  end
+  if type(envelope) == "table" then
+    if envelope.ok == false or envelope.error ~= nil then
+      return { next = "done", memory_response = failed_response(korean) }
+    end
+    if envelope.memory_result ~= nil then payload = envelope.memory_result end
+  end
+  local requested_memory = args.memory
+  if (type(requested_memory) ~= "table" or next(requested_memory) == nil)
+      and type(envelope) == "table" and type(envelope.memory) == "table" then
+    requested_memory = envelope.memory
+  end
+  local requested_delete_keys = args.delete_keys
+  if (type(requested_delete_keys) ~= "table" or #requested_delete_keys == 0)
+      and type(envelope) == "table" and type(envelope.delete_keys) == "table" then
+    requested_delete_keys = envelope.delete_keys
+  end
+
+
+  local operation = args.operation
+  if operation == "delete_candidates" then
+    local matches = type(payload) == "table" and payload.matches or {}
+    if args.confirmed ~= true and #(matches or {}) == 0 then
+      return {
+        next = "done",
+        memory_response = korean and "삭제할 일치하는 기억을 찾지 못했습니다. 아무것도 삭제하지 않았습니다."
+          or "No matching saved memory was found to delete. Nothing was deleted.",
+      }
+    end
+    if args.confirmed == false and is_cancel(latest_text(args)) then
+      return {
+        next = "cancelled",
+        memory_response = korean and "메모리 삭제를 취소했습니다. 아무것도 삭제하지 않았습니다."
+          or "Memory deletion was cancelled. Nothing was deleted.",
+      }
+    end
+    if args.confirmed == true then
+      operation = "delete"
+    else
+      return { next = "done", memory_response = failed_response(korean) }
+    end
+  end
+  if operation == "set" then
+    local saved, removed = requested_changes(requested_memory)
+    if #saved == 0 and #removed == 0 then
+      return { next = "done", memory_response = failed_response(korean) }
+    end
+    if korean then
+      if #saved > 0 and #removed > 0 then
+        return {
+          next = "done",
+          memory_response = labels(saved, true, true) .. " 기억했고 "
+            .. labels(removed, true, false) .. " 기억을 삭제했습니다.",
+        }
+      end
+      if #saved > 0 then
+        return { next = "done", memory_response = labels(saved, true, true) .. " 기억했습니다." }
+      end
+      return { next = "done", memory_response = labels(removed, true, false) .. " 기억을 삭제했습니다." }
+    end
+    if #saved > 0 and #removed > 0 then
+      return {
+        next = "done",
+        memory_response = "Remembered " .. labels(saved, false, false)
+          .. " and removed saved " .. labels(removed, false, false) .. ".",
+      }
+    end
+    if #saved > 0 then
+      return { next = "done", memory_response = "Remembered " .. labels(saved, false, false) .. "." }
+    end
+    return { next = "done", memory_response = "Removed saved " .. labels(removed, false, false) .. "." }
+  end
+
+  if operation == "delete" then
+    local removed = sorted_values(requested_delete_keys)
+    if #removed == 0 then return { next = "done", memory_response = failed_response(korean) } end
+    if korean then
+      return { next = "done", memory_response = labels(removed, true, false) .. " 기억을 삭제했습니다." }
+    end
+    return { next = "done", memory_response = "Removed saved " .. labels(removed, false, false) .. "." }
+  end
+
+  if operation == "list" then
+    local keys = sorted_values(type(payload) == "table" and payload.keys or {})
+    if #keys == 0 then
+      return {
+        next = "done",
+        memory_response = korean and "기억하고 있는 항목이 없습니다." or "No saved memory items were found.",
+      }
+    end
+    return {
+      next = "done",
+      memory_response = korean and ("기억하고 있는 항목: " .. labels(keys, true, false) .. ".")
+        or ("Saved memory items: " .. labels(keys, false, false) .. "."),
+    }
+  end
+
+  if operation == "get" then
+    local key = type(payload) == "table" and payload.key or args.key
+    local value = type(payload) == "table" and payload.value or nil
+    local shown = label(key, korean)
+    if type(value) ~= "string" or value == "" then
+      return {
+        next = "done",
+        memory_response = korean and ("저장된 " .. shown .. " 정보가 없습니다.")
+          or ("No saved " .. shown .. " was found."),
+      }
+    end
+    return {
+      next = "done",
+      memory_response = korean and ("기억한 " .. shown .. ": " .. value)
+        or ("Remembered " .. shown .. ": " .. value),
+    }
+  end
+
+  if operation == "search" then
+    local matches = type(payload) == "table" and payload.matches or {}
+    local blocks, truncated = {}, type(payload) == "table" and payload.truncated == true
+    for index = 1, #(matches or {}) do
+      local match = matches[index] or {}
+      local key = type(match.key) == "string" and match.key or ""
+      local excerpt = type(match.excerpt) == "string" and match.excerpt or ""
+      if key ~= "" or excerpt ~= "" then
+        blocks[#blocks + 1] = "- " .. key .. (excerpt ~= "" and ("\n" .. excerpt) or "")
+      end
+      if match.truncated == true then truncated = true end
+    end
+    if #blocks == 0 then
+      return {
+        next = "done",
+        memory_response = korean and "일치하는 기억을 찾지 못했습니다." or "No matching saved memory was found.",
+      }
+    end
+    local response = (korean and "기억에서 찾은 내용:\n" or "Remembered matches:\n")
+      .. table.concat(blocks, "\n")
+    if truncated then
+      response = response .. (korean
+        and "\n검색 결과 일부가 잘렸습니다. 정확한 항목이나 더 좁은 주제로 다시 검색해 주세요."
+        or "\nSome results were truncated. Search for an exact item or a narrower topic.")
+    end
+    return { next = "done", memory_response = response }
+  end
+
+  return { next = "done", memory_response = failed_response(korean) }
 end
 
 

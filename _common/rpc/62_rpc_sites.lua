@@ -299,10 +299,6 @@ RPC_SITES["coupang"] = {
   hosts = {
     "coupang.com"
   },
-  affiliate = {
-    program = "coupang",
-    disclosure = "쿠팡 파트너스 활동의 일환으로 일정액의 수수료를 제공받습니다."
-  },
   search_url = "https://www.coupang.com/np/search",
   search_param = "q",
   search_path_marker = "/np/search",

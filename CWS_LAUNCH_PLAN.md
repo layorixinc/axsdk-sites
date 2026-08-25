@@ -2,6 +2,10 @@
 
 `AXSDK Assistant`를 CWS에 올리기까지의 작업 목록. 각 항목은 **담당 파트 · 산출물 · 완료 판정**을 갖는다.
 
+The current user-scenario verdict, latest ten-site sweep, and test-first completion gates live in
+`CWS_PRODUCT_READINESS_REVIEW.md`. This document remains the owner/deliverable plan; the review is the
+current evidence baseline.
+
 담당은 저장소/역할 기준이다. 사람 배정은 이 문서의 권한 밖이다.
 
 | 코드 | 파트 | 저장소 |
@@ -47,11 +51,9 @@ dassi에서 확인된 기준선 — **번들 크기(9.86 MiB)도, 데이터가 �
 > `widget.js` 셋에 있고 fengari가 번들돼 있다. **M2는 포팅으로 해소되었다.** 새로 생긴 것은 권한 두
 > 개의 소명이다.
 
-
 | # | 항목 | 성격 | 규모(실측) | 소속 |
 |---|---|---|---|---|
-| **M1** | Lua·flows를 패키지에 번들, 원격 fetch는 dev 빌드로 격리 | **완료** (2026-08-15 실증) | **576.6 KiB** (그중 데이터 4.8%) | P0-1 |
-| ~~**M2**~~ | ~~`page-content.js` 상시 MAIN world 주입 제거~~ | **포팅으로 해소** | CDP 확장에 MAIN world 주입이 없다 | — |
+| **M1** | Lua·flows를 content-addressed 패키지 자산으로 공급 | **패키지 실행 경로 완료** (2026-08-24 재실증) | **32 assets / 873.2 KiB source** | P0-1 |
 | **M2′** | `debugger` · `declarativeNetRequestWithHostAccess` 소명 | 심사 시간 | 소명 문안 2건 | P1-0 |
 | **M3** | `<all_urls>`를 `optional_host_permissions`로 | 심사 시간·전환율 | manifest + 권한 요청 흐름 | P1-0 |
 | **M4** | 단일 목적 문장 + 목적 밖 플로우 제외 | 상시(Limited Use) | flows intent 3개 | P0-3 |
@@ -60,51 +62,54 @@ dassi에서 확인된 기준선 — **번들 크기(9.86 MiB)도, 데이터가 �
 
 ### M1 — 번들 · **완료**
 
-> **완료 판정(§P0-1)이 충족됐다.** 다섯 스토어와 digest 키를 전부 지운 뒤 **하네스 쓰기 없이** 확장을
-> 리로드했더니 스스로 채웠다 — `axsdk:sites` 3,890 · `axsdk:flows` 223,248 · `axsdk:lua` 215,964(11 레이어)
-> · `axsdk:lua-modules` 237,335(**모듈 14개**), `workspace-bundle-digest = f4a5db917edd`, sites index
-> `source: local`. 그리고 `provision: false`(설정도 레이어도 쓰지 않고 워크스페이스를 읽지도 않는 모드)로
-> 전체 파이프라인이 한 턴에 답했다: collect_request → identity → search_stores → 2개 스토어 × search/
-> normalize/collect → screening → judge_relevance → apply → verify → rank → present. 상세는 `AGENTS.md` §13.
+> **M1 완료 판정이 C3에서 다시 충족됐다.** `workspace-manifest.json`은 index/flow/common-Lua/
+> `workspace-assets/<sha256>.txt` 32개에 있다. 서비스 워커가 전체 그래프·길이·해시를 검증한 뒤
+> 세션 워커에 전달하며, flow/Lua/module 소스는 `chrome.storage`에 쓰지 않는다. 새 프로필의 정확한
+> ZIP에서 하네스 workspace store 쓰기는 **0**, 스크립트 소유자는
+> `axsdk-default-form-tools,packaged-lua:`였고 `stored-lua:*`는 없었다. 패키지 모듈 26개로
+> Amazon+eBay 비교 → Amazon-only refinement → 취소(no mutation) → 사이트 확인 장바구니 추가 →
+> 체크아웃 검토(no order)를 실행했다. 실측은 비교 22.7s, refinement 9.0s, 취소 6.5s, cart
+> 27.5s, checkout 49.1s. 상세는 `AGENTS.md` §6.5.
 >
-> **설치 트리거 결함도 그때 함께 고쳤다**: 아티팩트는 SW 안에서 `status 200`으로 파싱되고 있었는데
-> `onInstalled`는 이미 설치된 빌드에 다시 오지 않고 `onStartup`은 확장이 생기기 전에 지나가서, 어느 리스너도
-> 발화하지 않았다. 설치는 이제 **모듈 스코프**에서 돈다(워커가 뜰 때마다, `onStartup`을 포섭). digest 비교가
-> 반복 비용을 0으로 만든다.
+> **설치 트리거와 저장소 한계도 분리됐다.** 설치는 MV3 워커 모듈 스코프에서 시작되고 digest가 같은
+> 워커 수명에는 한 번만 검증한다. 새 digest는 digest·source switch·빈 legacy cache를 선택하고,
+> 같은 digest의 switch만 drift하면 stored override를 지우지 않고 local source를 다시 선택한다.
+> `flowsStore.setFlows`/remote fetch의 256 KiB 한계는 dev 저장 경로에 남아 있지만 C3 package asset은
+> 그 경로를 지나지 않는다. 다만 최종 compiler가 256 KiB 초과 합성 문서를 받는지는 아직 별도 실험이다.
+>
+> **정책 잔여:** generic SDK의 remote loader 코드와 개발용 토글은 아직 CWS artifact에도 있다.
+> C3는 기본/재시작 경로에서 모두 local source를 선택하지만, remote 코드를 CWS 빌드에서 물리적으로
+> 제외한 것은 아니다. P0-1 최종 판정에는 compile-time CWS profile 또는 해당 토글 제거가 별도로 필요하다.
 
-**번들해야 하는 것은 flows 문서가 실제로 선언한 것뿐이다.** `_common/flows.yaml`이 이름으로 부르는
-모듈은 **26개**이고, 그 합이 실측 **361.1 KiB** — flows 문서 자체 **215.5 KiB**를 더해
-**576.6 KiB**(원본, 압축 전)다.
+**패키지에 들어가는 실행 자산은 flows 문서가 실제로 선언한 것뿐이다.**
 
-| 자산 | 크기 | 번들 |
-|---|---|---|
-| flows가 선언한 `_common/rpc` 모듈 14개 | 202.8 KiB | **필수** |
-| flows가 선언한 `_common/scripts` 모듈 12개 (`00_base`, `10_form_wizard`, `44`–`46`, 커머스 `50`–`56`) | 158.3 KiB | **필수** |
-| `_common/flows.yaml` + thumbtack·bluemoonsoft 오버레이 | 215.5 KiB | **필수** — flowTool마다 `execute.lua`가 들어 있다 |
-| **소계** | **576.6 KiB** | |
-| 사이트 어댑터 `<site>/scripts/*.lua` 18개 | 109.3 KiB | **불필요** — 어느 flow tool의 `modules:`에도 없다. `62_rpc_sites.lua`가 이들의 config를 생성물로 이미 담고 있고, 남은 `AX_search_product`/`AX_add_to_cart`는 `ax run`과 라이브 스윕이 부르는 **개발 시점 스택**이다 **[확인필요 — 배포 전 라이브 스윕으로 검증]** |
-| `playground/**` | 73.1 KiB | 불필요 — 별도 워크스페이스 |
+| 자산 | C3 구성 | 번들 |
+|---|---:|---|
+| flow가 선언한 runtime modules | **26 assets** | **필수** |
+| common + site flow layers | 3 assets | **필수** |
+| `_common/scripts` browser Lua layer | 1 asset | **필수** |
+| sites index + sitemap | 2 assets | **필수** |
+| `<site>/scripts` config declarations | 0 runtime assets | 생성된 `_common.62_rpc_sites`에 반영 |
+| **합계** | **32 assets / 873.2 KiB** | |
 
-CDP 확장 dist는 **7.06 MiB**(19 파일: `widget.js` 2,612 KiB · `session-worker` 2,095 KiB ·
-`service-worker.js` 1,877 KiB · `fengari` 223 KiB · `page-bundle.js` 22 KiB). 576.6 KiB를 더해도
-**~7.6 MiB — dassi 9.86 MiB보다 작다.** **크기는 논점이 아니다.**
+2026-08-24 exact archive is **8.02 MiB / 54 entries**, including the 32 package assets and release
+manifest. Release/archive SHA-256는 각각
+`875d3b62202e0923652afb1b081e6f34f9a7df81e8ed86a85586272003bb325a` /
+`856551d2329945c440d7fb912ebe84b6fc1e0b15b268e211808be37989fbafe6`다.
+크기는 논점이 아니다; 실행 소스의 출처와 무결성이 논점이고 C3가 그 경계를 SHA-256 그래프로 만든다.
 
-shipped dist(`0.1.0`)에 번들 경로는 **존재하지 않는다**: `bundled` 식별자 0건이고 sites 소스 검증기가
-`github.com`/`raw.githubusercontent.com` HTTPS URL만 받는다. EXT 작업은 "원격 끄기"가 아니라
-**"번들 소스를 새로 만들기"**다.
+#### 데이터로 남는 것은 3.1% 하나 — `62_rpc_sites.lua`
 
-#### 데이터로 남는 것은 4.8% 하나 — `62_rpc_sites.lua`
-
-실측: **27.4 KiB / 919줄, `function` 0개, `if`/`for`/`while` 0개.** 순수 선언이다. 헤더가 그 성격을
+실측: **27.3 KiB / 932줄, `function` 0개, `if`/`for`/`while` 0개.** 순수 선언이다. 헤더가 그 성격을
 스스로 말한다 — *"GENERATED by tools/build-rpc-sites.mjs. Every value here is the site adapter's own
-registered config, taken whole."* 576.6 KiB 중 **4.8%**.
+registered config, taken whole."* C3 source 873.2 KiB 중 **3.1%**다.
 
-즉 답은 **번들 95 : 원격 데이터 5**다. JSON으로 바꾸면 §3.2의 "원격 구성 파일"에 정확히 들어맞고,
-설계는 `SITE_DATA_SPLIT_DESIGN.md`에 이미 있다. **[확인필요]** 는 그대로 남는다.
+현재 CWS 경로는 **package 100**이다. 이 3.1%는 `SITE_DATA_SPLIT_DESIGN.md`가 이후 서명된
+원격 데이터로 분리할 후보이지, 현재 실행 중인 remote source가 아니다.
 
-**그 5%가 무엇을 사주고 무엇을 못 사주는지**는 이번 세션의 실제 수정 4건이 그대로 답이다:
+**"그 3.1%를 이후 데이터로 분리하면 무엇을 사고 무엇을 못 사는지"**는 실제 수정 4건이 그대로 답이다:
 
-| 이번 세션의 실제 수정 | 5%로 커버되나 |
+| 이번 세션의 실제 수정 | data split으로 커버되나 |
 |---|---|
 | 11번가 배송비 `dd.c-card-item__price-delivery` | **예** — config 키 하나 |
 | 아마존 제목 `"a h2 span, a h2"` | **예** — config 키 하나 |
@@ -118,7 +123,7 @@ registered config, taken whole."* 576.6 KiB 중 **4.8%**.
 
 | | 하는 일 | 원격 Lua | 확실성 | 대가 |
 |---|---|---|---|---|
-| **M1-A 번들** | 576.6 KiB를 패키지에 | 제거 | **확실** | Lua 변경 = 릴리스 + 심사 |
+| **M1-A package assets (현재)** | 873.2 KiB source를 SHA-256 자산 32개로 패키지화 | 제거 | **실증 완료** | Lua/flow 변경 = 릴리스 + 심사 |
 | **M1-B 샌드박스** | fengari를 `sandbox.html`로 옮기고 `dom`/`nav` 옵을 `postMessage` host-call로 | 유지 가능 | **선례 있음, 확정 아님** | EXT 아키텍처 변경 + 모든 옵에 postMessage 왕복(현 옵 1회 ~460ms에 가산) |
 
 **기본값은 M1-A다.** M1-B는 dassi의 `repl`과 구조적으로 동일하고 우리 부록 B의 `[INFERENCE]`를
@@ -229,6 +234,25 @@ script 컨텍스트에서 돌며 `dom`·`nav` 옵으로 확장 API를 부른다.
 
 > **제품 영향**: 사이트 어댑터를 스토어 심사 없이 갱신하던 이점이 사라진다. Lua 변경 = 확장 릴리스.
 > 이 트레이드오프를 사업적으로 수용할지 먼저 정해야 한다.
+
+#### Agent Pack Phase 0은 실행 가능성만 GREEN이다 — 정책 승인이 아니다 (2026-08-24)
+
+Chrome 151 실브라우저 probe는 `chrome.userScripts.execute`의 좁은 기계 계약을 확인했다. 비활성
+task/provider 문서에 frame 0 exact no-op을 먼저 실행해 `documentId`를 얻고, 같은 문서만 exact
+실행했으며, stale-document·wrong-group 요청을 거부했다. task port는 provider navigation과
+service-worker stop/start 동안 같은 task 문서를 유지했고, unpacked-extension reload 뒤에는 무효가
+된 User Script world를 재사용하지 않고 task/provider 문서를 둘 다 교체한 뒤 새
+worker/document/nonce로 연결했다. 두 동시 그룹의 port와 pong도 섞이지 않았다. 이 순서는 세 번
+연속 통과했고, 정리 뒤 Pack 등록·저장 상태나 no-Pack 브라우저 구조를 남기지 않았다.
+
+이 결과가 **증명하지 않은 것**이 심사 경계다:
+
+- probe의 서명된 task/provider 코드는 테스트 fixture일 뿐이며 제품 Pack 등록·설치·활성화 코드는 아니다;
+- 코드를 Ed25519로 서명해도 publisher가 공급한 원격 로직이 사용자가 제공한 스크립트가 되지는 않는다;
+- CWS가 downloaded restricted flow logic와 signed first-party JavaScript의 정확한
+  `userScripts.execute` 조합을 허용한다는 서면 답은 아직 없다;
+- 따라서 Agent Pack P0-A는 **BLOCKED**다. Phase 0 실행 가능성 GREEN을 P0-1 정책 통과 근거로
+  바꾸어 말하면 안 된다.
 
 ### ~~P0-2. 권한 축소~~ → **P1-0. 권한 소명** · **EXT + BIZ**
 
@@ -450,7 +474,6 @@ CDP 빌드 `dist/manifest.json` 실측 (2026-08-06):
 
 - 상세 설명, 스크린샷(1280×800 또는 640×400) 최소 1장, 권장 5장
 - 프로모 타일, 카테고리, 언어(ko/en)
-- **어필리에이트 고지**를 리스팅 본문에 명시 — CWS Affiliate Ads 정책 요구 3곳 중 하나
 
 ### P1-3. 개인정보·데이터 공시 · **BIZ + EXT + WEB**
 
@@ -461,28 +484,15 @@ CDP 빌드 `dist/manifest.json` 실측 (2026-08-06):
 3. **BIZ** — "제한적 사용(Limited Use)" 준수 서약
 4. **EXT** — 공시한 것 이상을 보내지 않는지 실측 대조
 
-### P1-4. 어필리에이트 고지 3곳 · **BIZ + SITES + DESIGN**
+### P1-4. 어필리에이트는 이번 출시 범위에서 제외 · **CLOSED**
 
-[Affiliate Ads](https://developer.chrome.com/docs/webstore/program-policies/affiliate-ads) (2025-03-11)
-§1은 **리스팅 · UI · 설치 전** 세 곳을 요구하고, §3은 "**각각의** 제휴 코드·링크·쿠키 삽입 전에 관련
-사용자 행동이 필요하다"고 못박는다 — 우리 설계의 "픽 1건당 링크 1건"이 정확히 그 요구다.
+2026-08-18 실측에서 변환 엔드포인트가 HTTP 404를 반환했다. 작동하지 않는 링크와 고지를 노출하는
+대신 쿠팡 프로그램 선언, flow 노드/tool/state, `_common.74_rpc_affiliate`를 삭제했다. 따라서 이번
+스토어 리스팅·UI·설치 전 화면에는 어필리에이트 링크나 쿠키 삽입이 없고 Affiliate Ads 고지도
+요구하지 않는다.
 
-| 위치 | 담당 | 현황 |
-|---|---|---|
-| 스토어 리스팅 | DESIGN/BIZ | 미착수 |
-| 확장 UI | SITES | **완료** — 링크와 고지를 함께 생산하고, 터미널이 verbatim 출력하도록 게이트로 고정 |
-| 설치 전 고지 | DESIGN/WEB | 미착수 |
-
-### P1-5. 어필리에이트 서버 · **BE**
-
-`AFFILIATE_DESIGN.md` 7단계. `https://api.axsdk.ai/v1/affiliate/deeplink` 미구현.
-
-- HMAC-SHA256 서명, 키는 서버에만
-- URL→shortenUrl 캐시
-- `affiliate_link_created` 기록
-- **BIZ** — 쿠팡 파트너스 가입 + 확장 사용 형태 서면 문의(계정 보호막)
-
-**완료 판정** 확장이 링크를 받아 위젯으로 렌더하고, 클릭이 `axsdk.widget.action`으로 관측된다.
+다시 도입하려면 `AFFILIATE_DESIGN.md`의 서버 변환, 파트너 승인, 3개 고지 표면, 사용자 행동 이후
+링크 생성, exact-artifact 검증을 한 번에 충족해야 한다. 일부만 복원하는 것은 출시 조건이 아니다.
 
 ---
 
@@ -490,8 +500,8 @@ CDP 빌드 `dist/manifest.json` 실측 (2026-08-06):
 
 ### P2-1. 라이브 게이트 유지 · **SITES**
 
-현재 통과 상태: `check:flows` 121 · `test:lua` 471 · playground 50 · commerce 24/24+17/17 ·
-`test:commerce:live:all` 35/35 · `test:commerce:live:discovery` 14/14.
+현재 통과 상태: `check:flows` 191 · `test:lua` 580 · playground 87 · commerce 25/25+19/19 ·
+exact CWS artifact 26 modules. 마지막 live broad discovery는 18/18, memory response journey는 20/20이다.
 
 출시 전 재실행하고 결과를 릴리스 노트에 남긴다.
 

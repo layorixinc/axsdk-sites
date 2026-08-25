@@ -7,16 +7,6 @@ local CONFIG = {
   site = "coupang",
   home_url = "https://www.coupang.com/",
   hosts = { "coupang.com" },
-  -- The affiliate program this store's listings can be monetised through, and the disclosure that must
-  -- accompany any link made from it. Declared HERE because the reader gets its config from the generated
-  -- `RPC_SITES`, not from the adapter — a value only the adapter knows never reaches production.
-  --
-  -- Amazon must never gain one: its Operating Agreement forbids Special Links in client-side software.
-  -- `check:flows` refuses that outright rather than trusting anyone to remember.
-  affiliate = {
-    program = "coupang",
-    disclosure = "쿠팡 파트너스 활동의 일환으로 일정액의 수수료를 제공받습니다.",
-  },
   search_url = "https://www.coupang.com/np/search",
   search_param = "q",
   search_path_marker = "/np/search",

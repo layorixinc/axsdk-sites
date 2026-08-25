@@ -122,6 +122,9 @@ local ARGUMENT_MAPS = {
     choice_options_version = "choice_options_version", hard_constraints = "hard_constraints",
     soft_preferences = "soft_preferences",
   },
+  AX_complete_store_results = {
+    stores = "stores", store_results = "store_results",
+  },
   AX_verify_product_offers = {
     results = "store_results", identity_id = "identity_id", identity_kind = "identity_kind",
     identity_brand = "identity_brand", identity_model = "identity_model",
@@ -134,13 +137,17 @@ local ARGUMENT_MAPS = {
   AX_apply_offer_screening = {
     store_results = "store_results", screening_ids = "screening_ids", keep = "screening_keep",
   },
+  AX_summarize_store_outcomes = {
+    store_results = "store_results",
+  },
   AX_resolve_store_offer = {
     offers = "offers", choice_index = "choice_index", choice_comparison_id = "choice_comparison_id",
     comparison_id = "comparison_id", identity_id = "identity_id", choice_stage = "choice_stage",
     quantity = "quantity",
   },
   AX_browse_service_candidates = {
-    request_text = "requestText", candidates = "candidates", refine_request = "refine_request",
+    request_text = "requestText", user_messages = "userMessages",
+    candidates = "candidates", refine_request = "refine_request",
     page_command = "page_command", page_number = "page_number", choice_numbers = "choice_numbers",
     page = "view_page",
   },

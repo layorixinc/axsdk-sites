@@ -27,9 +27,11 @@ export const addThenConfirmAsks = step => !step.err
   && toolSucceeded(step.toolCalls, 'shopping_add_to_cart')
   && hasTool(step.toolCalls, 'shopping_single_site.checkout_confirm')
   && /체크아웃|결제|checkout/i.test(step.text);
-export const checkoutRunsNoOrder = step => !step.err
-  && (hasTool(step.toolCalls, 'run_checkout') || hasTool(step.toolCalls, 'do_checkout'))
-  && /주문|order|체크아웃|checkout|결제/i.test(step.text);
+export const checkoutRunsNoOrder = step => {
+  if (step.err || !(hasTool(step.toolCalls, 'run_checkout') || hasTool(step.toolCalls, 'do_checkout'))) return false;
+  const text = String(step.text || '');
+  return /주문.{0,20}(?:완료|처리|확정|접수)?되지 않았|주문.{0,20}(?:이루어지지|진행되지) 않았|주문.{0,20}(?:하지 않았|안 했|없습니다)|no order|order (?:has )?not been placed|did not place (?:an )?order|without placing (?:an )?order/i.test(text);
+};
 
 async function step(session, label, msg, timeoutMs = 180000) {
   const t0 = Date.now();

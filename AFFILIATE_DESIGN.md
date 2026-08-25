@@ -3,6 +3,11 @@
 M1 사양을 이 저장소의 실제 구조에 맞춰 검토하고 설계한 문서. 대상은 `_common/flows.yaml`의
 `shopping_multi_store_total_cost` 플로우와 `_common/rpc/*` 런타임 모듈.
 
+> **Status — retired from the launch surface on 2026-08-18.** The measured conversion endpoint returns
+> HTTP 404. The Coupang declaration, flow nodes/tool/state, and `_common.74_rpc_affiliate` were deleted; offer
+> selection uses the guarded cart path. The design below is historical and may be revived only after the
+> server, partner approval, disclosure surfaces, and exact-artifact gate all exist together.
+
 법률·정책 해석은 이 문서의 권한 밖이다. 아래 **[확인필요]** 표시는 전부 M1.2 5항의 서면 문의 또는
 자문으로 확정해야 하는 항목이다.
 

@@ -22,7 +22,10 @@ function worker(site, candidates, extra = {}) {
 }
 
 function row(id, name, price = 10000) {
-  return { product_id: id, id, name, price, currency: 'KRW', shipping_cost: 0, match_level: 'exact' };
+  return {
+    product_id: id, id, name, price, currency: 'KRW', shipping_cost: 0,
+    match_level: 'exact', url: `https://shop.test/products/${id}`,
+  };
 }
 
 const RESULTS = [
@@ -53,6 +56,30 @@ function apply(args) {
   return lua.call('AX_apply_offer_screening', { store_results: RESULTS, ...args });
 }
 
+
+test('a selected store whose fan-out child never answered becomes an explicit unsearched outcome', () => {
+  // Shipping-CDP broad discovery passed twice, then one run searched 11st only and the comparison window
+  // silently omitted Walmart. A missing flow.map child is a platform/session outcome, never evidence that
+  // the store had no products. Complete the requested frontier before any screening or rendering.
+  const completed = lua.call('AX_complete_store_results', {
+    stores: [{ site: 'ssg' }, { site: 'walmart' }],
+    store_results: [worker('ssg', [row('s1', '로지텍 M185 무선마우스')])],
+  });
+
+  assert.equal(completed.next, 'done');
+  assert.equal(completed.store_results.length, 2);
+  const missing = completed.store_results.find((entry) => entry.key === 'walmart');
+  assert.equal(missing.status, 'failed');
+  assert.equal(missing.value.site, 'walmart');
+  assert.equal(missing.value.error, 'unsearched');
+
+  const screened = lua.call('AX_build_offer_screening', {
+    store_results: completed.store_results,
+    identity_model: 'M185',
+  });
+  assert.ok(screened.store_outcomes.some((outcome) => outcome.site === 'walmart'
+    && outcome.status === 'unsearched'));
+});
 // ── the list the model judges ────────────────────────────────────────────────
 
 test('every candidate is numbered once, across all stores', () => {
@@ -65,6 +92,52 @@ test('every candidate is numbered once, across all stores', () => {
   assert.ok(built.screening_text.includes('ssg'));
   assert.ok(built.screening_text.includes('coupang'));
   assert.ok(built.screening_text.includes('스킨 커버'), 'the row to be rejected must be visible to judge it');
+});
+
+test('a compact per-store outcome survives when candidate payloads are too large for the trace', () => {
+  const built = build();
+  assert.deepEqual(built.store_outcomes, [
+    {
+      site: 'ssg',
+      status: 'candidates',
+      candidate_count: 3,
+      sample: {
+        site: 'ssg',
+        product_id: 's1',
+        name: '로지텍 M185 무선마우스 그레이',
+        price: 19400,
+        currency: 'KRW',
+        url: 'https://shop.test/products/s1',
+      },
+    },
+    {
+      site: 'coupang',
+      status: 'candidates',
+      candidate_count: 2,
+      sample: {
+        site: 'coupang',
+        product_id: 'c1',
+        name: '로지텍 무선마우스, M185, Gray',
+        price: 10690,
+        currency: 'KRW',
+        url: 'https://shop.test/products/c1',
+      },
+    },
+  ]);
+});
+
+test('the compact outcome preserves a classified store failure', () => {
+  const built = lua.call('AX_build_offer_screening', {
+    store_results: [{
+      key: 'walmart',
+      status: 'completed',
+      value: { store_result: { site: 'walmart', status: 'access_denied', error: 'access_denied' } },
+    }],
+  });
+
+  assert.deepEqual(built.store_outcomes, [{
+    site: 'walmart', status: 'access_denied', error: 'access_denied', candidate_count: 0,
+  }]);
 });
 
 test('the numbering is backed by ids so a verdict cannot drift onto another row', () => {
@@ -166,6 +239,20 @@ test('a store that failed stays a failure, not a rejection', () => {
   const failed = applied.store_results.find((entry) => entry.key === 'naver-shopping');
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error, 'security_verification_required');
+});
+
+test('post-screening outcomes stay compact and attribute every searched store', () => {
+  const applied = apply({ screening_ids: build().screening_ids, keep: '1' });
+  const summary = lua.call('AX_summarize_store_outcomes', { store_results: applied.store_results });
+
+  assert.deepEqual(summary.store_outcomes.map(({ site, status, candidate_count }) => ({
+    site, status, candidate_count,
+  })), [
+    { site: 'ssg', status: 'candidates', candidate_count: 1 },
+    { site: 'coupang', status: 'no_relevant_offers', candidate_count: 0 },
+  ]);
+  assert.equal(summary.store_outcomes[0].sample.product_id, 's1');
+  assert.equal(summary.store_outcomes[1].sample, undefined);
 });
 
 // ── the user is told what was removed ────────────────────────────────────────

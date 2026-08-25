@@ -1,0 +1,894 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AXSDK 커뮤니티 스크립트 — 라이브 시나리오</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --panel2: #1d212a; --line: #2a3039;
+    --fg: #e6e9ef; --dim: #9aa4b2; --faint: #6b7480;
+    --ok: #4ec9a0; --warn: #e2b341; --bad: #e06c75; --info: #61afef; --accent: #c586c0;
+    --mono: ui-monospace, SFMono-Regular, "Cascadia Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 15px/1.65 -apple-system, "Segoe UI", "Malgun Gothic", system-ui, sans-serif;
+  }
+  a { color: var(--info); }
+  code, pre { font-family: var(--mono); font-size: 13px; }
+  pre {
+    background: #0b0d11; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px 14px; overflow-x: auto; margin: 10px 0; line-height: 1.55;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 28px 22px 80px; }
+  header h1 { font-size: 24px; margin: 0 0 6px; letter-spacing: -0.2px; }
+  header p.lede { color: var(--dim); margin: 0 0 4px; }
+  .meta { color: var(--faint); font-size: 13px; margin-top: 10px; }
+  h2 { font-size: 19px; margin: 40px 0 6px; letter-spacing: -0.2px; }
+  h2 + p.sub { color: var(--dim); margin: 0 0 16px; }
+  h3 { font-size: 15px; margin: 22px 0 6px; }
+
+  .badge {
+    display: inline-block; font-family: var(--mono); font-size: 11px;
+    padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line);
+    color: var(--dim); background: var(--panel2); white-space: nowrap;
+  }
+  .badge.page { color: #8be9a0; border-color: #2c4a38; }
+  .badge.world { color: var(--accent); border-color: #4a3a52; }
+  .badge.sw { color: var(--info); border-color: #2c3f52; }
+  .badge.worker { color: var(--warn); border-color: #4d4227; }
+  .badge.ui { color: #f0a5c0; border-color: #4f2f3c; }
+  .badge.net { color: var(--dim); }
+  .badge.ok { color: var(--ok); border-color: #23503f; }
+  .badge.bad { color: var(--bad); border-color: #55292d; }
+
+  /* ---- stepper ---- */
+  .stage { display: grid; grid-template-columns: 268px 1fr; gap: 18px; align-items: start; }
+  .steps { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+  .steps button {
+    display: block; width: 100%; text-align: left; padding: 11px 13px; border: 0;
+    border-bottom: 1px solid var(--line); background: transparent; color: var(--dim);
+    font: inherit; cursor: pointer;
+  }
+  .steps button:last-child { border-bottom: 0; }
+  .steps button:hover { background: var(--panel2); color: var(--fg); }
+  .steps button[aria-current="step"] { background: var(--panel2); color: var(--fg); box-shadow: inset 3px 0 0 var(--accent); }
+  .steps .n { font-family: var(--mono); font-size: 11px; color: var(--faint); margin-right: 8px; }
+  .steps button[aria-current="step"] .n { color: var(--accent); }
+
+  .detail { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 18px 20px; min-height: 460px; }
+  .detail h3 { margin-top: 0; font-size: 17px; }
+  .detail .who { margin: 0 0 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .detail dl { margin: 14px 0 0; }
+  .detail dt { color: var(--faint); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; margin-top: 14px; }
+  .detail dd { margin: 4px 0 0; }
+  .nav { display: flex; gap: 8px; margin-top: 18px; }
+  .nav button {
+    background: var(--panel2); color: var(--fg); border: 1px solid var(--line);
+    border-radius: 7px; padding: 7px 14px; font: inherit; cursor: pointer;
+  }
+  .nav button:hover:not(:disabled) { border-color: var(--accent); }
+  .nav button:disabled { opacity: .4; cursor: default; }
+
+  /* ---- generic cards ---- */
+  .cards { display: grid; gap: 12px; }
+  .cards.two { grid-template-columns: 1fr 1fr; }
+  .card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px 16px; }
+  .card h4 { margin: 0 0 4px; font-size: 15px; }
+  .card p { margin: 6px 0 0; color: var(--dim); font-size: 14px; }
+  .card.bad { border-color: #55292d; }
+  .card.warn { border-color: #4d4227; }
+  .card.ok { border-color: #23503f; }
+
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--faint); font-size: 12px; text-transform: uppercase; letter-spacing: .06em; font-weight: 600; }
+  td.mono { font-family: var(--mono); font-size: 12.5px; }
+
+  /* ---- channels ---- */
+  .chan { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .chan .c { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 13px 14px; }
+  .chan .c[data-blocked="true"] { border-color: #55292d; background: #1a1315; }
+  .chan .c h4 { margin: 0 0 2px; font-size: 14px; }
+  .chan .c .t { font-size: 12.5px; color: var(--dim); }
+  .chan .c ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; color: var(--dim); }
+
+  /* ---- simulator ---- */
+  .sim { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 16px 18px; }
+  .sim .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .sim input {
+    flex: 1 1 320px; background: #0b0d11; border: 1px solid var(--line); border-radius: 7px;
+    color: var(--fg); padding: 9px 12px; font: inherit;
+  }
+  .sim button {
+    background: var(--accent); color: #14101a; border: 0; border-radius: 7px;
+    padding: 9px 16px; font: inherit; font-weight: 600; cursor: pointer;
+  }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .chips button {
+    background: var(--panel2); color: var(--dim); border: 1px solid var(--line);
+    border-radius: 999px; padding: 4px 11px; font-size: 12.5px; cursor: pointer;
+  }
+  .chips button:hover { color: var(--fg); border-color: var(--accent); }
+  .trace { margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+  .trace ol { margin: 0; padding-left: 20px; }
+  .trace li { margin: 5px 0; }
+  .verdict { margin-top: 12px; padding: 11px 13px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel2); }
+  .verdict.ok { border-color: #23503f; }
+  .verdict.warn { border-color: #4d4227; }
+  .verdict.bad { border-color: #55292d; }
+
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: 13px; }
+  .hint { color: var(--faint); font-size: 12.5px; }
+  @media (max-width: 900px) {
+    .stage, .chan, .cards.two { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>AXSDK 커뮤니티 스크립트 — 라이브 시나리오</h1>
+  <p class="lede">사용자가 userScript를 <b>지정</b>하고, 확장이 그것을 <b>로드</b>하고, 사용자가 <b>AI에 질의</b>해서 답을 받기까지.</p>
+  <p class="lede">각 단계가 어느 realm에서 실행되는지, 지금 실제로 동작하는 부분과 아직 막힌 부분을 구분해서 보여줍니다.</p>
+  <p class="meta">
+    측정 기준: Chrome 151 · 확장 <code>kmpjeabgdfgicnnplgiokmaolfilokko</code> · CDP 9334 ·
+    fixture <code>fixture.read-page@1.0.0</code> · 2026-08-21
+  </p>
+</header>
+
+<h2>1. 진행 단계</h2>
+<p class="sub">왼쪽 단계를 누르면 그 단계의 실제 데이터와 실패 모드를 보여줍니다. <span class="hint">✅ = 라이브로 증명됨 / 🚧 = 미구현</span></p>
+
+<div class="stage">
+  <nav class="steps" id="steps" aria-label="시나리오 단계"></nav>
+  <section class="detail" id="detail" aria-live="polite"></section>
+</div>
+
+<h2>2. AI가 스크립트에 닿는 4개 채널</h2>
+<p class="sub">핵심 제약: <b>모델은 스크립트를 직접 호출할 수 없습니다.</b> 아래 D가 그것을 가능하게 하지만 플랫폼 의존성이 있습니다.</p>
+
+<div class="chan" id="channels"></div>
+
+<h2>3. userScript에서 가능한 것 / 불가능한 것</h2>
+<p class="sub"><code>USER_SCRIPT</code> world의 실제 능력 범위입니다. 강력하지만 의도적으로 좁습니다.</p>
+<table id="caps"><thead><tr><th>가능</th><th>불가능</th></tr></thead><tbody></tbody></table>
+
+<h3>혼동하기 쉬운 3가지를 갈라놓기</h3>
+<p class="sub">이전 판 표에서 “사용자 저장 데이터: 없음”이라고 쓴 게 “userscript는 저장소가 없다”로 읽혔습니다.
+  저장소는 <b>있습니다</b>. 없는 건 <b>우리</b>가 저장한 사용자 데이터 접근입니다.</p>
+<table id="matrix">
+  <thead><tr><th>능력</th><th>Tampermonkey userscript</th><th>우리 커뮤니티 스크립트 (현재)</th><th>권한 grant된 flow</th></tr></thead>
+  <tbody></tbody>
+</table>
+<p class="hint">열을 위아래로 읽으면 진짜 그림이 보입니다: <b>Tampermonkey userscript가 거의 모든 축에서 우리 스크립트보다 강합니다.</b>
+  flow가 userscript를 넘어서는 곳은 <b>세 곳</b>뿐 — 세션 탭, 사용자 저장 데이터, 모델 도구 표면. 제한은 그 셋이 전부입니다.</p>
+
+<h3>“flows를 문자열로 들고 있다가 AXSDK로 전송” — 됩니까?</h3>
+<div class="cards" id="flowstring"></div>
+
+<h3>“userscript는 확장 허용 호스트 밖에서도 도나?” / “우리도 스크립트 승인 도메인으로 묶으면 되지 않나?”</h3>
+<div class="cards" id="scoping"></div>
+
+<h2>4. 질의 시뮬레이터</h2>
+<p class="sub">질문을 넣으면 어느 채널이 처리하고, 모델이 무엇을 보고, 무엇이 막히는지 보여줍니다.
+  <span class="hint">분류는 이 페이지의 결정적 데모 매핑입니다 — 실제 planner가 아닙니다.</span></p>
+
+<div class="sim">
+  <div class="row">
+    <input id="q" type="text" placeholder="예: 이 페이지 제목 뭐야?" autocomplete="off">
+    <button id="ask">질의</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <div class="trace" id="trace"></div>
+</div>
+
+<h2>5. 문제 — 확정된 것</h2>
+<p class="sub">측정으로 확인된 블로커입니다. 추측이 아닙니다.</p>
+<div class="cards two" id="blockers"></div>
+
+<h2>6. 문제 — 아직 측정하지 않은 것</h2>
+<p class="sub">각 항목은 프로브 하나로 결정됩니다. 답이 나오기 전에는 그것에 의존하는 단계를 만들지 않습니다.</p>
+<table id="probes"><thead><tr><th>측정</th><th>무엇이 걸려 있는가</th><th>거짓일 때의 대안</th></tr></thead><tbody></tbody></table>
+
+<h2>7. 지금 실제로 증명된 것</h2>
+<p class="sub">라이브 스모크 출력에서 그대로 가져온 항목입니다.</p>
+<pre id="evidence"></pre>
+
+<h2>8. Tampermonkey와 비교 — 누가 쓰고 누가 심사하나</h2>
+<p class="sub">같은 <code>userScripts</code> API를 쓰지만 신뢰 모델이 다릅니다.
+  <span class="hint">출처: Tampermonkey 공식 문서·FAQ, Greasy Fork 규칙 페이지 (2026-08-22 확인)</span></p>
+<table id="compare">
+  <thead><tr><th>축</th><th>Tampermonkey + Greasy Fork</th><th>AXSDK 커뮤니티 스크립트</th></tr></thead>
+  <tbody></tbody>
+</table>
+
+<h3>왜 우리가 더 엄격한가</h3>
+<div class="cards" id="why"></div>
+
+<footer>
+  설계 문서: <code>COMMUNITY_SCRIPT_LIVE_LOOP.md</code> ·
+  아키텍처: <code>COMMUNITY_SCRIPT_ARCHITECTURE.md</code> ·
+  구현 계획: <code>COMMUNITY_SCRIPT_IMPLEMENTATION_PLAN.md</code> ·
+  정책 계약: <code>community/release-policy.json</code>
+  <br>재현: <code>npm run check:community-registry</code> · <code>bun run test:user-scripts:live</code>
+</footer>
+
+</div>
+
+<script>
+const REALM = {
+  ui:     ['ui',     '확장 UI (옵션 페이지)'],
+  sw:     ['sw',     '서비스 워커'],
+  worker: ['worker', '세션 워커 (Lua/코어)'],
+  world:  ['world',  'USER_SCRIPT world'],
+  page:   ['page',   '페이지 문서'],
+  net:    ['net',    '레지스트리 (HTTP)'],
+};
+
+const badge = (key) => {
+  const [cls, label] = REALM[key];
+  return `<span class="badge ${cls}">${label}</span>`;
+};
+
+const STEPS = [
+  {
+    t: '스크립트 지정', done: true, realms: ['ui', 'net'],
+    what: `사용자가 옵션 페이지에서 스크립트를 고릅니다. 확장은 서명된 인덱스를 받아 그 안에 있는 릴리스만 보여줍니다.
+    <b>모델은 이 화면에 접근할 수 없습니다.</b>`,
+    code: `GET  \${registry}/index.json          → 서명 검증 (Ed25519 / fixture-registry-v1)
+GET  \${registry}/scripts/fixture.read-page/1.0.0/manifest.json
+GET  \${registry}/assets/3e69…bda3.js       ← 경로는 서명된 다이제스트에서 파생`,
+    facts: [
+      ['경로는 파생', '호출자가 artifact URL을 지정할 수 없습니다. 스크립트 신원과 다이제스트에서만 만들어집니다.'],
+      ['거부 어휘', 'registry_unreachable · document_invalid · untrusted_signature · not_indexed · incompatible_runtime · artifact_unavailable · artifact_invalid · revoked'],
+    ],
+    fail: '서명이 하나라도 어긋나면 바이트는 캐시에 들어가지 않습니다. 라이브에서 전송 중 1바이트를 덧붙였을 때 <code>artifact_invalid: … has 177 bytes</code>로 거부되었습니다.',
+  },
+  {
+    t: '호스트 권한 승인', done: false, realms: ['ui'],
+    what: `릴리스가 선언한 <b>정확한</b> 호스트만 <code>chrome.permissions.request()</code>로 요청합니다.
+    <code>&lt;all_urls&gt;</code>나 <code>https://*/*</code>는 커뮤니티 릴리스에 허용되지 않습니다.`,
+    code: `matches: ["http://127.0.0.1/fixture*"]
+      ↓ 파생
+origins: ["http://127.0.0.1/*"]   ← 사용자가 명시적으로 승인`,
+    facts: [
+      ['거부해도 남음', '권한을 거부하면 릴리스는 설치된 채 비활성으로 남습니다. 등록은 일어나지 않습니다.'],
+      ['호스트 확장 = 업데이트', '새 호스트가 추가되면 새 사용자 결정이 필요합니다.'],
+    ],
+    fail: '미구현(4A). 지금은 검증·캐시·상태만 있고 권한 요청 경로가 없습니다.',
+  },
+  {
+    t: '설치 — 비활성 상태로', done: true, realms: ['sw'],
+    what: `검증된 바이트가 먼저 캐시되고, 그 다음 설치 상태가 기록됩니다. 순서가 중요합니다:
+    상태가 먼저면 등록이 존재하지 않는 바이트를 가리킬 수 있고, 지금 순서는 고아 아티팩트만 남길 수 있습니다.`,
+    code: `axsdk:community-scripts = {
+  version: 1,
+  scripts: {
+    "fixture.read-page": {
+      version: "1.0.0",
+      artifactDigest: "sha256:3e69…bda3",
+      approvedMatches: ["http://127.0.0.1/fixture*"],
+      approvedEffects: ["read"],
+      enabled: false,          ← 기본 비활성
+      capabilityToken: "…"     ← 설치마다 회전
+    }
+  }
+}`,
+    facts: [
+      ['코드는 여기 없음', '아티팩트 바이트는 다이제스트 키의 캐시에만 있습니다. chrome.storage에 실행 코드를 넣지 않습니다.'],
+      ['쓰기 실패 시', '이전 릴리스가 그대로 설치·활성 상태로 남습니다. 절반 설치된 상태가 생기지 않습니다.'],
+    ],
+    fail: '승인 객체가 릴리스와 정확히 일치하지 않으면 거부됩니다 (<code>approval_mismatch</code>).',
+  },
+  {
+    t: '사용자가 활성화', done: true, realms: ['ui', 'sw'],
+    what: `설치와 활성화는 별개의 결정입니다. 활성화된 릴리스만 등록 대상이 됩니다.`,
+    code: `communityRegistrations(state)
+// enabled && !revoked 인 것만
+→ [{ scriptId, version, artifactDigest, commandsDigest, matches, capabilityToken }]`,
+    facts: [
+      ['폐기 우선', '폐기된 릴리스는 비활성화되고 재활성화가 거부됩니다.'],
+      ['캐시된 바이트만', '등록 소스는 캐시에서 읽고 <b>읽을 때 다시 해시 검증</b>합니다. 손상 항목은 삭제되고 보고됩니다.'],
+    ],
+    fail: '바이트가 없으면 <code>artifact_unavailable</code>로 보고하고 몰래 다시 받지 않습니다. 오프라인 시작은 이전에 검증된 바이트만 실행합니다.',
+  },
+  {
+    t: 'Chrome에 등록', done: true, realms: ['sw', 'world'],
+    what: `<code>chrome.userScripts</code>로 전용 world에 등록합니다. 소스 순서가 계약입니다:
+    패키지 bootstrap → 릴리스 초기화 → 정확한 아티팩트.`,
+    code: `chrome.userScripts.configureWorld({
+  worldId: "axsdk-community-3e69513221796cb5",
+  messaging: true,
+  csp: "script-src 'self'; object-src 'none'"
+});
+
+chrome.userScripts.register([{
+  id: "axsdk-community-fixture-read-page",   ← 코드가 바뀌어도 고정
+  matches: ["http://127.0.0.1/fixture*"],
+  runAt: "document_idle",
+  world: "USER_SCRIPT",
+  worldId: "axsdk-community-3e69513221796cb5",
+  js: [
+    { file: "community-script-bootstrap.js" },
+    { code: "globalThis.AXSDK.__configure({…token…})" },
+    { code: /* 검증된 아티팩트 */ }
+  ]
+}]);`,
+    facts: [
+      ['등록 ID 고정', '아티팩트에 묶으면 업데이트가 원자적이지 못하고 이전 등록이 고아가 됩니다. Phase 1에서 실제로 발견해 고친 결함입니다.'],
+      ['world 분리', '페이지의 JS와 다른 world입니다. 페이지가 토큰을 읽을 수 없습니다.'],
+    ],
+    fail: '<b>사용자가 chrome://extensions에서 “사용자 스크립트 허용”을 켜지 않으면 <code>chrome.userScripts</code>가 아예 없습니다.</b> 라이브에서 확장을 재빌드하면 이 설정이 초기화됩니다.',
+  },
+  {
+    t: '핸드셰이크', done: true, realms: ['world', 'sw'],
+    what: `bootstrap이 포트를 열고 릴리스 신원을 제시합니다. 서비스 워커가 설치된 상태와 대조해 바인딩합니다.`,
+    code: `// world → sw
+port = chrome.runtime.connect({ name: "axsdk-community-v1" })
+{ type: "hello", protocol: 1, registrationId, token, commandsDigest }
+
+// sw가 대조하는 것
+scriptId · version · registrationId · commandsDigest
+tabId · frameId · documentId · 살아있는 포트`,
+    facts: [
+      ['상속 이름 거부', '<code>toString</code> 같은 프로토타입 프로퍼티가 명령으로 실행될 수 있었습니다. 라이브 RED 테스트로 재현해 own-property 검사 + null-prototype 테이블로 고쳤습니다.'],
+      ['토큰의 역할', '브로커에 대한 인증입니다. 검토된 스크립트 자신에 대한 샌드박스가 아닙니다.'],
+    ],
+    fail: '토큰·버전·등록 ID·명령 다이제스트·탭·프레임·문서 중 하나라도 어긋나면 포트를 버립니다.',
+  },
+  {
+    t: '사용자가 AI에 질의', done: false, realms: ['worker', 'sw'],
+    what: `여기가 이 문서의 본질적인 문제 지점입니다. 모델은 스크립트를 <b>직접 호출할 수 없습니다.</b>
+    그래서 카탈로그와 (인자 없는 read의) 결과를 <b>컨텍스트로 미리 주입</b>합니다.`,
+    code: `// 턴 전에 서비스 워커가 실행 (≤3개, read only, 1500ms 상한)
+readings = [{ "fixture.read-page/read_heading": { heading: "AXSDK community fixture" } }]
+
+// 모델이 보는 텍스트 (토큰·다이제스트·소스 없음)
+이 페이지의 커뮤니티 스크립트
+- fixture.read-page 1.0.0 (axsdk-fixtures)
+  - read_heading — 보이는 H1 텍스트를 읽습니다. [read]
+이 페이지에서 읽은 값
+- read_heading → {"heading":"AXSDK community fixture"}`,
+    facts: [
+      ['채널이 이미 있음', '<code>contextvalues.ts</code>의 <code>BackendContextKey</code>는 <code>sites | env</code>이고 <code>env</code>는 <code>envStore</code>에서 만들어집니다 — 호스트가 모델 앞에 텍스트를 놓는 경로가 이미 존재합니다.'],
+      ['상한이 필요한 이유', '프롬프트와 지연은 사용자 것입니다. 설치 개수에 따라 커지면 안 됩니다.'],
+    ],
+    fail: '미구현(4C). 그리고 인자를 받는 명령이나 mutation은 이 경로로 처리할 수 없습니다 — 다음 단계로 갑니다.',
+  },
+  {
+    t: '확인 후 호출', done: false, realms: ['worker', 'ui', 'sw', 'world'],
+    what: `인자를 받는 read와 모든 비-read 효과는 모델이 <b>제안</b>하고 사용자가 <b>확인</b>합니다.
+    위젯 버튼이 확장의 AX 핸들러를 호출합니다.`,
+    code: `// flow가 렌더링하는 위젯 버튼
+action: { type: "ax", command: "AX_widget_community_invoke",
+          args: { script_id, version, command, arguments } }
+
+// 게이트: true가 아니라 정확한 허용목록
+widgets: { commandActions: ["AX_widget_community_invoke"] }
+
+// sw가 다시 검증하는 것 — 모델의 인자는 입력이지 권한이 아님
+설치됨 · 활성 · 미폐기 · 버전 일치 · 명령 선언됨
+인자 스키마 통과 · 탭 URL이 승인 범위 안 · 효과의 동의 획득`,
+    facts: [
+      ['왜 true가 아닌가', '<code>true</code>는 위젯이 만들어내는 모든 <code>AX_widget_*</code> 이름을 엽니다.'],
+      ['mutation 재시도 없음', 'timeout이나 document_changed는 종결입니다. 보고하고 재생하지 않습니다.'],
+    ],
+    fail: '미구현(4C/4D). <code>buildCdpSdkConfig</code>가 <code>widgets</code> 키를 아예 설정하지 않아 지금은 <code>ax</code> 액션이 꺼져 있습니다.',
+  },
+];
+
+const CHANNELS = [
+  {
+    k: 'A', t: '카탈로그를 컨텍스트로', blocked: false, need: '플랫폼 변경 불필요',
+    items: ['설치된 명령을 텍스트로 렌더링', 'contexts.community 또는 env 항목', '토큰·다이제스트·소스 미포함'],
+  },
+  {
+    k: 'B', t: 'read 사전 실행', blocked: false, need: '플랫폼 변경 불필요',
+    items: ['인자 없는 read를 턴 전에 실행', '≤3개 · 1500ms · 문서별 캐시', '→ 단일 턴 AI 답변'],
+  },
+  {
+    k: 'C', t: '확인된 호출', blocked: false, need: '플랫폼 변경 불필요',
+    items: ['모델 제안 → 사용자 버튼 확인', 'ax 위젯 액션 → AX 핸들러 → 브로커', '인자 재검증 + 효과별 동의'],
+  },
+  {
+    k: 'D', t: '직접 도구 호출', blocked: true, need: '플랫폼 op 공표 필요',
+    items: ['community.catalog / community.invoke', '런타임 flow tool 1개', '단일 턴 · 버튼 없음'],
+  },
+];
+
+const CAPS = [
+  ['<b>등록이 매칭한 페이지의 DOM 전체</b> — 읽기·쓰기·클릭·입력·submit·<code>MutationObserver</code>',
+   '등록이 매칭하지 <b>않는</b> 페이지의 DOM — 제한은 “무엇을 할 수 있나”가 아니라 <b>“어느 문서인가”</b>입니다'],
+  ['자기만의 격리된 JS 전역 — 페이지가 볼 수 없고, 페이지의 JS도 볼 수 없음',
+   '<code>chrome.*</code> API 전부 — <code>runtime.sendMessage</code>/<code>connect</code>만 예외, 그것도 <code>messaging: true</code>일 때만'],
+  ['타이머, <b>페이지 origin</b>으로의 <code>fetch</code>/XHR (페이지의 CORS 적용)',
+   '페이지 자신도 못 하는 cross-origin 요청'],
+  ['페이지와 같은 origin의 <code>localStorage</code>/<code>sessionStorage</code>',
+   '<code>chrome.storage</code>, 그리고 <b>현재로선 우리 쪽 스크립트 전용 저장소</b> (아래 공백 참조)'],
+  ['<b>페이지의</b> CSP 면제 (문서 명시: “exempt from the page’s CSP”)',
+   '<b>world의</b> CSP 면제 — 우리는 <code>script-src \'self\'; object-src \'none\'</code>으로 설정'],
+  ['한 명령 안에서 <b>여러 단계</b> — 루프, 대기, 페이지네이션, 재시도',
+   '<b>페이지 이동을 넘어 생존</b> — 페이지 로드가 world 인스턴스를 파괴'],
+  ['확장과의 포트 통신 (<code>onUserScriptConnect</code>로 수신)',
+   '확장 업데이트를 넘어 <b>등록 유지</b> — 문서 명시: “User scripts are cleared when an extension updates.”'],
+];
+
+const MATRIX = [
+  ['페이지 DOM 읽기·쓰기·클릭·submit', '✅ <code>@match</code> 페이지', '✅ <code>matches</code> 페이지',
+   '✅ <b><code>session.primaryTabId()</code></b> — 스크립트 승인 호스트와 무관'],
+  ['스크립트 <b>전용</b> 저장소', '✅ <code>GM_setValue</code>/<code>GM_getValue</code> — 확장이 백업, 페이지 불가시, 탭 간 공유, <code>@grant</code> 필요',
+   '🚫 <b>없음 — 진짜 기능 공백</b> (안전 속성이 아님)', '—'],
+  ['페이지 origin <code>localStorage</code>', '✅', '✅', '✅ 해당 탭'],
+  ['cross-origin fetch', '✅ <code>GM_xmlhttpRequest</code> + <code>@connect</code>', '🚫 페이지 CORS 안에서만',
+   '✅ <code>net:</code> 허용목록, <b>확장에서</b> 송신'],
+  ['쿠키 읽기·쓰기·삭제', '✅ <code>GM_cookie</code>', '🚫', '🚫'],
+  ['페이지 JS 객체 (MAIN world)', '✅ <code>unsafeWindow</code>', '🚫', '🚫'],
+  ['탭 열기·닫기', '✅ <code>GM_openInTab</code>', '🚫',
+   '호스트 op <code>tabs.*</code> — flow가 grant 가능한지 <b>미측정</b>'],
+  ['<b>사용자의</b> 저장된 연락처·주소', '개념 없음', '🚫',
+   '✅ <code>memory.*</code> — <code>needsNoTab()</code>이라 탭조차 불필요'],
+  ['모델의 도구 표면 정의', '개념 없음', '🚫', '✅'],
+];
+
+const SCOPING = [
+  {
+    cls: 'ok', h: '①의 답: <b>아니요.</b> userscript는 확장 허용 호스트를 절대 넘지 않습니다',
+    p: `<code>userScripts</code> API 문서는 “스크립트를 돌리려는 사이트에 대해 <code>host_permissions</code>를 선언하라”고 합니다.
+    Tampermonkey FAQ Q306은 제한된 경우를 명시합니다 — Site Access가 <i>특정 사이트</i>면
+    “Tampermonkey <b>와 당신의 userscript</b>는 나열된 사이트만 접근할 수 있다”.
+    Tampermonkey가 무제한처럼 보이는 건 <b>모든 사이트</b> 권한을 갖고 있기 때문이고,
+    <code>@match</code>는 그 안에서 저자가 고르는 <b>부분집합 필터</b>입니다.
+    <br>참고로 우리 manifest는 지금 <code>http://*/*</code>·<code>https://*/*</code>를 <b>필수</b>로 선언하고 있고,
+    계획은 이걸 <code>optional_host_permissions</code>로 옮겨 릴리스별 사용자 승인으로 묶는 것입니다 — Tampermonkey보다 좁게, 의도적으로.`,
+  },
+  {
+    cls: 'ok', h: '②는 원칙적으로 맞습니다 — 그리고 <b>이미 그렇게 되어 있습니다</b>',
+    p: `릴리스의 승인 <code>matches</code>로 op을 묶으면 DOM 관련 반대는 완전히 사라집니다. 맞는 방향입니다.
+    그런데 <b>USER_SCRIPT world에서 도는 명령은 이미 등록이 매칭한 문서만 건드립니다 — 브라우저가 검사합니다.</b>
+    우리 코드 한 줄 없이요.
+    DOM 작업을 스크립트에 두고 flow에 op을 0으로 두는 건 그 제안의 <b>타협이 아니라 그 제안 자체</b>이고,
+    가장 잘 강제할 수 있는 주체가 강제하는 형태입니다. 같은 검사를 우리 dispatcher에서 다시 만들면
+    코드가 늘고 틀릴 여지가 늘고 답은 같습니다.`,
+  },
+  {
+    cls: 'ok', h: '“op 대상이 tab이니 tab 도메인도 알 수 있고, 어느 userScript가 도는지도 안다” — <b>맞습니다. 구현 가능하고, 제가 틀렸습니다</b>',
+    p: `이전 판에서 “프레임에 출처가 없으니 dispatcher에서 구현 못 한다”고 했는데,
+    그건 <b>다른 질문에 답한 것</b>이었습니다. 술어가 두 개입니다:
+    <br>• <b>“어느 릴리스가 이 op을 보냈나?”</b> → 프레임 출처 필요 → 아직 없음 (플랫폼 요청)
+    <br>• <b>“이 op이 향하는 tab이 승인된 도메인인가?”</b> → <b>tab만 필요 → dispatcher가 이미 갖고 있음</b>
+    <br>피해를 묶는 건 두 번째이고, 필요한 게 전부 손에 있습니다:
+    <br>① <code>dispatcher.execute</code>가 실행 전에 이미 <code>tabId</code>를 해소합니다.
+    <br>② <code>CdpPageApi.locationHref()</code>가 <b>op과 같은 채널</b>(<code>chrome.debugger</code>)로 주소를 읽습니다 —
+    위 측정대로 host permission 0개에서도 되는 채널이라, 검사가 op보다 더 많은 권한을 요구하지 않습니다.
+    <br>③ <b>Chrome의 <code>matches</code> 강제가 곧 귀속(attribution) 신탁입니다.</b>
+    어떤 스크립트가 tab T에 살아있는 핸드셰이크 포트를 가졌다는 건 <b>Chrome이 그 문서에 주입했기 때문</b>입니다 —
+    브로커의 포트 테이블이 “T에 정당하게 존재하는 릴리스”를 프레임 출처 없이 답합니다.`,
+  },
+  {
+    cls: 'ok', h: '그래서 게이트를 두 강도로 만들 수 있습니다',
+    p: `<b>합집합 허용목록:</b> tab 도메인이 (설치·활성 릴리스의 승인 matches ∪ 패키지 제품이 설정한 사이트)에 없으면 거부.
+    거칠지만 — 릴리스 A의 flow가 B의 도메인에서 돌 수 있음 — 경계가 없는 지금보다 낫고,
+    <code>@match *://*/*</code>가 평범한 Tampermonkey보다 이미 엄격합니다.
+    <br><b>실시간 존재 허용목록:</b> <b>그 문서에</b> 살아있는 포트를 가진 릴리스가 승인한 도메인이 아니면 거부.
+    B가 승인했지만 이 tab에 B 스크립트가 주입되지 않은 도메인도 거부됩니다 —
+    <b>프레임 출처 없이 릴리스별 범위 제한에 근접</b>합니다.
+    <br><b>경쟁 상태(TOCTOU)는 기계적으로 해결됩니다.</b> <code>Page.createIsolatedWorld</code>가 주는
+    <code>executionContextId</code>는 문서와 함께 죽고 <code>frames.ts</code>가 이미 그 <code>contextId</code>로 평가합니다.
+    검사와 op을 <b>같은 컨텍스트</b>에서 하면, 문서가 바뀌면 op이 실패합니다 — 승인 안 된 페이지로 흘러가지 않습니다.
+    도메인은 <code>(tabId, contextId)</code>로 캐시하면 문서당 1회 읽기입니다.
+    <br><b>탭이 없는 두 계열은 구조적으로 밖입니다:</b> <code>needsNoTab()</code>(<code>memory.*</code>·<code>sitemap.*</code>·<code>tabs.*</code>)와
+    <code>net:</code> 송신은 자기 규칙을 따릅니다.
+    <br><b>커뮤니티 스크립트와 무관하게 패키지 flow부터 만들 값이 있습니다</b> —
+    지금은 op이 세션 그룹의 <b>어느 탭에서든</b> 동작합니다. 사용자가 그냥 열어둔 탭 포함.`,
+  },
+  {
+    cls: 'warn', h: '호스트 범위로는 못 메우는 축 2개 — 페이지 범위가 아니기 때문',
+    p: `<code>memory.*</code>는 <code>needsNoTab()</code>이라 페이지가 아예 없고, <code>net:</code>는 별도 호스트 허용목록입니다.
+    그래서 남는 공백과 정직한 해법:
+    <br>• <b>명령이 호출 사이에 기억 못 함</b> → 브로커에 <code>storage.*</code> 추가 (<code>scriptId</code> namespace, 쿼터, 교차 읽기 금지) — Tampermonkey <code>GM_setValue</code> 등가물
+    <br>• <b>페이지 CORS가 막는 API 호출</b> → 브로커에 <code>net.fetch</code> 추가, <b>릴리스가 선언하고 사용자가 승인한 호스트로만</b> — Tampermonkey <code>@connect</code> 등가물
+    <br>• <b>이동 후 생존 불가</b> → 이미 설계된 재진입 패턴 (명령이 <code>navigating</code> 보고, 브로커가 재호출)
+    <br>• <b>사용자의 저장된 연락처·주소</b> → <b>사용자 매개 전달</b>로 도달 가능 (아래 카드)`,
+  },
+  {
+    cls: 'ok', h: '“memory는 읽기·쓰기 때 동의 팝업 띄우면 된다” — 맞습니다. 다만 <b>무엇에 붙이는지</b>가 다릅니다',
+    p: `<code>memory</code>가 절대 금지라던 이전 판이 과했습니다. 바꿀 것은 팝업을 <b>권한에 붙이지 않는다</b>는 점입니다.
+    <br>• <b>아님:</b> <code>memory.get</code> grant + 다이얼로그. 권한은 남아 재호출되고, 다이얼로그는 클릭 습관을 만듭니다.
+    <br>• <b>대신:</b> 값 하나당 <b>사용자 매개 전달</b> 1회 — 프롬프트가 <b>키·넘길 값·목적지</b>를 보여주고
+    <i>이 값 사용</i> / <i>직접 입력</i> / <i>취소</i>를 받습니다. grant는 없고 전달을 사용자가 수행합니다.
+    <br>• <b>쓰기</b>도 자기 프롬프트 — 키와 새 값 명시. 사용자 주소록에 조용히 쓰는 건 편의가 아닙니다.
+    <br>• <b>목적지를 정직하게:</b> 스크립트가 쓰는 값은 이미 접근 가능한 페이지에 머물지만,
+    flow로 읽힌 값은 <b>모델 컨텍스트를 거쳐 백엔드로</b> 갑니다. 같은 값, 다른 노출 범위 — 문구도 달라야 합니다.
+    <br>이러면 스크립트 flow가 전화번호를 필요로 하는 경우는 <b><code>memory.*</code> grant 없이</b> 해결됩니다.`,
+  },
+  {
+    cls: 'bad', h: '“rpc op은 <b>지금</b> 허용 도메인에서만 호출되나?” — <b>측정 결과 아닙니다.</b> 오늘은 아무 경계도 없습니다',
+    p: `참이면 전부 달라지는 전제라서 정확히 짚습니다. 이 트리에서 확인한 3가지:
+    <br>① <b>도구가 도메인을 선언할 수 없습니다.</b> <code>rpc:</code> 블록 전체가
+    <code>allow</code>(op 이름) · <code>opTimeoutMs</code> · <code>deadlineMs</code>뿐입니다 —
+    호스트·도메인 키가 <b>아예 없어서</b> 저자가 원해도 “이 사이트에서만”이라고 쓸 수 없습니다.
+    <br>② <b>dispatcher는 URL을 검사하지 않습니다.</b> <code>session.primaryTabId()</code>(또는
+    <code>tabIdFor(frame.target)</code>)로 탭을 정하고 실행합니다. 주소를 무엇과도 비교하지 않습니다.
+    <code>needsNoTab()</code> op은 탭조차 없이 돕니다.
+    <br>③ <b>사이트 오버레이는 “전달” 시점 범위입니다.</b> <code>&lt;domain&gt;/flows.yaml</code>은
+    <code>siteclientflows.ts</code>가 <code>:&lt;domain&gt;</code> 키로 그 도메인이 현재가 될 때 <b>한 번</b> 보냅니다.
+    병합 후엔 아무것도 다시 검사하지 않고, 탭은 그 뒤 다른 곳으로 이동할 수 있습니다.
+    <b>현재 상태로는</b> “flow가 허용한 도메인”이 실행 시점에 존재하지 않습니다. 단 이건 <b>지금 없다</b>는 뜻이고
+    <b>만들 수 없다</b>는 뜻이 아닙니다 — 위 두 카드의 도메인 게이트가 그것을 만드는 방법입니다.`,
+  },
+  {
+    cls: 'bad', h: '“flow가 돌려면 도메인 허용이 필요하니 op도 허용 도메인에서만 돈다” — <b>라이브로 측정했고, 아닙니다</b>',
+    p: `참이면 전부 달라지는 전제라서 실제로 재봤습니다. 이 확장의 Site Access를 <b>클릭 시</b>로 바꿔
+    <code>chrome.permissions.getAll()</code>이 <code>origins: []</code>를 답하는 상태에서:
+    <br>• <code>chrome.scripting.executeScript</code> → <b>거부</b> (문서대로 host-gated)
+    <br>• <code>chrome.debugger.attach</code> + <code>Runtime.evaluate</code> → <b>성공, 페이지 텍스트를 읽음</b>
+    <br>• <code>chrome.userScripts.register</code> → 등록은 되고 <b>주입은 안 됨</b> (host-gated)
+    <br>우리 <code>dom.*</code>/<code>nav.*</code>는 <code>chrome.debugger</code>로 페이지에 닿고,
+    그 API가 요구하는 건 <code>debugger</code> 권한뿐입니다. <b>허용 도메인이 0개인 상태에서도 op이 문서에 닿았습니다.</b>
+    <br>그리고 비대칭이 불편한 방향입니다 — <b>덜 신뢰되는 쪽(userscript)만 Chrome이 도메인별로 묶고, flow는 전혀 묶이지 않습니다.</b>
+    <br>계획에 주는 함의: web origin을 <code>optional_host_permissions</code>로 옮기는 건(4A)
+    <b>userscript 주입</b>을 묶습니다 — 릴리스별 경계가 여기서 나옵니다. flow op은 묶지 못합니다.
+    우리 manifest의 <code>host_permissions</code>는 백엔드 fetch와 DNR 규칙용이고, 애초에 페이지 경계가 아니었습니다.`,
+  },
+];
+
+const FLOWSTRING = [
+  {
+    cls: 'warn', h: '결론부터 — 됩니다. 단, 그 flow가 무엇을 grant하느냐에 따라 갈립니다',
+    p: `이전 판에서 “스크립트별 flow 배포 금지”라고 썼는데 <b>그 근거는 틀렸습니다.</b>
+    <code>userScripts</code> API는 “패키지에 담아 배송할 수 없는 사용자 제공 스크립트”를 실행하기 위한 것이고,
+    Tampermonkey는 심사 없는 임의 JS를 그 API로 돌립니다.
+    그 JS보다 약한 YAML을 <b>“코드다”라는 이유로</b> 막는 것은 성립하지 않습니다.
+    <b>경계는 출처(provenance)가 아니라 권한(capability)입니다.</b>`,
+  },
+  {
+    cls: 'bad', h: '진짜 경계 — flow는 스크립트보다 <b>약한 게 아니라 다른 곳에서 더 센</b> 권한을 씁니다',
+    p: `측정한 사실입니다. <code>dispatcher.ts</code>는 flow의 <code>dom.*</code>/<code>nav.*</code>를
+    <code>session.primaryTabId()</code>에 실행합니다 — <b>커뮤니티 호스트 승인과 아무 관계가 없습니다.</b>
+    <code>memory.*</code>·<code>sitemap.*</code>는 탭조차 필요 없습니다(<code>needsNoTab</code>).
+    즉 flow에 op을 grant하면 그 스크립트는 자기 <code>matches</code> 밖의 페이지를 조작하고,
+    사용자의 저장된 연락처·주소를 읽고, 페이지 CORS를 우회해 확장에서 송신할 수 있습니다.
+    <b>USER_SCRIPT world는 그 셋 다 못 합니다.</b> Tampermonkey 비유가 여기서 끊깁니다.`,
+  },
+  {
+    cls: 'ok', h: '그래서 3단 권한 계층으로 다시 설계했습니다',
+    p: `<b>Tier 1 — 패키지된 우리 flow:</b> op grant, <code>net:</code>, <code>memory.*</code>, 도구 표면 정의. 심사·게이트 통과분만.
+    <br><b>Tier 2 — 스크립트가 실어 오는 flow 조각:</b> op grant 0, <code>net:</code> 0, <code>memory.*</code> 0.
+    도구는 <b>그 스크립트가 선언한 명령</b>에 대한 <code>community.invoke</code>뿐. 노드·프롬프트·문구는 자유.
+    이 경우 <b>실효 권한 = 스크립트 자신의 권한</b>이므로 반대할 근거가 없습니다.
+    <br><b>Tier 3 — 사용자가 직접 가져온 스크립트:</b> 레지스트리 심사 없음. 강한 동의. 모델에게는 신뢰되지 않은 것으로 표시하거나 감춤.`,
+  },
+  {
+    cls: 'bad', h: '계층과 무관하게 금지되는 것 하나 — 확장 realm의 원격 코드',
+    p: `“axhandler를 배포”는 안 됩니다. AX 핸들러는 <b>확장 자신의 realm</b>에서 돕니다 —
+    <code>chrome.*</code>, 모든 호스트, 사용자 저장소에 닿는 자리입니다.
+    그리고 여기엔 Tampermonkey 선례가 <b>없습니다</b>: <code>GM_*</code>는 확장이 구현한 고정 함수이고,
+    Tampermonkey는 사용자 코드를 자기 realm에서 절대 실행하지 않습니다.
+    우리 쪽 <code>GM_*</code> 등가물은 <b>브로커의 명령 프로토콜</b>이고, 스크립트가 능력을 원하면
+    핸들러를 실어 오는 게 아니라 <b>브로커 어휘를 넓히는</b> 것이 맞습니다.`,
+  },
+  {
+    cls: 'warn', h: '이전에 내가 과장한 근거 3개 — 철회합니다',
+    p: `<b>“우리 flow는 코드다”</b> → 사실이지만 정책 차단 근거가 못 됩니다. userScripts API가 바로 그 채널입니다.
+    <br><b>“심사 우회”</b> → Tier 2처럼 권한이 스크립트 범위로 묶이면 JS 심사가 곧 실효 권한 심사입니다. 성립하지 않습니다.
+    <br><b>“<code>check:flows</code>를 통과하지 않는다”</b> → 이건 <b>품질</b> 논거이고 보안 경계가 아닙니다.
+    그 게이트는 우리 flow를 우리 실수로부터 지킵니다. 사용자 flow가 못 지키면 그 사용자 경험이 나빠질 뿐입니다.`,
+  },
+  {
+    cls: 'ok', h: '남는 진짜 제약 — AI가 실행 경로에 있다는 것',
+    p: `이건 계층과 직교하고 여전히 유효합니다. 모델이 명령을 고르므로 페이지 내용이 모델 입력이 되고
+    <b>프롬프트 인젝션이 실행 경로</b>가 됩니다. 그래서 계층과 무관하게:
+    모델은 설치·활성화·호스트 승인·동의 승인 권한이 없고, mutation은 사용자 확인을 통과해야 하며,
+    Tier 3 명령은 모델에게 신뢰되지 않은 것으로 표시됩니다. <b>스크립트를 못 믿어서가 아니라 페이지를 못 믿어서입니다.</b>`,
+  },
+];
+
+const BLOCKERS = [
+  {
+    cls: 'bad', h: 'op 어휘는 서버가 정합니다',
+    p: `<code>tools/rpc-allow.mjs</code>의 <code>OPS</code>는 <b>“live <code>GET /axsdk/v2/lua/ops</code>에서 미러링”</b>이라고
+    파일 스스로 밝힙니다. 그래서 <code>community.invoke</code> 같은 새 wire op은 이 저장소가 단독으로 출시할 수 없습니다.
+    <b>채널 D가 막힌 이유이고, 채널 A~C가 존재하는 이유입니다.</b>`,
+  },
+  {
+    cls: 'warn', h: '호스트 op을 flow가 grant할 수 있는지 불명',
+    p: `호스트 op은 실재합니다 — 세션 워커의 <code>TAB_OPS</code>(<code>tabs.list/create/close/activate</code>)가 이름으로 전달됩니다.
+    그런데 <code>_common/flows.yaml</code>과 <code>_common/rpc</code> 전체 검색에서 <code>tabs.*</code>를 grant하는 flow가 <b>하나도 없습니다.</b>
+    즉 선례가 없어 가정할 수 없습니다.`,
+  },
+  {
+    cls: 'bad', h: '권한을 grant하는 flow는 패키지된 것만',
+    p: `<b>스크립트가 flow를 실어 오는 것 자체는 막지 않습니다(§3 Tier 2).</b> 막는 것은
+    <code>rpc.allow</code> op · <code>net:</code> 송신 · <code>memory.*</code>를 grant하는 flow입니다.
+    그 셋은 <code>session.primaryTabId()</code>와 확장 realm에서 동작하므로 <b>스크립트의 승인 호스트 밖</b>입니다.
+    패키지된 flow만 그 권한을 가질 수 있습니다.`,
+  },
+  {
+    cls: 'warn', h: '“사용자 스크립트 허용”은 수동 설정입니다',
+    p: `사용자가 <code>chrome://extensions</code>에서 직접 켜야 하고, 확장을 재빌드하면 초기화됩니다.
+    Phase 1 라이브에서 접근성 트리로는 이 토글을 클릭할 수 없었습니다 — 동작한 경로는 shadow DOM 안
+    <code>#allow-user-scripts</code>의 <code>cr-toggle</code>이었습니다. 온보딩 문구가 보기보다 중요합니다.`,
+  },
+  {
+    cls: 'bad', h: 'CWS 산출물에 기존 Lua 인터프리터가 남아 있습니다',
+    p: `현재 빌드는 <code>fengari-*.js</code>를 포함합니다. 커뮤니티 경로와 무관한 기존 P0이며 Phase 9에서 제거합니다.
+    그때까지 이 산출물은 스토어 제출 대상이 아닙니다.`,
+  },
+  {
+    cls: 'warn', h: '동의 없는 mutation 경로는 만들지 않습니다',
+    p: `<code>external_send</code>와 <code>cart_mutation</code>은 호출마다 사용자 확인이 필요합니다.
+    구매·주문·결제는 어휘 자체에 존재하지 않습니다. 결과가 불확실한 mutation은 한 번 보고하고 재시도하지 않습니다.`,
+  },
+];
+
+const PROBES = [
+  ['백엔드가 선언되지 않은 컨텍스트 이름을 받는가', '채널 A의 형태 — 전용 <code>community</code> 키 vs <code>env</code> 항목', '<code>env</code> 항목으로 실어 보냅니다. 렌더러는 그대로.'],
+  ['flow가 서버 미공표 호스트 op을 grant할 수 있는가', '채널 D의 존재 여부', '플랫폼 요청을 넣고, 채널 A~C가 제품이 됩니다.'],
+  ['<code>widgets.commandActions</code>가 워커 realm에서 동작하는가', '채널 C의 버튼 경로', '위젯 대신 확장 UI 자체에서 확인을 받습니다.'],
+  ['사전 실행 1500ms 상한이 실제 사이트에서 유효한가', '채널 B의 지연 예산', '상한을 낮추고 결과를 <code>stale</code>로 보고합니다.'],
+  ['<code>chrome.userScripts</code> 등록이 확장 업데이트를 넘어 유지되는가', '재조정 트리거의 필요 범위', '<code>onInstalled</code>에서 항상 전량 재등록합니다.'],
+];
+
+const EVIDENCE = `COMMUNITY SCRIPT SMOKE PASS axsdk-community-fixture-read-page
+  extension kmpjeabgdfgicnnplgiokmaolfilokko
+  release fixture.read-page@1.0.0 sha256:3e69513221796cb50d7ebc68ab43ca0c40bed7988b251dabeb99ab60c097bda3
+  registry http://127.0.0.1:57222/registry (signed index, manifest, revocations)
+  tampered artifact refused as artifact_invalid: assets/3e69…bda3.js has 177 bytes
+  world axsdk-community-3e69513221796cb5
+  heading "AXSDK community fixture"
+  boundaries undeclared:refused unapproved:not_injected removed:not_injected
+
+# 오프라인 단위 검증
+community 단위 테스트 47 · 확장 전체 864 · check:flows 180 · typecheck clean`;
+
+/* ---------- render ---------- */
+
+const stepsEl = document.getElementById('steps');
+const detailEl = document.getElementById('detail');
+let current = 0;
+
+function renderSteps() {
+  stepsEl.innerHTML = STEPS.map((s, i) => `
+    <button type="button" data-i="${i}" ${i === current ? 'aria-current="step"' : ''}>
+      <span class="n">${String(i + 1).padStart(2, '0')}</span>${s.t} ${s.done ? '✅' : '🚧'}
+    </button>`).join('');
+}
+
+function renderDetail() {
+  const s = STEPS[current];
+  detailEl.innerHTML = `
+    <h3>${String(current + 1).padStart(2, '0')} · ${s.t} ${s.done ? '✅ 라이브 증명됨' : '🚧 미구현'}</h3>
+    <p class="who">${s.realms.map(badge).join('')}</p>
+    <p>${s.what}</p>
+    <pre>${s.code.replace(/&/g, '&amp;').replace(/</g, '&lt;')}</pre>
+    <dl>
+      ${s.facts.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}
+      <dt>실패하면</dt><dd>${s.fail}</dd>
+    </dl>
+    <div class="nav">
+      <button type="button" id="prev" ${current === 0 ? 'disabled' : ''}>← 이전</button>
+      <button type="button" id="next" ${current === STEPS.length - 1 ? 'disabled' : ''}>다음 →</button>
+    </div>`;
+  detailEl.querySelector('#prev').onclick = () => go(current - 1);
+  detailEl.querySelector('#next').onclick = () => go(current + 1);
+}
+
+function go(i) {
+  current = Math.max(0, Math.min(STEPS.length - 1, i));
+  renderSteps();
+  renderDetail();
+}
+
+stepsEl.addEventListener('click', (e) => {
+  const button = e.target.closest('button[data-i]');
+  if (button) go(Number(button.dataset.i));
+});
+
+document.getElementById('channels').innerHTML = CHANNELS.map((c) => `
+  <div class="c" data-blocked="${c.blocked}">
+    <h4>${c.k}. ${c.t}</h4>
+    <div class="t">${c.blocked ? '🚫 ' : '✅ '}${c.need}</div>
+    <ul>${c.items.map((i) => `<li>${i}</li>`).join('')}</ul>
+  </div>`).join('');
+
+document.querySelector('#caps tbody').innerHTML = CAPS
+  .map(([yes, no]) => `<tr><td>✅ ${yes}</td><td>🚫 ${no}</td></tr>`).join('');
+
+document.querySelector('#matrix tbody').innerHTML = MATRIX
+  .map(([axis, tm, ours, flow]) =>
+    `<tr><td><b>${axis}</b></td><td>${tm}</td><td>${ours}</td><td>${flow}</td></tr>`).join('');
+
+document.getElementById('flowstring').innerHTML = FLOWSTRING
+  .map((c) => `<div class="card ${c.cls}"><h4>${c.h}</h4><p>${c.p}</p></div>`).join('');
+
+document.getElementById('blockers').innerHTML = BLOCKERS.map((b) => `
+  <div class="card ${b.cls}"><h4>${b.h}</h4><p>${b.p}</p></div>`).join('');
+
+document.querySelector('#probes tbody').innerHTML = PROBES.map(([q, s, f]) => `
+  <tr><td>${q}</td><td>${s}</td><td>${f}</td></tr>`).join('');
+
+document.getElementById('scoping').innerHTML = SCOPING
+  .map((c) => `<div class="card ${c.cls}"><h4>${c.h}</h4><p>${c.p}</p></div>`).join('');
+
+document.getElementById('evidence').textContent = EVIDENCE;
+
+const COMPARE = [
+  ['누가 작성하나', '누구나. 제3자 저자·취미 개발자가 자유롭게 게시.',
+   '릴리스마다 <b>publisherId</b>가 붙고, 인덱스에 들어가려면 검토자 승인이 필요.'],
+  ['사전 심사', '<b>없음.</b> 규칙 페이지는 “요건에서 벗어난 스크립트는 모더레이터가 <i>삭제할 수 있다</i>”고 하고, 발견 시 <code>Report script</code>로 신고하라고 안내 — <b>사후 신고 기반 조정</b>.',
+   '<b>필수.</b> <code>review.status: approved</code> + <code>reviewerId</code>가 매니페스트 안에 있고, 없으면 레지스트리 컴파일러가 빌드를 거부.'],
+  ['실질적 심사자', '<b>사용자</b>. 설치 화면에서 소스와 <code>@grant</code>/<code>@match</code>를 보고 판단.',
+   '<b>레지스트리 검토자 + 사용자</b>. 사용자는 여전히 호스트와 효과를 승인하지만, 코드는 이미 심사·서명됨.'],
+  ['사용자 심사를 위한 장치', '난독화·최소화 <b>금지</b>. 본체 코드가 Greasy Fork에 있어야 함. 외부 실행 코드 로딩 제한. 광고·추적·마이너는 <code>@antifeature</code>로 공개.',
+   '금지 구문을 빌드에서 거부: <code>eval</code>·<code>Function</code>·동적 <code>import</code>·<code>WebAssembly.compile</code>·<code>&lt;script&gt;</code> 주입. 소스 URL·라이선스 필수.'],
+  ['무결성 / 서명', '서명 없음. <code>@require</code>/<code>@resource</code>에 SRI 해시를 <b>붙일 수 있으나</b> 강제 아님.',
+   '릴리스마다 <b>Ed25519 서명</b> + 콘텐츠 주소. 다이제스트·바이트 수·서명을 다운로드 시와 <b>캐시에서 읽을 때마다</b> 재검증.'],
+  ['외부 코드 로딩', '<b>허용</b> — CDN, SRI 붙은 <code>@require</code>, Greasy Fork 라이브러리, 동일 출처 주입.',
+   '<b>금지.</b> 릴리스는 자기 완결적인 하나의 JS 아티팩트. 2차 코드 로딩은 빌드에서 거부.'],
+  ['권한 모델', '<code>@grant</code>로 <code>GM_*</code> 화이트리스트: <code>GM_xmlhttpRequest</code>(cross-origin), <code>GM_cookie</code>(쿠키 읽기·쓰기·삭제), <code>GM_download</code>, <code>GM_openInTab</code>, <code>GM_setClipboard</code>, <code>unsafeWindow</code>(페이지 JS 접근).',
+   '<code>chrome.runtime</code> 메시징만. cross-origin 없음, 쿠키 없음, 다운로드 없음, 탭 제어 없음, MAIN world 없음. 권한 단위는 <b>선언된 명령</b>.'],
+  ['호스트 범위', '스크립트가 <code>@match</code>/<code>@include</code>를 선언. <code>*</code>도 가능하고 사용자가 설치 시 승인.',
+   '넓은 패턴을 <b>빌드가 거부</b>. <code>&lt;all_urls&gt;</code>·<code>https://*/*</code> 불가. 사용자가 정확한 origin을 개별 승인.'],
+  ['업데이트', '<code>@updateURL</code>/<code>@downloadURL</code>로 매니저가 주기적 확인·설치. 규칙은 하루 1회 이상 확인 금지.',
+   '<b>모든 코드 업데이트에 사용자 승인.</b> 자동 업데이트 없음. 실패하면 이전 릴리스가 그대로 유지.'],
+  ['폐기 / 차단', 'Tampermonkey <b>BlackCheck</b> — 저자가 유지하는 <code>blacklist.json</code>. 사용자가 심각도 조절·비활성화 가능.',
+   '레지스트리의 <b>서명된 폐기 목록</b>. 폐기 시 비활성화·등록 해제되고 재활성화가 거부됨. 사용자가 끌 수 없음.'],
+  ['실행 주체', '<b>사용자</b>. 페이지를 열면 스크립트가 돌고, 나머지는 스크립트 마음.',
+   '<b>브로커</b>. 선언된 명령만, 호출마다 검증. read는 자동, 그 외는 사용자 확인.'],
+  ['AI 개입', '없음.', '<b>있음.</b> 모델이 명령을 제안 — 그래서 위협 모델이 다릅니다(아래).'],
+];
+
+const WHY = [
+  {
+    cls: 'bad', h: '① AI가 실행 경로에 들어옵니다 — Tampermonkey에 없는 위협',
+    p: `Tampermonkey는 사용자가 페이지를 열면 스크립트가 돕니다. 우리는 <b>모델이 어떤 명령을 부를지 고릅니다.</b>
+    그러면 페이지 내용이 모델 입력이 되고, <b>프롬프트 인젝션이 실행 경로</b>가 됩니다.
+    그래서 모델은 제안만 하고, 설치·활성화·호스트 승인·동의 승인 권한을 갖지 않으며,
+    mutation은 사용자 확인을 통과해야 합니다. 이 제약은 스크립트를 못 믿어서가 아니라 <b>페이지를 못 믿어서</b>입니다.`,
+  },
+  {
+    cls: 'warn', h: '② 실수의 단위가 다릅니다',
+    p: `일반 userscript의 오작동 비용은 대체로 페이지 하나입니다.
+    우리 대상은 커머스·견적·장바구니이고, 실수 하나가 <b>돈이나 발송</b>입니다.
+    그래서 <code>external_send</code>와 <code>cart_mutation</code>은 호출마다 확인을 받고,
+    구매·주문·결제는 어휘 자체에 넣지 않았습니다.`,
+  },
+  {
+    cls: 'warn', h: '③ 우리는 중립 도구가 아니라 배포자입니다',
+    p: `Chrome 문서는 <code>userScripts</code> API의 용도를 “패키지에 담아 배송할 수 없는, <b>사용자가 제공한</b> 스크립트를
+    실행하는 확장”이라고 씁니다. Tampermonkey는 정확히 그것이고, 스크립트 내용은 스토어 심사 대상이 아닙니다.
+    우리가 레지스트리를 운영해 <b>큐레이션</b>하는 순간 “우리가 고른 것”이 되고 책임이 우리에게 옵니다.
+    그래서 심사와 서명이 선택이 아니라 경계입니다.`,
+  },
+  {
+    cls: 'ok', h: '솔직한 대가 — Tampermonkey가 더 강력합니다',
+    p: `<code>GM_xmlhttpRequest</code> 하나로 cross-origin이 열리고, <code>unsafeWindow</code>로 페이지 JS에 닿고,
+    <code>@require</code>로 라이브러리를 끌어옵니다. 우리는 그 전부를 의도적으로 주지 않습니다.
+    대가는 기능 제약이고, 그래서 “스크립트 안에서 여러 단계를 하는 명령 1개”가 우리 쪽의 표현 수단입니다.
+    <br><br><b>선택지로 남겨둔 것:</b> “사용자가 직접 가져온 스크립트” 모드는 API의 원래 용도이므로 나중에 추가할 수 있습니다.
+    다만 그때는 그 스크립트의 명령을 <b>모델에게 보여주지 않거나</b>, 신뢰되지 않은 것으로 명확히 표시해야 합니다 —
+    그러지 않으면 ①이 되살아납니다.`,
+  },
+];
+
+document.querySelector('#compare tbody').innerHTML = COMPARE
+  .map(([axis, tm, ax]) => `<tr><td><b>${axis}</b></td><td>${tm}</td><td>${ax}</td></tr>`).join('');
+
+document.getElementById('why').innerHTML = WHY
+  .map((c) => `<div class="card ${c.cls}"><h4>${c.h}</h4><p>${c.p}</p></div>`).join('');
+
+/* ---------- simulator ---------- */
+
+const SAMPLES = [
+  '이 페이지 제목 뭐야?',
+  '제목을 영어로 번역해줘',
+  '이 스크립트 설치해줘',
+  '장바구니에 담아줘',
+  '견적 요청 보내줘',
+];
+
+const CASES = [
+  {
+    match: /설치|깔아|install|활성화|켜줘|권한|허용/,
+    channel: '없음 — 거부',
+    verdict: 'bad',
+    steps: [
+      ['worker', 'planner가 요청을 받습니다.'],
+      ['worker', '모델에게는 설치·활성화·권한·동의를 표현할 수단이 없습니다. 어떤 도구 스키마에도 없습니다.'],
+      ['ui', '확장이 “설정에서 직접 하세요”로 답하고 <b>상태를 바꾸지 않습니다.</b>'],
+    ],
+    note: '이것은 결함이 아니라 계약입니다. 모델은 스크립트 관리 권한이 없습니다.',
+  },
+  {
+    match: /장바구니|카트|담아|주문|구매|결제|cart|buy|order/,
+    channel: 'C — 확인된 호출 (동의 필요)',
+    verdict: 'warn',
+    steps: [
+      ['worker', '카탈로그에서 <code>cart_mutation</code> 효과의 명령을 찾습니다.'],
+      ['worker', '모델이 <code>{script_id, version, command, arguments}</code>를 <b>제안</b>합니다.'],
+      ['ui', '확장이 스크립트·발행자·명령·사이트·보낼 값을 보여주고 <b>Allow once / Cancel</b>을 받습니다.'],
+      ['sw', '승인 후 설치 상태·버전·인자 스키마·탭 URL을 <b>다시</b> 검증합니다. 모델의 인자는 입력이지 권한이 아닙니다.'],
+      ['world', '스크립트가 페이지에서 실행하고, 사이트가 확인해준 결과만 성공으로 봅니다.'],
+    ],
+    note: '구매·주문·결제 자체는 어휘에 없습니다. 결과가 불확실하면 보고하고 재시도하지 않습니다. 미구현(4B/4C).',
+  },
+  {
+    match: /보내|전송|제출|견적|submit|send|문의/,
+    channel: 'C — 확인된 호출 (동의 필요)',
+    verdict: 'warn',
+    steps: [
+      ['worker', '<code>external_send</code> 효과의 명령을 제안합니다.'],
+      ['ui', '호출마다 사용자 확인. 취소하면 아무것도 보내지 않습니다.'],
+      ['sw', '최종 제출 직전 재검증. 자동 제출 경로는 존재하지 않습니다.'],
+    ],
+    note: '미구현(4B/4C). 동의 없이는 도달할 수 없는 경로입니다.',
+  },
+  {
+    match: /번역|요약|정리|비교|바꿔|translate|summar/,
+    channel: 'B → 모델이 후처리',
+    verdict: 'ok',
+    steps: [
+      ['sw', '턴 전에 인자 없는 <code>read</code>를 실행합니다 (≤3개, 1500ms).'],
+      ['worker', '읽은 값이 컨텍스트 텍스트로 모델 앞에 놓입니다.'],
+      ['worker', '모델은 <b>추가 호출 없이</b> 그 값을 가공해서 답합니다.'],
+    ],
+    note: '스크립트는 읽기만 했고 가공은 모델이 합니다. 단일 턴. 미구현(4C).',
+  },
+  {
+    match: /.*/,
+    channel: 'B — read 사전 실행',
+    verdict: 'ok',
+    steps: [
+      ['sw', '활성·미폐기·호스트 일치 릴리스에서 인자 없는 <code>read</code>를 고릅니다.'],
+      ['world', 'bootstrap이 <code>read_heading</code>을 실행합니다.'],
+      ['page', 'DOM에서 실제 값을 읽습니다 → <code>{"heading":"AXSDK community fixture"}</code>'],
+      ['worker', '카탈로그 + 읽은 값이 컨텍스트로 들어갑니다.'],
+      ['worker', '모델이 그 값으로 <b>단일 턴</b>에 답합니다.'],
+    ],
+    note: '버튼도, 두 번째 턴도, 새 플랫폼 op도 필요하지 않습니다. 미구현(4C) — 아래 채널 B가 그것입니다.',
+  },
+];
+
+const traceEl = document.getElementById('trace');
+
+function classify(text) {
+  const q = text.trim();
+  if (q === '') return null;
+  return CASES.find((c) => c.match.test(q)) ?? CASES[CASES.length - 1];
+}
+
+function ask() {
+  const q = document.getElementById('q').value;
+  const hit = classify(q);
+  if (!hit) {
+    traceEl.innerHTML = '<p class="hint">질문을 입력하세요.</p>';
+    return;
+  }
+  traceEl.innerHTML = `
+    <p><b>질의</b> “${q.replace(/</g, '&lt;')}”</p>
+    <p><b>처리 채널</b> ${hit.channel}</p>
+    <ol>${hit.steps.map(([r, s]) => `<li>${badge(r)} ${s}</li>`).join('')}</ol>
+    <div class="verdict ${hit.verdict}">${hit.note}</div>`;
+}
+
+document.getElementById('ask').onclick = ask;
+document.getElementById('q').addEventListener('keydown', (e) => { if (e.key === 'Enter') ask(); });
+document.getElementById('chips').innerHTML = SAMPLES
+  .map((s) => `<button type="button">${s}</button>`).join('');
+document.getElementById('chips').addEventListener('click', (e) => {
+  const button = e.target.closest('button');
+  if (!button) return;
+  document.getElementById('q').value = button.textContent;
+  ask();
+});
+
+go(0);
+document.getElementById('q').value = SAMPLES[0];
+ask();
+</script>
+</body>
+</html>

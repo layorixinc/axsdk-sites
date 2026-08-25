@@ -1,0 +1,49 @@
+{
+  "schemaVersion": 1,
+  "productCharter": "AXSDK installs, manages, and runs user-selected community web-automation scripts on websites explicitly authorized by the user.",
+  "browser": {
+    "minimumChromeVersion": 138,
+    "executionApi": "chrome.userScripts",
+    "world": "USER_SCRIPT"
+  },
+  "artifacts": {
+    "executionLanguage": "javascript",
+    "acceptedAuthoringLanguages": [
+      "javascript",
+      "lua"
+    ],
+    "luaPublication": "deterministic_javascript_before_review",
+    "remoteInterpreter": false
+  },
+  "approvals": {
+    "install": "always",
+    "enable": "always",
+    "update": "always",
+    "hostExpansion": "always",
+    "capabilityExpansion": "always"
+  },
+  "updates": {
+    "automatic": false,
+    "atomicRollback": true
+  },
+  "trust": {
+    "registryReviewed": true,
+    "registrySigned": true,
+    "arbitraryUrlImport": false,
+    "unsignedScripts": false
+  },
+  "effects": {
+    "allowed": [
+      "read",
+      "page_write",
+      "external_send",
+      "cart_mutation"
+    ],
+    "forbidden": [
+      "purchase",
+      "order_placement",
+      "payment"
+    ]
+  },
+  "modelMayManageScripts": false
+}

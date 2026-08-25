@@ -48,6 +48,7 @@ export const recognizedAccessOutcomes = new Set([
   'security_verification_required',
   'price_unavailable',
   'no_results',
+  'no_relevant_offers',
 ]);
 
 export function parseSiteFilter(argv) {
@@ -87,6 +88,24 @@ export function groupByQuery(sites) {
       batches.push(batch);
     }
     batch.sites.push(item);
+  }
+  return batches;
+}
+
+/**
+ * This runner measures the multi-store flow. A singleton wording routes to `shopping_single_site`,
+ * whose tools and contract are intentionally different; accepting it would report `unsearched`
+ * about a flow the runner never attempted to inspect.
+ */
+export function assertRunnableBatches(batches) {
+  const singletonSites = batches
+    .filter((batch) => batch.sites.length < 2)
+    .flatMap((batch) => batch.sites.map((item) => item.site));
+  if (singletonSites.length > 0) {
+    throw new Error(
+      `Each query batch needs at least two stores; singleton batches: ${singletonSites.join(', ')}. `
+      + 'Add another store with the same query wording.',
+    );
   }
   return batches;
 }
@@ -134,14 +153,13 @@ export function isNormalizedCandidates(site, candidates) {
     && typeof candidate.url === 'string');
 }
 
-// Every tool whose output attributes a result to one store. The per-store tools publish a
-// `store_result` directly; the screening step publishes every worker's answer AGGREGATED under
-// `store_results`, one level deeper. Pipeline order, so the later write wins per site and the tally sees
-// the same result the ranking used.
+// Every tool whose output attributes a result to one store. Large candidate arrays may be truncated;
+// the dedicated post-screening summary carries one bounded sample per store in its own parseable result.
 const STORE_RESULT_TOOLS = [
   'shopping_search_one_store', 'shopping_collect_store_page', 'shopping_normalize_store_result',
   'shopping_apply_offer_screening',
 ];
+const COMPACT_OUTCOME_TOOLS = ['shopping_summarize_store_outcomes', 'shopping_build_offer_screening'];
 
 const nameMatches = (name, suffix) => name === suffix || typeof name === 'string' && name.endsWith(`.${suffix}`);
 
@@ -167,8 +185,18 @@ export function collectStoreResults(toolCalls) {
     bySite.set(site, result && typeof result === 'object' ? { ...result, site } : { site });
   };
   for (const call of toolCalls || []) {
-    if (!STORE_RESULT_TOOLS.some(tool => nameMatches(call?.name, tool))) continue;
     const output = decode(call.output);
+    if (COMPACT_OUTCOME_TOOLS.some(tool => nameMatches(call?.name, tool))) {
+      for (const outcome of Array.isArray(output?.store_outcomes) ? output.store_outcomes : []) {
+        const sample = outcome?.sample;
+        attribute({
+          ...outcome,
+          candidates: sample && typeof sample === 'object' ? [sample] : [],
+        });
+      }
+      continue;
+    }
+    if (!STORE_RESULT_TOOLS.some(tool => nameMatches(call?.name, tool))) continue;
     attribute(output?.store_result);
     for (const entry of Array.isArray(output?.store_results) ? output.store_results : []) {
       attribute(decode(entry?.value)?.store_result, typeof entry?.key === 'string' ? entry.key : undefined);
@@ -324,6 +352,7 @@ async function main() {
   const requestedSites = parseSiteFilter(process.argv.slice(2));
   const sites = selectSites(allSites, requestedSites);
   const batches = groupByQuery(sites);
+  assertRunnableBatches(batches);
   const checks = [];
   const reports = [];
   const timings = [];

@@ -42,6 +42,7 @@ function N.parse_choice_numbers(value)
 end
 
 local CANCEL_MARKERS = { "취소", "그만", "안 할래", "안할래", "cancel", "stop" }
+local RESTART_MARKERS = { "처음부터", "다시 시작", "새로 시작", "start over", "restart" }
 local PAGE_COMMANDS = {
   { { "다음", "next", "more", "더 보여" }, "next" },
   { { "이전", "prev", "previous", "뒤로" }, "prev" },
@@ -58,6 +59,9 @@ function N.classify_reply(text)
   for index = 1, #CANCEL_MARKERS do
     if lowered:find(CANCEL_MARKERS[index], 1, true) then return { kind = "cancel" } end
   end
+  for index = 1, #RESTART_MARKERS do
+    if lowered:find(RESTART_MARKERS[index], 1, true) then return { kind = "restart" } end
+  end
   for index = 1, #PAGE_COMMANDS do
     local markers, command = PAGE_COMMANDS[index][1], PAGE_COMMANDS[index][2]
     for marker_index = 1, #markers do
@@ -66,9 +70,24 @@ function N.classify_reply(text)
   end
   -- A page number ("3페이지") is a move; any other number is a pick.
   local page_number = tonumber(lowered:match("(%d+)%s*페이지") or lowered:match("page%s*(%d+)"))
+
   if page_number then return { kind = "page", page_number = page_number } end
   if #N.parse_choice_numbers(value) > 0 then return { kind = "choice", choice_numbers = value } end
   return { kind = "refine", refine_request = value }
+end
+--- The raw current user message is injected separately from flow requestText. A planner can preserve stale
+--- requestText while correctly resuming the paused node; reading that stale value turned "취소" into the
+--- model number in the original product query and attempted a cart selection.
+function N.current_user_text(args)
+  args = type(args) == "table" and args or {}
+  local messages = args.user_messages or args.userMessages
+  if type(messages) == "table" then
+    for index = #messages, 1, -1 do
+      local value = trim(messages[index])
+      if value ~= "" then return value end
+    end
+  end
+  return trim(args.request_text or args.requestText)
 end
 
 --- One browsing turn over the searched pros: rank, window, and (when numbers are given) select.
@@ -81,8 +100,9 @@ function AX_browse_service_candidates(args)
   end
 
   -- An explicit argument wins; otherwise the user's latest message is the instruction.
-  local reply = N.classify_reply(args.request_text)
+  local reply = N.classify_reply(N.current_user_text(args))
   if reply.kind == "cancel" then return { next = "cancel" } end
+  if reply.kind == "restart" then return { next = "restart" } end
 
   local page_size = math.max(1, math.floor(tonumber(args.page_size) or N.DEFAULT_PAGE_SIZE))
   local request = trim(args.refine_request)

@@ -885,6 +885,35 @@ Add `userTabIds`, `extensionCreatedTabIds`, one executor role, and one provider 
 existing `primaryTabIdOf`, untargeted CDP routing, opaque ids, manual membership, group liveness, and
 old snapshot parsing.
 
+##### P3-A measured result — 2026-08-24
+
+P3-A is implemented. `AgentSessions` retains the exact legacy `{tabIds, clientIds}` record when no
+Pack role exists and adds one optional, closed `roles` object only after the extension owns
+infrastructure:
+
+- `tabIds`, opaque client ids, `primaryTabIdOf()`, promotion, untargeted CDP routing, widgets, and
+  manual group membership remain user-tab-only;
+- `executorTabId` and `providerWorkTabId` must name distinct tracked
+  `extensionCreatedTabIds`; a user-owned tab cannot be relabelled as infrastructure;
+- role ownership round-trips through `chrome.storage.session`; unknown, overlapping, divergent, or
+  internally inconsistent role metadata drops the session closed instead of inventing authority;
+- membership reconciliation excludes tracked role tabs from arrivals and liveness. When the last
+  user-owned tab leaves, the service worker ends the run, releases both classes of attachment, and
+  closes only extension-created tabs;
+- restore fingerprints are derived by tab ownership, not URL shape, so an executor/provider showing
+  the same store URL as a user tab cannot claim a conversation;
+- reopening an existing group restores UI only to user-owned tabs.
+
+TDD evidence: the initial role suite was **7 failures plus one missing-export error**; the closed-role
+schema mutation was separately RED. Final gates are **52 focused tests / 89 assertions**,
+**1,170 extension tests / 2,048 assertions**, and **2,532 full SDK tests / 6,642 assertions**, all
+green. Typecheck and the production extension build pass. The freshly loaded build started a real
+no-Pack CDP session on one user tab, and the retained Phase 1 Chromium probe found Pack storage,
+User Script registrations, permissions, and DNR unchanged.
+
+No executor/provider tab is created yet. Shared topology locking remains P3-B; exact document
+creation, injection, and authentication remain P3-C.
+
 #### P3-B — Shared script topology
 
 Implement `src/user-script-topology.ts` around one service-worker-owned `scriptTopologyLock`:

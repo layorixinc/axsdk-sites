@@ -401,92 +401,360 @@ generated product-shell + Pack flow without creating a session/model turn. The a
 and agent checkouts contain no production flow compiler or compile adapter, so advertising readiness
 here would fabricate a contract. P0-E remains the compatibility oracle for those changes.
 
+**2026-08-24 authorization update:** Phase 1 was subsequently approved as an inert, pure package
+milestone. This does not change either blocker above: no Pack is installable or executable, and no
+platform compile capability is claimed.
+
 ## 8. Phase 1 — Pure `@axsdk/packs` contracts and composer
 
 ### 8.1 Objective
 
-Create the only shared semantic package before Chrome, UI, or platform integration.
+Create the only shared semantic package before Chrome, UI, registry, storage, or platform
+integration. Phase 1 validates and composes inert bytes and data. It does not install, activate,
+fetch, trust, execute, register, or persist a Pack.
 
-### 8.2 PR sequence
+### 8.2 Fixed design boundary
 
-#### P1-A — Package shell and dependency isolation
+`@axsdk/packs` is a pure browser-independent package. It owns:
 
-1. Add `packages/axsdk-packs` with explicit subpath exports from Architecture §5.1.
-2. Depend on no AXSDK runtime package.
-3. Add import-side-effect tests for every export.
-4. Snapshot existing root package exports/dependency graphs before adding the extension-only runtime
-   dependency.
-5. Update build ordering so the Pack package builds before extension-cdp without changing existing
-   browser, voice, React root, Lua, core, or legacy-extension graphs.
+- strict Script Pack v2 base contracts and concrete Agent/Provider Pack manifests;
+- canonical JSON, domain-separated signing bytes, SHA-256 digests, and asset-graph verification;
+- the closed restricted flow-fragment parser/validator;
+- semantic-version and contract compatibility;
+- deterministic dependency resolution, namespace rewriting, composition, and provider registries;
+- serializable invocation, provenance, failure, and diagnostic types.
 
-#### P1-B — Canonical release schemas
+It does not own:
 
-Implement strict schemas for:
+- fetch, registry trust roots, Ed25519 key selection, sequence high-water state, or revocation state;
+- IndexedDB, `chrome.storage`, options UI, service-worker messages, or activation pointers;
+- `chrome.userScripts`, task/provider tabs, Broker v2, session creation, or platform compilation;
+- the existing C3 packaged workspace implementation.
 
-- registry index and revocations;
-- Agent, Provider, and Script Pack release manifests;
-- assets and hashes;
-- commands, effects, consent, hosts, services, input/output schemas;
-- extension points and contributions;
-- route/resume/hook contributions;
-- data-flow classifications and destinations.
+The existing Phase 0 exact-document probe remains the execution/topology regression oracle. Phase 1
+adds no execution path and does not move the current C3 workspace parser merely because both systems
+use content-addressed assets.
 
-RED/mutation corpus:
+### 8.3 Package and public-surface design
 
-- duplicate keys;
-- unknown keys;
-- non-canonical numbers/Unicode;
-- path/host/origin confusion;
-- wrong byte count/hash/media type;
-- malformed signature envelope or wrong domain-separated signing payload.
+Create `packages/axsdk-packs` with these explicit public subpaths:
 
-Trust-root selection, signature verification, revocation, same-version equivocation, and registry
-sequence high-water state belong to the extension registry/lifecycle in Phase 2.
+|export|owns|
+|---|---|
+|`@axsdk/packs`|canonical JSON/digests, shared values, diagnostics, release-graph validation|
+|`@axsdk/packs/schemas`|strict Zod schemas and canonical signed-document parsers|
+|`@axsdk/packs/flow`|restricted YAML fragment parser, AST, validation, namespace rewrite|
+|`@axsdk/packs/composer`|dependency resolution, contribution matching, provider registries, digests|
+|`@axsdk/packs/protocol`|serialized invocation/result/provenance/failure contracts|
 
-#### P1-C — Restricted flow validator
+All five exports must be safe in a browser, worker, Bun, and Node. Importing any export performs no
+I/O, hashing, fetch, timer, storage access, registration, environment read, or logging. No Node-only
+subpath is added in Phase 1 because Phase 1 has no producer CLI.
 
-Reject any fragment that attempts to define or override:
+The package has no AXSDK runtime dependency. Its only runtime dependencies are the browser-safe
+schema/YAML libraries needed to implement the contract. `@axsdk/extension-cdp` may depend on the new
+package, but no production extension module imports it until Phase 2. `@axsdk/core`, `@axsdk/react`,
+`@axsdk/browser`, `@axsdk/voice`, `@axsdk/lua`, and the legacy extension retain their exact
+dependency/export graphs.
 
-- global app/router/planner/defaults/contexts;
-- arbitrary hooks or raw ops;
-- unowned namespace;
-- undeclared service/effect/host;
-- dangling/duplicate node, tool, terminal, resume, or hook references;
-- runtime module or Lua source;
-- caller-provided code, URL, selector, or capability grant.
+Before changing package metadata, capture a checked-in structural snapshot of:
 
-#### P1-D — Deterministic composer
+- every existing root package's `exports`, `dependencies`, and `peerDependencies`;
+- the root workspace/build order;
+- the extension-cdp dependency graph.
 
-1. Resolve exact enabled releases and dependency constraints.
-2. Reject cycles and ambiguity.
-3. Sort only by stable dependency order and Pack id—not install order.
-4. Namespace each Pack's state/nodes/tools/routes.
-5. Validate Provider contributions against the exact extension-point contract/version.
-6. Build deterministic provider registries and bounded defaults.
-7. Compute per-task `providerSetDigest` and global `packSetDigest` from the canonical active graph.
-8. Validate the final composed graph again.
+The post-change gate permits only the new package, its root build step, and one
+`@axsdk/extension-cdp -> @axsdk/packs` edge.
 
-Golden fixture:
+### 8.4 P1-A — Package shell and dependency isolation
+
+Implementation order:
+
+1. Add `package.json`, `tsconfig.json`, `build.ts`, and empty typed entry modules for the five exports.
+2. Add import-side-effect and exact-public-export tests before implementation.
+3. Add package/dependency snapshot tests before changing the root/extension package metadata.
+4. Build ESM, CJS, and declarations with the repository's existing package conventions.
+5. Insert `axsdk-packs` before extension-cdp in the root build.
+6. Add focused `test:packs` and `test:packs:phase1:live` commands without changing existing commands.
+
+P1-A is green only when the empty shell builds, each export imports under runtime traps, and the
+package graph differs from the frozen baseline only at the approved edges.
+
+### 8.5 P1-B — Canonical release contracts
+
+#### 8.5.1 Manifest family
+
+“Script Pack v2” is the shared base schema family, not a third executable Pack kind. The concrete
+manifest discriminator remains closed to `agent | provider`, matching the architecture's two
+concrete manifest examples.
+
+The strict schema surface is:
+
+- `AssetRefV2`: `ref`, `bytes`, and exact supported `mediaType`;
+- `SignatureV2`: `algorithm: "Ed25519"`, `keyId`, and base64url `value`;
+- `SignedEnvelopeV2`: `schemaVersion: 2`, `kind: index | release | revocation`, a closed
+  kind-specific `signed` body, and `signature`;
+- `ReleaseSignedBodyV2`: exact pack id/version/published time and manifest asset reference;
+- `ScriptPackManifestV2`: closed shared identity, assets, commands, service dependencies,
+  disclosures, review, and compatibility fields;
+- `AgentPackManifestV2`: task execution target, one flow asset, one task artifact, route/resume/hook
+  contributions, extension points, and optional embedded providers;
+- `ProviderPackManifestV2`: provider execution matches/entry URL and contributions to a named Agent
+  Pack extension point;
+- `CommandContractV1`: command name/contract/effect/confirmation, exact artifact/export, closed
+  input/output schemas, and companion data-flow maps;
+- active composition, invocation, provider-step, trusted-result/provenance, and bounded diagnostic
+  records.
+
+The effect vocabulary is closed to:
+
+```text
+read | page_write | state_write | external_send | cart_mutation
+```
+
+The data-flow class vocabulary is closed to:
+
+```text
+public_product | user_content | personal | secret_forbidden
+```
+
+Destinations are closed to:
+
+```text
+provider_page | task_script | extension_state | backend_model
+```
+
+plus a service contract id declared by the same manifest. Every leaf JSON Pointer pattern in each
+input/output schema must have exactly one companion classification. Parent declarations do not cover
+children. `secret_forbidden` has no destination. Unknown schema fields, command fields, or result
+fields are rejected rather than dropped.
+
+#### 8.5.2 Canonical bytes
+
+Signed index/release/revocation documents use strict UTF-8 JSON and RFC 8785 canonicalization.
+The parser:
+
+- rejects duplicate keys before object construction;
+- rejects trailing data, lone Unicode surrogates, unsafe integers, non-finite values, and
+  non-canonical textual round trips;
+- preserves Unicode exactly—no extra NFC/NFD or locale normalization is invented;
+- rejects unknown fields in every closed schema;
+- sorts object keys by the RFC 8785 UTF-16 ordering and preserves array order.
+
+Signing bytes are exactly:
+
+```text
+UTF8("AXSDK-PACK-" + KIND + "-V2\n") || UTF8(canonicalJson(signed))
+```
+
+where `KIND` is exactly `INDEX`, `RELEASE`, or `REVOCATION`.
+
+Asset-graph validation checks the signed closure before returning any asset:
+
+- every declared reference exists;
+- no undeclared asset is supplied;
+- byte count, SHA-256, and media type match;
+- every manifest reference resolves to an asset with the required role/media type.
+
+Trust-root selection, Ed25519 verification, registry sequence state, same-version equivocation state,
+and live revocation state remain Phase 2. Phase 1 defines their signed wire shapes and signing bytes,
+not their lifecycle authority.
+
+#### 8.5.3 URL, origin, and host rules
+
+- execution `matches` and product matches use validated Chrome match patterns;
+- `entryUrl` is an absolute credential-free HTTPS URL covered by execution matches;
+- approved network hosts are absolute credential-free HTTPS origins with no path, query, or
+  fragment;
+- fixed services are referenced only by declared versioned service contract id;
+- URLs, origins, patterns, and paths have separate branded types and are never accepted
+  interchangeably.
+
+### 8.6 P1-C — Restricted flow validator
+
+The released flow artifact remains YAML with media type
+`application/vnd.axsdk.flow-fragment+yaml`. It is a closed subset of the existing v1 flow syntax,
+not a second flow language and not a generic overlay.
+
+Only these top-level keys are accepted:
+
+```yaml
+flows: {}
+flowTools: {}
+```
+
+The fragment may define only:
+
+- local flow ids, local state, local nodes, and local flow-tool ids;
+- bounded `action_unit`, `action_contract`, and terminal/respond nodes;
+- local `next`, fallback, input-selector, output-map, tool, terminal, resume, and hook references;
+- one of three closed execute bindings:
+  - `community.task` targeting the owning Agent Pack;
+  - `community.provider` targeting one declared extension point;
+  - `platform.service` targeting one declared fixed service.
+
+It rejects rather than ignores:
+
+- `version`, `extends`, `app`, global `planner`, `router`, `defaults`, `contexts`, arbitrary hooks,
+  or top-level actions;
+- runtime Lua/module/source, raw op grants, `rpc.allow`, `net`, selector, caller URL, source code, or
+  capability grant;
+- unowned/foreign namespace, whole-root selector, or cross-Pack state/tool/flow reference;
+- undeclared service, effect, host, command, or extension point;
+- duplicate or dangling flow/node/tool/terminal/next/resume/hook reference;
+- YAML duplicate keys, aliases/anchors, custom tags, non-core schema values, or unbounded structures.
+
+The parser returns a typed `RestrictedFlowFragment`; the composer never deep-merges author input.
+
+### 8.7 P1-D — Deterministic composer
+
+The composer accepts only already parsed, verified, enabled release inputs. A release marked revoked
+or missing its exact manifest/flow/schema assets is rejected. This input status is data supplied by
+Phase 2 later; Phase 1 does not decide trust.
+
+Composition order is:
+
+1. Require one exact enabled release per pack id.
+2. Resolve manifest dependencies with strict semantic-version/contract checks.
+3. Reject missing dependencies, incompatible constraints, cycles, duplicate identities, and
+   ambiguous enabled releases.
+4. Topologically sort Agent Packs; ties use canonical pack id, never install/storage/UI order.
+5. Parse and validate every Agent flow fragment.
+6. Namespace all Pack-owned flows, nodes, tools, state, routes, resume rules, hooks, extension
+   points, and services using a composer-generated prefix authors cannot spoof.
+7. Rewrite only validated local references; reject foreign or whole-root references.
+8. Match every embedded/external Provider contribution against the exact target Agent release,
+   version range, extension-point id, contract, command, and cardinality.
+9. Reject duplicate canonical provider ids within one extension point.
+10. Build provider registries in canonical provider-id/release order and bounded default sets.
+11. Validate the fully rewritten graph again.
+12. Canonicalize and hash only the active semantic graph.
+
+Labels and aliases are not authority and are not composition keys. Two enabled providers may share a
+normalized label/alias; the deterministic resolver returns `ambiguous_provider` with all matches so
+the shell can ask. It never chooses by install order, version, or model guess. A duplicate provider
+id still rejects composition. If more than the allowed number of contributors are marked default,
+composition returns `default_selection_required` rather than evicting one silently.
+
+Digest rules:
+
+- `providerRegistryDigest` hashes the canonical active provider registry plus provider settings,
+  excluding timestamps;
+- `providerSetDigest` hashes ordered selected provider ids, exact provider release digests,
+  contracts, and task release version/digest;
+- `packSetDigest` hashes the complete canonical active composition including
+  `providerRegistryDigest`, exact releases, namespaced flow graph, bindings, routes, resume rules,
+  hooks, and services, excluding `generatedAt`;
+- install order, storage order, object insertion order, UI order, and timestamps never affect a
+  digest.
+
+The composer returns either one immutable `ActivePackCompositionV1` or a sorted, structured
+diagnostic list—never a partial candidate.
+
+### 8.8 Golden and malformed fixtures
+
+The minimum golden matrix is:
 
 ```text
 Pack 1 only
 Pack 1 + Store X
-Pack 1 + Store X installed in opposite order
+Pack 1 + Store X supplied in opposite input order
 Pack 1 + incompatible Store Y
-Pack 1 + duplicate Store X alias
+Pack 1 + duplicate Store X provider id
+Pack 1 + two providers sharing one normalized alias
 ```
 
-The two compatible install orders must produce byte-identical output. Incompatible and ambiguous
-fixtures must produce deterministic diagnostics and no candidate activation.
+Expected results:
 
-### 8.3 Phase 1 gate
+- the two compatible input orders produce byte-identical flow documents and all three digests;
+- incompatible Store Y and duplicate provider id produce deterministic diagnostics and no candidate;
+- the alias collision composes successfully, but resolving that alias deterministically returns
+  `ambiguous_provider` and never a selected provider.
 
-- focused package tests green;
-- malformed corpus green;
-- each validator mutation turns RED;
-- deterministic golden hashes stable across three builds;
-- package import performs no I/O, timers, storage, registration, or environment reads;
-- current public package snapshots unchanged.
+The malformed/mutation corpus covers at least:
+
+- duplicate/unknown keys and malformed/non-canonical JSON/YAML;
+- non-canonical number and lone-surrogate mutations;
+- unsupported algorithm and wrong signing-domain bytes;
+- missing/extra/hash-mismatched/size-mismatched/media-mismatched assets;
+- uncovered schema leaves and undeclared data-flow destinations;
+- path/URL/origin/match-pattern confusion;
+- forbidden flow top-level fields, raw ops, source, selectors, URLs, grants, and foreign namespaces;
+- duplicate/dangling references;
+- missing/incompatible/cyclic dependencies;
+- extension-point contract mismatch, duplicate provider id, excess defaults, and alias ambiguity;
+- timestamp/input/install-order mutations that must not alter semantic digests.
+
+Each validator has one mutation that removes or reverses its guard and turns its focused test RED.
+
+### 8.9 TDD and verification sequence
+
+Each substage follows RED → implementation → focused GREEN → mutation RED → restored GREEN:
+
+1. **P1-A:** package shell/public exports/import traps/dependency snapshot.
+2. **P1-B:** canonical parser, schemas, asset closure, protocol types.
+3. **P1-C:** restricted YAML parser and reference validator.
+4. **P1-D:** composer, registries, digests, golden matrix.
+5. **Package gate:** typecheck, ESM/CJS/declaration build, exact export snapshot, malformed corpus.
+6. **Determinism gate:** build the same package and compose the same golden input three times from
+   clean directories with changed mtimes and input insertion order; compare bytes and hashes.
+7. **Existing regressions:** root typecheck/build plus all existing package/core/extension tests whose
+   dependency or build path was touched.
+8. **Real Chrome gate:** run the retained Phase 0 no-Pack/exact-document probe, then load a
+   browser-bundled `@axsdk/packs` golden composition in a disposable ordinary tab. It must parse,
+   compose, and hash identically without Pack storage, user-script registration, session creation,
+   task/provider tabs, or backend/model traffic.
+
+The browser smoke proves browser compatibility and zero side effects only. It does not advertise
+installation, activation, CWS approval, platform compilation, or execution, which remain later
+gates.
+
+### 8.10 Phase 1 exit gate
+
+Phase 1 exits only when:
+
+- all five public exports import with no observable side effect;
+- focused package tests and the complete malformed corpus are green;
+- every named validator mutation has been observed RED;
+- deterministic golden bytes/hashes are stable across three clean builds;
+- the final composed graph passes the package's own full reference/schema validation;
+- the current public package/dependency snapshots change only at the approved new-package and
+  extension-cdp edge;
+- the complete existing SDK regression matrix is green;
+- the real-Chrome zero-Pack/exact-document and pure-browser package probes are green;
+- no Phase 2/3/4 lifecycle, execution, or platform capability has been fabricated.
+
+### 8.11 Measured Phase 1 result — 2026-08-24
+
+**GREEN.** `@axsdk/packs` is a new pure package with exactly five public export paths: root,
+`canonical`, `flow-fragment`, `protocol`, and `schemas`. It adds no runtime dependency outside the
+package and is referenced by `@axsdk/extension-cdp` only as a build-time dependency for the retained
+browser probe.
+
+The implementation includes strict canonical JSON/signing/digest helpers, closed Agent/Provider
+manifest and release schemas, verified asset closure, the bounded restricted-flow parser, exact
+command/effect/schema/data-flow authority checks, deterministic dependency/namespace/provider
+composition, immutable active-composition output, provider alias resolution, and bounded invocation,
+provenance, failure, and diagnostic protocol schemas. The composer accepts only verified lifecycle
+inputs; it does not fetch, verify publisher trust, install, activate, persist, register User Scripts,
+open role tabs, invoke commands, compile on the platform, or create a session.
+
+Measured gates:
+
+- `bun run test:packs`: **72 tests / 280 assertions**, including malformed inputs and focused guard
+  mutations;
+- `bun run build`: all SDK packages built and `@axsdk/packs` emitted ESM, CJS, and declarations;
+- `bun test`: **2,484 pass / 0 fail** across 215 files;
+- three clean deterministic package builds produced byte-identical output and the same golden
+  composition hashes;
+- the retained Phase 0 real-Chrome probe passed with the no-Pack baseline unchanged;
+- the Phase 1 ordinary-document Chrome probe imported all five export paths, parsed and composed the
+  golden Pack without Pack state or extension-side effects, and reproduced pack-set digest
+  `sha256:e408ead954eb5c96823e08843e75a13b6a1bbf7e014acb8d496fa20a2400cc50` and composed-flow digest
+  `sha256:7bb9a83f6453a7d97a51e3fd62e5b49badcc21122e5a4eddc6b699b5f6e82682`.
+
+Phase 2 remains unstarted. P0-A policy and P0-C platform compilation remain blocked exactly as stated
+in §7.4.
 
 ## 9. Phase 2 — Registry, artifact store, installation, and lifecycle UI
 

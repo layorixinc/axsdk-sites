@@ -2016,6 +2016,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   test and the live proof. **A pre-existing test had built its scenario through a disable while reporting a
   live session, a sequence that cannot happen** (the pin appears when the session starts, which is after
   the switch); it only passed because nothing refused the switch.
+- **An in-page add has to be given a moment to commit, and eBay is the one store where nothing else
+  moves.** Its add is an XHR: the URL stays on `/itm/<id>`, no panel appears, and the only change is the
+  store's own header badge — measured live **5 → 6** on `.gh-cart .gh-badge`. eBay declares no
+  `add_ready_selector`, so the guard navigated to the cart the instant the click returned and read a cart
+  that had not committed; that is the whole of the `added` ↔ `pending` alternation this matrix carried for
+  days. A store whose counter we can read now gets a bounded wait for it to move. **The counter is not
+  evidence** — it says something entered the cart, never WHICH product — so the cart-line check still has
+  to name the id. Live: **3/3 `added`** where it used to alternate; mutation-checked.
+- **A shared fault rule needs a per-STEP expectation, not a per-runner one.** `turn-fault.mjs` now carries
+  the rule every live runner needs (session / no-node / misroute / stalled, with `stalled` never retried),
+  and seven runners had no attribution at all before it. Adopting it in `shopping.mjs` immediately produced
+  a FALSE misroute: its third step hands off to the checkout flow on purpose, and the runner's default
+  expectation was the single-site set. A runner states which tools mean "my flow ran" — and a scenario that
+  legitimately crosses flows says so per step. A caller that names nothing never reports a misroute, because
+  the memory hook runs on every turn and would otherwise look like the flow under test on one runner and
+  like a misroute on another.
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /
@@ -2394,6 +2410,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `readSessionPackPin(sessionId)` is what `axchat`/`axcall`/`deferred` read. A deferred call and a
   portable work envelope carry `agentPackSession`, so a completion delivered after a runtime recycle
   claims the pin the call STARTED under, not whichever pin is globally active at delivery.
+  **A grep pattern that cannot match the field is how a working capability gets reported as a gap.**
+  Searching `packPin\|PackPin` across `deferred.ts` and `work-store.ts` returned nothing and I proposed
+  implementing what was already there — the field is `agentPackSession` and its type is `PackSessionPin`,
+  which the pattern `PackPin` cannot match. Two greps would have settled it: the FIELD name and the type
+  name are different words. The one thing genuinely missing was a test for the distinguishing case (a
+  session pinned to a DIFFERENT composition at delivery, not merely no session), which now exists and is
+  mutation-checked: reading the live pin instead of the record's fails it and the expiry test beside it.
 - **The composition-immutability guard protects a LIVE pin, not the presence of a previous config.**
   Measured: gating it on `isUpdate` alone made `AXSDK.init` throw
   `AXSDK Pack session configuration is immutable after initialization` in a realm whose worker had

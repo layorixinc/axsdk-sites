@@ -506,6 +506,28 @@ run('an add control is the buy box, not a row that repeats', () => {
     'ssg declares the buy box control measured live', siteData.ssg?.add_selectors);
 });
 
+run('a confirmation selector that cannot exist is not declared', () => {
+  // Measured live 2026-08-26 with a real click on each store's own add control: ssg's page carries **0**
+  // `[data-layer-name]` elements and gmarket's **0** `[data-cart-layer="success"], .box__layer-cart.is-active`.
+  // Both had been configured, so the guard consulted a panel that never exists.
+  //
+  // gmarket also gets NO `cart_item_scopes`, and that is the finding rather than an omission: its cart
+  // holds the added item (header `장바구니 갯수3개`, four `goodsCode=` links inside one `.basket_list_group`),
+  // but the 최근 본 상품 rail that produced the original false positive would not render again, so no scope
+  // could be validated AGAINST it. A configured path nobody has walked is worse than one that says it is
+  // not configured (§6.4).
+  for (const slug of ['ssg', 'gmarket']) {
+    const config = siteData[slug] ?? {};
+    assert(config.confirmation_selector === undefined,
+      `${slug} declares no per-add panel: none exists after a real click`, config.confirmation_selector);
+    assert(config.confirmation_text_selectors === undefined,
+      `${slug} declares no confirmation text either`, config.confirmation_text_selectors);
+  }
+  assert(siteData.gmarket?.cart_item_scopes === undefined,
+    'gmarket declares no cart-line scope: none could be validated against its rail',
+    siteData.gmarket?.cart_item_scopes);
+});
+
 run('a declared cart-line scope names a REGION, never the cart page', () => {
   // Measured live 2026-08-26: on coupang's cart page 19 of 40 product links are a `#cart-reco-widget`
   // recommendation, on amazon's 26 of 60 are carousels, on 11st 25 of 26 are a carousel, and gmarket's

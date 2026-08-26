@@ -593,11 +593,6 @@ RPC_SITES["gmarket"] = {
   required_option_selectors = {
     "select[required]"
   },
-  confirmation_selector = "[data-cart-layer=\"success\"], .box__layer-cart.is-active",
-  confirmation_text_selectors = {
-    "[data-cart-layer=\"success\"]",
-    ".box__layer-cart.is-active"
-  },
   add_ready_selector = "[data-cart-layer=\"success\"], .box__layer-cart.is-active, form[action*=\"login\"]",
   cart_url = "https://cart.gmarket.co.kr/ko/cart",
   cart_url_markers = {

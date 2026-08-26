@@ -34,8 +34,13 @@ local CONFIG = {
   add_selectors = { '#btn_add_cart', 'button.button__add-cart', '.btn_mycart', 'button[data-montelena-acode="200000911"]' },
   quantity_selectors = { 'input[name="orderQty"]', 'select[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
-  confirmation_selector = '[data-cart-layer="success"], .box__layer-cart.is-active',
-  confirmation_text_selectors = { '[data-cart-layer="success"]', '.box__layer-cart.is-active' },
+  -- No per-add panel is declared because none exists: measured live 2026-08-26 after a real click on the
+  -- buy box control, `[data-cart-layer="success"], .box__layer-cart.is-active` matched **0** and the only
+  -- layers on the page were 최근 본 상품 / 상품평 안내 / 가격 안내. The cart DOES receive the item (header
+  -- "장바구니 갯수3개", four goodsCode links inside one .basket_list_group), but the rail that produced the
+  -- original false positive would not render again, so no cart-line scope could be validated against it —
+  -- gmarket therefore answers add_to_cart_pending, which claims nothing.
+
   add_ready_selector = '[data-cart-layer="success"], .box__layer-cart.is-active, form[action*="login"]',
   cart_url = "https://cart.gmarket.co.kr/ko/cart",
   cart_url_markers = { "cart.gmarket.co.kr", "/cart" },

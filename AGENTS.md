@@ -984,6 +984,12 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   strip tracking/session/localized params unless required for the resource to work.
 - **Small, reviewable changes**, no unrelated churn. Preserve existing naming/directory conventions;
   don't add a `sites/` wrapper. Lowercase host/slug dir names, no `https://` in paths.
+- **Slice product work by user-verifiable outcomes, not internal implementation layers.** A work unit
+  is complete only when the user can follow a documented manual journey and observe a meaningful
+  product result. Bundle invisible prerequisites with the first visible capability they enable;
+  passing unit tests, a harness, or an internal state transition is not a user-verifiable result.
+  Every delivered unit must state its entry point, exact user actions, expected visible outcome,
+  safety/negative behavior, and cleanup or production-restore path.
 - **Keep in sync:** `index.md` with populated sites; `SCHEMA.md` (simple array: `name`,
   `description`, `parameters` only — no output schemas/shared types); `DEVTOOLS.md`;
   `thumbtack/CONTRACT.md` (re-survey when Thumbtack changes).

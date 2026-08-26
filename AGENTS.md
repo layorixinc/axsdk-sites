@@ -805,6 +805,14 @@ Other tools:
   When a test asserts on a Lua→JS conversion, mirror the SDK's real converter (sequence detection + the
   array-type marker); `lualib.luaL_openlibs(L)` is needed for `tostring`/string lib. A custom reader
   that ignores the marker gives false confidence.
+- **First-party Agent Packs:** `npm run test:packs` runs `bun test tools/packs` — the first-party
+  Agent Pack manifest/composition/provenance suite plus the Shopping task and Amazon/Store X provider
+  artifacts (10 tests). The provenance test goes through the shipping registry verifier with real
+  Ed25519 signatures, not a parse-only composer.
+- **Guarded cart, per store:** `npm run test:commerce:live:cart [-- --stores=coupang,11st --cancel
+  --query="…"]` drives the single-site flow on each store, then re-reads the page to check the site
+  itself shows the approved product id. Real carts get real items (no order is ever placed) and the run
+  prints what it left behind. `--cancel` proves the refusal path reaches no cart tool at all.
 - **Cost discipline:** a full live multi-step flow run costs minutes (nav + per-model-call). Iterate
   with reduced scope (one item / lowest count) and confirm full scope once at the end.
 
@@ -1010,6 +1018,15 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - Run available checks: `npm run build:lua:check`, `node --check <changed>.mjs`, the relevant
   `ax`/`test_*`/`verify_*` run, or an offline `fengari` unit test. If no check exists for what you
   changed, say so in the final response.
+- Current gate evidence (all green, this stretch) — SITES: `check:flows` 191 · `test:lua` 593 ·
+  `test:scenarios` 104 · `test:playground` 87 · `test:packs` 10 (new) · `test:commerce` 25/25 + 19/19 ·
+  `dead:lua` alive 39 / dead 0 · `check:bundle` ok, 32 assets (the digest is checkout-local — §13 —
+  so it is not quoted here).
+- SDK suites (current, all green): `axsdk-packs` 81 · `axsdk-core` 833 · `axsdk-extension-cdp` 1268 ·
+  extension `tsc` 0 diagnostics.
+- Live no-Pack smoke through the shipping CDP extension:
+  `npm run cdp -- send '아마존에서 Logitech M185 마우스 찾아줘'` answered in 12.67 s with 20 candidates and
+  paused at the single-site refine gate.
 
 ---
 
@@ -1866,10 +1883,90 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   a configured path nobody has walked is worse than one that says it is not configured.
 - **`cart_subtotal_selectors` is read by nobody.** Amazon declares it; no module consumes it. It was not
   mirrored onto eBay — copying a dead key is how the next survey concludes the reader is broken.
-- **`shopping_single_site`'s entry node is literally `open_amazon`.** The single-site cart flow is
-  hardcoded to one store, so eBay's cart config is reachable only through the multi-store comparison's
-  select-then-add path. A probe that opens ebay.com and sends a shopping request lands on amazon and looks
-  like a site-detection bug; it is the flow graph.
+- **`shopping_single_site` used to be pinned to amazon by its flow STATE, not by its tools** (fixed
+  2026-08-26; the entry node is `open_store` now). The searching and cart readers already derive their
+  adapter from the open page — `shopping_add_to_cart` says so in its own comment — but the flow seeded
+  `site: amazon` and the opener forced `args.site or "amazon"`, so a user standing on coupang asking to
+  buy something was NAVIGATED AWAY to amazon and shopped there, and nine of the ten published stores
+  were unreachable from that flow. `AX_RPC_NAV.resolve_site` now decides in order of evidence — the
+  store the user NAMED (an enum on `collect_shopping`, so it cannot be invented), else the store the
+  page is already on (`N.site_of`, hosts from the generated site data, subdomain-tolerant), else the
+  documented default — and publishes `site_source` so the reply can say when it fell back. Live:
+  coupang stays coupang, `이베이에서 …` from coupang goes to eBay, and an unpublished page defaults.
+- **A parameter the flow seeds `null` must be declared nullable, or the turn dies before its script
+  runs.** `enter_shopping_site` declared `site: { type: string }` while the flow seeded it `null` for
+  the resolver to fill, and the trace read
+  `actions.enter_shopping_site.tools.enter_shopping_site.schema rejected value: site: Invalid input:
+  expected string, received null` — routed through `invalidNext` to the flow's error terminal, so the
+  user got "무엇을 살지 확인하지 못했습니다" while `collect_shopping` had already produced a perfect
+  shopping list. §13 records this for accumulators; it applies to every seeded-null parameter, and the
+  guess that the MODEL had refused cost two live turns before the trace named the node.
+- **The persisted flow layer is CHUNKED now, so a flow document is no longer capped at 256 KiB**
+  (2026-08-26). It had reached 262,074 of 262,144 bytes: `npm run cdp -- sources` refused the whole
+  workspace (`flows layer ":" is larger than 262144 bytes`) and every prompt line had to be paid for by
+  deleting another — four rounds of comment-shaving in one change. `encodeFlowLayers`
+  (`scripts/workspace.mjs`) now splits a layer into `:` / `:|2` … exactly as the module store does, and
+  `readStoredFlowLayer` (`axsdk-core/src/flowchunks.ts`) rejoins the slots for both flow consumers.
+  Two rules a document needs that a name→source map does not: slots rejoin by CONCATENATION (the split
+  runs on line boundaries and keeps each line's own ending, so the bytes are the file's bytes), and the
+  numbering must be CONTIGUOUS `1..n` — a hole refuses the layer, because truncated YAML either fails
+  to compile loudly or parses into a partial graph silently. A single line larger than the cap is still
+  refused: no lossless split of it exists. Measured live on the dev profile with a 262,874-byte
+  document: slots `:` 262,039 B + `:|2` 835 B, rejoin byte-exact, and a real coupang turn ran on it.
+  Note the working tree is CRLF (§13) and `git show HEAD:` is LF, so the committed blob reads ~5.9 KiB
+  smaller than what the harness stores — measure the FILE.
+- **The guarded cart is now live-proven on six stores, and every other store's outcome is a measured
+  classification** (`npm run test:commerce:live:cart`, 2026-08-26). Until the store resolver landed the
+  single-site flow could only reach amazon, so eight of the nine cart-capable stores had a mutation path
+  nobody had ever run. The runner never believes the tool — it re-reads the page the browser is on and
+  asks whether the APPROVED product id appears there, through generic attribute probes plus the page
+  text, so no per-store selector is duplicated in the runner. Measured:
+  **added, with the site's own cart page as evidence** — coupang (`9334628346`), 11st
+  (`buy.11st.co.kr/cart/CartAction.tmall`), amazon (`cart/smart-wagon?newItems=…`, the URL only a real
+  add produces), walmart (`walmart.com/cart`), gmarket (`cart.gmarket.co.kr`), and — once the list was
+  screened (below) — ebay (`158215016462` on `cart.ebay.com`, its only evidence, since eBay has no
+  per-add confirmation panel to configure);
+  **classified, claiming nothing** — ssg `pending` (the click reached `pay.ssg.com/cart/dmsShpp.ssg`, but
+  no id is readable there without a signed-in user), aliexpress `access_denied` (captcha), etsy
+  `add_control_missing` (a made-to-order listing shows no add control the adapter knows). A refusal the
+  tool MAKES is an answer; an unverified claim and an unknown code
+  are the only failures, and a probe that could not run is `unverifiable`, never an accusation.
+- **Two add controls had gone stale and every add on those stores refused, silently as far as the
+  matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
+  twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /
+  `button.button__add-cart` matched NOTHING; ssg's is `ssgitem_btn_cart ssgitem_iconbtn clickable`,
+  not `#btn_cart`. Both are word-based design-system classes, so §10 allows them. After the fix gmarket
+  answers `added` with its own cart page as proof and ssg reaches its cart instead of refusing. Note
+  what is NOT the add: gmarket's `.btn_round.btn_blue` ("장바구니로") is the confirmation popup's link to
+  the cart, and clicking it would leave the product behind.
+- **The single-site list was never screened, so row one was whatever the grid rendered — CLOSED
+  2026-08-26.** "첫 번째로 해줘" on an eBay search selected `2500219655424533`, the "Shop on eBay" promo
+  tile, and `shopping_add_to_cart` answered `product_navigation_failed` because that id has no product
+  page. The multi-store path had screened for relevance all along; the single-site path had nothing
+  between the reader and the user's pick. No structural signature separates the tile from a listing (§13
+  records the rule that was written, tested and REJECTED for exactly this) — what removes it is that it
+  carries none of the query's words. `AX_RPC_PURE.screen_site_candidates` + the `screen_item` contract
+  node now sit between `search_item` and `refine_item`. Three rules the mechanics own:
+  `C.matches_query`, **not** `C.relevance_match` — the comparison rule ANCHORS on a model code and a
+  brand, and a single-site request usually has neither ("USB C cable", "신발"), so applying it verbatim
+  would empty every ordinary list; screening everything away keeps the original rows (an empty list
+  leaves nothing to choose) and reports `screen_fallback` rather than a count, because the count is what
+  the user is TOLD and "N개 제외" beside those same N rows is a false statement; and the empty list
+  crosses as ABSENT. Live: eBay 30 rows → 2 screened out, the pick lands on a real M185 listing
+  (`158215016462`), and the guarded add reaches the cart page and confirms by id. Mutation-checked
+  (filter removed → 3 red).
+- **A follow-up at the single-site gate is misrouted into another flow about half the time, on one
+  measured pair, and it is NOT caused by the screening node.** §13 recorded this as observed and not
+  attributed; it now has a rate. On eBay with "Logitech M185 mouse", "첫 번째로 해줘" was routed into
+  `shopping_multi_store_total_cost.collect_request` (and once into `shopping_search_plan`) in **6 of 11**
+  live turns, while the same pair driven from a throwaway probe routed correctly, and coupang with the
+  same query added the right product. Attribution was measured, not argued: removing the new
+  `screened_out` sentence from the gate's prompt left the rate unchanged (**1 pass / 3 misroute**), so the
+  reply text is not the input that moves it. The planner already carries the SINGLE-SITE SHOPPING
+  FOLLOW-UP rule naming `activeFlow`/`activeNode`, and prompt tuning is capped at three formulations —
+  the next lever is an engine-level "a paused flow wins unless the message is plainly a new request",
+  which is an SDK request, not another rewording. Until then a misrouted pick is user-visible: the user's
+  choice does nothing and a fresh one-to-two-minute comparison is announced instead.
 - **The working tree mixes line endings, and two gates compare BYTES — so a revert can turn a gate red
   without any content change.** `core.autocrlf=true` with no `.gitattributes`: measured 203 LF-only files,
   10 CRLF-only, and 2 genuinely mixed (`tools/flow-conformance.test.mjs`, and
@@ -2125,13 +2222,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   and core merges them by name, but the CWS package carries each of the 26 runtime modules as its own
   content-addressed asset. Module headroom is now governed by individual tool/compiler constraints,
   not one encoded name→source store value.
-- **The 256 KiB FLOW STORE boundary is confirmed but package-local now.** `_common/flows.yaml` is
-  261,319 B; `flowsStore.setFlows` and remote-site fetching still cap their individual values at
-  256 KiB. C3 never writes package flow/Lua/module sources through either path, and a regression builds
-  a >256 KiB flow asset successfully. No matching 256 KiB final compiler check was found. The open
-  proof is therefore narrower: pass a valid >256 KiB document directly from package assets to the
-  compiler. Canonical YAML remains useful for transport and review, not required to fit the package
-  into a persisted value.
+- **The 256 KiB flow boundary is now per SLOT, not per document — the persisted layer chunks**
+  (superseded 2026-08-26; see the chunking entry above). `flowsStore.setFlows` and remote-site fetching
+  still cap one individual VALUE at 256 KiB, and that is what the harness splits `:` / `:|2` against;
+  the package path never wrote through either. A regression builds a >256 KiB flow asset successfully,
+  and a 262,874-byte document is live-proven through the persisted path. Still unproven, and still the
+  narrower open question: whether the final compiler accepts a composed document above 256 KiB — no
+  matching compiler check was ever found. Canonical YAML remains useful for transport and review.
 - **The exact User Script executor feasibility gate is GREEN, not production code — and reload
   lifecycles are not interchangeable.** On Chrome 151, four inactive task/provider tabs in two
   same-release groups executed only after frame-0 no-ops returned exact `documentId` values. The task

@@ -67,14 +67,48 @@ export function auditVerdict(report) {
       reason: `extraction disagrees with the page: ${first?.id ?? '?'} ${problem?.field}=${JSON.stringify(problem?.value)} (${problem?.kind})`,
     };
   }
-  // Measured live: coupang audited 8 fields across 8 rows — one per row, because its title lives in an
-  // `img[alt]` the snippet had not asked for. Everything matched and the run said PASS. An audit that
-  // checks one field per row is not evidence that the extraction is grounded.
-  const perRow = report.fieldsChecked / report.checked;
-  if (perRow < 2) {
-    return { pass: false, reason: `only ${perRow.toFixed(1)} fields per row were checkable — too thin to be evidence` };
+  return { pass: true, reason: `every extracted value is in the page (${report.fieldsChecked} fields, ${(report.fieldsChecked / report.checked).toFixed(1)} per row)` };
+}
+
+/**
+ * Did the store's own selectors fill rows, and does the extraction look like a page at all?
+ *
+ * The first version failed a zero fill on ANY declared selector, and four of its five failures were facts
+ * about the store rather than drift: coupang and ssg state their title in an `img alt` (so the text
+ * selector fills nothing and the reader uses `image_alt`), while walmart and etsy grids omit
+ * shipping/rating/reviews — §13 records both. So a zero fill fails only for a CORE identity field: the url,
+ * the title in either form, and a price the store declares (an offer with no price cannot be compared).
+ * Everything else is reported.
+ *
+ * The mean fill catches the shape that started this: gmarket's `result_selector` was the union of two
+ * different element sets, so most rows carried nothing but an id — 8 full rows out of 30.
+ */
+const CORE = ['url', 'price_text'];
+
+export function fillVerdict({ declared, rows }) {
+  const entries = Object.entries(declared ?? {});
+  if (entries.length === 0) return { pass: false, reason: 'the store declares no result selectors — nothing to audit' };
+  const fill = (field) => declared[field] ?? 0;
+  const dead = entries.filter(([, filled]) => filled === 0).map(([field]) => field);
+  const partial = entries.filter(([, filled]) => filled > 0 && filled < rows)
+    .map(([field, filled]) => `${field} ${filled}/${rows}`);
+  const deadCore = CORE.filter((field) => field in declared && fill(field) === 0);
+  // The title counts as present in EITHER form: the reader's own fallback is text-then-alt.
+  const titleDeclared = 'title' in declared || 'image_alt' in declared;
+  if (titleDeclared && fill('title') === 0 && fill('image_alt') === 0) deadCore.push('title/image_alt');
+  if (deadCore.length > 0) {
+    return { pass: false, reason: `core selector filled 0 of ${rows} rows: ${deadCore.join(', ')} — drifted off the page` };
   }
-  return { pass: true, reason: `every extracted value is in the page (${report.fieldsChecked} fields, ${perRow.toFixed(1)} per row)` };
+  const mean = entries.reduce((sum, [, filled]) => sum + filled, 0) / (entries.length * Math.max(rows, 1));
+  if (mean < 0.5) {
+    return { pass: false, reason: `rows mostly carry nothing: mean fill ${(mean * 100).toFixed(0)}% across ${entries.length} selectors` };
+  }
+  const notes = [...dead.map((field) => `${field} 0/${rows}`), ...partial];
+  return {
+    pass: true,
+    reason: `all ${entries.length} declared selectors checked, mean fill ${(mean * 100).toFixed(0)}%`
+      + `${notes.length > 0 ? ` (${notes.join(', ')})` : ''}`,
+  };
 }
 
 /**
@@ -162,7 +196,20 @@ const EXTRACT_LUA = `
       row_id = row.root_id,
     }
   end
-  return { site = site, href = dom.get_location_href(), selector = config.result_selector, rows = out }
+  -- Per DECLARED selector, how many rows it filled. A selector the store declares that fills zero rows has
+  -- drifted off the page; that is what gmarket's shipping/delivery/reviews selectors had done.
+  local declared = {}
+  for name in pairs(fields) do
+    if name ~= "text" then
+      local filled = 0
+      for index = 1, #(rows or {}) do
+        local value = rows[index][name]
+        if type(value) == "string" and value:gsub("%s", "") ~= "" then filled = filled + 1 end
+      end
+      declared[name] = filled
+    end
+  end
+  return { site = site, href = dom.get_location_href(), selector = config.result_selector, rows = out, declared = declared, rowCount = #(rows or {}) }
 `;
 
 async function auditStore(session, store, query) {
@@ -211,7 +258,10 @@ async function auditStore(session, store, query) {
   console.log(`  extracted: ${candidates.length} rows via ${extracted.selector}`);
 
   const report = auditCandidates(candidates, page.html);
-  const verdict = auditVerdict(report);
+  const grounded = auditVerdict(report);
+  const filled = fillVerdict({ declared: extracted?.declared ?? {}, rows: extracted?.rowCount ?? candidates.length });
+  console.log('  declared: ' + filled.reason);
+  const verdict = grounded.pass ? filled : grounded;
   for (const entry of report.candidates.filter((row) => !row.ok)) {
     for (const problem of entry.problems) {
       console.log(`  MISMATCH ${entry.id}: ${problem.field}=${JSON.stringify(problem.value).slice(0, 90)} (${problem.kind})`);

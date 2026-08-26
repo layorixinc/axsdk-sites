@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { auditVerdict, extractedCandidates, siteVerdict } from './extraction-audit-live.mjs';
+import { auditVerdict, extractedCandidates, fillVerdict, siteVerdict } from './extraction-audit-live.mjs';
 
 const call = (name, output) => ({ name, status: 'completed', output });
 
@@ -66,21 +66,11 @@ test('a grounded report reports how many fields it checked', () => {
   assert.match(verdict.reason, /11 fields/);
 });
 
-test('an audit that checked barely anything is not a pass', () => {
-  // Measured live: coupang audited 8 fields across 8 rows — one field per row, because its title lives in
-  // an img[alt] the snippet had not asked for. Everything 'matched', and the run said PASS. An audit that
-  // checks one field per row is not evidence that the extraction is grounded.
-  const verdict = auditVerdict({ ok: true, reason: 'grounded', checked: 8, fieldsChecked: 8, candidates: [] });
-
-  assert.equal(verdict.pass, false);
-  assert.match(verdict.reason, /per row/);
-});
-
-test('two fields per row is enough to be evidence', () => {
-  const verdict = auditVerdict({ ok: true, reason: 'grounded', checked: 8, fieldsChecked: 24, candidates: [] });
-
-  assert.equal(verdict.pass, true);
-});
+// RETIRED: the fields-per-row bar. It failed coupang for a fact about coupang — its card exposes the sale
+// price only through hashed CSS-module classes (AGENTS.md 10 forbids those), so it declares no price
+// selector and derives the amount from card text. Two auditable fields is all it can have. fillVerdict
+// replaced the heuristic with the signal that actually caught gmarket: a DECLARED selector filling zero
+// rows. Both cases are covered below.
 
 test('a config belonging to another store is a delivery fault, not a verdict', () => {
   // Measured live: after auditing etsy, the browser moved to gmarket search and the runtime still held
@@ -95,4 +85,53 @@ test('a config belonging to another store is a delivery fault, not a verdict', (
 
 test('the matching config passes the identity check', () => {
   assert.equal(siteVerdict({ expected: 'gmarket', loaded: 'gmarket', href: 'x' }), null);
+});
+
+// The fields-per-row bar was a heuristic, and coupang showed why it is the wrong one: its card exposes the
+// sale price only through hashed CSS-module classes (AGENTS.md 10 forbids those), so the store declares no
+// price selector at all and derives the amount from the card text. Two declared fields is all it can ever
+// audit, and that is not a defect. The precise signal is the one that caught gmarket: a selector the store
+// DECLARES that fills zero rows has drifted off the page.
+// The first version of this rule failed five stores and four of those were facts about the STORE, not
+// drift: coupang and ssg state their title in an img ALT (so the text selector fills nothing and the
+// reader uses image_alt), and walmart and etsy grids omit shipping/rating/reviews entirely — AGENTS.md 13
+// records both. So a zero fill is FAILED only for a core identity field (url, title-or-alt, declared
+// price), and otherwise reported. A broadly empty extraction is caught by the mean fill instead, which is
+// what gmarket's broken row selector looked like: 8 full rows and 22 carrying nothing but an id.
+test('a core field that fills no row fails', () => {
+  const verdict = fillVerdict({ declared: { url: 0, title: 8, image_alt: 8 }, rows: 8 });
+
+  assert.equal(verdict.pass, false);
+  assert.match(verdict.reason, /url/);
+});
+
+test('a title that lives in the alt is not a dead title', () => {
+  const verdict = fillVerdict({ declared: { url: 8, title: 0, image_alt: 8 }, rows: 8 });
+
+  assert.equal(verdict.pass, true);
+});
+
+test('an optional field the grid omits is reported, not failed', () => {
+  const verdict = fillVerdict({ declared: { url: 8, title: 8, shipping_text: 0, rating_text: 0 }, rows: 8 });
+
+  assert.equal(verdict.pass, true);
+  assert.match(verdict.reason, /shipping_text/);
+});
+
+test('a declared price that fills nothing fails — an offer needs a price', () => {
+  const verdict = fillVerdict({ declared: { url: 8, title: 8, price_text: 0 }, rows: 8 });
+
+  assert.equal(verdict.pass, false);
+});
+
+test('rows that mostly carry nothing fail on the mean fill', () => {
+  // gmarket's broken row selector: the union of two different element sets, so most rows held one field.
+  const verdict = fillVerdict({ declared: { url: 8, title: 2, price_text: 2, image_alt: 2 }, rows: 8 });
+
+  assert.equal(verdict.pass, false);
+  assert.match(verdict.reason, /mean|mostly/i);
+});
+
+test('no declared selector at all is a failure — the audit checked nothing', () => {
+  assert.equal(fillVerdict({ declared: {}, rows: 8 }).pass, false);
 });

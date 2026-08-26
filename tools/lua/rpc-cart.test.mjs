@@ -565,6 +565,60 @@ test('walmart: the cart line confirms through its own product link', () => {
   assert.equal(lua.call('AX_RPC_CART.cart_contains', WALMART_CART, '2387232905'), true);
 });
 
+// ── `pending` was one bucket holding at least three different facts ───────────
+//
+// Four stores answered `add_to_cart_pending` — "clicked, not confirmed" — and that sentence covered a
+// cart the store shows as EMPTY (the click never reached it), a cart holding OTHER lines but not ours,
+// and a cart nobody can read. Those are different things to tell a user, and only the last one is
+// genuinely unknown. Measured live 2026-08-26 on the empty carts: etsy renders "Your cart is empty.",
+// ssg "장바구니에 담긴 상품이 없습니다.".
+//
+// gmarket is why the phrase must be MEASURED per store rather than guessed: the only
+// "…상품이 없습니다" on its cart page is **최근 본 상품이 없습니다** — the recently-viewed rail saying that
+// IT is empty. A generic Korean empty-phrase would report an empty cart from a rail's own message, which
+// is the rail defect again in the opposite direction.
+const EMPTY_AWARE = {
+  ...CONFIG,
+  cart_item_scopes: ['.sc-list-item'],
+  cart_empty_phrases: ['your cart is empty'],
+};
+
+test('a cart the store itself calls empty is reported as empty, not as unknown', () => {
+  const page = shop({ href: CART, extra: { body: [{ text: 'Your cart is empty. Etsy invests in climate' }] } });
+  installRpcStub(lua, page);
+
+  const outcome = lua.call('AX_RPC_CART.classify_unconfirmed', EMPTY_AWARE, 'B0TEST1234',
+    'Your cart is empty. Etsy invests in climate');
+
+  assert.equal(outcome, 'cart_empty');
+});
+
+test('a cart holding other lines but not ours says so', () => {
+  const page = shop({ href: CART, extra: { '.sc-list-item': 'Some Other Thing' } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.classify_unconfirmed', EMPTY_AWARE, 'B0TEST1234', 'Cart 1 item'),
+    'cart_missing_product');
+});
+
+test("a rail's own empty message is not the cart's", () => {
+  // gmarket declares no phrase precisely because this sentence is the rail's. With no phrase and no
+  // readable line region the answer stays the honest unknown.
+  const page = shop({ href: CART });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.classify_unconfirmed', CONFIG, 'B0TEST1234',
+    '최근 본 상품이 없습니다.닫기전체 카테고리'), 'add_to_cart_pending');
+});
+
+test('a store with no phrase and no scope keeps the honest unknown', () => {
+  const page = shop({ href: CART });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.classify_unconfirmed', CONFIG, 'B0TEST1234', 'Cart'),
+    'add_to_cart_pending');
+});
+
 // ── a foreign primary quote with a localized alternate ───────────────────────
 //
 // Measured live on an eBay item page (2026-08-15): the primary quote is the seller's currency and the

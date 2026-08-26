@@ -187,6 +187,34 @@ function R.cart_contains(config, product_id)
   return false
 end
 
+--- WHY an add could not be confirmed. `add_to_cart_pending` used to answer for three different facts.
+---
+--- Measured 2026-08-26: four stores answered it — etsy and ssg because their cart renders as EMPTY (so
+--- the click never reached it), 11st because its cart holds OTHER lines and not ours, gmarket because
+--- nothing on that page can be read as either. Only the last is genuinely unknown, and a user can act on
+--- the other two ("the store's cart is empty" / "the cart has items but not this one").
+---
+--- The empty phrase is per store and MEASURED, never a generic one: on gmarket the only
+--- "…상품이 없습니다" is **최근 본 상품이 없습니다** — the recently-viewed rail reporting that IT is empty. A
+--- generic Korean phrase would call the cart empty on a rail's own message, which is the same rail
+--- defect as the id probe had, pointing the other way.
+function R.classify_unconfirmed(config, product_id, page_text)
+  local text = lower(page_text or "")
+  local phrases = config.cart_empty_phrases or {}
+  for index = 1, #phrases do
+    local phrase = lower(phrases[index])
+    if phrase ~= "" and text:find(phrase, 1, true) then return "cart_empty" end
+  end
+  -- Lines exist and ours is not among them. This needs the declared line region: counting anything else
+  -- would count recommendations as cart contents.
+  local scopes = config.cart_item_scopes or {}
+  for index = 1, #scopes do
+    local scope = tostring(scopes[index] or "")
+    if scope ~= "" and exists(scope) then return "cart_missing_product" end
+  end
+  return "add_to_cart_pending"
+end
+
 --- The model the user approved must still be the model on the page. An id can outlive a listing's product.
 function R.identity_error(config, args, product_id)
   local expected = trim(args.expected_identity_model)
@@ -393,6 +421,12 @@ function R.add_to_cart(args)
   end
 
   local confirmed = R.cart_contains(config, product_id)
+  -- One read of the page's own words, and only when there is something to explain.
+  local unconfirmed = nil
+  if not confirmed then
+    local ok, text = pcall(function() return dom.get_text("body") end)
+    unconfirmed = R.classify_unconfirmed(config, product_id, ok and text or nil)
+  end
   return {
     -- The flow enumerates `done` and `error`; a click the site never confirmed is not `done`, because
     -- reporting it would tell the user a cart line exists that does not.
@@ -400,7 +434,7 @@ function R.add_to_cart(args)
     site = config.site,
     product_id = product_id,
     added = confirmed,
-    error = (not confirmed) and "add_to_cart_pending" or nil,
+    error = unconfirmed,
     previous_cart_count = R.last_count_before,
     cart_count = R.cart_count(config),
     confirmation = confirmed

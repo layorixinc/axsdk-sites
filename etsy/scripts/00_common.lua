@@ -16,10 +16,12 @@ local CONFIG = {
   result_title_selector = 'h3, [data-listing-card-title]',
   result_image_selector = 'img[alt]',
   result_price_selector = '.currency-value, [data-buy-box-region="price"]',
-  result_shipping_selector = '[data-shipping-cost], [data-delivery-estimate]',
-  result_rating_selector = '[aria-label*="out of 5 stars"]',
-  result_reviews_selector = 'a[href*="#reviews"]',
-  result_delivery_selector = '[data-delivery-estimate]',
+  -- Measured live 2026-08-26 on the search grid: `[data-shipping-cost], [data-delivery-estimate]` match 0,
+  -- while the card states it in `.streamline-spacing-pricing-info` ("Free shipping"). The rating, reviews
+  -- and delivery selectors matched 0 too and are removed: etsy's grid does not render them, and a
+  -- selector that matches nothing forever is drift nobody can see.
+  result_shipping_selector = '.streamline-spacing-pricing-info',
+
   shipping_from_text = true,
   result_ready_selector = '[data-listing-id], iframe[src*="captcha"]',
   default_currency = "USD",

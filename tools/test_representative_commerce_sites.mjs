@@ -182,13 +182,15 @@ const siteCases = [
     site: '11st', home: 'https://www.11st.co.kr/', id: '2035182061', total: 19.4, currency: 'KRW',
     dom: {
       'li.c-search-list__item': [{
-        url: 'https://www.11st.co.kr/products/2035182061',
+        // The measured card shape (2026-08-26): 11st routes every card through its ad server, so there is
+        // NO product href on it and the id lives in ; the star widget is gone. A fixture
+        // carrying a url would exercise a path the live page no longer has.
+        root_id: '{"content_type":"PRODUCT","content_no":"2035182061"}',
         title: 'Logitech M185 Wireless Mouse',
         image_alt: 'Logitech M185 Wireless Mouse',
         price_text: '16,900',
         // Measured on the live card: the sr-only label is glued to the value with no separator.
         shipping_text: '배송비2,500원',
-        rating_text: '4.8',
         text: 'Logitech M185 Wireless Mouse 16,900 배송비2,500원',
       }],
     },

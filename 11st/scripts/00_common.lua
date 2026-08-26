@@ -12,9 +12,14 @@ local CONFIG = {
   search_extra = { tabId = "TOTAL_SEARCH" },
   search_path_marker = "/pc/total-search",
   result_selector = 'li.c-search-list__item, li:has(> .c-card-item)',
-  result_url_selector = 'a.c-card-item__anchor[href*="/products/"]',
+
   -- 11st routes every result card through its ad server, so the anchor href carries no product id; the
   -- card's own log payload is where the id survives. Measured live: 156 cards on the page, 1 read.
+  -- Measured live 2026-08-26 on the search grid: `a.c-card-item__anchor[href*="/products/"]` and
+  -- `.c-starrate` match **0**. 11st routes every card through its ad server (AGENTS.md 13), so the card
+  -- carries no product href at all and the id comes from `data-log-body`; the star widget is gone. Those
+  -- three selectors are removed rather than kept as invisible drift — the reader rebuilds the canonical
+  -- url from the id, which is the path that has been working.
   result_id_selector = 'a.c-card-item__anchor[data-log-body]',
   result_id_attr = 'data-log-body',
   result_title_selector = '.c-card-item__name dd, img[alt]',
@@ -29,8 +34,7 @@ local CONFIG = {
   -- The other five state no shipping at all: that is the page, not a selector gap, and those rows keep an
   -- unknown total on purpose. Guessing zero there would make 11st look like the cheapest store on screen.
   result_shipping_selector = '.c-card-item__price-delivery, .c-card-item__price-delivery .value',
-  result_rating_selector = '.c-starrate, [aria-label*="평점"]',
-  result_reviews_selector = '.c-starrate, [data-review-count]',
+
   -- Live card text is in this delivery cell ("배송비무료"); the older delivery/shipping classes match 0.
   result_delivery_selector = 'dd.c-card-item__price-delivery',
   shipping_from_text = true,

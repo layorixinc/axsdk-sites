@@ -928,6 +928,52 @@ Implement `src/user-script-topology.ts` around one service-worker-owned `scriptT
 
 Do not move or reinterpret `src/community/store.ts`, `broker.ts`, private storage, or v1 records.
 
+##### P3-B measured result — 2026-08-24
+
+P3-B is implemented around one service-worker-owned `ScriptTopologyCoordinator`:
+
+- `runPackTransaction()` holds one bounded lock from actual
+  `chrome.userScripts.getScripts()` inspection through the caller's future exact-execute/authenticate
+  transaction. A matching or syntactically uncertain owned registration refuses
+  `community_script_conflict`; inspection failure or lock timeout refuses
+  `script_topology_unavailable`;
+- the matcher implements Chrome HTTP(S)/file/`<all_urls>` match patterns, wildcard hosts, optional
+  ports, path wildcards and the documented trailing-slash form, then applies `includeGlobs`,
+  `excludeMatches`, and `excludeGlobs` in Chrome's order. A definite exclusion remains safe; an
+  unparseable rule that could still include the role remains uncertain;
+- every service-worker community reconciliation now takes the same lock, inspects both the actual
+  owned registrations and the desired set, reads live P3-A role documents, closes each colliding
+  extension-created role, clears its role metadata, and only then registers/updates/unregisters;
+- the current retirement path releases the existing CDP attachment before closing the tab. There is
+  no Pack dispatcher yet; P3-D must add its own dispatch-eligibility frontier before it can use this
+  callback;
+- `RegisteredCommunityUserScript` gained only the three optional Chrome match/exclude fields. The
+  community store, v1 broker/protocol, artifact/private-state stores, registration prefix, and
+  no-Pack registration bytes remain unchanged.
+
+The first live collision probe exposed a second race: independent `withSessions()` read/modify/write
+calls could both read one `chrome.storage.session` snapshot and let a later stale membership refresh
+erase newly written role ownership. `AgentSessionTransactions` now serializes every service-worker
+session mutation. The RED fixture preserved both a provider role and a concurrent manually-added user
+tab; removing its queue wait fails that test.
+
+TDD evidence: the complete initial topology suite was **14 failures / 1 pass**. The official Chrome
+trailing-slash pattern added a separate **1-failure RED**. Mutation checks produced **2 failures** when
+exclude precedence was removed, **2** when the lock released before the transaction, **3** when role
+retirement was removed, and **1** when session transaction serialization was removed. Final gates are
+**313 focused tests / 760 assertions**, **1,187 extension tests / 2,115 assertions**, and **2,549 full
+SDK tests / 6,709 assertions**, all green; typecheck and the production build pass.
+
+The real Chromium registrar smoke passes twice consecutively: community v1 is rebuilt from trusted
+state and executes on its ordinary fixture page; a matching simulated provider role is then closed,
+its user-owned sibling remains open, role metadata is cleared, and only afterward does the
+registration reappear; final removal leaves no registration. The retained Phase 1 probe reports Pack
+storage/User Script registrations/permissions/DNR unchanged, and the same build starts a normal
+no-Pack CDP session.
+
+No production path calls `runPackTransaction()` yet. P3-C is the first caller and must keep the lock
+through exact document execution and authenticated connection acceptance.
+
 #### P3-C — Injector and bootstrap
 
 1. Configure a digest-qualified named `USER_SCRIPT` world with reviewed CSP and messaging.

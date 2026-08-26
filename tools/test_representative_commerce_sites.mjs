@@ -479,6 +479,39 @@ run('a transient op refusal is never read as a page fact', () => {
   assert(value.error === undefined, 'a transient refusal never becomes no_results or a wall', value);
 });
 
+run('a declared cart-line scope names a REGION, never the cart page', () => {
+  // Measured live 2026-08-26: on coupang's cart page 19 of 40 product links are a `#cart-reco-widget`
+  // recommendation, on amazon's 26 of 60 are carousels, on 11st 25 of 26 are a carousel, and gmarket's
+  // cart page carries the just-VIEWED product in a 최근 본 상품 rail while the cart is EMPTY. So the id
+  // probe needs the region holding cart LINES, and a scope that is really the page (`#mainContent`,
+  // `#sc-page-content`, `#CartListPC`) hands the hole straight back. Two rules a scope must satisfy: it
+  // selects on a class, id or attribute — a bare tag is the document again — and it is not the adapter's
+  // own confirmation selector, which is what the site uses to say "this is a cart".
+  // Every page-level container below was MEASURED as an ancestor of a cart-page product link during that
+  // survey, so each entry names a page someone probed rather than a word someone imagined. The second
+  // rule is the sharper one: a scope naming a recommendation surface is the bug wearing the fix's clothes.
+  const PAGE_LEVEL = new Set(['#mainContent', '#maincontent', '#sc-page-content', '#sc-retail-cart-container',
+    '#CartListPC', '#a-page', '#content', '#container', '#wrap', '#wrapper', '#__next', '#root', '#app',
+    '#wrapBody', '#layBodyWrap', 'body', 'main', 'html']);
+  const RAIL = /reco|recommend|recent|carousel|suggest|related|viewed|widget/i;
+  let scoped = 0;
+  lua.define('function __rpc_site_data() return RPC_SITES end', 'site data reader');
+  for (const [slug, config] of Object.entries(lua.call('__rpc_site_data') ?? {})) {
+    const scopes = Object.values(config.cart_item_scopes ?? {});
+    if (scopes.length === 0) continue;
+    scoped += 1;
+    for (const raw of scopes) {
+      const scope = String(raw).trim();
+      assert(/[.#[]/.test(scope), `${slug} scope selects on a class, id or attribute`, scope);
+      assert(!PAGE_LEVEL.has(scope), `${slug} scope is not a measured page-level container`, scope);
+      assert(!RAIL.test(scope), `${slug} scope is not a recommendation surface`, scope);
+      assert(scope !== config.confirmation_selector,
+        `${slug} scope is not its own confirmation selector`, scope);
+    }
+  }
+  assert(scoped >= 3, 'the stores proven by cart-line evidence declare their scope', scoped);
+});
+
 console.log(`\n${passed}/${passed + failed} tests passed (${assertions} assertions)`);
 lua.close();
 process.exit(failed ? 1 : 0);

@@ -57,6 +57,9 @@ RPC_SITES["11st"] = {
     "buy.11st.co.kr/cart",
     "CartAction.tmall"
   },
+  cart_item_scopes = {
+    "li.s_cart_prd"
+  },
   login_urls = {
     "/login",
     "login.11st.co.kr"
@@ -248,6 +251,10 @@ RPC_SITES["amazon"] = {
     "/cart/view.html",
     "/cart?"
   },
+  cart_item_scopes = {
+    ".sc-list-item",
+    "#sc-active-cart .sc-list-item"
+  },
   cart_count_selectors = {
     "#nav-cart-count",
     "#sc-subtotal-label-activecart"
@@ -349,6 +356,9 @@ RPC_SITES["coupang"] = {
     "cartView.pang",
     "/cart"
   },
+  cart_item_scopes = {
+    "[id^=\"item_\"]"
+  },
   login_urls = {
     "/login",
     "login.coupang.com"
@@ -422,6 +432,9 @@ RPC_SITES["ebay"] = {
   cart_url_markers = {
     "cart.ebay.com"
   },
+  cart_item_scopes = {
+    "[data-test-id=\"cart-bucket\"]"
+  },
   cart_count_selectors = {
     ".gh-cart .gh-badge",
     ".gh-cart__icon .badge"
@@ -484,8 +497,8 @@ RPC_SITES["etsy"] = {
     "[data-buy-box-region=\"price\"]"
   },
   add_selectors = {
-    "button[data-add-to-cart-button]",
-    "button[name=\"add_to_cart\"]"
+    "#listing-page-cart button[type=\"submit\"]",
+    "[data-buy-box] form[action*=\"/cart/listing.php\"] button[type=\"submit\"]"
   },
   quantity_selectors = {
     "select[name=\"quantity\"]"

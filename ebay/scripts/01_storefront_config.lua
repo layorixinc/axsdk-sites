@@ -70,6 +70,9 @@ local CONFIG = {
   -- id on the cart page the ONLY evidence, which is the strongest and the only language-independent one.
   cart_url = "https://cart.ebay.com/",
   cart_url_markers = { "cart.ebay.com" },
+  -- Cart LINES: measured live 2026-08-26, all three `a[href*="/itm/"]` on the cart page sit inside
+  -- `[data-test-id="cart-bucket"]`, which is eBay own name for the region holding its lines.
+  cart_item_scopes = { '[data-test-id="cart-bucket"]' },
   -- The count lives in a word-based design-system badge whose text is the digit; the same number is also
   -- in the link's `aria-label`, but that is a Korean sentence here, and a digit is not.
   cart_count_selectors = { ".gh-cart .gh-badge", ".gh-cart__icon .badge" },

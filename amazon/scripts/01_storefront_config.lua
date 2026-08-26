@@ -100,6 +100,10 @@ local CONFIG = {
   -- fallback gone from `confirmation_selector`, an unconfirmed add navigates to `cart_url` and the id probe
   -- runs on the canonical page.
   cart_url_markers = { "/gp/cart/view.html", "/cart/view.html", "/cart?" },
+  -- Cart LINES, measured live 2026-08-26 on a populated cart: `.sc-list-item` = 5, exactly the five rows,
+  -- and all five [data-asin] elements are those rows. The same page carried 60 `a[href*="/dp/"]` of which
+  -- **26 were inside recommendation carousels**, so a document-wide id probe there confirms a suggestion.
+  cart_item_scopes = { ".sc-list-item", "#sc-active-cart .sc-list-item" },
   cart_count_selectors = { "#nav-cart-count", "#sc-subtotal-label-activecart" },
   -- Checkout REVIEW only. `place_order_selectors` is read to tell the user whether the button is there;
   -- nothing clicks it. The cart-page keys are here too because reaching the review starts from the cart.

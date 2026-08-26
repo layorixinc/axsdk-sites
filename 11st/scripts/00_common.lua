@@ -46,6 +46,10 @@ local CONFIG = {
   required_option_selectors = { 'select[required]' },
   cart_url = "https://buy.11st.co.kr/cart/CartAction.tmall?method=getCartList",
   cart_url_markers = { "buy.11st.co.kr/cart", "CartAction.tmall" },
+  -- Cart LINES: measured live 2026-08-26 the cart page carried 26 `a[href*="/products/"]`, of which the
+  -- single real line is `li.s_cart_prd`; the other 25 are a recommendation carousel (ten `li.bx-clone`).
+  -- `#CartListPC` contains all 26, so it is not a usable scope.
+  cart_item_scopes = { "li.s_cart_prd" },
   login_urls = { "/login", "login.11st.co.kr" },
   login_selector = 'form[action*="login"] input[type="password"]',
   blocked_selectors = {

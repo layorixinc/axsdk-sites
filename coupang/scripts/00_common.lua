@@ -37,6 +37,10 @@ local CONFIG = {
   add_ready_selector = '.cart-message, [data-cart-item-id], form[action*="login"], .captcha',
   cart_url = "https://cart.coupang.com/cartView.pang",
   cart_url_markers = { "cartView.pang", "/cart" },
+  -- Cart LINES: measured live 2026-08-26 `[id^="item_"]` matched exactly the two rows in the cart, the
+  -- `#cart-reco-widget` contains none of them, and a product present ONLY in that widget scored 0 inside
+  -- the scope and 1 inside the widget. 19 of the page 40 product links are recommendations.
+  cart_item_scopes = { '[id^="item_"]' },
   login_urls = { "/login", "login.coupang.com" },
   login_selector = 'form[action*="login"] input[type="password"]',
   blocked_selectors = {

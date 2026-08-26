@@ -27,7 +27,14 @@ local CONFIG = {
   product_url_prefix = "https://www.etsy.com/listing/",
   product_title_selectors = { 'h1[data-buy-box-listing-title]', 'h1' },
   product_price_selectors = { '[data-buy-box-region="price"] .currency-value', '[data-buy-box-region="price"]' },
-  add_selectors = { 'button[data-add-to-cart-button]', 'button[name="add_to_cart"]' },
+  -- Measured live 2026-08-26 on `/listing/1848131106`: BOTH configured selectors matched 0, which is why
+  -- every etsy add answered `add_control_missing` and the matrix recorded that as a made-to-order
+  -- listing's own limit. The real control is the submit of etsy's own cart form, and it must be SCOPED:
+  -- `form[action*="/cart/listing.php"] button[type="submit"]` matches 5 on that page (the buy box plus
+  -- four related-item cards), so clicking the first in document order could add a different listing.
+  -- `#listing-page-cart` and `[data-buy-box]` each scope it to exactly 1.
+  add_selectors = { '#listing-page-cart button[type="submit"]',
+                    '[data-buy-box] form[action*="/cart/listing.php"] button[type="submit"]' },
   quantity_selectors = { 'select[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
   -- Per-add panel ONLY. `[data-cart-listing-id]` names a LISTING ALREADY IN THE CART and

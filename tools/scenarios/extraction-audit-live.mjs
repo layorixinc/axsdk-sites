@@ -71,6 +71,17 @@ export function auditVerdict(report) {
 }
 
 /**
+ * The rows a Lua extraction returned, whichever shape they crossed in.
+ *
+ * AGENTS.md 13 in this runner own code: a Lua table crosses as a JSON OBJECT when the array marker is not
+ * honoured, and gmarket answered one once - .map threw and the store was reported as a runner error rather
+ * than as an audit result.
+ */
+export const rowsOf = (extracted) => (Array.isArray(extracted?.rows)
+  ? extracted.rows
+  : Object.values(extracted?.rows ?? {}));
+
+/**
  * Did the store's own selectors fill rows, and does the extraction look like a page at all?
  *
  * The first version failed a zero fill on ANY declared selector, and four of its five failures were facts
@@ -252,7 +263,7 @@ async function auditStore(session, store, query) {
     console.log('  site: ' + mismatch.reason);
     return { store, verdict: mismatch };
   }
-  const candidates = (extracted?.rows ?? []).map((row) => ({ ...row, product_id: row.row_id }));
+  const candidates = rowsOf(extracted).map((row) => ({ ...row, product_id: row.row_id }));
   const page = await session.pageHtml();
   console.log(`  page: ${page.url} html=${page.html.length}B${page.error ? ` error=${page.error}` : ''}`);
   console.log(`  extracted: ${candidates.length} rows via ${extracted.selector}`);

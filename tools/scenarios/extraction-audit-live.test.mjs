@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { auditVerdict, extractedCandidates, fillVerdict, siteVerdict } from './extraction-audit-live.mjs';
+import { auditVerdict, extractedCandidates, fillVerdict, rowsOf, siteVerdict } from './extraction-audit-live.mjs';
 
 const call = (name, output) => ({ name, status: 'completed', output });
 
@@ -134,4 +134,13 @@ test('rows that mostly carry nothing fail on the mean fill', () => {
 
 test('no declared selector at all is a failure — the audit checked nothing', () => {
   assert.equal(fillVerdict({ declared: {}, rows: 8 }).pass, false);
+});
+
+test('rows arriving as an OBJECT are still rows', () => {
+  // AGENTS.md 13, in this runner: a Lua table crosses as a JSON object when the array marker is not
+  // honoured, and gmarket answered {"1": {...}} once — .map threw and the store was reported as a runner
+  // error rather than as an audit result.
+  assert.deepEqual(rowsOf({ rows: { 1: { name: 'a' }, 2: { name: 'b' } } }).map((row) => row.name), ['a', 'b']);
+  assert.deepEqual(rowsOf({ rows: [{ name: 'a' }] }).map((row) => row.name), ['a']);
+  assert.deepEqual(rowsOf({}), []);
 });

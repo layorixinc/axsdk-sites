@@ -174,3 +174,23 @@ test('stores come from the argument, and naver-shopping is refused with its reas
   assert.ok(parseStores([]).stores.length >= 1);
   assert.ok(parseStores([]).stores.length <= 3);
 });
+
+// Measured 2026-08-26: `pending` was one bucket holding three different facts, so the cart module now
+// classifies them — the store's cart renders EMPTY (etsy, ssg), or it holds other lines and not ours
+// (11st), or nothing on the page can be read either way (gmarket). Each is an answer the user can act
+// on, and a code the runner does not know is reported as `unknown`, which fails the store.
+test('a classified unconfirmed add is an answer, not an unknown', () => {
+  for (const [error, label] of [
+    ['cart_empty', 'cart_empty'],
+    ['cart_missing_product', 'cart_missing_product'],
+    ['add_to_cart_pending', 'pending'],
+  ]) {
+    const outcome = classifyAdd({
+      toolCalls: [pickCall('X1'), cartCall({ next: 'error', add_status: 'failed', add_error: error })],
+      text: '',
+      siteEvidence: { productId: 'X1', mentionsProduct: false },
+    });
+    assert.equal(outcome.label, label, `${error} -> ${label}`);
+    assert.equal(storeVerdict(outcome).pass, true, `${error} is an answer the user can act on`);
+  }
+});

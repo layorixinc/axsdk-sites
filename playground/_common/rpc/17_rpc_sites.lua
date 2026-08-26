@@ -515,6 +515,9 @@ RPC_SITES["etsy"] = {
   cart_url_markers = {
     "/cart"
   },
+  cart_empty_phrases = {
+    "your cart is empty"
+  },
   login_urls = {
     "/signin"
   },
@@ -828,6 +831,9 @@ RPC_SITES["ssg"] = {
   cart_url_markers = {
     "pay.ssg.com/cart",
     "/cart/"
+  },
+  cart_empty_phrases = {
+    "장바구니에 담긴 상품이 없습니다"
   },
   login_urls = {
     "/login",

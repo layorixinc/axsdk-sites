@@ -54,6 +54,10 @@ local CONFIG = {
   add_ready_selector = '[data-layer-name="cart_success"].on, .cart_layer.on, form[action*="login"]',
   cart_url = "https://pay.ssg.com/cart/dmsShpp.ssg",
   cart_url_markers = { "pay.ssg.com/cart", "/cart/" },
+  -- Measured live 2026-08-26 on the empty cart: "장바구니에 담긴 상품이 없습니다." gmarket deliberately has
+  -- NO phrase — the only "…상품이 없습니다" on its cart page is 최근 본 상품이 없습니다, the recently-viewed
+  -- rail reporting that IT is empty, and reading that as the cart is the rail defect pointing the other way.
+  cart_empty_phrases = { "장바구니에 담긴 상품이 없습니다" },
   login_urls = { "/login", "member.ssg.com" },
   login_selector = 'form[action*="login"] input[type="password"]',
   blocked_selectors = {

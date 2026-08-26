@@ -45,6 +45,9 @@ local CONFIG = {
   add_ready_selector = '[data-add-to-cart-success], [data-cart-listing-id], form[action*="signin"], iframe[src*="captcha"]',
   cart_url = "https://www.etsy.com/cart",
   cart_url_markers = { "/cart" },
+  -- Measured live 2026-08-26 on the empty cart: etsy renders "Your cart is empty." So an unconfirmed add
+  -- there is reported as `cart_empty` (the click never reached the cart) instead of an unclassified pending.
+  cart_empty_phrases = { "your cart is empty" },
   login_urls = { "/signin" },
   login_selector = 'form[action*="signin"] input[type="password"]',
   blocked_selectors = {

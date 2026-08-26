@@ -479,6 +479,9 @@ run('a transient op refusal is never read as a page fact', () => {
   assert(value.error === undefined, 'a transient refusal never becomes no_results or a wall', value);
 });
 
+lua.define('function __rpc_site_data() return RPC_SITES end', 'site data reader');
+const siteData = lua.call('__rpc_site_data') ?? {};
+
 run('a declared cart-line scope names a REGION, never the cart page', () => {
   // Measured live 2026-08-26: on coupang's cart page 19 of 40 product links are a `#cart-reco-widget`
   // recommendation, on amazon's 26 of 60 are carousels, on 11st 25 of 26 are a carousel, and gmarket's
@@ -495,8 +498,6 @@ run('a declared cart-line scope names a REGION, never the cart page', () => {
     '#wrapBody', '#layBodyWrap', 'body', 'main', 'html']);
   const RAIL = /reco|recommend|recent|carousel|suggest|related|viewed|widget/i;
   let scoped = 0;
-  lua.define('function __rpc_site_data() return RPC_SITES end', 'site data reader');
-  const siteData = lua.call('__rpc_site_data') ?? {};
   for (const [slug, config] of Object.entries(siteData)) {
     const scopes = Object.values(config.cart_item_scopes ?? {});
     if (scopes.length === 0) continue;
@@ -518,6 +519,29 @@ run('a declared cart-line scope names a REGION, never the cart page', () => {
     assert(scopes.length > 0, `${slug} declares the region holding its cart lines`, scopes);
   }
   assert(scoped >= 5, 'every surveyed store declares its scope', scoped);
+});
+
+run('a declared empty-cart phrase belongs to the CART, not to a rail', () => {
+  // Measured live 2026-08-26: the only "…상품이 없습니다" on gmarket's cart page is
+  // 최근 본 상품이 없습니다 — the recently-viewed rail reporting that IT is empty. A store declaring a
+  // phrase that generic would call its cart empty on a rail's message, which is the rail defect the id
+  // scoping just closed, pointing the other way. gmarket therefore declares NO phrase and keeps the
+  // honest `add_to_cart_pending`.
+  const RAIL_SENTENCE = '최근 본 상품이 없습니다';
+  let declared = 0;
+  for (const [slug, config] of Object.entries(siteData)) {
+    const phrases = Object.values(config.cart_empty_phrases ?? {});
+    if (phrases.length === 0) continue;
+    declared += 1;
+    for (const phrase of phrases) {
+      const text = String(phrase).trim();
+      assert(text.length >= 8, `${slug} empty phrase is a sentence, not a fragment`, text);
+      assert(!RAIL_SENTENCE.includes(text), `${slug} empty phrase is not the rail's own message`, text);
+    }
+  }
+  assert(declared >= 2, 'the stores whose empty cart was READ declare their phrase', declared);
+  assert(siteData.gmarket?.cart_empty_phrases === undefined,
+    'gmarket declares no phrase: its only empty sentence belongs to the rail', siteData.gmarket?.cart_empty_phrases);
 });
 
 console.log(`\n${passed}/${passed + failed} tests passed (${assertions} assertions)`);

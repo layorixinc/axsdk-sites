@@ -41,6 +41,11 @@ const ACCESS_ERRORS = {
   login_required: 'login_required',
   required_option: 'required_option',
   add_to_cart_pending: 'pending',
+  // Measured 2026-08-26: `pending` covered three different facts. A cart the store itself renders as
+  // empty (etsy, ssg) and a cart holding other lines but not ours (11st) are answers; only a page nobody
+  // can read stays unknown.
+  cart_empty: 'cart_empty',
+  cart_missing_product: 'cart_missing_product',
   product_navigation_failed: 'product_unreachable',
   product_page_unreadable: 'product_unreachable',
   cart_unavailable: 'store_unsupported',
@@ -131,6 +136,8 @@ export function storeVerdict(outcome) {
   const answers = {
     added: 'the site shows the approved product in the cart',
     pending: 'clicked, not confirmed — nothing claimed',
+    cart_empty: 'the store renders its cart as empty — the click never reached it',
+    cart_missing_product: 'the cart holds other lines and not this product',
     login_required: 'the store needs a signed-in user',
     access_denied: 'the store served a wall',
     required_option: 'the listing needs an option the flow does not choose',

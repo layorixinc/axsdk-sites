@@ -1955,18 +1955,30 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   crosses as ABSENT. Live: eBay 30 rows → 2 screened out, the pick lands on a real M185 listing
   (`158215016462`), and the guarded add reaches the cart page and confirms by id. Mutation-checked
   (filter removed → 3 red).
-- **A follow-up at the single-site gate is misrouted into another flow about half the time, on one
-  measured pair, and it is NOT caused by the screening node.** §13 recorded this as observed and not
-  attributed; it now has a rate. On eBay with "Logitech M185 mouse", "첫 번째로 해줘" was routed into
-  `shopping_multi_store_total_cost.collect_request` (and once into `shopping_search_plan`) in **6 of 11**
-  live turns, while the same pair driven from a throwaway probe routed correctly, and coupang with the
-  same query added the right product. Attribution was measured, not argued: removing the new
-  `screened_out` sentence from the gate's prompt left the rate unchanged (**1 pass / 3 misroute**), so the
-  reply text is not the input that moves it. The planner already carries the SINGLE-SITE SHOPPING
-  FOLLOW-UP rule naming `activeFlow`/`activeNode`, and prompt tuning is capped at three formulations —
-  the next lever is an engine-level "a paused flow wins unless the message is plainly a new request",
-  which is an SDK request, not another rewording. Until then a misrouted pick is user-visible: the user's
-  choice does nothing and a fresh one-to-two-minute comparison is announced instead.
+- **A PLANNER EXAMPLE that names the same product as the live request pulls the follow-up into the
+  example's intent — measured, fixed, and it destroys the user's list when it fires.** The gate misroute
+  §13 had carried as "observed, not attributed" now has a cause. On eBay with "Logitech M185 mouse",
+  "첫 번째로 해줘" was routed into `shopping_multi_store_total_cost.collect_request` (occasionally
+  `shopping_search_plan`, once **no node at all**) in **10 of 24** pick turns. Two planner exemplars
+  named that exact product — the `Examples:` line and the route's own `examples` list, the latter naming
+  이베이 as well — and the conversation carried it too. Swapping both to `Keychron K8 키보드` took the
+  rate to **1 of 16** (Fisher p ≈ 0.014), and a positive control confirms the route still wins on a real
+  comparison request, including one that literally says `Logitech M185` (2/2): the intent matches on the
+  request's own shape — several stores plus total cost — not on the example's product.
+  Three things this measurement pinned, each of which had a plausible wrong answer:
+  the screening node was NOT implicated (removing its `screened_out` sentence left the rate unchanged,
+  1 pass / 3 misroute); the rate swings hard run to run (one 5/5 clean run followed a 2/4 run minutes
+  earlier), so **any single clean run is worthless as evidence here** — arms need ~8 samples; and a
+  misroute **destroys** the paused pick rather than parking it: measured, the very next turn re-enters
+  `shopping_single_site.collect_shopping` and asks "어떤 상품을 구매하고 싶으신가요?", so a real search
+  (navigation + 30 rows) is thrown away and the user's number can never land. That is why no guard at the
+  arriving flow's entry can repair it — by then the planner has already replaced the flow — and why the
+  swap is a mitigation, not a fix: `1/16` is not `0/16`, and the collision simply moves to whoever asks
+  for a Keychron K8. The real lever is engine-level, filed as
+  `RPC_LUA_RUNTIME_REQUESTS_20.md` §1: a paused flow that is holding a question wins a short reply
+  unless the message plainly names a new request. **An example is not decoration — it is training data
+  the planner sees on every turn, so never illustrate an intent with a product your own live scenarios
+  type.**
 - **The working tree mixes line endings, and two gates compare BYTES — so a revert can turn a gate red
   without any content change.** `core.autocrlf=true` with no `.gitattributes`: measured 203 LF-only files,
   10 CRLF-only, and 2 genuinely mixed (`tools/flow-conformance.test.mjs`, and

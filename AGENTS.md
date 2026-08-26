@@ -1930,12 +1930,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `[data-asin]` elements), coupang `[id^="item_"]` (exactly the 2 rows; the reco widget holds none, and a
   reco-only product scores **0** inside the scope and 1 inside the widget), ebay
   `[data-test-id="cart-bucket"]` (all 3 `/itm/` links), 11st `li.s_cart_prd` (the 1 real line —
-  `#CartListPC` contains all 26 links, so it is NOT a usable scope).
+  `#CartListPC` contains all 26 links, so it is NOT a usable scope), and walmart
+  `[data-testid="product-tile-container"]` — the sharpest case of the whole survey: that tile is the cart
+  line and its link carries `/ip/seort/2387232905`, while **all 29 `[data-item-id]` elements on the page
+  sit inside `[data-testid="recommendation-carousel"]`, so the cart line carries no item id at all and the
+  old probe could ONLY ever have matched a suggestion there.** `[data-testid="fulfillment-details-container"]`
+  reads like the cart region and is not: 0 tiles, 0 item ids, 0 `/ip/` links — it is the shipping panel.
   **The honest matrix after the fix** (`npm run test:commerce:live:cart`): **added, on a cart LINE** —
-  amazon (`B0CG1LGWR6`), coupang (`8087835532`), ebay (`158215016462`); **`pending`, claiming nothing** —
+  amazon (`B0CG1LGWR6`), coupang (`8087835532`), ebay (`366624299100`), walmart (`910614807`);
+  **`pending`, claiming nothing** —
   11st (its guest cart kept only an older line, so today's add is unproven), etsy, gmarket, ssg
   (no id is readable there without a signed-in user); **`access_denied`** — aliexpress (captcha).
-  walmart's turn hit the `no-node` session fault, so it is unmeasured, not passing.
+  The walmart proof needed a second run to mean anything: the first answered `added` for `2387232905`,
+  which that cart ALREADY held from an earlier session — `cart_contains` is true on arrival, so the click
+  is skipped and the report is about the cart's state, not about this turn. Re-run with a product the cart
+  did not hold (`phone charger` → `910614807`) it was `in_scope` **2** / `in_carousel` **0** against 29
+  carousel item ids. **A store whose cart already holds the picked product cannot prove an add.**
   Two further notes worth keeping. The RUNNER's own evidence probe is deliberately generic (attribute
   probes plus page text, no per-store selectors) and is therefore fooled by the same rails — on gmarket it
   still reports `mentions=true` while the cart is empty; it is safe only because `added` requires the

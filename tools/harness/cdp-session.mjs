@@ -307,6 +307,38 @@ export async function openCdpSession(options = {}, lib = undefined) {
     return typeof answered === 'string' ? answered : '';
   };
 
+  /**
+   * The whole document as the DOM domain sees it, for the tab this session drives.
+   *
+   * Deliberately a DIFFERENT channel from everything else the runners use: our readers extract through
+   * `dom.query_all` with our own selectors, so a check that re-reads through the same path can only
+   * confirm itself. `DOM.getDocument` + `DOM.getOuterHTML` answer from Chrome's own tree, which is what
+   * makes "is this value actually in the page" a question worth asking (`extraction-audit.mjs`).
+   */
+  const pageHtml = async () => {
+    const url = await pageUrl();
+    const targets = await cdp.send('Target.getTargets');
+    const target = (targets?.targetInfos ?? []).find((entry) => entry?.type === 'page' && entry?.url === url)
+      ?? (targets?.targetInfos ?? []).find((entry) => entry?.type === 'page' && entry?.url?.startsWith('http'));
+    if (target === undefined) return { url, html: '', error: 'no page target' };
+    const attached = await cdp.send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+    const pageSession = attached?.sessionId;
+    if (pageSession === undefined) return { url, html: '', error: 'attach failed' };
+    try {
+      await cdp.send('DOM.enable', {}, pageSession);
+      const document = await cdp.send('DOM.getDocument', { depth: -1, pierce: false }, pageSession);
+      const nodeId = document?.root?.nodeId;
+      if (nodeId === undefined) return { url: target.url, html: '', error: 'no document node' };
+      const outer = await cdp.send('DOM.getOuterHTML', { nodeId }, pageSession);
+      return { url: target.url, html: typeof outer?.outerHTML === 'string' ? outer.outerHTML : '' };
+    } catch (error) {
+      return { url: target.url, html: '', error: String(error?.message ?? error) };
+    } finally {
+      await cdp.send('DOM.disable', {}, pageSession).catch(() => {});
+      await cdp.send('Target.detachFromTarget', { sessionId: pageSession }).catch(() => {});
+    }
+  };
+
   /** Core's own answer, read back out of `axsdk:sites`, rather than any loader's guess. */
   const currentSite = async () => {
     const stored = await stateGet('axsdk:sites');
@@ -383,6 +415,14 @@ export async function openCdpSession(options = {}, lib = undefined) {
         }
       }
       return { url: await pageUrl(), site };
+    },
+
+    /**
+     * The whole document, read through CDP's DOM domain rather than through our own selectors.
+     * `{ url, html }`, or `{ url, html: '', error }` when the tab could not be read.
+     */
+    async pageHtml() {
+      return pageHtml();
     },
 
     /** Where the session is + which site/layer is active. */

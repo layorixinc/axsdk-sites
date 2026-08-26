@@ -130,19 +130,24 @@ end
 --- it. So a cart containing someone else's item reported the approved product as `added`. This is the one
 --- path in this repo where a wrong answer spends the user's money; it fails closed or not at all.
 ---
---- On the cart page the id is therefore the ONLY evidence that means anything. `data-asin` is in the
---- probe because amazon states the id most precisely there, and without it the one site whose cart page
---- names the id could only be matched through an href.
+--- On the cart page the id is therefore the only evidence that means anything — but "on the cart page"
+--- is not "in the cart". Measured live 2026-08-26 on gmarket: its cart page renders a 최근 본 상품 rail, so
+--- after merely VIEWING `goodscode=4798681473` the cart page carried TWO `a[href*="goodsCode=4798681473"]`
+--- links with the cart itself empty. The flow always visits the product page first, so a document-wide
+--- probe is wrong on EVERY add for that store. A store must name the region holding its cart LINES
+--- (`cart_item_scopes`); without one the id is not evidence there and the caller answers
+--- `add_to_cart_pending`, which claims nothing. `data-asin` is in the probe because amazon states the id
+--- most precisely there.
 ---
---- And the id probe is evidence ONLY there. Measured live 2026-08-15: a PRODUCT page states its own id
---- in links that have nothing to do with a cart — eBay's sign-in return URL (`ru=…%2Fitm%2F<id>`) and its
---- related-item rails (`_trkparms`), amazon's brand showcase, warranty and review links. Counts on
+--- And the id probe is evidence ONLY on that page. Measured live 2026-08-15: a PRODUCT page states its own
+--- id in links that have nothing to do with a cart — eBay's sign-in return URL (`ru=…%2Fitm%2F<id>`) and
+--- its related-item rails (`_trkparms`), amazon's brand showcase, warranty and review links. Counts on
 --- arrival, cart contents irrelevant: ebay `/itm/188780934255` **51**, amazon `/dp/B0DGJ7HYG1` **95**
 --- (90 of them outside every cart-UI subtree), amazon `/dp/B0FBWHDNXK` **16**. Because `add_to_cart`
 --- guards its entire add block with `if not cart_contains(...)`, a true answer on arrival SKIPPED the
 --- click and the final read answered true again — `added = true`, `next = "done"`, a confirmation quoted
---- to the user, and nothing in the cart. Same defect as the paragraph above, other half of the costume:
---- that fix scoped the structural selector and left the id probe running everywhere.
+--- to the user, and nothing in the cart. All three fixes are the same lesson at a narrower radius:
+--- structure is not evidence, the page is not the cart, and only a cart LINE naming the id is.
 function R.cart_contains(config, product_id)
   local href = here()
   local on_cart = false
@@ -151,9 +156,24 @@ function R.cart_contains(config, product_id)
   end
   if on_cart then
     local id = tostring(product_id or ""):gsub('["\\]', "")
-    if id ~= "" and exists('a[href*="' .. id .. '"], [data-product-id="' .. id .. '"], '
-      .. '[data-item-id="' .. id .. '"], [data-asin="' .. id .. '"]') then
-      return true
+    local scopes = config.cart_item_scopes or {}
+    if id ~= "" and #scopes > 0 then
+      -- One selector per scope, all four id shapes inside it: a cart line states the id as a link to the
+      -- product or as its own attribute, and which one is the site's business.
+      local parts = {}
+      for index = 1, #scopes do
+        local scope = tostring(scopes[index] or "")
+        if scope ~= "" then
+          parts[#parts + 1] = scope .. ' a[href*="' .. id .. '"]'
+          parts[#parts + 1] = scope .. ' [data-product-id="' .. id .. '"]'
+          parts[#parts + 1] = scope .. ' [data-item-id="' .. id .. '"]'
+          parts[#parts + 1] = scope .. ' [data-asin="' .. id .. '"]'
+          -- The line itself may BE the element that names the id (amazon's `.sc-list-item[data-asin]`).
+          parts[#parts + 1] = scope .. '[data-asin="' .. id .. '"]'
+          parts[#parts + 1] = scope .. '[data-item-id="' .. id .. '"]'
+        end
+      end
+      if #parts > 0 and exists(table.concat(parts, ", ")) then return true end
     end
     -- On the cart page the WIDE selector is worthless: it is what the site uses to say "this is a cart".
     -- `confirmation_text_selectors` is the narrow set the site shows only for an add that just happened,

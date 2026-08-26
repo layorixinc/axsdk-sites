@@ -399,6 +399,9 @@ const STRUCTURAL_CONFIRM = {
   ...CONFIG,
   // Verbatim shape from the generated site data for amazon.
   confirmation_selector: '#sw-atc-confirmation, #sc-active-cart, .sc-list-item[data-asin]',
+  // Amazon's cart LINES. The id probe is scoped to these (see the rail measurement below): the same
+  // selectors are worthless as confirmation and exactly right as a scope.
+  cart_item_scopes: ['#sc-active-cart', '.sc-list-item'],
 };
 
 test('a cart page holding a DIFFERENT product does not confirm the approved one', () => {
@@ -419,8 +422,8 @@ test('a cart page holding a DIFFERENT product does not confirm the approved one'
 test('a cart page listing the approved product does confirm it', () => {
   const page = shop({ href: CART, extra: {
     '#sc-active-cart': 'Shopping Cart',
-    '.sc-list-item[data-asin]': 'Logitech M185',
-    'a[href*="B0TEST1234"]': 'Logitech M185 Wireless Mouse',
+    '.sc-list-item': 'Logitech M185',
+    '#sc-active-cart a[href*="B0TEST1234"]': 'Logitech M185 Wireless Mouse',
   } });
   installRpcStub(lua, page);
 
@@ -428,11 +431,11 @@ test('a cart page listing the approved product does confirm it', () => {
 });
 
 test('an asin declared on the row confirms it too', () => {
-  // Amazon carries the id in `data-asin`, which the id probe did not ask for — so on the one site whose
-  // cart page states the id most precisely, the check could only fall back to an href match.
+  // Amazon carries the id in `data-asin` on the row ITSELF, so the scope and the id element are the same
+  // node — the probe has to ask for `<scope>[data-asin=…]` as well as `<scope> [data-asin=…]`.
   const page = shop({ href: CART, extra: {
     '#sc-active-cart': 'Shopping Cart',
-    '[data-asin="B0TEST1234"]': 'Logitech M185',
+    '.sc-list-item[data-asin="B0TEST1234"]': 'Logitech M185',
   } });
   installRpcStub(lua, page);
 
@@ -475,6 +478,59 @@ test('off the cart page an anchor bearing the id is NOT evidence of an add', () 
   const confirmed = lua.call('AX_RPC_CART.cart_contains', STRUCTURAL_CONFIRM, 'B0TEST1234');
 
   assert.equal(confirmed, false, 'a product page naming its own id is not a cart holding it');
+});
+
+// ── the CART PAGE names ids that are not in the cart either ───────────────────
+//
+// Measured live 2026-08-26 on gmarket, and it is the third costume of the same defect. The two above
+// scoped the structural selector to the cart page and then scoped the id probe to the cart page; both
+// took "on the cart page" to mean "inside the cart". It does not. gmarket's cart page renders a
+// 최근 본 상품 rail, so after merely VIEWING `goodscode=4798681473` — no add, no click — its cart page
+// carried TWO `a[href*="goodsCode=4798681473"]` links while the cart itself was empty. The shopping flow
+// always visits the product page first, so this false positive is reachable on every single add: the
+// probe answers true on arrival, `add_to_cart` skips its whole block, and the user is told an empty cart
+// holds their product.
+//
+// A store therefore has to name the region that holds its cart LINES. Without one, the id is not
+// evidence on that page at all — the guard fails closed rather than trusting the document.
+const SCOPED_CART = { ...CONFIG, cart_item_scopes: ['#cart-lines', '[data-cart-line]'] };
+
+test('an id in a recently-viewed rail on the cart page is not evidence of an add', () => {
+  const page = shop({ href: CART, extra: {
+    '#cart-lines': 'Your cart is empty',
+    'a[href*="B0TEST1234"]': '최근 본 상품',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', SCOPED_CART, 'B0TEST1234'), false,
+    'the rail is on the cart page and not in the cart');
+});
+
+test('an id inside the cart line region confirms the add', () => {
+  const page = shop({ href: CART, extra: {
+    '#cart-lines a[href*="B0TEST1234"]': 'Logitech M185 Wireless Mouse',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', SCOPED_CART, 'B0TEST1234'), true);
+});
+
+test('the second declared scope is consulted too', () => {
+  const page = shop({ href: CART, extra: {
+    '[data-cart-line] [data-item-id="B0TEST1234"]': 'Logitech M185',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', SCOPED_CART, 'B0TEST1234'), true);
+});
+
+test('a store that declares no cart-line region cannot confirm by id', () => {
+  // Fails closed: the caller answers `add_to_cart_pending`, which claims nothing. Trusting a
+  // document-wide match is what produced the gmarket reading above.
+  const page = shop({ href: CART, extra: { 'a[href*="B0TEST1234"]': 'Logitech M185' } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', CONFIG, 'B0TEST1234'), false);
 });
 
 // ── a foreign primary quote with a localized alternate ───────────────────────

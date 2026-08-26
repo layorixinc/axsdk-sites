@@ -2078,6 +2078,28 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   per row** grounded, and a two-store window shows gmarket rows with `배송비 KRW 3,000` and complete totals
   beside 11st. **Offline could not have caught this**: `rpc-stub.mjs` keys fixture rows by FIELD name, so a
   fixture supplies `shipping_text` whatever selector the config asks for — the live audit is the test.
+- **The audit's pass rule is now the store's OWN declaration, not a field count — and that distinction is
+  the whole difference between a detector and a nag.** The first version failed a store whose selectors
+  filled fewer than two fields per row, and four of its five failures were facts about the store: coupang
+  and ssg state their title in an `img alt` (so the text selector fills nothing and the reader's own
+  fallback uses `image_alt`), while walmart's and etsy's grids omit shipping/rating/reviews and 11st states
+  a dispatch promise rather than a fee — all already on record here. `fillVerdict` keeps the signal that
+  caught gmarket and narrows the failure to what cannot be a store's choice: a **core** field (url, title in
+  either form, a declared price) filling **0** rows, or rows that mostly carry nothing (mean fill under
+  **50%** — which is exactly what gmarket's union-of-two-element-sets row selector looked like). Everything
+  else is reported: `coupang … mean fill 50% (title 0/8, shipping_text 0/8)` tells the reader what the store
+  does without accusing the reader of a defect.
+- **Two more stores were carrying selectors that match nothing, and one of them hid a working field.**
+  Measured live on each search grid: 11st's `a.c-card-item__anchor[href*="/products/"]` and `.c-starrate`
+  match **0** — every card is routed through the ad server (§13), so there is no product href on it at all
+  and the id comes from `data-log-body` — and etsy's `[data-shipping-cost], [data-delivery-estimate]` plus
+  its rating/review selectors match **0** while the card states shipping in
+  `.streamline-spacing-pricing-info` ("Free shipping"). The dead ones are deleted rather than kept as drift
+  nobody can see; etsy's shipping now reads. Live after: a two-store comparison still ranks three 11st
+  offers with real shipping (`무료배송` / `배송비 KRW 2,500`), so removing the url selector cost nothing —
+  the canonical url is rebuilt from the id, which is the path that had been working all along.
+  **The 11st FIXTURE carried a url the live card no longer has**, so the offline suite was exercising a page
+  shape that no longer exists; it now carries the measured one (no href, id in `data-log-body`).
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /

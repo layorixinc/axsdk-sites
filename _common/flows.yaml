@@ -133,7 +133,7 @@ planner:
     Examples:
     - "청소 견적 줘" → replace_current, intents=[{intent:request_service_quote, segments:["청소 견적 줘"], state:{requestText:"청소 견적 줘"}}]
     - "아이폰 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
-    - "Logitech M185를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘" → intents=[{intent:shopping_multi_store_total_cost, segments:["Logitech M185를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"], state:{requestText:"Logitech M185를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"}}]
+    - "Keychron K8 키보드를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘" → intents=[{intent:shopping_multi_store_total_cost, segments:["Keychron K8 키보드를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"], state:{requestText:"Keychron K8 키보드를 쿠팡, G마켓, 11번가에서 배송비 포함 총액으로 비교해서 가장 싼 걸 담아줘"}}]
     - "청소 견적 주고 아이폰 사줘" → intents=[{intent:request_service_quote, segments:["청소 견적 주고"], state:{requestText:"청소 견적 줘"}}, {intent:shopping_single_site, segments:["아이폰 사줘"], state:{requestText:"아이폰 사줘"}}]
     - "아이폰이랑 계란 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰이랑 계란 사줘"], state:{requestText:"아이폰이랑 계란 사줘"}}]
     - "온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어." → replace_current, intents=[{intent:shopping_single_site, segments:["온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."], state:{requestText:"온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."}}] — use shopping_single_site even when the product is still missing; that flow asks what to buy.
@@ -166,7 +166,7 @@ router:
         commerce sites by normalized item-plus-shipping cost, then prepare only
         the explicitly selected offer's cart.
       examples:
-        - Logitech M185를 아마존, 월마트, 이베이에서 총비용 비교해줘
+        - Keychron K8 키보드를 아마존, 월마트, 이베이에서 총비용 비교해줘
         - compare AirPods across all five global stores including shipping
         - 쿠팡, 네이버쇼핑, G마켓, 11번가, SSG에서 배송비 포함 가장 싼 마우스를 찾아줘
     - intent: shopping_single_site

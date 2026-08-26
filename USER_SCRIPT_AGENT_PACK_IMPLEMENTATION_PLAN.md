@@ -1124,24 +1124,133 @@ P3-E.
 
 #### P3-D — Broker v2
 
-- one in-flight invocation per connection/document;
-- bounded queue;
-- closed input and output validation;
-- host/effect/service/consent checks immediately before dispatch;
-- trusted provenance stamped only after output validation;
-- read/page-write settlement and document replacement;
-- mutation frontier persistence before commit;
-- no replay after uncertain acknowledgement;
-- compact failure vocabulary.
+P3-D is an internal prerequisite, not a delivery boundary. It is complete only as part of the first
+usable-Pack unit that continues through the real read-only Shopping Agent Pack, the Amazon Provider
+Pack, and a normal chat result.
+
+##### P3-D1 — Read-only invocation design
+
+1. `@axsdk/packs` owns one fail-closed validator for the complete signed inline-schema subset. The
+   extension uses it for both command arguments and command results; unknown fields, malformed
+   schemas, unbounded values, and unsupported formats are refusals, never dropped values.
+2. Broker v2 consumes an authenticated P3-C connection plus authority freshly resolved from the
+   pinned composition and installed state when a queued call reaches dispatch. A caller cannot supply
+   or widen its own release, command, schema, effect, host, service, consent, or provenance.
+3. The wire vocabulary is closed to `pack.invoke` and `pack.result`, protocol 2, one bounded
+   invocation id, one command name, and one JSON argument/result. The executor/provider bootstrap
+   calls only an own-property function from its frozen command table and never retries a command.
+4. Each exact connection permits one in-flight invocation and at most eight queued invocations.
+   Queue overflow returns `queue_full`. Disconnect, navigation, retirement, timeout, or document
+   replacement settles every affected call once and ignores late results.
+5. The first usable-Pack slice admits only `read`. Any other effect is refused before dispatch.
+   `page_write`, `state_write`, `external_send`, and `cart_mutation` require later independently
+   user-verifiable slices; an unsupported effect never becomes a hidden no-op.
+6. Input is validated immediately before dispatch and output immediately after receipt. Trusted
+   provenance is constructed from the fresh authority only after the output passes. Script errors and
+   invalid output never carry trusted provenance.
+7. P3-C's exact session/group/tab/frame/document/world/URL/digest identity remains part of every
+   dispatch decision. Broker v2 does not fall back to a frame, another document, a user-owned tab, the
+   community v1 broker, Lua, or a default form tool.
+
+##### P3-D1 measured result — 2026-08-24
+
+The signed `layorix.fixture-agent@1.0.0` command now completes one real Broker v2 round trip in
+Chromium. The user entered `Logitech M185` in Options and saw:
+
+```text
+Signed Pack command returned "Logitech M185" from layorix.fixture-agent@1.0.0;
+schema and provenance validated
+```
+
+An empty request was visibly refused before executor acquisition. A second valid call returned
+`Amazon M185`, replaced executor tab `1819756790` with `1819756792`, and left exactly one inactive
+executor beside one active user tab. `chrome.userScripts.getScripts()` remained empty. The executor
+MAIN world had an empty body and exposed neither the Pack state nor registration hook; only the
+digest-qualified `USER_SCRIPT` world executed the command.
+
+The pure schema validator began with the missing-export RED. Broker v2 began with a missing-module
+RED; bootstrap dispatch began with the absent `command_busy` response; the Options/service-worker
+slice was **5 pass / 2 fail** before wiring; and an authority-storage exception added its own
+**7 pass / 1 fail** RED. Mutation checks fail when output validation, the eight-item queue bound, or
+the one-in-flight bootstrap guard is weakened. Final focused gates are **82 tests / 258 assertions**
+for the Broker/role/manual-CWS slice and **78 tests / 298 assertions** for `@axsdk/packs`; both
+typechecks pass.
+
+The guarded production CWS build passes. After reloading it, the manual banner/control was absent,
+no Pack was installed, the live session carried no Pack role, and no persistent User Script was
+registered. This is still not the user delivery boundary: P3-E, the platform/core Pack path, and the
+real Shopping/Amazon chat journey remain.
+
+##### P3-D2 — Effectful invocation
+
+- add host/effect/service/consent checks immediately before dispatch;
+- settle read/page-write work before a document replacement;
+- persist a mutation frontier before commit;
+- never replay after an uncertain acknowledgement;
+- keep the failure vocabulary compact and consumer-safe.
+
+P3-D2 starts only when a real user-facing effect needs it. The first usable Shopping Pack remains
+read-only, so P3-D1 plus role recovery is the Broker scope on its critical path.
 
 #### P3-E — Role recovery
 
-- service-worker restart: rehydrate metadata, inspect actual community registrations, exact re-execute;
-- extension update: recycle affected role documents because Chrome cannot “unexecute” a world;
-- provider navigation: invalidate old connection, re-authenticate new document;
-- group end: count only user-owned tabs, then close extension-created infrastructure;
-- restore fingerprint: exclude executor/provider URLs;
-- revoked/removed role: dispatch-ineligible before settlement/recycle.
+P3-E preserves one exact, user-visible Pack session across extension worker lifetimes without making
+an old document authoritative merely because a tab survived.
+
+1. A closed `chrome.storage.session` role-lease record exists only while the extension owns a Pack
+   role. It binds `packSetDigest`, session/group/tab/role, exact target, Pack/version,
+   release/artifact/commands digests, and command names. It never stores source, nonce, signatures,
+   model state, user input, or credentials. With no Pack role, its storage key is absent.
+2. `AgentSessions` remains the ownership authority for user versus extension-created tabs; the lease
+   is the cryptographic/composition authority. Recovery requires both records to name the same
+   group/role/tab. Either record alone grants nothing.
+3. On service-worker restart, Broker v2 begins empty and dispatch-ineligible. Recovery re-reads the
+   active installed composition and verified content-addressed artifact, inspects the live role tab,
+   runs the shared community/Pack topology transaction, obtains the current exact main document, and
+   re-executes/bootstrap-authenticates before binding Broker v2.
+4. A normal worker restart may reuse only the same extension-owned role tab at the same exact URL and
+   artifact binding. Extension update, release/digest change, wrong landing, lost ownership, or an
+   unprovable document recycles the role tab; Chrome cannot unexecute an old world.
+5. Navigation invalidates Broker v2 before any page event can be treated as a result. A provider
+   navigation requested by a validated `step:navigate` updates the lease only through the coordinator
+   and re-authenticates the new exact document; arbitrary tab navigation never widens authority.
+6. Disable, removal, revocation, session end, and group loss first invalidate Broker dispatch, then
+   settle/quarantine work, close only extension-created role tabs, and delete their leases. Existing
+   P3-A user-tab liveness, primary routing, and restore fingerprints remain unchanged.
+7. Recovery is a prerequisite, not a user delivery boundary. The live gate is a signed read command,
+   a real service-worker termination with the executor left open, automatic exact reconnection, and
+   a second visible command result from the same role tab. Disable must then remove the role without
+   touching the user tab.
+
+##### P3-E measured result — 2026-08-24
+
+P3-E is implemented in the CDP extension.
+
+- The lease store is a strict, serialized `chrome.storage.session` record. The live record contained
+  only the exact session/group/tab/role, target URL, Pack/version, Pack-set/release/artifact/command
+  digests, and `collect_request`; disabling the Pack removed the storage key.
+- Broker and injector identity now include `packSetDigest`. Recovery requires the persisted lease and
+  `AgentSessions` ownership to agree, re-resolves the active composition and verified JavaScript
+  artifact, reacquires the current top document, and completes the nonce/document/world handshake
+  before Broker dispatch becomes eligible.
+- A real `Target.closeTarget` of the extension service worker left executor tab `1819756820` open.
+  The restarted worker re-authenticated that exact tab, and a second signed command returned
+  `After worker restart` without changing the lease tab id or creating another executor.
+- Navigating role tab `1819756822` to a wrong document invalidated dispatch first; recovery retired it,
+  created exact role tab `1819756824`, updated the lease, and the next signed command returned
+  `After role navigation` through that replacement.
+- Disable then returned `Lifecycle default cleared`, removed the executor, and left both the lease key
+  and executor-tab list empty. The user-owned session tab remained.
+- The first real-worker RED found a wrong recovery predicate: an active composition's installed
+  release still has `enabled:false`; composition selection, not that historical field, is the active
+  authority. The first restart therefore retired a valid role. Removing that false condition produced
+  the same-tab GREEN above.
+- Focused Pack/recovery tests are green, and mutating the session-role ownership comparison made four
+  of seven recovery tests fail.
+- Active-set lifecycle messages now restore role documents in a `finally` path after dispatch is
+  invalidated. A failed registry refresh originally left the unchanged active Pack disconnected
+  (`5 pass / 1 fail`); the focused regression now proves `invalidate -> refresh -> recover -> reply`
+  for both success and refusal.
 
 ### 10.3 RED cases
 
@@ -1202,6 +1311,52 @@ After the exact repository is named:
 6. validate branch/output schemas exactly as ordinary tools;
 7. preserve old request/action behaviour when Pack capability is absent;
 8. return structured unavailable/incompatible/revoked failures.
+
+#### 11.3.1 Compile and action protocol decision
+
+The protocol is fixed independently of the deployment pathname. The compiler-owning repository must
+choose and publish the authenticated route; the SDK and extension must not guess one.
+
+1. **Negotiation.** The existing pre-session app-info response MAY add one closed field under `app`:
+   `agentPacks`. Its value names `protocolVersion: 1`, `compositionContract:
+   "axsdk.pack-composition.v1"`, the two fixed action names `community.task` and
+   `community.provider`, the supported fixed-service contract ids, and measured
+   `maxCompositionBytes` / `maxCompiledCommandBytes`. Absence means legacy-only. An unknown version or
+   missing required action refuses Pack mode before any role tab or User Script is created.
+2. **Compile-only request.** The value is exactly
+   `{ protocolVersion: 1, composition: ActivePackCompositionV1 }`. The composition carries one
+   complete flow document plus immutable task/provider/service bindings and digests, never JavaScript
+   source. The platform validates the closed composition schema, verifies the declared
+   `packSetDigest`, compiles the whole flow document with the production compiler, and validates every
+   fixed action/binding/branch/input/output reference.
+3. **Compile-only result.** Success is
+   `{ ok: true, protocolVersion: 1, packSetDigest, compilerRevision, diagnostics: [] }`; refusal is
+   `{ ok: false, protocolVersion: 1, diagnostics }`. Diagnostics use the bounded
+   `@axsdk/packs` code/severity/path/message vocabulary. A mismatched returned digest, unknown field,
+   unbounded diagnostic, session id, or chat/model output is a protocol failure, never partial
+   success.
+4. **No-side-effect proof.** The route runs after existing app/API-key/domain authentication but
+   before any app-user upsert or session middleware that mutates state. Its gate measures zero session
+   records, zero model/prompt calls, zero action calls, and zero executor/provider roles before and
+   after both a valid and an invalid compile.
+5. **Action authority.** A compiled node names only `community.task`, `community.provider`, or a
+   versioned fixed-service action. The model/tool arguments provide only the declared command input.
+   The platform resolves the immutable binding from the pinned composition and creates the
+   `PackProtocolInvocation`; callers cannot supply or widen Pack id, provider id, release digest,
+   effect, host, service, consent, schema, or provenance.
+6. **Client round trip.** Task/provider actions travel over a dedicated Pack-action channel to the
+   session host, then Broker v2. They never enter page/Lua RPC tables. The browser returns the closed
+   `PackInvokeResult`; both Broker v2 and the platform validate output before the flow receives it.
+   Later messages carry only `protocolVersion`, `packSetDigest`, request id, bounded arguments/result,
+   and trusted provenance—never the flow document or Pack source.
+7. **Provider fan-out.** `community.provider` resolves only enabled contributions in the pinned
+   `providerSetDigest`, dispatches at most three providers per task, preserves input order in the
+   bounded result, and materializes every selected child as success or structured failure. It never
+   silently truncates, drops, or substitutes a provider.
+8. **Failure and replay.** Unavailable, incompatible, stale, revoked, invalid-input/output, timeout,
+   and consent failures use the existing closed Pack failure vocabulary. A read may be retried only
+   before a validated result crosses the dispatch frontier. `state_write`, `external_send`, and
+   `cart_mutation` return `uncertain` after a lost acknowledgement and are never replayed.
 
 Fixed service implementations land when their first consumer needs them, behind the Phase 4 dispatcher:
 

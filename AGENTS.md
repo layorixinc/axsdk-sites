@@ -2176,3 +2176,18 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   never retires Pack authority; exact tab removal/retirement owns that transition, and the role
   coordinator revalidates the live group, URL, and document before reuse. The live double-acquisition
   exposed this after the transaction queue itself was already green.
+- **A Pack role survives a service-worker restart only by re-authentication, never by trusting its
+  surviving tab.** The CDP extension stores a closed, source-free role lease in
+  `chrome.storage.session`, requires it to agree with `AgentSessions`, re-resolves the exact active
+  Pack-set/release/artifact/commands, reacquires the current top `documentId`, and completes a fresh
+  nonce/world handshake before Broker v2 binds it. Live, terminating the worker left executor tab
+  `1819756820` open; the restarted worker returned a second signed result through that same tab.
+  Navigating another role off-target replaced `1819756822` with exact tab `1819756824`; disabling the
+  Pack then removed the role and lease without touching the user tab. The first live RED also corrected
+  the authority predicate: an installed release inside the selected active composition still carries
+  `enabled:false`, so `newSessionDefault` plus composition membership—not that field—defines active
+  execution authority.
+- **Invalidating Pack dispatch before a lifecycle mutation creates a recovery obligation even when
+  the mutation fails.** The active composition remains unchanged after a refused refresh/enable/
+  disable/replace/rollback/remove/reset, but its Broker connections have already been closed.
+  Recovery therefore runs in `finally`, before the options-page reply, for both success and refusal.

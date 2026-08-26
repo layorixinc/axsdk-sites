@@ -261,7 +261,12 @@ local function parse_money(text, fallback_currency)
   return amount_in(value), non_empty(fallback_currency)
 end
 
--- Everything a card prints after these belongs to delivery, rewards or financing, not to the price.
+-- Everything a card prints around these belongs to delivery, rewards or financing, not to the price — and
+-- WHICH SIDE the marker takes is the whole discriminator. Measured on live Korean cards: a fee marker
+-- precedes its amount ("배송비 3,000원") while a reward marker follows it ("최대 339원 적립"). Proximity
+-- alone cannot tell them apart, because both sit one space from the amount.
+local PRICE_MARKERS_BEFORE = { "배송비", "배송료", "배송", "쿠폰", "shipping", "delivery", "postage", "coupon" }
+local PRICE_MARKERS_AFTER = { "적립", "포인트", "할부", "cashback", "reward" }
 local PRICE_CUTOFF_MARKERS = { "배송비", "무료배송", "배송", "적립", "포인트", "쿠폰", "할부",
   "shipping", "delivery", "postage", "coupon", "cashback", "reward" }
 
@@ -271,6 +276,24 @@ local PRICE_CUTOFF_MARKERS = { "배송비", "무료배송", "배송", "적립", 
 --- one nobody exercised.
 S.parse_money = parse_money
 
+--- Whether a marker claims this amount, judged by the side the marker sits on.
+---
+--- The old rule cut the whole text at the first marker WORD. Measured live 2026-08-26 on a coupang card
+--- ("15,560원56%6,780원(1개당 6,780원) … 최대 339원 적립") the reward amount stayed inside the head and, being
+--- the last 원 amount, became the PRICE: **339 instead of 6,780**. A reward figure read as a price is the
+--- exact failure this strategy exists to prevent.
+local function marker_claims(value, start_at, end_at)
+  local before = value:sub(math.max(1, start_at - 14), start_at - 1):lower()
+  local after = value:sub(end_at + 1, end_at + 12):lower()
+  for index = 1, #PRICE_MARKERS_BEFORE do
+    if before:find(PRICE_MARKERS_BEFORE[index], 1, true) then return true end
+  end
+  for index = 1, #PRICE_MARKERS_AFTER do
+    if after:find(PRICE_MARKERS_AFTER[index], 1, true) then return true end
+  end
+  return false
+end
+
 local function won_amount(text, pick_last)
   local value = tostring(text or "")
   local found, cursor = nil, 1
@@ -278,7 +301,7 @@ local function won_amount(text, pick_last)
     local start_at, end_at, amount = value:find("([%d][%d,]*%.?%d*)%s*원", cursor)
     if not start_at then break end
     local previous = start_at > 1 and value:sub(start_at - 1, start_at - 1) or ""
-    if not previous:match("[%a%d]") then
+    if not previous:match("[%a%d]") and not (pick_last and marker_claims(value, start_at, end_at)) then
       found = normalize_number(amount)
       if not pick_last then return found end
     end
@@ -310,16 +333,18 @@ local function parse_candidate_price(value, fallback_currency, strategy)
   end
 
   if strategy == "last_before_shipping" then
+    -- The FULL text, judged amount by amount. Cutting at the first marker word hid that marker from the
+    -- side test: a reward marker follows its amount, so the reward stayed in the head and won as the last
+    -- 원 amount. Only the non-KRW fallback still cuts, because a `$` amount carries no 원 anchor to judge.
+    local won = won_amount(text, true)
+    if won then return won, "KRW" end
     local lowered = text:lower()
     local cutoff = #text + 1
     for index = 1, #PRICE_CUTOFF_MARKERS do
       local at = lowered:find(PRICE_CUTOFF_MARKERS[index], 1, true)
       if at and at < cutoff then cutoff = at end
     end
-    local head = text:sub(1, cutoff - 1)
-    local won = won_amount(head, true)
-    if won then return won, "KRW" end
-    return parse_money(head, fallback_currency)
+    return parse_money(text:sub(1, cutoff - 1), fallback_currency)
   end
 
   return parse_money(text, fallback_currency)

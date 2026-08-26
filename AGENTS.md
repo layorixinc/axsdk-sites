@@ -2100,6 +2100,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   the canonical url is rebuilt from the id, which is the path that had been working all along.
   **The 11st FIXTURE carried a url the live card no longer has**, so the offline suite was exercising a page
   shape that no longer exists; it now carries the measured one (no href, id in `data-log-body`).
+- **A cutoff marker can sit on EITHER side of its amount, and cutting the text at the marker word read a
+  reward figure as the price.** `last_before_shipping` cut at the first marker and took the last `원`
+  amount before it. Measured live on a coupang card —
+  `15,560원56%6,780원(1개당 6,780원) … 최대 339원 적립` — `적립` FOLLOWS its own amount, so the reward stayed
+  inside the head and won: **price 339 instead of 6,780**. That is the exact failure the strategy exists to
+  prevent ("a struck-through price, a per-month instalment, or a reward figure"), and coupang is the store
+  most exposed to it: its sale price is reachable only through hashed CSS-module classes (§10 forbids
+  those), so it declares no price selector and mines the card text.
+  Proximity cannot tell the two shapes apart — `배송비 3,000원` and `최대 339원 적립` both sit one space from
+  their amount — so the markers are split by the SIDE they take: fee/coupon words disqualify an amount that
+  FOLLOWS them, reward/point/instalment words disqualify one they follow. Each amount is judged in the full
+  text; cutting first is what hid the marker from the test.
+  Live before/after on one 12-card page: **2 rows changed**, both from the struck-through regular price to
+  the 최저 price the card advertises (25,670 → 19,500 and 12,330 → 10,180), which is exactly what the user's
+  list now shows. The guarded cart still revalidates and adds (`coupang added 9334628346`), and
+  mutation-checking the side rule turns 5 tests red.
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /

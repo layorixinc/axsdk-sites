@@ -1446,3 +1446,87 @@ test('arrival is checked against the target, so a fast navigation costs one chec
   assert.ok(hrefReads <= 10,
     `arrival should settle in a few href reads, not a ceiling of them — got ${hrefReads}`);
 });
+
+// coupang states four amounts in one card and declares NO price selector: its sale price is reachable only
+// through hashed CSS-module classes (AGENTS.md 10 forbids those), so the reader parses the card TEXT with
+// the last_before_shipping strategy. Measured live 2026-08-26, a card reads:
+//   15,560원 (struck through) · 56% · 6,780원 (what the buyer pays) · (1개당 6,780원) · 최대 339원 적립
+// The strategy cuts at the first cutoff marker and takes the LAST 원 amount before it. 적립 comes AFTER its
+// own amount, so the reward figure is inside the head — and a reward read as a price is the exact failure
+// 13 warns about (a struck-through price, an instalment, a reward figure).
+const COUPANG = {
+  site: 'coupang',
+  search_url: 'https://www.coupang.com/np/search',
+  search_param: 'q',
+  search_path_marker: '/np/search',
+  result_selector: 'li[data-id]',
+  result_ready_selector: 'li[data-id]',
+  result_url_selector: 'a',
+  result_title_selector: 'img[alt]',
+  result_image_selector: 'img[alt]',
+  // The real adapter declares BOTH of these, and a fixture without them tests a config no store has:
+  // mining the row text is opt-in precisely because a reward figure would otherwise be read as a price.
+  price_from_text: true,
+  shipping_from_text: true,
+  price_text_strategy: 'last_before_shipping',
+  default_currency: 'KRW',
+  product_id_patterns: ['/vp/products/(%d+)'],
+  product_url_prefix: 'https://www.coupang.com/vp/products/',
+};
+
+test('coupang: the price is what the buyer pays, not the reward or the struck-through amount', () => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    // The reader navigates when the open page is not this query's result page, so the grid has to be
+    // what the NEXT document holds — a fixture whose card sits only on the pre-navigation page tests a
+    // page the reader never reads.
+    afterNavigate: { 'li[data-id]': [{
+      text: '무선 마우스 15,560원56%6,780원(1개당 6,780원) 내일(금) 도착 보장 (13,588) 최대 339원 적립',
+      url: 'https://www.coupang.com/vp/products/123456',
+      image_alt: '무선 마우스',
+    }] },
+  });
+
+  const { value } = search(page, {}, COUPANG);
+  const first = Object.values(value.candidates ?? {})[0];
+
+  assert.equal(first?.price, 6780, 'the sale price, not 339 (reward) and not 15560 (struck through)');
+});
+
+test('coupang: a shipping FEE beside the price is not the price', () => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    // The reader navigates when the open page is not this query's result page, so the grid has to be
+    // what the NEXT document holds — a fixture whose card sits only on the pre-navigation page tests a
+    // page the reader never reads.
+    afterNavigate: { 'li[data-id]': [{
+      text: '무선 마우스 6,780원 배송비 3,000원',
+      url: 'https://www.coupang.com/vp/products/222',
+      image_alt: '무선 마우스',
+    }] },
+  });
+
+  const first = Object.values(search(page, {}, COUPANG).value.candidates ?? {})[0];
+
+  assert.equal(first?.price, 6780);
+  assert.equal(first?.shipping_cost, 3000, 'the fee is the fee, and it is not the price');
+});
+
+test('coupang: a reward line after the price leaves the price alone', () => {
+  const page = makePage({
+    href: 'https://www.google.com/',
+    // The reader navigates when the open page is not this query's result page, so the grid has to be
+    // what the NEXT document holds — a fixture whose card sits only on the pre-navigation page tests a
+    // page the reader never reads.
+    afterNavigate: { 'li[data-id]': [{
+      text: '무선 마우스 6,780원 무료배송 최대 339원 적립',
+      url: 'https://www.coupang.com/vp/products/333',
+      image_alt: '무선 마우스',
+    }] },
+  });
+
+  const first = Object.values(search(page, {}, COUPANG).value.candidates ?? {})[0];
+
+  assert.equal(first?.price, 6780);
+  assert.equal(first?.shipping_cost, 0);
+});

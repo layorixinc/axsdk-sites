@@ -57,6 +57,8 @@ RPC_LUA_REFERENCE.md          # RPC ops, module shape, and the smallest complete
 FLOWS_IMPROVEMENTS.md         # measured authoring review of both flow documents + ordered proposals
 CWS_LAUNCH_PLAN.md            # Chrome Web Store launch blockers + owners, quoted from current policy
 CWS_PRODUCT_READINESS_REVIEW.md # end-user CWS readiness verdict, live evidence, and TDD gate order
+CWS_RELEASE_DESIGN.md         # R1 embeds every pack, R2 turns on remote packs: tracks, gates, decisions
+TODO.md                       # deferred-work register: why not now, what unblocks it
 AFFILIATE_DESIGN.md           # retired M1 affiliate design; historical until server + policy gates exist
 SITE_DATA_SPLIT_DESIGN.md     # selectors as remote DATA so a store fix does not need a review
 COMPETITIVE_RESEARCH.md       # agentic extensions measured from their store listings
@@ -2574,3 +2576,37 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   the item page renders no `h1`, no price and an empty title in this profile — `#root` exists and
   never hydrates. So a shipping-enrichment feature would have been built on a source nobody has
   seen work; name the folded store instead, and do not add a selector for either site from memory.
+- **The CWS release strategy is fixed: R1 embeds every pack, R2 turns remote community packs on.** The
+  execution design is `CWS_RELEASE_DESIGN.md`; `CWS_LAUNCH_PLAN.md` stays the policy/owner register and
+  `CWS_PRODUCT_READINESS_REVIEW.md` the journey verdict. Four measurements from 2026-08-26 that a plan
+  written off the older documents would get wrong:
+  1. **"Embed the packs" is new code, not a switch.** The only pack byte source in shipped code is a
+     network registry (`packs/registry.ts:200,370-555`) and `PACK_REGISTRIES` is `Object.freeze([])`
+     (`packs/config.ts:17-19`) — so the pipeline is CLOSED, not embedded, and no package-carried pack
+     path exists anywhere in `src/packs/**`. The producer (`tools/packs/first-party.ts`, 431 lines,
+     2 packs) writes **nothing to disk** and signs with the placeholder `'A'×85+'Q'`; its only caller is
+     its own test. The seam is `packs/config.ts` (registry list + fetch), and the shape is already proven
+     twice: `packs/manual-qa.ts:209-213` serves packaged signed responses through a fetch, and
+     `background/workspace-assets.ts:193-247` reads `chrome.runtime.getURL` assets with per-asset digest
+     checks. Reusing it keeps ONE verification path for R1 and R2 — signature, digest, schema, two-phase
+     approval, disabled-by-default, composition re-verify — which is the point.
+  2. **An agent pack's task runs in a hosted DOCUMENT, and that URL is closed.** `execution.role: 'task'`
+     dispatches to `PACK_TASK_EXECUTOR`, which is `undefined` in production, so an embedded agent pack
+     answers `no_executor_document` (`background/service-worker.ts:371-377`). `chrome.userScripts` does
+     not inject into extension-origin documents, so this cannot be answered with a packaged HTML page —
+     it is a deployment decision, not a config value.
+  3. **The P0-3a domain gate was never wired, while its own plan said it was.** `ops/domain-gate.ts` and
+     the dispatcher branch exist with 25 tests, and the single production construction
+     (`background/service-worker.ts:1392-1413`) passes no `domainGate`; the identifier appears nowhere
+     else in the package. So a `dom.*`/`nav.*` op is bounded only by session tab-group membership and
+     risky-action consent, exactly the exposure the 08-22 addendum measured. Corrected in
+     `COMMUNITY_SCRIPT_IMPLEMENTATION_PLAN.md` Phase 4. **The plan's "(25 tests)" was right** — a scout
+     reported 20 and re-counting showed 25, so the claim to fix was the wiring, not the number.
+  4. **`release:cws` fails closed on real drift, measured today**: `21 stale + missing
+     _common.75_rpc_community`, workspace `sha256:75f134d6…` with 32 assets / 26 modules (the review says
+     31/25). No ZIP or sidecar was written. Only `tools/rpc-package.mjs push --modules-only` can close it,
+     and that is a production write needing approval.
+  Also worth carrying: the gate-enforced product charter in `community/release-policy.json` describes the
+  R2 product ("runs user-selected community web-automation scripts"), which R1 by definition does not do.
+  Two releases need two true sentences; loosening the charter gate to cover both would leave neither
+  provable.

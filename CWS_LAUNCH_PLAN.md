@@ -6,6 +6,10 @@ The current user-scenario verdict, latest ten-site sweep, and test-first complet
 `CWS_PRODUCT_READINESS_REVIEW.md`. This document remains the owner/deliverable plan; the review is the
 current evidence baseline.
 
+**출시 전략 확정 (2026-08-26)**: 첫 릴리스(R1)는 **모든 pack을 확장 패키지에 임베드**해서 내고, 원격 community pack은
+**다음 업데이트(R2)**에서 활성화한다. 그 두 릴리스의 실행 설계 — 트랙, 변경 지점, 먼저 실패시킬 게이트, 결정 대기 목록 —
+는 `CWS_RELEASE_DESIGN.md`에 있다. 이 문서는 정책 대조와 담당/산출물 등록부로 남는다.
+
 담당은 저장소/역할 기준이다. 사람 배정은 이 문서의 권한 밖이다.
 
 | 코드 | 파트 | 저장소 |

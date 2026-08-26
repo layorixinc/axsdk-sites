@@ -3,6 +3,12 @@
 Date: 2026-08-18  
 Scope: public Chrome Web Store launch readiness, reviewed from end-user journeys rather than implementation inventory.
 
+Re-measured 2026-08-26: the release strategy is now fixed — **R1 embeds every pack** and remote community
+packs arrive in **R2**. The execution design lives in `CWS_RELEASE_DESIGN.md`, which also corrects four
+numbers below (workspace is 32 assets / 26 modules, `_common/rpc` is 14 files, backend drift is 21 stale +
+1 missing, and `build:cws` is a verification step, not a stripping profile) and one status claim outside
+this file (the P0-3a domain gate is implemented but **not wired**, so that gate is still open).
+
 ## Verdict
 
 **NO-GO for a public CWS submission.**

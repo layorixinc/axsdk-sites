@@ -401,10 +401,15 @@ Cleanup only after the smoke proves the request works.
 
 ### Phase 4 — Domain gate on ops
 
-**Status:** Complete on 2026-08-22.
+**Status:** module complete on 2026-08-22. **NOT WIRED — corrected 2026-08-26 by measurement.**
 
-`src/ops/domain-gate.ts` + `src/ops/domain-gate.test.ts` (25 tests), wired at the dispatcher's single
-construction site in `background/service-worker.ts`.
+`src/ops/domain-gate.ts` + `src/ops/domain-gate.test.ts` (25 tests, count verified) and the dispatcher
+branch `dispatcher.ts:36,91-99` are in place. The earlier line here claimed the gate was "wired at the
+dispatcher's single construction site in `background/service-worker.ts`". It is not: that site
+(`service-worker.ts:1392-1413`) passes no `domainGate`, and the whole package contains the identifier
+only in `dispatcher.ts` and its test. So the P0-3a release gate is **open** — a `dom.*`/`nav.*` op is
+bounded today only by session tab-group membership (`dispatcher.ts:83-88`) and risky-action consent.
+Wiring it is track T4 in `CWS_RELEASE_DESIGN.md`.
 
 **What shipped**
 

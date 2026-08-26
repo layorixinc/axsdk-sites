@@ -83,9 +83,27 @@ Error: backend module drift: stale _common.61_rpc_storefront, … (21건), missi
 `minimum_chrome_version 138`, 권한 7종(`storage`, `userScripts`, `debugger`, `offscreen`, `tabGroups`,
 `declarativeNetRequestWithHostAccess`, `scripting`), `host_permissions` `http://*/*`+`https://*/*`, 아이콘 4종, 고정 `key`.
 
-**두 저장소 어디에도 없는 것**: 스크린샷(1280×800), 타일(440×280), 마키(1440×960), 스토어 긴 설명,
+**두 저장소 어디에도 없는 것**: 스크린샷(1280×800), 타일(440×280), 마키(1400×560), 스토어 긴 설명,
 개인정보 처리방침 URL, 지원/홈페이지 URL, 권한 7종 + 광범위 호스트 소명 문구, `_locales/en|ko`,
 데이터 사용 공시문, `.env.example`, 소비자 로그인, 개발자 표면 분리.
+
+### 1.6 개발자 콘솔에서만 할 수 있는 일 (계정 소유자)
+
+공식 문서 기준(`register`, `set-up-account`, `cws-dashboard-listing`, `cws-dashboard-privacy`,
+`cws-dashboard-distribution`, `manifest/key`)으로, 우리가 코드로 대신할 수 없는 항목:
+
+| 시점 | 콘솔 작업 | 비고 |
+|---|---|---|
+| 지금 | 개발자 등록(일회성 등록비) + 약관 동의 | **계정 이메일은 이후 변경 불가** — 전용/조직 계정 권장 |
+| 지금 | Account 페이지: Publisher name(필수), 연락 이메일 **인증**(필수), Trusted testers(비공개 배포용) | 물리 주소는 **유료 기능이 있을 때만** 필수 |
+| 지금 | **드래프트 아이템 생성 → Package 탭 → View public key** | 그 공개키가 `src/manifest.json`의 `key`가 되어야 스토어 ID와 개발 ID가 일치한다. 현재 키는 로컬 생성분이고 그 id는 6개 파일에 문자열로 남아 있다 |
+| 지금 | Official URL(검증된 게시자) — Search Console 도메인 소유 확인 | 도메인 소유자만 가능 |
+| 산출물 후 | Store listing: 긴 설명 · 카테고리 · 언어 · 스토어 아이콘 128 · 스크린샷 1280×800(1~5) · 타일 440×280 · 마키 1400×560(선택) · Homepage/Support URL · Mature content 선언 | 문안·이미지는 T6가 파일로 공급 |
+| 산출물 후 | Privacy practices: **Single purpose**(D1) · 권한 7종 + 호스트 소명 · **Remote code 선언** · Data usage 체크박스 2세트(수집 항목 + Limited Use 인증) · 개인정보 URL | 문서 원문: 원격 코드를 쓰면서 신고하지 않으면 **거절**, 신고해도 심사 지연 |
+| 산출물 후 | Distribution: Visibility(Public / Unlisted / Private+테스터·그룹) · 지역 | D3의 결과가 여기서 선택된다 |
+
+**Remote code 필드가 T3의 기한을 정한다**: 오늘 dist에는 3개 번들 × `raw.githubusercontent.com` 5회와 Fengari가
+있다. T3 전에 제출하면 "Yes, I am using remote code"를 써야 하고, T3 후에는 "No"를 게이트가 증명한다.
 
 ---
 
@@ -206,7 +224,7 @@ API 키 입력이 **없는지**(T3의 마커 게이트 확장).
 | `store/listing.md` | 제품명, 짧은/긴 설명, 카테고리 |
 | `store/permissions.md` | 권한 7종 + 광범위 호스트 소명 각 한 단락 (`debugger`가 핵심) |
 | `store/privacy.md` | 확장 전용 수집·사용·공유·보관 표, 수신자(백엔드·모델), 삭제 수단, Limited Use 확약 |
-| `store/assets/` | 스크린샷 1280×800, 타일 440×280, 마키 1440×960 |
+| `store/assets/` | 스크린샷 1280×800, 타일 440×280, 마키 1400×560 |
 | `_locales/en`, `_locales/ko` | 매니페스트 name/description을 `__MSG_*__`로 |
 
 **먼저 RED**: `check:listing` — 위 파일·섹션과 매니페스트의 `homepage_url`·개인정보 URL 존재 검사. 오늘 전부 없음.
@@ -271,7 +289,7 @@ T3·T4·T5·T6은 서로 독립이라 병렬로 간다.
 ## 6. 제출 체크리스트
 
 - [ ] 단일 목적 문장(D1) · 짧은/긴 설명 · 카테고리
-- [ ] 스크린샷 ≥1(1280×800) · 타일 440×280 · 마키 1440×960
+- [ ] 스크린샷 ≥1(1280×800) · 타일 440×280 · 마키 1400×560
 - [ ] 권한 7종 + 광범위 호스트 소명(`debugger` 포함)
 - [ ] 개인정보 처리방침 URL(확장 전용 서술) · 지원 URL · 데이터 사용 공시 · Limited Use 확약
 - [ ] dist에 `raw.githubusercontent.com` 0회, `PACK_REGISTRIES`가 패키지 레지스트리 전용 — 게이트가 증명

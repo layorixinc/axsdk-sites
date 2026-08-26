@@ -176,6 +176,18 @@ export function installRpcStub(lua, page, { allow } = {}) {
       }
       return first.text ?? '';
     },
+    // The runtime HAS this op — measured live 2026-08-26, `dom.get_attr("#listing-page-quantity-select",
+    // "value")` answered "1" — and this stub did not, so every caller of `attr_of` read nil offline. The
+    // required-option guard therefore could not tell a CHOSEN option from an unchosen one: it refused
+    // either way, and the one test covering it passed for the wrong reason. A missing op is as dishonest
+    // as a permissive one.
+    'dom.get_attr': (selector, name) => {
+      page.tick();
+      const first = rowsFor(selector)[0];
+      if (!first) throw new Error(`rpc dom.get_attr failed: no_element: ${selector}`);
+      const value = first[name];
+      return value === undefined || value === null ? '' : String(value);
+    },
     'dom.query_all': (selector, fields, limit) => {
       // The channel can refuse an op while it is re-attaching — measured live as `rpc_timeout` on the
       // first read after a navigation, which killed a whole tool because the error propagated.
@@ -261,6 +273,7 @@ export function installRpcStub(lua, page, { allow } = {}) {
           if (op === 'dom.exists') return { value: api['dom.exists'](params.selector) };
           if (op === 'dom.get_text') return { value: api['dom.get_text'](params.selector) };
           if (op === 'dom.get_location_href') return { value: api['dom.get_location_href']() };
+          if (op === 'dom.get_attr') return { value: api['dom.get_attr'](params.selector, params.name ?? params.attr) };
           if (op === 'dom.query_all') {
             return { value: api['dom.query_all'](params.selector, params.fields, params.limit) };
           }
@@ -296,6 +309,7 @@ export function installRpcStub(lua, page, { allow } = {}) {
       get_location_href: () => call('dom.get_location_href'),
       exists: (selector) => call('dom.exists', selector),
       get_text: (selector) => call('dom.get_text', selector),
+      get_attr: (selector, name) => call('dom.get_attr', selector, name),
       query_all: (selector, fields, limit) => call('dom.query_all', selector, fields, limit),
       click: (selector) => call('dom.click', selector),
       set_value: (selector, value) => call('dom.set_value', selector, value),

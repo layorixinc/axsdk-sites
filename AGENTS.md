@@ -1938,9 +1938,8 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   reads like the cart region and is not: 0 tiles, 0 item ids, 0 `/ip/` links — it is the shipping panel.
   **The honest matrix after the fix** (`npm run test:commerce:live:cart`): **added, on a cart LINE** —
   amazon (`B0CG1LGWR6`), coupang (`8087835532`), ebay (`366624299100`), walmart (`910614807`);
-  **`pending`, claiming nothing** —
-  11st (its guest cart kept only an older line, so today's add is unproven), etsy, gmarket, ssg
-  (no id is readable there without a signed-in user); **`access_denied`** — aliexpress (captcha).
+  **classified, claiming nothing** — etsy and ssg `cart_empty`, 11st `cart_missing_product`, gmarket
+  `add_to_cart_pending`; **`access_denied`** — aliexpress (captcha).
   The walmart proof needed a second run to mean anything: the first answered `added` for `2387232905`,
   which that cart ALREADY held from an earlier session — `cart_contains` is true on arrival, so the click
   is skipped and the report is about the cart's state, not about this turn. Re-run with a product the cart
@@ -1955,6 +1954,21 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `npm run test:commerce:sites` pins both scope rules — a scope may not be one of the page-level
   containers this survey measured, and may not name a recommendation surface — mutation-checked with
   `#sc-page-content`, `#cart-reco-widget .item` and a bare `li`.
+- **`pending` was one bucket holding three different facts, and only one of them was unknown.**
+  "clicked, not confirmed" covered a cart the store itself renders as EMPTY (so the click never reached
+  it), a cart holding OTHER lines but not ours, and a page nobody can read. `R.classify_unconfirmed` now
+  separates them from one body read taken only when there is something to explain: a measured per-store
+  phrase (`cart_empty_phrases`) → `cart_empty`; else the declared `cart_item_scopes` matching at least one
+  line → `cart_missing_product`; else `add_to_cart_pending`. Live: etsy `cart_empty`, ssg `cart_empty`,
+  11st `cart_missing_product` (its guest cart keeps an older line), gmarket `add_to_cart_pending`.
+  **The phrase is measured per store and never generic, and gmarket is the reason:** the only
+  "…상품이 없습니다" on its cart page is **최근 본 상품이 없습니다** — the recently-viewed rail reporting that
+  IT is empty. A generic Korean phrase would call the cart empty from a rail's own message, which is the
+  rail defect the id scoping just closed, pointing the other way. So gmarket declares no phrase and keeps
+  the honest unknown; `test:commerce:sites` refuses any phrase that is a substring of that rail sentence
+  (mutation-checked by giving gmarket `상품이 없습니다` → red) and both classifier branches are
+  mutation-checked (disable either → 1 red). The runner learned both codes, because a code it does not
+  know is reported as `unknown`, which fails the store rather than telling the user anything.
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /

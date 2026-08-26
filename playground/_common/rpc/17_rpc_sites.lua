@@ -504,7 +504,8 @@ RPC_SITES["etsy"] = {
     "select[name=\"quantity\"]"
   },
   required_option_selectors = {
-    "select[required]"
+    "[id^=\"variation-selector-\"]",
+    "[id^=\"perso-dropdown-\"]"
   },
   confirmation_selector = "[data-add-to-cart-success]",
   confirmation_text_selectors = {

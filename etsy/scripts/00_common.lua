@@ -36,7 +36,15 @@ local CONFIG = {
   add_selectors = { '#listing-page-cart button[type="submit"]',
                     '[data-buy-box] form[action*="/cart/listing.php"] button[type="submit"]' },
   quantity_selectors = { 'select[name="quantity"]' },
-  required_option_selectors = { 'select[required]' },
+  -- Measured live 2026-08-26 on `/listing/1848131106`: `select[required]` matches **0** — etsy marks no
+  -- variation control required or aria-required — so the guard saw nothing to choose and clicked blindly,
+  -- the site refused the add, and the empty cart was then reported as `cart_empty`. After the click etsy
+  -- marks every unchosen control `aria-invalid="true"`, which is the site naming what it wanted:
+  -- `#variation-selector-0/1` (the variations) and four `#perso-dropdown-…` (choices among options).
+  -- `dom.get_attr("[id^=\"variation-selector-\"]", "value")` reads "" unchosen and the chosen value after.
+  -- `#perso-input-…` is deliberately ABSENT: a free-text personalization field is not a choice among
+  -- options, and requiring it would refuse an add whose text is genuinely optional on another listing.
+  required_option_selectors = { '[id^="variation-selector-"]', '[id^="perso-dropdown-"]' },
   -- Per-add panel ONLY. `[data-cart-listing-id]` names a LISTING ALREADY IN THE CART and
   -- `[aria-live="polite"]` is a page-wide live region — either one made `cart_contains` true off the cart
   -- page for a cart holding anything at all, so the guard skipped the click and reported `added = true`.

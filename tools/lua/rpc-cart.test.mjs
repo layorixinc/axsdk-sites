@@ -203,6 +203,54 @@ test('a required variation stops the add', () => {
   assert.deepEqual(clicks(page), []);
 });
 
+// Etsy, measured live 2026-08-26 on `/listing/1848131106`. Its variation controls carry NEITHER
+// `required` NOR `aria-required`, so the configured `select[required]` matched 0 and the guard clicked
+// blindly: the site refused the add and the cart stayed empty, which we then reported as `cart_empty`.
+// After the click etsy marks every unchosen control `aria-invalid="true"` — that is the site telling us
+// what it wanted. The controls it marked:
+//   #variation-selector-0/1   the two variations (Aviator / cable length)
+//   #perso-dropdown-…×4       choices among options (colour, connector type)
+//   #perso-input-…            a free-text personalization field
+// So the honest declaration is the id prefixes, and the guard refuses BEFORE clicking.
+const ETSY_OPTIONS = {
+  ...CONFIG,
+  site: 'etsy',
+  required_option_selectors: ['[id^="variation-selector-"]', '[id^="perso-dropdown-"]'],
+};
+
+test('etsy: an unchosen variation stops the add before the click', () => {
+  const page = shop({ extra: { '[id^="variation-selector-"]': [{ text: 'Select an option' }] } });
+  const result = add(page, { config: ETSY_OPTIONS });
+
+  assert.equal(result.error, 'variation_required');
+  assert.deepEqual(clicks(page), [], 'a listing that needs a choice is never clicked blindly');
+});
+
+test('etsy: an unchosen personalization DROPDOWN stops it too', () => {
+  const page = shop({ extra: { '[id^="perso-dropdown-"]': [{ text: 'Select an option' }] } });
+  const result = add(page, { config: ETSY_OPTIONS });
+
+  assert.equal(result.error, 'variation_required');
+});
+
+test('etsy: a free-text personalization field is NOT treated as a required choice', () => {
+  // `#perso-input-…` was aria-invalid on that listing too, but a free-text field is not a choice among
+  // options: declaring it required would refuse an add whose text is genuinely optional, and we have not
+  // measured a listing where it is. Absent from the declaration on purpose.
+  const page = shop({ extra: { '[id^="perso-input-"]': [{ text: '' }] } });
+  const result = add(page, { config: ETSY_OPTIONS });
+
+  assert.notEqual(result.error, 'variation_required');
+});
+
+test('etsy: a chosen variation lets the add proceed', () => {
+  const page = shop({ extra: { '[id^="variation-selector-"]': [{ text: 'Aviator', value: 'aviator' }] } });
+  const result = add(page, { config: ETSY_OPTIONS });
+
+  assert.notEqual(result.error, 'variation_required');
+  assert.ok(clicks(page).length > 0, 'nothing blocks a listing whose options are chosen');
+});
+
 test('a quantity above one is set before the add', () => {
   const page = shop();
   add(page, { quantity: 3 });

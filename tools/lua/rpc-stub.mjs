@@ -167,6 +167,16 @@ export function installRpcStub(lua, page, { allow } = {}) {
     'dom.exists': (selector) => { page.tick(); return rowsFor(selector).length > 0; },
     'dom.get_text': (selector) => {
       page.tick();
+      // A page's TEXT changes as it settles, exactly as its element count does — eBay's header cart badge
+      // reads "5" for a moment after an add and then "6". `dom.query_all` has honoured `sequence` all
+      // along; a reader that waits on text could not be tested without this.
+      const seqKey = page.sequence && (page.sequence[selector] ? selector : null);
+      if (seqKey) {
+        const steps = page.sequence[seqKey];
+        const rows = steps[Math.min(page.sequenceAt[seqKey] ?? 0, steps.length - 1)];
+        page.sequenceAt[seqKey] = (page.sequenceAt[seqKey] ?? 0) + 1;
+        return rows[0]?.text ?? '';
+      }
       const first = rowsFor(selector)[0];
       // Every document has a body. A page that declares no body row is a page with an empty one, not a
       // page missing an element — raising there would make a reader look broken for asking.

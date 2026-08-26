@@ -280,6 +280,60 @@ test('11st: a listing without an option list still adds', () => {
   assert.ok(clicks(page).length > 0);
 });
 
+// eBay's add is an in-page XHR: the URL stays on `/itm/<id>` and the only thing that moves is the header
+// cart badge, measured live 2026-08-26 as **5 → 6** on `.gh-cart .gh-badge`. The store declares no
+// `add_ready_selector`, so the guard navigated to the cart the instant the click returned and read a cart
+// that had not committed yet — which is why eBay alternated between `added` and `pending` run to run.
+//
+// The count is NOT used as evidence of the add: it proves something entered the cart, never WHICH product,
+// and that distinction is the whole point of this file. It is used as the ready SIGNAL, after which the
+// cart-line check still has to name the id.
+// eBay declares neither a confirmation selector nor confirmation text, so this config carries neither:
+// the default fixture's amazon panel would otherwise confirm the add for the wrong reason.
+const { confirmation_selector: _ebayPanel, confirmation_text_selectors: _ebayText, ...EBAY_BASE } = CONFIG;
+const EBAY_COUNT = {
+  ...EBAY_BASE,
+  site: 'ebay',
+  cart_count_selectors: ['.gh-cart .gh-badge'],
+  cart_item_scopes: ['[data-test-id="cart-bucket"]'],
+};
+
+/** eBay's add: the page does not move, no panel appears, and only the header badge changes. */
+function ebayShop({ badge = [['5'], ['5'], ['6']], cartLists = true } = {}) {
+  const page = shop({
+    extra: { '.gh-cart .gh-badge': [{ text: badge[0][0] }] },
+    onAdd: (current, dom) => {
+      // Still on `/itm/<id>`: an XHR ran, nothing else in this document changed.
+      dom['[data-test-id="cart-bucket"]'] = cartLists
+        ? [{ text: 'USB C Cable' }, { text: 'B0TEST1234' }]
+        : [];
+      if (cartLists) dom['[data-test-id="cart-bucket"] a[href*="B0TEST1234"]'] = [{ text: 'USB C Cable' }];
+      current.dom = dom;
+    },
+  });
+  page.sequence = { '.gh-cart .gh-badge': badge.map((step) => [{ text: step[0] }]) };
+  page.sequenceAt = {};
+  return page;
+}
+
+test('ebay: the add waits for the store own counter to move before reading the cart', () => {
+  const page = ebayShop();
+  const result = add(page, { config: EBAY_COUNT });
+
+  const badgeReads = page.ops.filter((entry) => entry.op === 'dom.get_text'
+    && String(entry.params?.selector ?? '').includes('gh-badge')).length;
+  assert.ok(badgeReads >= 3, `the counter is polled until it moves, not read once (reads=${badgeReads})`);
+  assert.equal(result.added, true, 'once the counter moved, the cart line still had to name the id');
+});
+
+test('ebay: a counter that never moves does not block forever, and claims nothing', () => {
+  const page = ebayShop({ badge: [['5'], ['5'], ['5'], ['5']], cartLists: false });
+  const result = add(page, { config: EBAY_COUNT });
+
+  assert.equal(result.added, false);
+  assert.equal(result.error, 'add_to_cart_pending');
+});
+
 test('a quantity above one is set before the add', () => {
   const page = shop();
   add(page, { quantity: 3 });

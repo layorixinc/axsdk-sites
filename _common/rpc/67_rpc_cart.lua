@@ -396,6 +396,24 @@ function R.add_to_cart(args)
     end
     if config.add_ready_selector then wait_for(config.add_ready_selector, config.product_timeout or 8000) end
 
+    -- eBay's add is an in-page XHR: the URL stays on `/itm/<id>` and the only thing that moves is the
+    -- store's own header badge (measured live 5 → 6 on `.gh-cart .gh-badge`). With no ready selector the
+    -- guard navigated to the cart the instant the click returned and read a cart that had not committed,
+    -- which is why that store alternated between `added` and `pending` run to run. So a store whose
+    -- counter we can read is given a bounded moment to move it.
+    --
+    -- The counter is NOT evidence: it says something entered the cart, never WHICH product. It is the
+    -- ready signal, and the cart-line check still has to name the id.
+    if before ~= nil and #(config.cart_count_selectors or {}) > 0 then
+      local deadline = 8
+      for _ = 1, deadline do
+        local now = R.cart_count(config)
+        if now ~= nil and now > before then break end
+        if not rpc or type(rpc.sleep) ~= "function" then break end
+        rpc.sleep(250)
+      end
+    end
+
     -- An optional upsell pane ("add a protection plan") stands between the click and the confirmation.
     -- Declining is the default: nobody approved a second product.
     if config.upsell_pane_selector and exists(config.upsell_pane_selector) then

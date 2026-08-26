@@ -46,13 +46,18 @@ test('every test suite under tools/ is reachable from an npm script', () => {
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   const commands = Object.values(pkg.scripts ?? {}).join(' ');
   const orphans = [];
+  // Both runners live here: `node --test` over `.test.mjs` and `bun test` over `.test.ts`. A gate that
+  // knows one extension is the hand-maintained list in another costume — the Pack suites are TypeScript.
   const walk = (dir) => {
     for (const entry of readdirSync(new URL(`${dir}/`, new URL('../../', import.meta.url)), { withFileTypes: true })) {
       const path = `${dir}/${entry.name}`;
       if (entry.isDirectory()) { walk(path); continue; }
-      if (!entry.name.endsWith('.test.mjs')) continue;
-      const glob = `${dir}/*.test.mjs`;
-      if (!commands.includes(path) && !commands.includes(glob)) orphans.push(path);
+      const suffix = ['.test.mjs', '.test.ts'].find((candidate) => entry.name.endsWith(candidate));
+      if (suffix === undefined) continue;
+      const reachable = commands.includes(path)
+        || commands.includes(`${dir}/*${suffix}`)
+        || new RegExp(`(?:^|\\s)bun test [^&|]*${dir.replaceAll('/', '\\/')}(?:\\s|$)`).test(commands);
+      if (!reachable) orphans.push(path);
     }
   };
   walk('tools');

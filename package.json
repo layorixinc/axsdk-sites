@@ -40,7 +40,8 @@
     "build:schema": "node tools/build-schema.mjs",
     "dead:lua": "node tools/dead-lua.mjs",
     "test:playground:live": "node tools/scenarios/playground-live.mjs",
-    "test:scenarios": "node --test \"tools/scenarios/*.test.mjs\""
+    "test:scenarios": "node --test \"tools/scenarios/*.test.mjs\"",
+    "test:commerce:live:cart": "node tools/scenarios/cart-live.mjs"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

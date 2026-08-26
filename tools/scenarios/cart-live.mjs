@@ -234,6 +234,9 @@ export { turnFault } from './turn-fault.mjs';
 
 const CART_FLOW = FLOW_TOOLS.singleSite;
 
+/** The add can land on either turn, so the classifier sees both. */
+export const addCalls = (search, pick) => [...(search?.toolCalls ?? []), ...(pick?.toolCalls ?? [])];
+
 async function proveStore(session, store, { cancel, query }, attempt = 1) {
   console.log(`\n=== ${store}${attempt > 1 ? ` (retry ${attempt - 1})` : ''} ===`);
   await session.reset();
@@ -260,12 +263,17 @@ async function proveStore(session, store, { cancel, query }, attempt = 1) {
              outcome: { label: pickFault.kind === 'misroute' ? 'misrouted' : 'session_fault',
                         detail: pickFault.detail }, search, pick };
   }
+  // Which TURN carried the add is not the point. Measured live: on 11st and etsy the search turn ran the
+  // whole item — refine picked the single candidate, the cart tool answered, next_product moved on — so the
+  // pick turn only met the checkout gate and reading it alone reported "the flow never reached the cart"
+  // about a run where the cart tool had already answered.
+  const calls = addCalls(search, pick);
   // The cart tool publishes no id, so the pick node's own arguments are where it lives.
-  const productId = pickedProductId(pick.toolCalls);
+  const productId = pickedProductId(calls);
   const siteEvidence = cancel ? {} : await readSiteEvidence(session, productId);
   const outcome = classifyAdd({
-    toolCalls: pick.toolCalls,
-    text: pick.text,
+    toolCalls: calls,
+    text: `${search.text ?? ''} ${pick.text ?? ''}`.trim(),
     siteEvidence,
     expect: cancel ? 'cancel' : 'add',
   });

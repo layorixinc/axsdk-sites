@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { classifyAdd, pickedProductId, parseStores, storeVerdict } from './cart-live.mjs';
+import { addCalls, classifyAdd, pickedProductId, parseStores, storeVerdict } from './cart-live.mjs';
 
 const call = (name, status, output) => ({ name, status, output });
 const cartCall = (output) => call('shopping_add_to_cart', 'completed', { next: 'done', ...output });
@@ -221,4 +221,19 @@ test('a misroute and a lost session fail, but not as cart defects', () => {
   const session = storeVerdict({ label: 'session_fault', detail: 'no node' });
   assert.equal(session.pass, false);
   assert.match(session.reason, /session|harness|engine/i);
+});
+// Measured live 2026-08-26: on 11st and etsy the SEARCH turn ran the whole item — refine picked the single
+// candidate, the cart tool answered, and next_product moved on — so the pick turn only met the checkout
+// gate. The runner read the pick turn ALONE and reported no_add_call, "the flow never reached the cart",
+// about a run where the cart tool had already answered. Which turn carried the add is not the point.
+test('the calls handed to the classifier span both turns', () => {
+  const search = { toolCalls: [pickCall('X1'), cartCall({ next: 'done', add_status: 'added' })] };
+  const pick = { toolCalls: [call('shopping_single_site.checkout_confirm', 'completed', { next: 'ask' })] };
+
+  const calls = addCalls(search, pick);
+
+  assert.deepEqual(calls.map((entry) => entry.name), [
+    'shopping_single_site.refine_item', 'shopping_add_to_cart', 'shopping_single_site.checkout_confirm',
+  ]);
+  assert.equal(classifyAdd({ toolCalls: calls, text: '', siteEvidence: { productId: 'X1', mentionsProduct: true } }).label, 'added');
 });

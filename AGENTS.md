@@ -1969,6 +1969,53 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   (mutation-checked by giving gmarket `상품이 없습니다` → red) and both classifier branches are
   mutation-checked (disable either → 1 red). The runner learned both codes, because a code it does not
   know is reported as `unknown`, which fails the store rather than telling the user anything.
+- **`select[required]` is what etsy does NOT mark, so the guard clicked blindly on every variation
+  listing.** Measured live on `/listing/1848131106`: the configured selector matched **0** while the page
+  carried two `#variation-selector-*` and four `#perso-dropdown-*`, all with an empty value; after the
+  click etsy marked each of them `aria-invalid="true"` — the site naming what it wanted. So the add was
+  refused by the store and the empty cart read as `cart_empty`. With the id prefixes declared the guard
+  refuses BEFORE clicking and the store answers `required_option`. `#perso-input-*` is deliberately absent:
+  a free-text personalization field is not a choice among options, and requiring it would refuse an add
+  whose text is optional on a listing nobody has measured.
+- **The stub had no `dom.get_attr` while the runtime does, so no offline test could tell a CHOSEN option
+  from an unchosen one.** `attr_of` is the only way the cart guard reads a control's value; every offline
+  caller read nil, the required-option guard refused either way, and the one test covering it passed for
+  the wrong reason. Measured live: `dom.get_attr("#listing-page-quantity-select", "value")` answers `"1"`.
+  **A missing op is as dishonest as a permissive one** — this is the same lesson as the optimistic
+  `nav.wait_for_navigation` stub, in the other direction.
+- **ssg's configured add selector could have added a DIFFERENT product, and the note I wrote in that same
+  place earlier this stretch was the wrong measurement.** `.ssgitem_btn_cart` matches **9** elements on an
+  item page — related-item icon buttons, not variant rows of this product — and clicking one NAVIGATED to
+  `itemId=1000728596071` with `click=itemMidArea23`. The product's own control is `#actionCart` (sticky-bar
+  duplicate `#_bar_actionCart`); `#btn_cart` matched nothing. Measured further, with the correct control
+  clicked the guest cart still shows empty, so ssg keeps a cart only for a signed-in user and `cart_empty`
+  is the honest outcome. The adapter gate now refuses the three controls measured NOT to be a buy box
+  (this one, gmarket's confirmation-popup link, the unscoped etsy cart-form submit).
+- **Two stores declared a confirmation panel that does not exist.** After a real click, ssg's page carries
+  **0** `[data-layer-name]` elements and gmarket's **0** `[data-cart-layer="success"], .box__layer-cart.is-active`.
+  Both are gone. gmarket keeps NO `cart_item_scopes` either, and that is the finding rather than an
+  omission: its cart DOES receive the item (header `장바구니 갯수3개`, four `goodsCode=` links inside one
+  `.basket_list_group`), but the 최근 본 상품 rail that produced the original false positive would not render
+  again, so no scope could be validated AGAINST it — and a scope validated against nothing is the rail
+  defect waiting to return. gmarket therefore answers `add_to_cart_pending`, which claims nothing.
+- **Three faults wore one label in the live gate, and only one belonged to the cart.** A turn fails because
+  the backend never opened a session, because the engine answered with NO node, or because the planner
+  routed the message into another flow — all three printed "the flow never reached the cart", which reads
+  like a defect in the cart path and sent one investigation to the wrong repo. `turnFault` names them, one
+  retry each, always reported with a count; a STALLED turn is reported and never retried, because it
+  produced evidence and re-running throws that evidence away. Live, an etsy turn hit `no-node`, the runner
+  said so, retried once, and the store then answered `required_option`.
+- **A live Pack session pins one composition, and switching the active set underneath it was unguarded.**
+  `compositionInUse` already refused a remove and a reset; the operation a user reaches most often —
+  enable/disable/replace — went through `activate()` unchecked, so a live session could end up running a
+  composition the manager no longer calls active with nothing on any surface saying so. The refusal
+  (`session_pinned`) sits at the single place a switch happens, after the idempotent early return, so
+  enabling what is already active stays a no-op. Proven in a real browser through the same manager the
+  Options page drives, with the activation pointer read back afterwards — a refusal that still moved the
+  pointer would be worse than no refusal — and mutation-checked: disabling the guard fails both the unit
+  test and the live proof. **A pre-existing test had built its scenario through a disable while reporting a
+  live session, a sequence that cannot happen** (the pin appears when the session starts, which is after
+  the switch); it only passed because nothing refused the switch.
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /

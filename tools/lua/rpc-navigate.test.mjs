@@ -243,6 +243,72 @@ test('a cross-domain open that never lands says so', () => {
   assert.equal(result.error, 'navigation_failed');
 });
 
+// The single-site shopping loop searches and adds to the cart on WHATEVER STORE IS OPEN — both readers
+// derive the adapter from the page, and `shopping_add_to_cart` says so in its own comment. The one thing
+// that pinned the whole flow to one store was the opener's argument: flow state carried `site: amazon`,
+// nothing ever updated it, so a user standing on coupang.com asking to buy something was NAVIGATED AWAY
+// to amazon and shopped there. Nine of the ten published stores were unreachable from that flow.
+test('with no store named, the store already open is the store', () => {
+  const page = makePage({ href: 'https://www.coupang.com/np/search?q=mouse', dom: {}, afterNavigate: {} });
+  installRpcStub(lua, page);
+  const result = lua.call('AX_RPC_NAV.open_site', {});
+
+  assert.equal(result.next, 'search');
+  assert.equal(result.site, 'coupang');
+  assert.equal(result.site_source, 'current_page');
+  assert.deepEqual(navigated(page), [], 'the user is already where they asked to shop');
+});
+
+test('a named store wins over the page the user happens to be on', () => {
+  const page = makePage({ href: 'https://www.coupang.com/np/search?q=mouse', dom: {}, afterNavigate: {} });
+  installRpcStub(lua, page);
+  const result = lua.call('AX_RPC_NAV.open_site', { site: 'ebay' });
+
+  assert.equal(result.site, 'ebay');
+  assert.equal(result.site_source, 'requested');
+  assert.deepEqual(navigated(page), ['https://www.ebay.com/']);
+});
+
+test('an unpublished page with no store named falls back, and says that it did', () => {
+  // A default is honest only while it is VISIBLE: the reply has to name the store it chose, or the user
+  // reads amazon results for a request they never pointed anywhere.
+  const page = makePage({ href: 'https://axsdk.ai/ko', dom: {}, afterNavigate: {} });
+  installRpcStub(lua, page);
+  const result = lua.call('AX_RPC_NAV.open_site', {});
+
+  assert.equal(result.site, 'amazon');
+  assert.equal(result.site_source, 'default');
+  assert.deepEqual(navigated(page), ['https://www.amazon.com/']);
+});
+
+test('the open store is matched by host, subdomain-tolerant, from the generated site data', () => {
+  for (const [href, site] of [
+    ['https://www.11st.co.kr/products/1', '11st'],
+    ['https://search.11st.co.kr/pc/total-search?kwd=x', '11st'],
+    ['https://www.ebay.com/itm/123', 'ebay'],
+    ['https://ko.aliexpress.com/item/1.html', 'aliexpress'],
+    ['https://shopping.naver.com/', 'naver-shopping'],
+  ]) {
+    const page = makePage({ href, dom: {}, afterNavigate: {} });
+    installRpcStub(lua, page);
+    const result = lua.call('AX_RPC_NAV.open_site', {});
+    assert.equal(result.site, site, `${href} -> ${result.site}`);
+    assert.equal(result.site_source, 'current_page');
+    assert.deepEqual(navigated(page), [], `${site} was already open`);
+  }
+});
+
+test('a site the caller named that nobody published is still refused by name', () => {
+  // The fallback must not swallow a caller mistake: an unknown slug is a bug, not "use amazon".
+  const page = makePage({ href: 'https://www.coupang.com/', dom: {}, afterNavigate: {} });
+  installRpcStub(lua, page);
+  const result = lua.call('AX_RPC_NAV.open_site', { site: 'nowhere' });
+
+  assert.equal(result.next, 'error');
+  assert.equal(result.error, 'unknown_site');
+  assert.deepEqual(navigated(page), []);
+});
+
 test('the published site list is the one the site data declares', () => {
   // Two sources for "where does this site live" drift apart, and the one nobody exercises is the one that
   // sends the browser to the wrong host. The commerce stores come from the generated data; only the sites

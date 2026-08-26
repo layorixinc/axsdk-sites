@@ -189,6 +189,45 @@ function N.home_url(slug)
   return N.EXTRA_HOME[site]
 end
 
+--- Which published store a URL is on, or nil. Hosts come from the generated site data, so this cannot
+--- drift from what the readers accept; `www.` and any other subdomain resolve to the same store because
+--- `search.11st.co.kr` and `www.11st.co.kr` are one shop.
+function N.site_of(url)
+  local host = N.base_domain(url)
+  if host == "" or type(RPC_SITES) ~= "table" then return nil end
+  local slugs = {}
+  for slug in pairs(RPC_SITES) do slugs[#slugs + 1] = slug end
+  table.sort(slugs)
+  for index = 1, #slugs do
+    local config = RPC_SITES[slugs[index]]
+    local hosts = type(config) == "table" and config.hosts or nil
+    for host_index = 1, #(hosts or {}) do
+      local candidate = tostring(hosts[host_index] or ""):lower():gsub("^www%.", "")
+      if candidate ~= "" and (host == candidate or host:sub(-(#candidate + 1)) == ("." .. candidate)) then
+        return config.site or slugs[index]
+      end
+    end
+  end
+  return nil
+end
+
+--- The store a single-site turn runs on, and WHERE that decision came from.
+---
+--- The searching and cart readers both derive their adapter from the open page, so the only thing that
+--- ever pinned this flow to one store was the opener's argument: flow state carried `site = "amazon"`,
+--- nothing updated it, and a user standing on their own store was navigated away from it. The order is
+--- the order of evidence: a store the user NAMED, else the store they are already looking at, else the
+--- documented default — which is published as `site_source` so the answer can say it chose.
+N.DEFAULT_SITE = "amazon"
+
+function N.resolve_site(requested, here)
+  local named = trim(requested)
+  if named then return named, "requested" end
+  local open = N.site_of(here)
+  if open then return open, "current_page" end
+  return N.DEFAULT_SITE, "default"
+end
+
 --- Gets the browser onto a site's home page, for the steps that need to BE somewhere before they can act:
 --- the checkout has to reach its cart, bluemoonsoft's page navigation is same-site only, and the
 --- single-site shopping loop searches whichever store is open.
@@ -201,22 +240,29 @@ end
 --- destination. This one waits, so `search` means the browser is there.
 function N.open_site(args)
   args = type(args) == "table" and args or {}
-  local target = N.home_url(args.site) or trim(args.url)
+  -- One href read serves both the resolution and the "already there" check: an op costs a round trip, and
+  -- this tool used to spend one just to decide it had nothing to do.
+  local from = href_or_nil()
+  local site, source = N.resolve_site(args.site, from)
+  local target = N.home_url(site) or trim(args.url)
   if not target then
-    return { next = "error", error = trim(args.site) and "unknown_site" or "missing_target" }
+    -- A slug the caller NAMED and nobody published is a bug, not a reason to shop somewhere else.
+    return { next = "error", site = site, site_source = source,
+             error = trim(args.site) and "unknown_site" or "missing_target" }
   end
 
-  local from = href_or_nil()
   if from and N.same_site(target, from) then
-    return { next = "search", site = args.site, url = target, href = from, navigated = false }
+    return { next = "search", site = site, site_source = source, url = target, href = from,
+             navigated = false }
   end
 
   nav.navigate(target)
   nav.wait_for_navigation({ url = target, timeout = 15000, interval = 250 })
   local landed = href_or_nil()
   if not landed or not N.same_site(target, landed) then
-    return { next = "error", site = args.site, url = target, href = landed,
+    return { next = "error", site = site, site_source = source, url = target, href = landed,
              error = "navigation_failed" }
   end
-  return { next = "search", site = args.site, url = target, href = landed, navigated = true }
+  return { next = "search", site = site, site_source = source, url = target, href = landed,
+           navigated = true }
 end

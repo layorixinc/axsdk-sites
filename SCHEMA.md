@@ -614,6 +614,25 @@
             }
           }
         },
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "amazon",
+            "ebay",
+            "walmart",
+            "aliexpress",
+            "etsy",
+            "coupang",
+            "11st",
+            "gmarket",
+            "ssg",
+            "naver-shopping",
+            null
+          ]
+        },
         "message": {
           "type": "string"
         }
@@ -1000,26 +1019,32 @@
   },
   {
     "name": "enter_checkout_site",
-    "description": "Get the browser onto the store before the checkout reads its cart, and confirm it arrived.",
+    "description": "Get the browser onto the store whose cart is being reviewed — the one already open, since that is where the items were added — and confirm it arrived.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "site": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }
   },
   {
     "name": "enter_shopping_site",
-    "description": "Get the browser onto the store before the single-site shopping loop searches whichever store is open, and confirm it arrived.",
+    "description": "Resolve the store this turn shops on — named, else already open, else default — get the browser onto it, and confirm it arrived.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
         "site": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

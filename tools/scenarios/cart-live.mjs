@@ -13,6 +13,7 @@
 //
 // Real carts get real items (approved for this repo); no order is ever placed. The run prints what it left
 // behind so the operator can empty those carts.
+import { FLOW_TOOLS, turnFault as sharedTurnFault } from './turn-fault.mjs';
 import { pathToFileURL } from 'node:url';
 
 /** Stores whose generated adapter data carries an add path. naver-shopping is a comparison portal. */
@@ -227,26 +228,11 @@ async function turn(session, label, message, timeoutMs = 240000) {
   return { failure, text, toolCalls };
 }
 
-/** Which faults belong to the harness or the planner rather than to the cart path — and which to retry. */
-export function turnFault({ toolCalls = [], failure = null }) {
-  const names = (toolCalls ?? []).map((call) => call.name ?? '');
-  const reached = names.join(' -> ');
-  if (failure && /open a (fresh )?session|backend to open/i.test(failure)) {
-    return { kind: 'session', retry: true, detail: failure };
-  }
-  // A turn that produced tool calls and then ran out of time produced EVIDENCE. Re-running throws it
-  // away, which is why the sweep's own rule is to retry a no-node turn and never a stalled one.
-  if (failure) return { kind: 'stalled', retry: false, detail: `${failure}${reached ? ` after ${reached}` : ''}` };
-  if (names.length === 0) return { kind: 'no-node', retry: true, detail: 'the engine answered with no node at all' };
-  // The single-site flow is the one under test. Anything else ran because the PLANNER chose another
-  // route — measured 10 of 24 pick turns before the example-collision fix and 1 of 16 after — and a
-  // misrouted turn destroys the paused pick, so the store learned nothing about its cart.
-  if (!names.some((name) => name.startsWith('shopping_single_site') || name === 'shopping_search_product'
-    || name === 'shopping_add_to_cart' || name === 'enter_shopping_site')) {
-    return { kind: 'misroute', retry: true, detail: reached || 'no flow tool ran' };
-  }
-  return null;
-}
+// The rule is shared with every other live runner (); this runner only states which
+// tools mean its flow ran.
+export { turnFault } from './turn-fault.mjs';
+
+const CART_FLOW = FLOW_TOOLS.singleSite;
 
 async function proveStore(session, store, { cancel, query }, attempt = 1) {
   console.log(`\n=== ${store}${attempt > 1 ? ` (retry ${attempt - 1})` : ''} ===`);
@@ -256,7 +242,7 @@ async function proveStore(session, store, { cancel, query }, attempt = 1) {
   const search = await turn(session, 'search', `이 사이트에서 ${query} 사줘`);
   // A misroute, a lost session or a turn that reached no node says nothing about this store's cart. One
   // retry, always reported: a retry nobody sees is a flake nobody will ever have samples of (§13).
-  const searchFault = turnFault(search);
+  const searchFault = sharedTurnFault(search, { expects: CART_FLOW });
   if (searchFault) {
     console.log(`     fault: ${searchFault.kind} — ${searchFault.detail}`);
     if (searchFault.retry && attempt === 1) return proveStore(session, store, { cancel, query }, attempt + 1);
@@ -266,7 +252,7 @@ async function proveStore(session, store, { cancel, query }, attempt = 1) {
   }
 
   const pick = await turn(session, cancel ? 'cancel' : 'pick', cancel ? '취소' : '첫 번째로 해줘');
-  const pickFault = turnFault(pick);
+  const pickFault = sharedTurnFault(pick, { expects: CART_FLOW });
   if (pickFault) {
     console.log(`     fault: ${pickFault.kind} — ${pickFault.detail}`);
     if (pickFault.retry && attempt === 1) return proveStore(session, store, { cancel, query }, attempt + 1);

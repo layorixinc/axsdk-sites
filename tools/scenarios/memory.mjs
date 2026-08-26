@@ -9,6 +9,7 @@
 // live in the shared `axsdk:memory` store as `g/<key>` markdown entries; a seeded write only
 // reaches the session runtime after `session.reset()` (the worker reads the store when it spawns),
 // which is also what keeps every check clear of paused flow nodes.
+import { FLOW_TOOLS, turnFault } from './turn-fault.mjs';
 import { pathToFileURL } from 'node:url';
 import { openCdpSession } from '../harness/cdp-session.mjs';
 
@@ -38,14 +39,18 @@ const freshSession = async (session) => { await session.writeMemory({}); await r
 // Seed memory, then reset so the respawned session runtime rehydrates it.
 const seedMem = async (session, obj) => { await session.writeMemory(seedDocs(obj)); await resetSession(session); };
 
-async function send(session, label, msg, timeoutMs = 150000) {
+async function send(session, label, msg, timeoutMs = 150000, expects = FLOW_TOOLS.memory) {
   const res = await session.send(msg, { timeoutMs }).catch((e) => ({ text: 'ERR ' + (e && e.message), parts: [], toolCalls: [] }));
   const mem = await session.readMemory().catch(() => ({}));
   console.log(`\n[${label}] ${msg}`);
   console.log('  tools:', tools(res).join(' -> ') || '(none)');
   console.log('  reply:', (res?.text || '').replace(/\s+/g, ' ').slice(0, 180));
   console.log('  memory:', JSON.stringify(mem));
-  return { res, mem, reply: (res?.text || '').replace(/\s+/g, ' ') };
+  // This suite reported 6/10 for a whole day before anyone could run it, so a turn that never reached the
+  // engine must not be counted against memory (`turn-fault.mjs`).
+  const fault = turnFault({ toolCalls: res?.toolCalls, failure: /^ERR /.test(res?.text ?? '') ? res.text : null }, { expects });
+  if (fault) console.log(`  fault: ${fault.kind} — ${fault.detail}`);
+  return { res, mem, reply: (res?.text || '').replace(/\s+/g, ' '), fault };
 }
 const openSession = async () => {
   try {

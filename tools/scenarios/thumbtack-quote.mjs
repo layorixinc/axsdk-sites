@@ -1,6 +1,7 @@
 // Shipping-CDP regression for the public Thumbtack quote journey.
 // Across the suite it proves multi-turn state retention, deterministic candidate selection, wizard drive,
 // and a final safe-boundary stop with no send tool.
+import { FLOW_TOOLS, turnFault } from './turn-fault.mjs';
 import { pathToFileURL } from 'node:url';
 
 const nameMatches = (name, suffix) => name === suffix || name?.endsWith(`.${suffix}`);
@@ -83,12 +84,16 @@ function evidence(turn) {
   }).join(' -> ');
 }
 
-async function send(session, label, text, timeoutMs = 300_000) {
+async function send(session, label, text, timeoutMs = 300_000, expects = FLOW_TOOLS.quote) {
   const turn = await session.send(text, { timeoutMs });
   console.log(`\n[${label}] ${(turn.elapsedMs / 1000).toFixed(1)}s`);
   console.log(`  tools: ${evidence(turn) || '(none)'}`);
   console.log(`  reply: ${String(turn.text || '').replace(/\s+/g, ' ').slice(0, 300)}`);
-  return turn;
+  // A turn the quote flow never received is not a quote defect — and this suite's failures are the ones
+  // most likely to be read as "Thumbtack broke" (`turn-fault.mjs`).
+  const fault = turnFault({ toolCalls: turn.toolCalls, failure: null }, { expects });
+  if (fault) console.log(`  fault: ${fault.kind} — ${fault.detail}`);
+  return { ...turn, fault };
 }
 
 async function resetSession(session, label) {

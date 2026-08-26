@@ -4,6 +4,7 @@
 //  1) idle;  2) from another site (cross-nav to amazon);  3) mid-flow interrupt.
 // Runs on the shipping CDP extension via tools/harness/cdp-session.mjs (contract C3). The flow
 // reaches a checkout REVIEW page and stops — no place-order selector exists anywhere in this file.
+import { FLOW_TOOLS, turnFault } from './turn-fault.mjs';
 import { pathToFileURL } from 'node:url';
 
 export const toolLabels = calls => (calls || []).map(call => `${call.name}(${call.status})`);
@@ -31,14 +32,18 @@ export async function recordCase(checks, name, run) {
   }
 }
 
-async function send(session, label, msg, timeoutMs = 150000) {
+async function send(session, label, msg, timeoutMs = 150000, expects = FLOW_TOOLS.checkout) {
   const res = await session.send(msg, { timeoutMs }).catch(e => ({ text: 'ERR ' + (e && e.message), parts: [], toolCalls: [] }));
   const url = await session.status().then(s => s.url).catch(() => '?');
   console.log(`\n[${label}] ${msg}`);
   console.log('  tools:', toolLabels(res.toolCalls).join(' -> ') || '(none)');
   console.log('  reply:', (res.text || '').replace(/\s+/g, ' ').slice(0, 180));
   console.log('  url:', url);
-  return { res, url, reply: (res.text || '').replace(/\s+/g, ' ') };
+  // A lost session, a turn that reached no node, or a planner misroute is not a checkout defect. Printing
+  // it as one is how an afternoon goes to the wrong repo (`turn-fault.mjs`).
+  const fault = turnFault({ toolCalls: res.toolCalls, failure: /^ERR /.test(res.text ?? '') ? res.text : null }, { expects });
+  if (fault) console.log(`  fault: ${fault.kind} — ${fault.detail}`);
+  return { res, url, reply: (res.text || '').replace(/\s+/g, ' '), fault };
 }
 
 async function main() {

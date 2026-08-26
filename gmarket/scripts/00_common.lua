@@ -10,16 +10,28 @@ local CONFIG = {
   search_url = "https://www.gmarket.co.kr/n/search",
   search_param = "keyword",
   search_path_marker = "/n/search",
-  result_selector = '.box__item-container, [data-montelena-goodscode]',
+  -- Measured live 2026-08-26 (30 cards), and the configured CSS LIST was structurally wrong in the way
+  -- AGENTS.md 13 already records: the two alternatives select DIFFERENT elements and each holds half the
+  -- data. `.box__item-container` -> 30 rows, 30 with title+price, **0 with the id attribute**;
+  -- `[data-montelena-goodscode]` -> 30 rows, **0 full**, 30 with the id. The browser answers the union in
+  -- document order, so the configured list produced 8 full rows and 22 id-only rows. The card is the row;
+  -- the id is read from the descendant that carries it.
+  result_selector = '.box__item-container',
+  result_id_selector = '[data-montelena-goodscode]',
   result_id_attr = "data-montelena-goodscode",
   result_url_selector = 'a[href*="goodscode="], a[href*="goodsCode="]',
   result_title_selector = '.text__item, [data-montelena-acode="200003874"]',
   result_image_selector = 'img[alt]',
   result_price_selector = '.text__value, [data-price]',
-  result_shipping_selector = '.box__delivery, .text__delivery',
+  -- Measured live 2026-08-26 on gmarket search (30 cards): the configured `.box__delivery, .text__delivery`
+  -- matched **0**, so every gmarket row carried no shipping at all and its total cost was folded out of the
+  -- comparison window as unknown. The card states it in `.box__item-arrival` — 30/30, with real fees
+  -- (무료배송 / 배송비 3,000원 / 배송비 2,500원), which is exactly what the parser needs.
+  result_shipping_selector = '.box__item-arrival',
   result_rating_selector = '.image__awards-points, [aria-label*="평점"]',
-  result_reviews_selector = '.text__reviews, [data-review-count]',
-  result_delivery_selector = '.box__delivery, .text__delivery',
+  -- Measured live: `.text__reviews, [data-review-count]` matched 0; the card renders 상품평(7)건 here.
+  result_reviews_selector = '.list-item__feedback-count',
+  result_delivery_selector = '.box__item-arrival',
   result_ready_selector = '.box__item-container, [data-montelena-goodscode]',
   default_currency = "KRW",
   product_id_patterns = { "[?&]goodscode=(%d+)", "[?&]goodsCode=(%d+)" },

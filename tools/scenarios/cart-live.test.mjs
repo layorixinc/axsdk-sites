@@ -15,7 +15,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { classifyAdd, pickedProductId, parseStores, storeVerdict } from './cart-live.mjs';
+import { classifyAdd, pickedProductId, parseStores, storeVerdict, turnFault } from './cart-live.mjs';
 
 const call = (name, status, output) => ({ name, status, output });
 const cartCall = (output) => call('shopping_add_to_cart', 'completed', { next: 'done', ...output });
@@ -193,4 +193,84 @@ test('a classified unconfirmed add is an answer, not an unknown', () => {
     assert.equal(outcome.label, label, `${error} -> ${label}`);
     assert.equal(storeVerdict(outcome).pass, true, `${error} is an answer the user can act on`);
   }
+});
+
+// Measured live 2026-08-26: etsy marks no variation control required, so the guard clicked blindly and
+// the refused add read as an empty cart. With the measured selectors declared, the cart module refuses
+// BEFORE clicking and answers `variation_required` — a code the runner did not know, and an unknown code
+// fails the store instead of telling the user the listing needs a choice.
+test('a listing that needs a choice is an answer, not an unknown', () => {
+  const outcome = classifyAdd({
+    toolCalls: [pickCall('X1'), cartCall({ next: 'error', add_status: 'failed', add_error: 'variation_required' })],
+    text: '',
+    siteEvidence: { productId: 'X1', mentionsProduct: false },
+  });
+  assert.equal(outcome.label, 'required_option');
+  assert.equal(storeVerdict(outcome).pass, true);
+});
+
+
+// ── three faults wore one label, and only one of them belonged to the cart ────
+//
+// Measured across this stretch's live runs: a turn fails because the backend never opened a session
+// (harness), because the engine answered with NO node at all, or because the planner routed the message
+// into another flow (10 of 24 pick turns before the example-collision fix, 1 of 16 after). All three were
+// reported as `no_add_call` — "the flow never reached the cart" — which reads like a defect in the cart
+// path. Each deserves its own sentence and its own retry decision, and a stall deserves NEITHER: it
+// produced evidence, and re-running throws that evidence away.
+test('a session that never opened is a harness fault', () => {
+  const fault = turnFault({ toolCalls: [], failure: 'Timed out after 60000ms waiting for the backend to open a fresh session' });
+
+  assert.equal(fault.kind, 'session');
+  assert.equal(fault.retry, true);
+});
+
+test('a turn that reached no node at all is named as such', () => {
+  const fault = turnFault({ toolCalls: [], failure: null });
+
+  assert.equal(fault.kind, 'no-node');
+  assert.equal(fault.retry, true);
+});
+
+test('a turn routed into another flow is a misroute, not a cart failure', () => {
+  const fault = turnFault({
+    toolCalls: [{ name: 'capture_memory_clause' }, { name: 'shopping_prefill_total_cost_request' },
+      { name: 'shopping_multi_store_total_cost.collect_request' }],
+    failure: null,
+  });
+
+  assert.equal(fault.kind, 'misroute');
+  assert.equal(fault.retry, true);
+  assert.match(fault.detail, /multi_store|prefill/);
+});
+
+test('the single-site flow running is not a fault at all', () => {
+  const fault = turnFault({
+    toolCalls: [{ name: 'capture_memory_clause' }, { name: 'shopping_single_site.collect_shopping' },
+      { name: 'shopping_search_product' }, { name: 'shopping_single_site.refine_item' }],
+    failure: null,
+  });
+
+  assert.equal(fault, null);
+});
+
+test('a stalled turn is reported and NOT retried — its evidence is the point', () => {
+  const fault = turnFault({
+    toolCalls: [{ name: 'shopping_single_site.collect_shopping' }],
+    failure: 'Timed out after 240000ms waiting for the assistant to answer',
+  });
+
+  assert.equal(fault.kind, 'stalled');
+  assert.equal(fault.retry, false);
+});
+
+test('a misroute and a lost session fail, but not as cart defects', () => {
+  const misrouted = storeVerdict({ label: 'misrouted', detail: 'shopping_multi_store_total_cost.collect_request' });
+  assert.equal(misrouted.pass, false);
+  assert.match(misrouted.reason, /planner|another flow/i);
+  assert.doesNotMatch(misrouted.reason, /never reached the cart/);
+
+  const session = storeVerdict({ label: 'session_fault', detail: 'no node' });
+  assert.equal(session.pass, false);
+  assert.match(session.reason, /session|harness|engine/i);
 });

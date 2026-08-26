@@ -863,6 +863,42 @@ Measured gates:
 This closes Phase 2 only. Production registry publication, Pack code execution, Pack role tabs,
 Broker v2, and Pack-mode core/platform sessions remain later-phase work.
 
+### 9.7 MV-0A — browser-only lifecycle verification
+
+Phase 2 originally had a real-Chromium automation proof but no release a person could install by
+clicking the product UI: the production registry and trust-root list is deliberately empty. MV-0A
+adds a separate manual-verification build without widening production installation authority:
+
+- `build:pack-manual` generates a fresh Ed25519 fixture outside the repository, embeds only its
+  public key and signed immutable responses, and discards the temporary files after the build. The
+  extension contains no signing key and accepts no unsigned/local-file Pack.
+- The QA registry has one canonical synthetic HTTPS origin. Its fetch adapter serves only exact
+  packaged paths under that origin, returns 404 for an absent path instead of reaching the network,
+  and delegates every other origin to the ordinary fetch implementation.
+- The actual Options lifecycle surface is used. A build-defined banner names the artifact as a
+  manual verification build and pre-fills `layorix.fixture-agent@1.0.0`; verify, install-disabled,
+  persistence across reload, enable, disable, and remove remain the Phase 2 production handlers.
+- Ordinary builds define no QA registry, fixture, or presentation data. The CWS package gate scans
+  the final extension tree and refuses the QA origin, registry id, banner, or an unresolved build
+  marker. This is an additional release boundary, not a convention.
+
+TDD began with **4 failures / 0 pass**: the closed QA source, build defines, Options presentation,
+and CWS exclusion export did not exist. The focused suite is now **9 pass / 28 assertions**. The
+first real `build:cws` then found a genuine leak: the banner literal remained in the production
+Options chunk because an exported presentation helper kept it reachable even when its caller was
+compiled out. Moving all presentation authority into the QA-only build define made the same CWS
+build pass and mutation tests still refuse each marker.
+
+Real browser proof used only the visible Options controls: exact verification rendered publisher,
+registry, trust key, release digest, command/effect/hosts/services/providers; install-disabled
+survived a page reload; enable reported the inert lifecycle default; disable and remove returned the
+list to empty. Unknown Pack id and version were both refused as not indexed. Enabling created no
+executor/provider tab and `chrome.userScripts.getScripts()` remained empty. The retained production
+Phase 1 Chromium probe remained green.
+
+This is a verification path, not P3-C: no Pack artifact executes and no role, document, nonce,
+connection, command dispatcher, core session, or platform action is added.
+
 ## 10. Phase 3 — Exact executor, Broker v2, tab roles, and recovery
 
 ### 10.1 Objective

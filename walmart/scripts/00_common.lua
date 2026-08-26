@@ -44,6 +44,12 @@ local CONFIG = {
   add_ready_selector = '[data-testid="add-to-cart-success"], [data-testid="cart-drawer"], form[action*="login"]',
   cart_url = "https://www.walmart.com/cart",
   cart_url_markers = { "/cart" },
+  -- Cart LINES, measured live 2026-08-26 with one item in the cart: [data-testid="product-tile-container"]
+  -- is the line (its link carries /ip/seort/2387232905), while ALL 29 [data-item-id] elements on that page
+  -- sit inside [data-testid="recommendation-carousel"] — so on walmart the old document-wide id probe
+  -- could only ever have matched a suggestion. [data-testid="fulfillment-details-container"] is a
+  -- shipping panel: 0 tiles, 0 item ids, 0 /ip/ links.
+  cart_item_scopes = { '[data-testid="product-tile-container"]' },
   login_urls = { "/account/login", "/account/verify" },
   login_selector = 'form[action*="/account/login"] input[type="password"]',
   blocked_selectors = {

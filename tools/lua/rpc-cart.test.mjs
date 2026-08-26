@@ -533,6 +533,38 @@ test('a store that declares no cart-line region cannot confirm by id', () => {
   assert.equal(lua.call('AX_RPC_CART.cart_contains', CONFIG, 'B0TEST1234'), false);
 });
 
+// Walmart's cart page, measured live 2026-08-26 with one item in the cart. It is the sharpest instance
+// of the rule above, because on that store the id probe could ONLY ever have matched a recommendation:
+//   [data-testid="product-tile-container"]        1  — the cart line, its link `/ip/seort/2387232905`
+//   [data-item-id]                               29  — ALL 29 inside [data-testid="recommendation-carousel"]
+//   [data-testid="fulfillment-details-container"]  1  — 0 tiles, 0 item ids, 0 /ip/ links (a shipping panel)
+// So the cart line carries no `data-item-id` at all, and every element that does is a suggestion.
+const WALMART_CART = {
+  ...CONFIG,
+  cart_url_markers: ['/cart'],
+  cart_item_scopes: ['[data-testid="product-tile-container"]'],
+};
+
+test('walmart: 29 recommendation item ids are not evidence for any of them', () => {
+  const page = shop({ href: 'https://www.walmart.com/cart', extra: {
+    '[data-testid="recommendation-carousel"] [data-item-id="2387232905"]': 'Best seller Anker Braided',
+    'a[href*="2387232905"]': 'Anker Braided USB-C to USB-C',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', WALMART_CART, '2387232905'), false,
+    'a carousel tile naming the id is a suggestion, not a cart line');
+});
+
+test('walmart: the cart line confirms through its own product link', () => {
+  const page = shop({ href: 'https://www.walmart.com/cart', extra: {
+    '[data-testid="product-tile-container"] a[href*="2387232905"]': 'Anker Braided USB-C to USB-C',
+  } });
+  installRpcStub(lua, page);
+
+  assert.equal(lua.call('AX_RPC_CART.cart_contains', WALMART_CART, '2387232905'), true);
+});
+
 // ── a foreign primary quote with a localized alternate ───────────────────────
 //
 // Measured live on an eBay item page (2026-08-15): the primary quote is the seller's currency and the

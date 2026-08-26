@@ -919,6 +919,9 @@ RPC_SITES["walmart"] = {
   cart_url_markers = {
     "/cart"
   },
+  cart_item_scopes = {
+    "[data-testid=\"product-tile-container\"]"
+  },
   login_urls = {
     "/account/login",
     "/account/verify"

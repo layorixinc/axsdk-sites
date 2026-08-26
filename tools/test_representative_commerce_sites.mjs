@@ -496,7 +496,8 @@ run('a declared cart-line scope names a REGION, never the cart page', () => {
   const RAIL = /reco|recommend|recent|carousel|suggest|related|viewed|widget/i;
   let scoped = 0;
   lua.define('function __rpc_site_data() return RPC_SITES end', 'site data reader');
-  for (const [slug, config] of Object.entries(lua.call('__rpc_site_data') ?? {})) {
+  const siteData = lua.call('__rpc_site_data') ?? {};
+  for (const [slug, config] of Object.entries(siteData)) {
     const scopes = Object.values(config.cart_item_scopes ?? {});
     if (scopes.length === 0) continue;
     scoped += 1;
@@ -509,7 +510,14 @@ run('a declared cart-line scope names a REGION, never the cart page', () => {
         `${slug} scope is not its own confirmation selector`, scope);
     }
   }
-  assert(scoped >= 3, 'the stores proven by cart-line evidence declare their scope', scoped);
+  // The stores whose cart page the survey actually READ. Each one's id probe would otherwise match a
+  // recommendation, so this list is the matrix's claim written as a gate: delete a scope and the store
+  // silently returns to confirming suggestions.
+  for (const slug of ['amazon', 'coupang', 'ebay', '11st', 'walmart']) {
+    const scopes = Object.values(siteData?.[slug]?.cart_item_scopes ?? {});
+    assert(scopes.length > 0, `${slug} declares the region holding its cart lines`, scopes);
+  }
+  assert(scoped >= 5, 'every surveyed store declares its scope', scoped);
 });
 
 console.log(`\n${passed}/${passed + failed} tests passed (${assertions} assertions)`);

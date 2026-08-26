@@ -41,6 +41,7 @@
     "dead:lua": "node tools/dead-lua.mjs",
     "test:playground:live": "node tools/scenarios/playground-live.mjs",
     "test:scenarios": "node --test \"tools/scenarios/*.test.mjs\"",
+    "test:packs": "bun test tools/packs",
     "test:commerce:live:cart": "node tools/scenarios/cart-live.mjs"
   },
   "devDependencies": {

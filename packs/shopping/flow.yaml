@@ -1,0 +1,126 @@
+flowTools:
+  prepare_search:
+    description: Prepare one bounded storefront search request.
+    effect: read
+    execute:
+      kind: community.task
+      target: self
+      command: prepare_search
+    parameters: {"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":240}},"required":["query"]}
+    output:
+      next: done
+      query: result.query
+      page: result.page
+      limit: result.limit
+      quantity: result.quantity
+      query_variants: result.query_variants
+  search_provider:
+    description: Search the selected enabled storefront provider.
+    effect: read
+    execute:
+      kind: community.provider
+      extensionPoint: storefronts
+      command: search_products
+    parameters: {"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":240},"page":{"type":"integer","minimum":1,"maximum":2},"limit":{"type":"integer","minimum":1,"maximum":6},"quantity":{"type":"integer","minimum":1,"maximum":99},"query_variants":{"type":"array","items":{"type":"string","minLength":1,"maxLength":240},"minItems":1,"maxItems":3}},"required":["query","page","limit","quantity","query_variants"]}
+    output:
+      next: done
+      providerResult: result
+  rank_provider_result:
+    description: Rank one validated provider result without inventing missing shipping.
+    effect: read
+    execute:
+      kind: community.task
+      target: self
+      command: rank_provider_result
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        providerResult:
+          type: object
+          additionalProperties: false
+          properties:
+            schema_version: {type: integer, enum: [1]}
+            status: {type: string, enum: [candidates, no_results, price_unavailable]}
+            query: {type: string, minLength: 1, maxLength: 240}
+            page: {type: integer, minimum: 1, maximum: 2}
+            cards_seen: {type: integer, minimum: 0, maximum: 1000}
+            has_more: {type: boolean}
+            candidates:
+              type: array
+              maxItems: 6
+              items:
+                type: object
+                additionalProperties: false
+                properties:
+                  product_id: {type: string, minLength: 1, maxLength: 128}
+                  name: {type: string, minLength: 1, maxLength: 500}
+                  url: {type: string, format: uri, maxLength: 2048}
+                  price: {type: number, exclusiveMinimum: 0}
+                  currency: {type: string, pattern: "^[A-Z]{3}$"}
+                  shipping_cost: {type: number, minimum: 0}
+                  shipping_currency: {type: string, pattern: "^[A-Z]{3}$"}
+                  brand: {type: string, minLength: 1, maxLength: 128}
+                  manufacturer_model: {type: string, minLength: 1, maxLength: 128}
+                  rating: {type: number, minimum: 0, maximum: 5}
+                  review_count: {type: integer, minimum: 0}
+                  condition: {type: string, minLength: 1, maxLength: 64}
+                required: [product_id, name, url, price, currency]
+          required: [schema_version, status, query, page, cards_seen, has_more]
+      required: [providerResult]
+    output:
+      next: done
+      status: result.status
+      offers: result.offers
+      comparisonText: result.comparisonText
+flows:
+  shopping_search:
+    goal: Search one enabled storefront provider and show grounded read-only results.
+    state:
+      requestText: null
+      query: null
+      page: 1
+      limit: 6
+      quantity: 1
+      query_variants: null
+      providerResult: null
+      status: null
+      offers: null
+      comparisonText: null
+    nodes:
+      entry:
+        kind: action_unit
+        inputSelector: [requestText]
+        allowedTools: [prepare_search]
+        prompt: |
+          Extract the exact product query from the user's request. Call prepare_search once.
+          Do not invent a model number, provider, price, shipping fee, or product attribute.
+        next:
+          done: search
+        fallback:
+          invalidNext: done
+          exhaustedNext: done
+          maxStalledSteps: 2
+          stalledNext: done
+      search:
+        kind: action_contract
+        id: search_provider
+        inputSelector: [query, page, limit, quantity, query_variants]
+        next:
+          done: rank
+        fallback:
+          invalidNext: done
+          exhaustedNext: done
+      rank:
+        kind: action_contract
+        id: rank_provider_result
+        inputSelector: [providerResult]
+        next:
+          done: report
+        fallback:
+          invalidNext: done
+          exhaustedNext: done
+      report:
+        kind: terminal
+        inputSelector: [comparisonText]
+        respond: Reply with comparisonText exactly in the user's language. Do not add products or prices.

@@ -52,12 +52,15 @@ export function extractedCandidates(toolCalls) {
   });
 }
 
-export function auditVerdict(report) {
+export function auditVerdict(report, context = {}) {
   if (report.reason === 'html_unavailable') {
     return { pass: false, reason: 'the page could not be read through CDP — nothing was checked' };
   }
   if (report.checked === 0) {
-    return { pass: false, reason: 'the turn published no candidates, so the audit checked nothing' };
+    // Where it landed IS the answer: gmarket served `/Notice-checkNotice?edt=05:00` (a maintenance window)
+    // once, and "published no candidates" was true and useless.
+    const where = context.href ?? 'an unknown page';
+    return { pass: false, reason: `the turn published no candidates on ${where}, so the audit checked nothing` };
   }
   if (!report.ok) {
     const first = report.candidates.find((entry) => !entry.ok);
@@ -269,7 +272,7 @@ async function auditStore(session, store, query) {
   console.log(`  extracted: ${candidates.length} rows via ${extracted.selector}`);
 
   const report = auditCandidates(candidates, page.html);
-  const grounded = auditVerdict(report);
+  const grounded = auditVerdict(report, { href: page.url || extracted?.href });
   const filled = fillVerdict({ declared: extracted?.declared ?? {}, rows: extracted?.rowCount ?? candidates.length });
   console.log('  declared: ' + filled.reason);
   const verdict = grounded.pass ? filled : grounded;

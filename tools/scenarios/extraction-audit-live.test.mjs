@@ -144,3 +144,13 @@ test('rows arriving as an OBJECT are still rows', () => {
   assert.deepEqual(rowsOf({ rows: [{ name: 'a' }] }).map((row) => row.name), ['a']);
   assert.deepEqual(rowsOf({}), []);
 });
+
+test('an empty extraction names the page it landed on', () => {
+  // Measured: gmarket served /Notice-checkNotice?edt=05:00 (a maintenance window) and the audit said only
+  // "published no candidates" — true, and useless. Where it landed is the answer.
+  const verdict = auditVerdict({ ok: true, reason: 'grounded', checked: 0, fieldsChecked: 0, candidates: [] },
+    { href: 'https://www.gmarket.co.kr/Notice-checkNotice?edt=05:00' });
+
+  assert.equal(verdict.pass, false);
+  assert.match(verdict.reason, /Notice-checkNotice/);
+});

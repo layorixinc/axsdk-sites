@@ -566,6 +566,7 @@ RPC_SITES["gmarket"] = {
   add_selectors = {
     "#btn_add_cart",
     "button.button__add-cart",
+    ".btn_mycart",
     "button[data-montelena-acode=\"200000911\"]"
   },
   quantity_selectors = {
@@ -794,6 +795,7 @@ RPC_SITES["ssg"] = {
   },
   add_selectors = {
     "#btn_cart",
+    ".ssgitem_btn_cart",
     "button[data-react-tarea-dtl-cd=\"00020_000000000\"]"
   },
   quantity_selectors = {

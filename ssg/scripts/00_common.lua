@@ -43,7 +43,10 @@ local CONFIG = {
   product_url_prefix = "https://www.ssg.com/item/itemView.ssg?itemId=",
   product_title_selectors = { '.cdtl_info_tit h2', 'h1' },
   product_price_selectors = { '.cdtl_new_price .ssg_price', '.ssg_price' },
-  add_selectors = { '#btn_cart', 'button[data-react-tarea-dtl-cd="00020_000000000"]' },
+  -- `.ssgitem_btn_cart` is the live control (measured 2026-08-26 on `ssg.com/item/itemView.ssg`:
+  -- `ssgitem_btn_cart ssgitem_iconbtn clickable`, repeated once per variant row). `#btn_cart` matched
+  -- nothing, so every add refused with `add_to_cart_unavailable`.
+  add_selectors = { '#btn_cart', '.ssgitem_btn_cart', 'button[data-react-tarea-dtl-cd="00020_000000000"]' },
   quantity_selectors = { 'select[name="quantity"]', 'input[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
   confirmation_selector = '[data-layer-name="cart_success"].on, .cart_layer.on',

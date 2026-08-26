@@ -26,7 +26,12 @@ local CONFIG = {
   product_url_prefix = "https://item.gmarket.co.kr/Item?goodscode=",
   product_title_selectors = { 'h1.itemtit', 'h1' },
   product_price_selectors = { '.price_real', '.price_innerwrap strong', '[data-price]' },
-  add_selectors = { '#btn_add_cart', 'button.button__add-cart', 'button[data-montelena-acode="200000911"]' },
+  -- `.btn_mycart` is what the live buy box carries (measured 2026-08-26 on `item.gmarket.co.kr/Item`:
+  -- `btn_primary btn_white btn_mycart`, rendered twice as a responsive duplicate). The two selectors that
+  -- stood alone here matched NOTHING, so every add refused with `add_to_cart_unavailable`. Word-based
+  -- design-system classes, not build hashes (§10). `.btn_round.btn_blue` ("장바구니로") is the confirmation
+  -- popup's link to the cart, never the add.
+  add_selectors = { '#btn_add_cart', 'button.button__add-cart', '.btn_mycart', 'button[data-montelena-acode="200000911"]' },
   quantity_selectors = { 'input[name="orderQty"]', 'select[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
   confirmation_selector = '[data-cart-layer="success"], .box__layer-cart.is-active',

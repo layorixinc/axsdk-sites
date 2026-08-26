@@ -43,7 +43,15 @@ local CONFIG = {
   product_price_selectors = { '#finalDscPrcArea .value' },
   add_selectors = { 'button.btn_cart[data-log-actionid-label="cart"]' },
   quantity_selectors = { 'input[name="quantity"]', 'select[name="quantity"]' },
-  required_option_selectors = { 'select[required]' },
+  -- Measured live 2026-08-26 on two listings, after three wrong answers. `select[required]` is 0 on both,
+  -- as on etsy; what separates them is `.option_item_list` — 0 on the listing whose add landed
+  -- (`/products/9199437109`) and 2 on the one that never reached the cart (`/products/7489684108`).
+  -- The element carries no `value` by nature, so its mere presence is the refusal: this flow chooses no
+  -- options, and adding a default would be a different product. Note what is NOT the signal — the page
+  -- text carries 품절 twice for unrelated reasons (inside 반품절차, and inside an unrendered
+  -- {{#stockQty '<=' 0}} template), and 11st per-add panel says 장바구니에 담았습니다. for a listing that
+  -- never enters the cart, which is why no confirmation selector is declared here.
+  required_option_selectors = { '.option_item_list' },
   cart_url = "https://buy.11st.co.kr/cart/CartAction.tmall?method=getCartList",
   cart_url_markers = { "buy.11st.co.kr/cart", "CartAction.tmall" },
   -- Cart LINES: measured live 2026-08-26 the cart page carried 26 `a[href*="/products/"]`, of which the

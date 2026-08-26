@@ -313,8 +313,10 @@ async function main() {
   for (const result of results) {
     const verdict = storeVerdict(result.outcome);
     if (verdict.pass) pass += 1;
+    // The approved id belongs on every line, not only the ones that passed: a store that did not confirm
+    // is the case where you most need to know WHICH product the flow approved.
     console.log(`  ${verdict.pass ? 'PASS' : 'FAIL'}  ${result.store.padEnd(15)} ${result.outcome.label.padEnd(19)} ${verdict.reason}`
-      + `${result.outcome.detail ? ` [${result.outcome.detail}]` : ''}`);
+      + `${result.productId ? ` id=${result.productId}` : ''}${result.outcome.detail ? ` [${result.outcome.detail}]` : ''}`);
   }
   const added = results.filter((result) => result.outcome.label === 'added');
   if (added.length > 0) {

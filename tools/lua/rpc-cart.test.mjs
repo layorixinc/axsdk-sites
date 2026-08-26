@@ -251,6 +251,35 @@ test('etsy: a chosen variation lets the add proceed', () => {
   assert.ok(clicks(page).length > 0, 'nothing blocks a listing whose options are chosen');
 });
 
+// 11st, measured live 2026-08-26 on two listings and it took three wrong answers to get here. Its per-add
+// panel says `장바구니에 담았습니다.` for a listing that never enters the cart — so that panel is NOT
+// evidence and stays undeclared — and the page text carries `품절` twice for reasons that have nothing to
+// do with stock: inside `반품절차` (return procedure) and inside an unrendered `{{#stockQty '<=' 0}}`
+// template. The real difference between the listing that landed and the one that did not:
+//   .option_item_list   9199437109 (added): 0   |   7489684108 (never in the cart): 2
+// `select[required]` is 0 on both, as on etsy. So an option list is the signal, and it carries no `value`
+// by nature: its mere presence is the refusal, because this flow chooses no options.
+const ELEVENST_OPTIONS = { ...CONFIG, site: '11st', required_option_selectors: ['.option_item_list'] };
+
+test('11st: a listing with an option list is refused before the click', () => {
+  const page = shop({ extra: { '.option_item_list': [{ text: '상품01 리체비티 USB' }] } });
+  const result = add(page, { config: ELEVENST_OPTIONS });
+
+  assert.equal(result.error, 'variation_required');
+  assert.deepEqual(clicks(page), [], 'a listing whose options nobody chose is never clicked');
+});
+
+test('11st: a listing without an option list still adds', () => {
+  // No pre-rendered confirmation panel: one off the cart page is per-add evidence, so `cart_contains`
+  // would answer true on ARRIVAL and the add block would be skipped — the fixture would then "pass"
+  // while nothing was clicked.
+  const page = shop();
+  const result = add(page, { config: ELEVENST_OPTIONS });
+
+  assert.notEqual(result.error, 'variation_required');
+  assert.ok(clicks(page).length > 0);
+});
+
 test('a quantity above one is set before the add', () => {
   const page = shop();
   add(page, { quantity: 3 });

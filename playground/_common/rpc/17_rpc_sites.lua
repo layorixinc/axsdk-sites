@@ -50,7 +50,7 @@ RPC_SITES["11st"] = {
     "select[name=\"quantity\"]"
   },
   required_option_selectors = {
-    "select[required]"
+    ".option_item_list"
   },
   cart_url = "https://buy.11st.co.kr/cart/CartAction.tmall?method=getCartList",
   cart_url_markers = {

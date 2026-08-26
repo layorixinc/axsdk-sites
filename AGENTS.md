@@ -2063,6 +2063,21 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   must assert the loaded site IS the store under test and report a mismatch as a delivery fault, never as a
   verdict about extraction. `siteVerdict` does that, and the same probe is what caught a second instance
   (an intended gmarket measurement that landed on 11st).
+- **The audit found a real defect on its first day: gmarket's row selector held half the data and its
+  shipping selector held none.** It audited **1.8** checkable fields per row while every other store reached
+  2.6–6.8, and three live measurements of 30 cards each explain it. The `result_selector` was a CSS LIST
+  whose two alternatives select DIFFERENT elements: `.box__item-container` → 30 rows, 30 with title+price,
+  **0 with the id attribute**; `[data-montelena-goodscode]` → 30 rows, **0 full**, 30 with the id. The
+  browser answers the union in document order, so the configured list produced **8 full rows and 22 id-only
+  rows** — the same failure §13 records for a title read off the wrong `h2`, one level up. The card is the
+  row now and the id comes from the descendant that carries it. Shipping and reviews were dead too:
+  `.box__delivery, .text__delivery` and `.text__reviews, [data-review-count]` matched **0**, while the card
+  states them in `.box__item-arrival` (무료배송 / 배송비 3,000원 / 배송비 2,500원) and
+  `.list-item__feedback-count` (상품평(7)건). **So every gmarket row had carried no shipping at all and its
+  total cost folded out of the comparison window as unknown.** Live after: the audit reports **5.0 fields
+  per row** grounded, and a two-store window shows gmarket rows with `배송비 KRW 3,000` and complete totals
+  beside 11st. **Offline could not have caught this**: `rpc-stub.mjs` keys fixture rows by FIELD name, so a
+  fixture supplies `shipping_text` whatever selector the config asks for — the live audit is the test.
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /

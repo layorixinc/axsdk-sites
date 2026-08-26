@@ -2156,3 +2156,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   approval, pairs it with the update's `approvalDigest`, and observes `approval_mismatch`; the unit test was
   mutation-checked by swapping in the new approval. Revocation is likewise consumed through the ordinary
   registry refresh handler, not by editing lifecycle state from the UI.
+- **An authenticated Pack artifact is not a callable Pack command.** P3-C configures a
+  digest-qualified `USER_SCRIPT` world, acquires the top `documentId` with a packaged scripting
+  no-op, executes bootstrap plus the exact verified asset only against that document, and accepts a
+  one-use port only after execute results and sender/hello identity all agree. The command table is
+  closed and frozen, but `dispatchEligible` stays false until P3-D supplies policy, validation,
+  provenance, and mutation semantics. Live, two consecutive acquisitions closed the first inactive
+  executor before replacing it; the page MAIN world saw no task side effect, and
+  `chrome.userScripts.getScripts()` remained empty.
+- **Serializing state writes does not serialize the Chrome read that preceded them.** A group query
+  begun before `tabs.group()` completed could apply after a serialized role claim and erase
+  `executorTabId`, leaving every replacement as another orphan role tab. Membership refresh therefore
+  never retires Pack authority; exact tab removal/retirement owns that transition, and the role
+  coordinator revalidates the live group, URL, and document before reuse. The live double-acquisition
+  exposed this after the transaction queue itself was already green.

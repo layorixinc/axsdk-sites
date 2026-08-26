@@ -1061,6 +1061,67 @@ through exact document execution and authenticated connection acceptance.
 8. Accept one frozen command table matching the signed commands digest.
 9. Destroy the nonce on success, failure, timeout, or navigation.
 
+
+##### P3-C measured result — 2026-08-24
+
+P3-C is implemented as an exact-document authenticator, not as an action dispatcher:
+
+- `createExactPackInjector()` configures one digest-qualified `USER_SCRIPT` world with messaging and
+  the reviewed `script-src 'self'; object-src 'none'` CSP;
+- each acquisition creates a 256-bit one-use nonce, acquires the top document through a packaged
+  `chrome.scripting.executeScript()` no-op, re-reads the tab, and requires the exact approved URL;
+- `chrome.userScripts.execute()` receives only packaged bootstrap plus the already verified task
+  artifact and targets `{tabId, documentIds:[documentId]}`. It never uses a registered User Script,
+  a match pattern, `allFrames`, or a caller-selected URL;
+- ports are quarantined until execute returns. Acceptance matches the runtime port name, sender
+  extension/tab/top-frame/document/URL, nonce, session/group/role/world, release/artifact/commands
+  digests, and the own-property command-name allowlist. Commands are exposed as a frozen null-prototype
+  table and `dispatchEligible` remains `false`;
+- every failure, timeout, navigation, success, and replacement invalidates the nonce. A second port or
+  a late port cannot claim it.
+
+`createPackRoleCoordinator()` is the first production caller of the P3-B topology transaction. It
+holds that lock across community-registration inspection, role recycling, exact tab creation/grouping,
+document execution, and authenticated connection acceptance. Role tabs are inactive, extension-created,
+and assigned only after authentication; every failure closes the tab and forgets its ownership.
+
+The build-only manual QA path reads the selected installed Agent Pack from the verified Pack state,
+re-hashes its signed command declarations, reads and re-verifies the exact task asset from IndexedDB,
+and targets one inert loopback executor document packaged into the fixture authority. The control is
+Options-page-only. Its URL, message, fixture field, UI button, and executor server are all manual-build
+markers refused by the production CWS source and artifact gates.
+
+The first real-Chromium double-acquisition exposed a stale external-read race beyond P3-B's serialized
+state writes: a group query begun before `tabs.group()` could complete after the role claim and erase
+`executorTabId`. The new RED test received `undefined` instead of the claimed tab. Membership refresh
+no longer retires role authority; exact tab removal/retirement owns that transition, while the
+coordinator revalidates live group/URL/document state before reuse.
+
+Live, two consecutive exact v1 acquisitions in one real session produced two authenticated document
+ids. The second acquisition closed the first role tab before replacement; the group retained exactly
+one user tab plus one inactive executor, persisted exactly that executor role, and
+`chrome.userScripts.getScripts()` remained empty. The executor page's MAIN world saw no artifact side
+effect or source; the authenticated USER_SCRIPT hello reported only the signed `collect_request`
+command and `dispatchEligible:false`.
+
+TDD evidence: the first injector/coordinator/CWS slice was **1 pass, 3 failures, and 2
+missing-module errors**. The live stale-membership race and a replacement whose old role could not
+retire each added their own **1-failure RED**. Mutation checks fail when the sender document-id
+comparison is removed or the exact landed-URL check is weakened; the CWS marker mutation is likewise
+refused. Final gates are **68 focused tests / 190 assertions**, **1,220 extension tests / 2,238
+assertions**, and **2,582 full SDK tests / 6,832 assertions**, all green. Typecheck and the guarded
+production CWS build pass.
+
+The production build was then loaded into the same profile: manual banner/control/executor elements
+were absent, Pack readiness remained closed, no Pack record or role remained, and a normal no-Pack
+session started. The retained Phase 1 probe again reported Pack storage/registration/permission/DNR
+unchanged. Community registrar and broker live smokes remained green, including collision retirement
+before community registration.
+
+P3-C does not execute a command. Broker policy, invocation, output/provenance, and mutation semantics
+remain P3-D. Restart re-entry, navigation re-authentication, and lifecycle-driven retirement remain
+P3-E.
+
 #### P3-D — Broker v2
 
 - one in-flight invocation per connection/document;

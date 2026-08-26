@@ -2032,6 +2032,37 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   legitimately crosses flows says so per step. A caller that names nothing never reports a misroute, because
   the memory hook runs on every turn and would otherwise look like the flow under test on one runner and
   like a misroute on another.
+- **Nothing had ever checked that an extracted value is IN the page it describes** — `npm run
+  test:extraction:live` (`tools/scenarios/extraction-audit-live.mjs`, 2026-08-26). Every sweep until now
+  read the answer through the same `dom.query_all` path that produced it, and §13's extraction defects all
+  passed that bar: a title taken from the wrong `h2` (every row named "Logitech"), a price glued out of
+  `Now$4999current price`, an id mined from a junk token so 156 cards read as one, shipping invented as 0
+  from a threshold sentence. Each was found by hand, weeks later. The audit re-reads the whole document
+  through **CDP's DOM domain** (`DOM.getDocument` + `DOM.getOuterHTML`, exposed as `session.pageHtml()`) —
+  a channel that shares nothing with our selectors — and asks whether each value exists in it. The
+  extraction itself is the product's: `AX_SITE_CONFIGS` is the site's own Lua layer, so the selectors are
+  not a copy, and the field list mirrors the reader's `fields_for` key for key.
+  **The first live run's job was to expose the audit's own false positives, and it found four**, each a
+  difference between what a DOM read returns and what the markup literally holds — not between the
+  extraction and the page: an attribute read is entity-DECODED while the raw HTML is not (all 8 amazon rows
+  reported absent); `textContent` concatenates children with no separator while stripping tags INSERTS one,
+  and eBay produced both directions in one row (so whitespace is dropped from both sides); coupang rewrites
+  its own hrefs with tracking params between the read and the HTML fetch (so only the PATH is a claim); and
+  ssg's title IS the image `alt`, which lives inside a tag the text projection strips.
+  Two guards keep a green run meaningful: the trace cannot be the source (chat truncates a large tool
+  output at 4,120 characters, so the first version audited **0 candidates and still said PASS**), and an
+  audit averaging under **2 checkable fields per row** fails as too thin — measured when coupang matched
+  one field per row because a partial field list never asked for its `img[alt]` title.
+  **Live: 7 of 8 stores grounded** — amazon 5.0 fields/row, ebay 6.8, walmart 3.6, 11st 3.4, etsy 2.6,
+  coupang 2.0, ssg 2.0; gmarket audits at 1.8/row with its own config loaded, which is unattributed:
+  a follow-up probe aimed at gmarket measured **11st** instead, because the session had moved.
+- **The site Lua layer can lag a navigation, and a runner reading `AX_SITE_CONFIGS` may get the PREVIOUS
+  store's selectors.** Measured: after auditing etsy the browser was on `gmarket.co.kr/n/search` while the
+  runtime still held **etsy's** config, so the audit extracted a gmarket page with etsy selectors and called
+  the result "too thin" — a conclusion about the wrong thing entirely. Any runner that reads the site layer
+  must assert the loaded site IS the store under test and report a mismatch as a delivery fault, never as a
+  verdict about extraction. `siteVerdict` does that, and the same probe is what caught a second instance
+  (an intended gmarket measurement that landed on 11st).
 - **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /

@@ -41,6 +41,67 @@ test('normalize reads the site and query out of the node state', () => {
   assert.ok(Object.values(value.store_result.candidates ?? {}).length >= 1);
 });
 
+// ── the single-site list is screened the same way the comparison is ───────────
+// The multi-store path drops a row that is a different product (relevance), and the single-site path had
+// no screening at all: row one was whatever the grid rendered. Measured live 2026-08-26 on eBay —
+// "첫 번째로 해줘" picked eBay's own "Shop on eBay" promo tile (`2500219655424533`), and the cart refused
+// with `product_navigation_failed` because that id has no product page. §13 records that NO structural
+// signature separates that tile from a listing, so the fix cannot be a selector: the tile carries none of
+// the query's words, and that is what removes it.
+const EBAY_ROWS = [
+  { site: 'ebay', product_id: '2500219655424533', id: '2500219655424533', name: 'Shop on eBay', price: 20, currency: 'USD', url: 'https://www.ebay.com/itm/2500219655424533' },
+  { site: 'ebay', product_id: '236951166964', id: '236951166964', name: 'Logitech M185 Wireless Mouse 2.4GHz', price: 14.99, currency: 'USD', url: 'https://www.ebay.com/itm/236951166964' },
+  { site: 'ebay', product_id: '188780934255', id: '188780934255', name: 'Logitech M185 Mouse Grey', price: 12.5, currency: 'USD', url: 'https://www.ebay.com/itm/188780934255' },
+];
+
+test('a row that carries none of the query words is screened out of the single-site list', () => {
+  const value = lua.call('AX_RPC_PURE.screen_site_candidates', {
+    query: 'Logitech M185 mouse',
+    candidates: EBAY_ROWS,
+  });
+
+  assert.equal(value.next, 'done');
+  assert.deepEqual(
+    Object.values(value.candidates ?? {}).map((row) => row.product_id),
+    ['236951166964', '188780934255'],
+    'the promo tile is the row the cart cannot reach',
+  );
+  assert.equal(value.screened_out, 1);
+});
+
+test('a generic query keeps its rows — the model-code anchor must not be required here', () => {
+  // The comparison path REQUIRES a model code and a brand; a single-site request is usually neither
+  // ("USB C cable", "신발"). Applying that rule verbatim would empty every ordinary list.
+  const rows = [
+    { site: 'coupang', product_id: '1', name: 'USB C cable 2m fast charge', price: 9900, currency: 'KRW' },
+    { site: 'coupang', product_id: '2', name: 'USB C 케이블 1m', price: 8900, currency: 'KRW' },
+  ];
+  const value = lua.call('AX_RPC_PURE.screen_site_candidates', { query: 'USB C cable', candidates: rows });
+
+  assert.equal(Object.values(value.candidates ?? {}).length, 1, 'only the row carrying every word survives');
+  assert.equal(value.screened_out, 1);
+});
+
+test('screening everything away keeps the original list — an empty list leaves nothing to choose', () => {
+  const rows = [
+    { site: 'ssg', product_id: '1', name: '전혀 다른 상품', price: 1000, currency: 'KRW' },
+    { site: 'ssg', product_id: '2', name: '또 다른 상품', price: 2000, currency: 'KRW' },
+  ];
+  const value = lua.call('AX_RPC_PURE.screen_site_candidates', { query: 'Logitech M185 mouse', candidates: rows });
+
+  assert.equal(Object.values(value.candidates ?? {}).length, 2, 'the user still gets something to pick from');
+  assert.equal(value.screened_out, 0, 'nothing was removed from what the user sees, so nothing is reported');
+  assert.equal(value.screen_fallback, true);
+});
+
+test('no query, no candidates, and a single row all pass through untouched', () => {
+  assert.equal(Object.values(lua.call('AX_RPC_PURE.screen_site_candidates', { candidates: EBAY_ROWS }).candidates ?? {}).length, 3);
+  const empty = lua.call('AX_RPC_PURE.screen_site_candidates', { query: 'x' });
+  assert.equal(empty.next, 'done');
+  assert.equal(empty.candidates, undefined, 'an empty list must cross as ABSENT, never as {}');
+  assert.equal(empty.screened_out, 0);
+});
+
 test('normalize refuses without a site rather than normalizing nothing', () => {
   // The command answers `error: missing_site` and the flow would branch `done` on it anyway; naming the
   // refusal keeps a mapping mistake from looking like a store with no matches.

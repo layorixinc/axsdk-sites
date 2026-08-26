@@ -1110,12 +1110,14 @@ flows:
       quantity), then on the shopping site search for each item in turn and add
       it to the cart, and report what was added. Never place an order.
     state:
-      site: amazon
+      site: null
+      site_source: null
       shop_plan: null
       shop_index: null
       query: null
       quantity: null
       candidates: null
+      screened_out: null
       search_status: null
       product_id: null
       product_name: null
@@ -1196,9 +1198,20 @@ flows:
         id: shopping_search_product
         description: Search the store that is open, in the runtime, and read its candidates.
         next:
-          done: refine_item
+          done: screen_item
           error: next_product
         fallback: { invalidNext: error, exhaustedNext: error }
+
+      screen_item:
+        kind: action_contract
+        id: shopping_screen_site_candidates
+        description: Drop rows that are a different product from the one asked for. The comparison path
+          has always screened; this list had nothing, so row one was whatever the grid rendered — on eBay
+          that is its own promo tile, which has no product page to add from.
+        inputSelector: [ query, candidates ]
+        next:
+          done: refine_item
+        fallback: { invalidNext: done, exhaustedNext: done }
 
       refine_item:
         kind: action_unit
@@ -1212,6 +1225,7 @@ flows:
           - query
           - quantity
           - candidates
+          - screened_out
           - shop_refine_stage
         allowedTools: [ refine_products ]
         prompt: |-
@@ -1222,7 +1236,7 @@ flows:
 
           1. `candidates` is empty/absent: next="skip" (nothing to choose).
           2. `shop_refine_stage` is empty/absent (results just arrived, no criterion asked yet):
-             next="ask", shop_refine_stage="criteria", question=<in the user's language: state how many products were found for `query`, list the top few by name with price_text/rating, then offer concrete ways to choose — e.g. 저렴한 순(price), 평점 높은 순(rating), 특정 브랜드/키워드, 또는 "첫 번째"/"아무거나". Ask which they want.>. Do NOT set product_id.
+             next="ask", shop_refine_stage="criteria", question=<in the user's language: state how many products were found for `query`, and when `screened_out` is a number above 0 add that this many unrelated rows were left out; list the top few by name with price_text/rating, then offer concrete ways to choose — e.g. 저렴한 순(price), 평점 높은 순(rating), 특정 브랜드/키워드, 또는 "첫 번째"/"아무거나". Ask which they want.>. Do NOT set product_id.
           3. `shop_refine_stage`="criteria" (requestText is the user's choice/criterion):
              Rank/filter `candidates` by that criterion (lowest price, highest rating, a brand/keyword in name, "first"/"아무거나"/"any" -> the first candidate, …).
              - If one matches: next="pick", product_id=<the chosen candidate's id>, product_name=<its name>, cart_approval="user_picked_searched_product". Copy id/name VERBATIM from candidates.
@@ -4650,6 +4664,46 @@ flowTools:
         next: { type: string, enum: [ navigate, ask ] }
         question: { type: string }
         message: { type: string }
+
+
+  shopping_screen_site_candidates:
+    description: Keep the searched rows that carry every word of the request, for the single-site list.
+    execute:
+      kind: runtime
+      implementation: lua
+      # No rpc and no net block: this reads the rows the search already returned and touches nothing.
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.50_commerce_core",
+          "_common.51_relevance",
+          "_common.52_identity",
+          "_common.53_verify",
+          "_common.54_comparison",
+          "_common.55_offers",
+          "_common.56_store_io",
+          "_common.63_pure_entries"
+        ]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PURE.screen_site_candidates(args)
+        end
+    output:
+      next: result.next
+      candidates: result.candidates
+      screened_out: result.screened_out
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        query: { type: [ string, "null" ] }
+        # Nullable and NOT required: a store that found nothing sends null, and `null` against
+        # `{type: array}` is refused before the script runs.
+        candidates: { type: [ array, "null" ], items: { type: object, additionalProperties: true } }
 
   sitemap_search:
     description: Search the current site's sitemap for pages matching a

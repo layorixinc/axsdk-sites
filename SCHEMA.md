@@ -3253,6 +3253,32 @@
     }
   },
   {
+    "name": "shopping_screen_site_candidates",
+    "description": "Keep the searched rows that carry every word of the request, for the single-site list.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidates": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    }
+  },
+  {
     "name": "shopping_search_one_store",
     "description": "Search one mapped store with a runtime-side script that drives the page over RPC.",
     "parameters": {

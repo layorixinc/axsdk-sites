@@ -1915,30 +1915,48 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   document: slots `:` 262,039 B + `:|2` 835 B, rejoin byte-exact, and a real coupang turn ran on it.
   Note the working tree is CRLF (§13) and `git show HEAD:` is LF, so the committed blob reads ~5.9 KiB
   smaller than what the harness stores — measure the FILE.
-- **The guarded cart is now live-proven on six stores, and every other store's outcome is a measured
-  classification** (`npm run test:commerce:live:cart`, 2026-08-26). Until the store resolver landed the
-  single-site flow could only reach amazon, so eight of the nine cart-capable stores had a mutation path
-  nobody had ever run. The runner never believes the tool — it re-reads the page the browser is on and
-  asks whether the APPROVED product id appears there, through generic attribute probes plus the page
-  text, so no per-store selector is duplicated in the runner. Measured:
-  **added, with the site's own cart page as evidence** — coupang (`9334628346`), 11st
-  (`buy.11st.co.kr/cart/CartAction.tmall`), amazon (`cart/smart-wagon?newItems=…`, the URL only a real
-  add produces), walmart (`walmart.com/cart`), gmarket (`cart.gmarket.co.kr`), and — once the list was
-  screened (below) — ebay (`158215016462` on `cart.ebay.com`, its only evidence, since eBay has no
-  per-add confirmation panel to configure);
-  **classified, claiming nothing** — ssg `pending` (the click reached `pay.ssg.com/cart/dmsShpp.ssg`, but
-  no id is readable there without a signed-in user), aliexpress `access_denied` (captcha), etsy
-  `add_control_missing` (a made-to-order listing shows no add control the adapter knows). A refusal the
-  tool MAKES is an answer; an unverified claim and an unknown code
-  are the only failures, and a probe that could not run is `unverifiable`, never an accusation.
-- **Two add controls had gone stale and every add on those stores refused, silently as far as the
+- **"On the cart page" is not "in the cart" — the id probe was confirming RECOMMENDATIONS, and it
+  retracts three of the six stores this entry used to claim** (measured 2026-08-26). The guard already
+  scoped its structural selector to the cart page and then scoped the id probe to the cart page; both
+  fixes read "on the cart page" as "in the cart". It is not. Measured, with nothing added — the product
+  merely VIEWED, which the flow always does first: gmarket's cart page carried **two**
+  `a[href*="goodsCode=4798681473"]` links from its 최근 본 상품 rail while the cart itself was **empty**.
+  Coupang's cart page: 40 product links, **19 inside `#cart-reco-widget`**, and a product present only in
+  that widget matched the old document-wide probe. Amazon's: 60 `a[href*="/dp/"]`, **26 inside
+  recommendation carousels**. 11st's: 26, of which **25 are a carousel** (ten `li.bx-clone`).
+  So a store must now declare `cart_item_scopes`, the region holding its cart LINES, and without one the
+  id is not evidence there at all — the add answers `add_to_cart_pending`, which claims nothing.
+  Measured scopes, each validated against a populated cart: amazon `.sc-list-item` (5 rows, all five
+  `[data-asin]` elements), coupang `[id^="item_"]` (exactly the 2 rows; the reco widget holds none, and a
+  reco-only product scores **0** inside the scope and 1 inside the widget), ebay
+  `[data-test-id="cart-bucket"]` (all 3 `/itm/` links), 11st `li.s_cart_prd` (the 1 real line —
+  `#CartListPC` contains all 26 links, so it is NOT a usable scope).
+  **The honest matrix after the fix** (`npm run test:commerce:live:cart`): **added, on a cart LINE** —
+  amazon (`B0CG1LGWR6`), coupang (`8087835532`), ebay (`158215016462`); **`pending`, claiming nothing** —
+  11st (its guest cart kept only an older line, so today's add is unproven), etsy, gmarket, ssg
+  (no id is readable there without a signed-in user); **`access_denied`** — aliexpress (captcha).
+  walmart's turn hit the `no-node` session fault, so it is unmeasured, not passing.
+  Two further notes worth keeping. The RUNNER's own evidence probe is deliberately generic (attribute
+  probes plus page text, no per-store selectors) and is therefore fooled by the same rails — on gmarket it
+  still reports `mentions=true` while the cart is empty; it is safe only because `added` requires the
+  tool's own `add_status` too, so tightening the tool tightened the conjunction. And a store whose cart
+  cannot be read gets NO scope rather than a guessed one: a configured path nobody has walked is worse
+  than one that says it is not configured (§6.4).
+  `npm run test:commerce:sites` pins both scope rules — a scope may not be one of the page-level
+  containers this survey measured, and may not name a recommendation surface — mutation-checked with
+  `#sc-page-content`, `#cart-reco-widget .item` and a bare `li`.
+- **Three add controls had gone stale and every add on those stores refused, silently as far as the
   matrix was concerned.** gmarket's live buy box carries `btn_primary btn_white btn_mycart` (measured
   twice on the page — a responsive duplicate) while the configured `#btn_add_cart` /
   `button.button__add-cart` matched NOTHING; ssg's is `ssgitem_btn_cart ssgitem_iconbtn clickable`,
-  not `#btn_cart`. Both are word-based design-system classes, so §10 allows them. After the fix gmarket
-  answers `added` with its own cart page as proof and ssg reaches its cart instead of refusing. Note
-  what is NOT the add: gmarket's `.btn_round.btn_blue` ("장바구니로") is the confirmation popup's link to
-  the cart, and clicking it would leave the product behind.
+  not `#btn_cart`; and etsy's `button[data-add-to-cart-button]` / `button[name="add_to_cart"]` both
+  matched **0** on an ordinary listing — which the matrix had recorded as a made-to-order listing's own
+  limit rather than as our stale selector. Etsy's real control is the submit of its own cart form, and it
+  MUST be scoped: `form[action*="/cart/listing.php"] button[type="submit"]` matches **5** on that page
+  (the buy box plus four related-item cards), so the first in document order could add a different
+  listing; `#listing-page-cart` scopes it to exactly 1. All are word-based design-system names, so §10
+  allows them. Note what is NOT the add: gmarket's `.btn_round.btn_blue` ("장바구니로") is the confirmation
+  popup's link to the cart, and clicking it would leave the product behind.
 - **The single-site list was never screened, so row one was whatever the grid rendered — CLOSED
   2026-08-26.** "첫 번째로 해줘" on an eBay search selected `2500219655424533`, the "Shop on eBay" promo
   tile, and `shopping_add_to_cart` answered `product_navigation_failed` because that id has no product

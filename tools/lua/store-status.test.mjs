@@ -117,6 +117,72 @@ test('rows without a known total are folded out by default and counted', () => {
   assert.equal(ranked.all_offers.length, 4, 'the folded rows must remain reachable');
 });
 
+// A fold can remove a WHOLE store from the window. Measured live 2026-08-26 on SSG + AliExpress:
+// "배송비/총액 미확인 3건은 접었습니다" while every listed row was SSG — AliExpress had answered with three
+// candidates and none of them survived, and the sentence never named it. §13 already records the rule this
+// breaks ("a silently missing store is indistinguishable from 'this product is not sold there'"); the fold
+// is the second way a store disappears, and the count alone cannot tell the user which one it was.
+test('the fold names the stores whose rows it removed', () => {
+  const ranked = rank([
+    offer({ site: 'ssg', product_id: 's1', currency: 'KRW', total_base: 12, total_for_quantity: 17000 }),
+    offer({ site: 'aliexpress', product_id: 'x1', shipping_cost: null, cost_complete: false, total_base: null, known_cost_base: 15 }),
+    offer({ site: 'aliexpress', product_id: 'x2', shipping_cost: null, cost_complete: false, total_base: null, known_cost_base: 16 }),
+    offer({ site: 'etsy', product_id: 'e1', shipping_cost: null, cost_complete: false, total_base: null, known_cost_base: 40 }),
+  ]);
+
+  assert.match(ranked.comparison_text, /미확인 3건은 접었습니다/);
+  assert.match(ranked.comparison_text, /알리익스프레스 2건/, `the store that lost the most rows is named: ${ranked.comparison_text}`);
+  assert.match(ranked.comparison_text, /엣시 1건/);
+  // The names ride inside the existing note, so nothing new has to be published to reach the window.
+  assert.match(ranked.comparison_text, /'미확인 포함'/);
+});
+
+test('the fold breakdown is ordered, bounded and derived from the folded rows themselves', () => {
+  const rows = [
+    { site: 'aliexpress' }, { site: 'aliexpress' }, { site: 'aliexpress' },
+    { site: 'etsy' }, { site: 'etsy' },
+    { site: 'walmart' },
+    { site: 'coupang' },
+  ];
+  const attribution = lua.call('AX_COMMERCE.fold_attribution', rows);
+
+  assert.equal(attribution.count, 7, 'the count and the names come from ONE list, so they cannot disagree');
+  assert.deepEqual(
+    attribution.entries.map((entry) => [entry.site, entry.count]),
+    [['aliexpress', 3], ['etsy', 2], ['coupang', 1], ['walmart', 1]],
+    'most rows lost first, then the slug — a window that reorders itself between turns is not reproducible',
+  );
+  // Naming ten stores would push the sentence past the window's character budget.
+  assert.match(attribution.text, /^알리익스프레스 3건 · 엣시 2건 · 쿠팡 1건 · 외 1곳$/);
+});
+
+test('a folded row with no store still counts, and never invents a name', () => {
+  const attribution = lua.call('AX_COMMERCE.fold_attribution', [{ site: 'ssg' }, {}, { site: '' }]);
+  assert.equal(attribution.count, 3, 'every folded row is counted, named or not');
+  assert.deepEqual(attribution.entries.map((entry) => entry.site), ['ssg']);
+  assert.match(attribution.text, /^SSG 1건$/, `an unnamed row must not become a store: ${attribution.text}`);
+});
+
+test('the browsed window keeps the fold breakdown after a filter', () => {
+  // §13: the window the user reads is ALWAYS rendered from a RESTORE, so anything the build computed and the
+  // next turn drops is simply gone — that is how `notes`, `display_currency` and the branch payload were lost.
+  const ranked = rank([
+    offer({ site: 'ssg', product_id: 's1', currency: 'KRW', total_base: 12, total_for_quantity: 17000 }),
+    offer({ site: 'amazon', product_id: 'a1' }),
+    offer({ site: 'aliexpress', product_id: 'x1', shipping_cost: null, cost_complete: false, total_base: null, known_cost_base: 15 }),
+  ]);
+  const browsed = lua.call('AX_refine_store_offers', {
+    comparison_id: ranked.comparison_id,
+    offers: ranked.offers,
+    all_offers: ranked.all_offers,
+    view_page: 1,
+    refine_request: '평점 높은 순',
+  });
+
+  assert.match(browsed.question, /미확인 1건은 접었습니다/);
+  assert.match(browsed.question, /알리익스프레스 1건/, `the breakdown must survive the browse: ${browsed.question}`);
+});
+
 test('the user can unfold them in their own words', () => {
   const ranked = rank([
     offer({ site: 'amazon', product_id: 'a1' }),

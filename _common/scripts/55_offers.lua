@@ -61,18 +61,21 @@ function AX_rank_store_offers(args)
   -- out of the default window but stay in `all_offers`, one sentence away ("미확인 포함"). Folding them
   -- when there is nothing else left would leave the user with no choice at all, so that case shows them.
   local complete = array()
-  local incomplete = 0
+  local incomplete_rows = array()
   for index = 1, #offers do
     if offers[index].cost_complete == true then
       complete[#complete + 1] = offers[index]
     else
-      incomplete = incomplete + 1
+      incomplete_rows[#incomplete_rows + 1] = offers[index]
     end
   end
+  local incomplete = #incomplete_rows
   local visible = #complete > 0 and complete or offers
-  local hidden_incomplete = #complete > 0 and incomplete or 0
+  -- Folding everything away would leave nothing to choose from, so that case lists them and folds nothing.
+  local folded_rows = #complete > 0 and incomplete_rows or array()
+  local hidden_incomplete = #folded_rows
 
-  local notes, status = C.comparison_notes(failures, offers, hidden_incomplete, args.screened_out)
+  local notes, status = C.comparison_notes(failures, offers, folded_rows, args.screened_out)
   local snapshot = C.open_comparison(visible, required_identity, {
     all_offers = offers,
     filters = hidden_incomplete > 0 and { complete_cost_only = true } or {},
@@ -155,24 +158,24 @@ function AX_refine_store_offers(args)
   -- only the cost-incomplete absentees keeps every number in that sentence real, and keeps its promise
   -- ("'미확인 포함'이라고 하면 함께 보여드려요") answerable. A window that itself holds an incomplete row is
   -- not folding at all, so it reports nothing.
-  local function folded_count(list)
-    if C.has_incomplete(list) then return 0 end
+  local function folded_rows(list)
+    if C.has_incomplete(list) then return array() end
     local shown = {}
     for index = 1, #list do
       local offer = list[index]
       shown[tostring(offer.id or offer.product_id or index)] = true
     end
-    local folded = 0
+    local folded = array()
     for index = 1, #all_offers do
       local offer = all_offers[index]
       local key = tostring(offer.id or offer.product_id or "")
-      if not shown[key] and offer.cost_complete ~= true then folded = folded + 1 end
+      if not shown[key] and offer.cost_complete ~= true then folded[#folded + 1] = offer end
     end
     return folded
   end
 
   local function notes_for(list)
-    return C.comparison_notes(args.failures, all_offers, folded_count(list))
+    return C.comparison_notes(args.failures, all_offers, folded_rows(list))
   end
 
   -- A refinement that did not apply must say so in the window, not only in a state field the model may
@@ -251,9 +254,9 @@ function AX_refine_store_offers(args)
       -- An empty result would strand the user with nothing to pick, so the previous listing stands.
       return window_of(offers, comparison_id, { refine_error = "no_matches" })
     end
-    -- Same rule as `folded_count`: only rows whose cost is unknown are reported as folded, never rows a
+    -- Same rule as `folded_rows`: only rows whose cost is unknown are reported as folded, never rows a
     -- site or price condition removed. `#all_offers - #visible` counted both.
-    local notes, status = C.comparison_notes(args.failures, all_offers, folded_count(visible))
+    local notes, status = C.comparison_notes(args.failures, all_offers, folded_rows(visible))
     local snapshot = C.open_comparison(visible, identity_id, {
       all_offers = all_offers,
       filters = filters,

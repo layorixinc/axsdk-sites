@@ -290,19 +290,66 @@ function C.has_incomplete(offers)
   return false
 end
 
+--- Which stores lost rows to the fold, most rows first. The COUNT and the NAMES come out of one list, so
+--- the sentence cannot say "3건" while naming two: a fold can remove a whole store from the window, and a
+--- bare count leaves that store indistinguishable from one that answered nothing (§13's rule, applied to
+--- the fold rather than to a failure). A row whose site is absent is still counted and never named — an
+--- invented store name in a comparison is worse than an unattributed row.
+local FOLD_NAMED_MAX = 3
+
+function C.fold_attribution(folded)
+  local counts = {}
+  local order = array()
+  local total = 0
+  for index = 1, #(folded or {}) do
+    total = total + 1
+    local site = lower((folded[index] or {}).site)
+    if site ~= "" then
+      if counts[site] == nil then
+        counts[site] = 0
+        order[#order + 1] = site
+      end
+      counts[site] = counts[site] + 1
+    end
+  end
+
+  local entries = array()
+  for index = 1, #order do
+    entries[#entries + 1] = { site = order[index], count = counts[order[index]] }
+  end
+  table.sort(entries, function(left, right)
+    if left.count ~= right.count then return left.count > right.count end
+    return left.site < right.site
+  end)
+
+  local parts = array()
+  for index = 1, math.min(#entries, FOLD_NAMED_MAX) do
+    local entry = entries[index]
+    parts[#parts + 1] = (STORE_NAMES[entry.site] or entry.site) .. " " .. entry.count .. "건"
+  end
+  if #entries > FOLD_NAMED_MAX then
+    parts[#parts + 1] = "외 " .. (#entries - FOLD_NAMED_MAX) .. "곳"
+  end
+  return { count = total, entries = entries, text = table.concat(parts, " · ") }
+end
+
 --- The lines a window carries beyond the offers: store outcomes and rows folded for an unknown total.
 --- `answered` is the WHOLE listing, not the visible page: a folded row still proves its store answered.
-function C.comparison_notes(failures, answered, hidden_incomplete, screened_out)
+--- `folded` is the LIST of rows the default window removed, never a count: the sentence names the stores
+--- that lost them, and one list is the only way the number and the names cannot drift apart.
+function C.comparison_notes(failures, answered, folded, screened_out)
   local notes = array()
   local status = C.store_status(failures, answered)
   if status.text ~= "" then notes[#notes + 1] = status.text end
   if (tonumber(screened_out) or 0) > 0 then
     notes[#notes + 1] = string.format("관련 없는 %d건은 제외했습니다", math.floor(tonumber(screened_out)))
   end
-  if (hidden_incomplete or 0) > 0 then
+  local fold = C.fold_attribution(type(folded) == "table" and folded or {})
+  if fold.count > 0 then
     notes[#notes + 1] = string.format(
-      "배송비/총액 미확인 %d건은 접었습니다 — '미확인 포함'이라고 하면 함께 보여드려요",
-      hidden_incomplete)
+      "배송비/총액 미확인 %d건은 접었습니다%s — '미확인 포함'이라고 하면 함께 보여드려요",
+      fold.count,
+      fold.text ~= "" and (" (" .. fold.text .. ")") or "")
   end
   return notes, status
 end

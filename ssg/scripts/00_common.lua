@@ -43,15 +43,21 @@ local CONFIG = {
   product_url_prefix = "https://www.ssg.com/item/itemView.ssg?itemId=",
   product_title_selectors = { '.cdtl_info_tit h2', 'h1' },
   product_price_selectors = { '.cdtl_new_price .ssg_price', '.ssg_price' },
-  -- `.ssgitem_btn_cart` is the live control (measured 2026-08-26 on `ssg.com/item/itemView.ssg`:
-  -- `ssgitem_btn_cart ssgitem_iconbtn clickable`, repeated once per variant row). `#btn_cart` matched
-  -- nothing, so every add refused with `add_to_cart_unavailable`.
-  add_selectors = { '#btn_cart', '.ssgitem_btn_cart', 'button[data-react-tarea-dtl-cd="00020_000000000"]' },
+  -- CORRECTED 2026-08-26, and the earlier note in this place was wrong in a way that could add the wrong
+  -- product. `.ssgitem_btn_cart` matches **9** elements on an item page — related-item icon buttons, not
+  -- variant rows of this product — and clicking one NAVIGATED to `itemId=1000728596071` with
+  -- `click=itemMidArea23`. The product's own control is `#actionCart` (`cdtl_btn_dgray cdtl_btn_cart`),
+  -- with the sticky bar's duplicate at `#_bar_actionCart`; clicking it stays on the item page. `#btn_cart`
+  -- matched nothing and is gone.
+  add_selectors = { '#actionCart', '#_bar_actionCart' },
   quantity_selectors = { 'select[name="quantity"]', 'input[name="quantity"]' },
   required_option_selectors = { 'select[required]' },
-  confirmation_selector = '[data-layer-name="cart_success"].on, .cart_layer.on',
-  confirmation_text_selectors = { '[data-layer-name="cart_success"].on', '.cart_layer.on' },
-  add_ready_selector = '[data-layer-name="cart_success"].on, .cart_layer.on, form[action*="login"]',
+  -- No per-add panel is configured because there is none to read: after a real click on `#actionCart` the
+  -- page carries **0** `[data-layer-name]` elements, so the previous
+  -- `[data-layer-name="cart_success"].on` matched nothing and could never confirm. Measured further: the
+  -- guest cart stays EMPTY after a correct add, so ssg keeps a cart only for a signed-in user and the
+  -- honest outcome is `cart_empty` from the phrase below.
+  add_ready_selector = 'form[action*="login"], iframe[src*="captcha"]',
   cart_url = "https://pay.ssg.com/cart/dmsShpp.ssg",
   cart_url_markers = { "pay.ssg.com/cart", "/cart/" },
   -- Measured live 2026-08-26 on the empty cart: "장바구니에 담긴 상품이 없습니다." gmarket deliberately has

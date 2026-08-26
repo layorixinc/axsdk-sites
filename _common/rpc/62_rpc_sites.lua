@@ -811,9 +811,8 @@ RPC_SITES["ssg"] = {
     ".ssg_price"
   },
   add_selectors = {
-    "#btn_cart",
-    ".ssgitem_btn_cart",
-    "button[data-react-tarea-dtl-cd=\"00020_000000000\"]"
+    "#actionCart",
+    "#_bar_actionCart"
   },
   quantity_selectors = {
     "select[name=\"quantity\"]",
@@ -822,12 +821,7 @@ RPC_SITES["ssg"] = {
   required_option_selectors = {
     "select[required]"
   },
-  confirmation_selector = "[data-layer-name=\"cart_success\"].on, .cart_layer.on",
-  confirmation_text_selectors = {
-    "[data-layer-name=\"cart_success\"].on",
-    ".cart_layer.on"
-  },
-  add_ready_selector = "[data-layer-name=\"cart_success\"].on, .cart_layer.on, form[action*=\"login\"]",
+  add_ready_selector = "form[action*=\"login\"], iframe[src*=\"captcha\"]",
   cart_url = "https://pay.ssg.com/cart/dmsShpp.ssg",
   cart_url_markers = {
     "pay.ssg.com/cart",

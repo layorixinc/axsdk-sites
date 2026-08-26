@@ -482,6 +482,30 @@ run('a transient op refusal is never read as a page fact', () => {
 lua.define('function __rpc_site_data() return RPC_SITES end', 'site data reader');
 const siteData = lua.call('__rpc_site_data') ?? {};
 
+
+run('an add control is the buy box, not a row that repeats', () => {
+  // Each entry below was MEASURED clicking or matching something other than the product's own add:
+  //   .ssgitem_btn_cart   ssg, 9 matches — related-item icon buttons; clicking one NAVIGATED to
+  //                       itemId=1000728596071 with `click=itemMidArea23`, i.e. it would add another product
+  //   .btn_round.btn_blue gmarket — the confirmation popup's link to the cart, which leaves the product behind
+  //   an unscoped etsy cart-form submit — 5 matches on one listing (buy box plus four related-item cards)
+  // A code fix that leaves the same mistake expressible in data is half a fix, so the data is gated too.
+  const NOT_THE_BUY_BOX = [
+    '.ssgitem_btn_cart',
+    '.btn_round.btn_blue',
+    'form[action*="/cart/listing.php"] button[type="submit"]',
+  ];
+  for (const [slug, config] of Object.entries(siteData)) {
+    for (const raw of Object.values(config.add_selectors ?? {})) {
+      const selector = String(raw).trim();
+      assert(!NOT_THE_BUY_BOX.includes(selector),
+        `${slug} add selector is the product's own control, not a repeated row`, selector);
+    }
+  }
+  assert(Object.values(siteData.ssg?.add_selectors ?? {}).includes('#actionCart'),
+    'ssg declares the buy box control measured live', siteData.ssg?.add_selectors);
+});
+
 run('a declared cart-line scope names a REGION, never the cart page', () => {
   // Measured live 2026-08-26: on coupang's cart page 19 of 40 product links are a `#cart-reco-widget`
   // recommendation, on amazon's 26 of 60 are carousels, on 11st 25 of 26 are a carousel, and gmarket's

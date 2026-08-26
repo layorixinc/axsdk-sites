@@ -139,7 +139,7 @@ export function storeVerdict(outcome) {
   const answers = {
     added: 'the site shows the approved product in the cart',
     pending: 'clicked, not confirmed — nothing claimed',
-    cart_empty: 'the store renders its cart as empty — the click never reached it',
+    cart_empty: 'the store cart page shows no items — nothing was retained',
     cart_missing_product: 'the cart holds other lines and not this product',
     login_required: 'the store needs a signed-in user',
     access_denied: 'the store served a wall',

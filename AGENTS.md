@@ -2191,3 +2191,81 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   the mutation fails.** The active composition remains unchanged after a refused refresh/enable/
   disable/replace/rollback/remove/reset, but its Broker connections have already been closed.
   Recovery therefore runs in `finally`, before the options-page reply, for both success and refusal.
+- **Agent Pack session pins are bound to the backend session, not to a module global.** `chatStore`
+  persists `sessionPackPin`; `bindSession(session, pin)` is the only writer, and
+  `readSessionPackPin(sessionId)` is what `axchat`/`axcall`/`deferred` read. A deferred call and a
+  portable work envelope carry `agentPackSession`, so a completion delivered after a runtime recycle
+  claims the pin the call STARTED under, not whichever pin is globally active at delivery.
+- **The composition-immutability guard protects a LIVE pin, not the presence of a previous config.**
+  Measured: gating it on `isUpdate` alone made `AXSDK.init` throw
+  `AXSDK Pack session configuration is immutable after initialization` in a realm whose worker had
+  been recycled (config present, pin gone) — which is that realm's RECOVERY, not a change. It now
+  compares the whole composition (flowDocument + providerRegistryDigest included, via the stored
+  composition JSON) and only when `readActivePackSession()` is defined.
+- **A `CUT` that removes one line can delete a payload field, and only a live-shaped test sees it.**
+  Reworking `handleChatMessage` for Pack pins deleted
+  `...(siteClientFlows ? { clientFlows: siteClientFlows.clientFlows } : {})`; the first message
+  stopped carrying site client flows and exactly one test caught it (`axsdk.test.ts` "sends site
+  clientFlows once without memory after site change"), through a YAML parse of an undefined body
+  field. The contract is now pinned in `axchat-send-state.test.ts` and mutation-checked (remove the
+  line → red). A Pack session neither SENDS nor CLAIMS site client flows: claiming and dropping them
+  would consume a pending publication forever.
+- **A Pack session must decline, not fall through.** `createCdpAXHandler(..., packOnly=true)`
+  returned `undefined`, which is core's signal to KEEP RESOLVING into Lua and the builtins — so
+  `AX_set_memory` and friends stayed reachable outside the signed Pack command/effect/consent
+  boundary. It now returns a branded `route.decline('pack_command_undeclared')`, and core's own
+  `AX_SYSTEM` table (which runs BEFORE any app handler) is gated separately in `axhandler.ts`. Two
+  layers, because the system table cannot be reached from a handler-level test.
+- **The extension suite tests the BUILT core, not core's source.** `@axsdk/core` resolves to
+  `dist/lib.js`, so a core-source fix is invisible to `packages/axsdk-extension-cdp` until
+  `bun run build` runs in `axsdk-core`. Measured: an `AX_clear` isolation assertion passed in
+  `axsdk-core` and failed in the extension against a stale dist. Rebuild core before believing an
+  extension-side result about core behaviour.
+- **The backend advertises no Agent Pack contract, so no Pack session can be created live.**
+  Measured 2026-08-26 with `npm run probe:packs:phase0:platform`: `status:200`,
+  `Pack protocol: not_advertised`, `compile-only: not_advertised`. Every Pack path in the SDK is
+  therefore offline-verified only; no endpoint was guessed, and the live Pack browser phase stays
+  blocked on the platform.
+- **The orphan-suite gate knew one file extension.** `tools/scenarios/runner-contract.test.mjs`
+  walked `tools/` for `*.test.mjs` only, so `tools/packs/first-party.test.ts` (bun, TypeScript) was
+  reachable from no npm script — the hand-maintained list in another costume, which §13 already
+  records twice. The gate now accepts both `node --test` globs and `bun test <dir>`, and
+  `test:packs` is the script that runs it.
+- **The composer parses release envelopes; it never verifies them.** A first-party manifest that no
+  signed registry would serve composed cleanly, so the provenance gate now signs real Ed25519
+  index/release/revocation envelopes, serves them through `fetchVerifiedPackRelease` (the shipping
+  verifier), and composes from ITS output. A tamper that keeps the declared byte length is refused
+  as `asset_hash_mismatch` — an unequal-length tamper only reaches the cheaper
+  `asset_bytes_mismatch` check, which is the weaker assertion.
+- **Provider execution is authorized from the pinned composition, and a provider result is bounded
+  by its SIGNED authority.** `authorizeInstalledPackTask` resolves a contributed provider (release,
+  artifact ref, commands digest, entry URL) instead of refusing every invocation carrying
+  `providerId`; `packs/provider-router.ts` maps one invocation to one session-scoped provider lease
+  and coordinates at most two bounded navigations, each to a URL inside
+  `execution.matches`/`approvedOrigins`; the broker refuses a `candidates` payload whose product
+  URLs fall outside the contribution's `productMatches`, and an empty `candidates` list under
+  `status: "candidates"`.
+- **A composition that needs more than one task executor document is refused at ACTIVATION.**
+  Pre-session preparation already refused it, so such a composition could become the new-session
+  default and then fail every new session deterministically. `assertSupportedTaskExecutorCapacity`
+  refuses it in `PackManager.activate`, and `reset` refuses while any live session still pins an
+  installed composition.
+- **The fold can remove a whole STORE from the window, and a bare count cannot say which.** Measured
+  live 2026-08-26 on SSG + AliExpress: `배송비/총액 미확인 3건은 접었습니다` while every listed row was
+  SSG — AliExpress had answered with three candidates, none of them survived the fold, and the
+  sentence never named it, so a folded store read exactly like a store that sells nothing (§13's own
+  rule, one boundary further in). The note now carries the breakdown
+  (`… 접었습니다 (알리익스프레스 3건) — '미확인 포함'…`), and `C.fold_attribution` derives the count AND
+  the names from ONE list of folded rows, because two sources would let the number and the names
+  drift. Order is rows-lost desc then slug asc (reproducible between turns), at most three stores are
+  named plus `외 N곳` (the window has a character budget), and a row whose site is absent is counted
+  but never given an invented name.
+- **AliExpress and Etsy state no shipping on their search grid at all, so their totals are not
+  reachable from a search page.** Measured 2026-08-26, three cards each: AliExpress cards carry
+  title, discount percentage, both prices and the sold count and nothing about delivery — the card
+  CONTAINER has no badge either — and Etsy cards end at `USD 39.99 Add to cart`. Both declare
+  `shipping_from_text`, so there is nothing for the parser to find and every row folds. The obvious
+  repair (read the fee from the product page) was measured too and is NOT available on AliExpress:
+  the item page renders no `h1`, no price and an empty title in this profile — `#root` exists and
+  never hydrates. So a shipping-enrichment feature would have been built on a source nobody has
+  seen work; name the folded store instead, and do not add a selector for either site from memory.

@@ -2143,3 +2143,16 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   available backend, SDK, and agent checkouts contain no production flow compiler or compile adapter;
   the available backend `origin/main` also lacks the live package compiler route. The platform owner
   must publish the capability and compile-only endpoint from the repository that owns that compiler.
+- **A lifecycle phase is not user-testable merely because automation can call its manager.** Phase 2
+  originally had a real-Chromium harness but production intentionally packaged no registry trust root, so
+  nobody could click through update, stale approval, rollback, or revocation before Phase 3. The
+  `build:pack-manual` artifact now packages two signed exact releases and a signed revocation variant
+  behind build-only Options controls; the production CWS build scans its final tree and refuses every QA
+  authority/UI marker. Visible browser proof covered v1 install/enable, v2 exact diff, stale-v1 approval
+  refusal, replace, rollback, signed revocation refresh, disable, and removal. The fixture task side effect
+  stayed false and `chrome.userScripts.getScripts()` stayed empty throughout.
+- **A stale-approval test must submit the OLD receipt against the NEW staged digest.** Re-submitting the
+  staged approval only proves the happy path. The browser control retains the installed release's immutable
+  approval, pairs it with the update's `approvalDigest`, and observes `approval_mismatch`; the unit test was
+  mutation-checked by swapping in the new approval. Revocation is likewise consumed through the ordinary
+  registry refresh handler, not by editing lifecycle state from the UI.

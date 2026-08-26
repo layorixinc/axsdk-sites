@@ -899,6 +899,45 @@ Phase 1 Chromium probe remained green.
 This is a verification path, not P3-C: no Pack artifact executes and no role, document, nonce,
 connection, command dispatcher, core session, or platform action is added.
 
+### 9.8 MV-0B — update, rollback, and revocation through the product UI
+
+MV-0A proved one exact release. That still left Phase 3 untestable by a person: the production registry
+is intentionally closed, while the manual build exposed no second release, stale approval, rollback, or
+revocation path. MV-0B extends only the manual-verification artifact:
+
+- `build:pack-manual` packages two independently signed synthetic registries for
+  `layorix.fixture-agent@1.0.0` and `@2.0.0`. The fixture still contains public keys and signed immutable
+  responses only; no signing key, network fallback for a fixture origin, or unsigned/local-file Pack is
+  accepted.
+- The Options page exposes release selectors, the production verify/install-disabled controls, and the
+  production enable/replace/rollback/disable/remove handlers. A dedicated negative control submits the
+  installed release's approval against the staged update and must report `approval_mismatch`.
+- A signed v2 revocation variant is publishable inside the fixture service worker, then consumed through
+  the ordinary **Refresh signed registries** handler. Revoked releases lose activation controls and remain
+  removable.
+- The installed-release list distinguishes a selected lifecycle default, an installed-disabled update,
+  an exact rollback target, and a revoked release. It continues to state that Pack execution is inactive.
+
+The visible browser path was exercised end to end:
+
+```text
+verify v1 → install disabled → enable
+→ verify v2 with exact diff → reject stale v1 approval
+→ install v2 disabled → replace → rollback to v1
+→ publish signed v2 revocation → refresh → remove v2
+→ disable v1 → remove v1
+```
+
+At every step the fixture task's observable top-level side effect remained false and
+`chrome.userScripts.getScripts()` remained empty. The final list returned to empty. The focused Pack
+suite is **51 pass / 206 assertions**; mutation checks fail when the stale-approval control sends the
+new approval, when rollback dispatches replace, or when the production CWS gate omits the manual
+presentation marker. A production `build:cws` passes and contains no fixture authority or UI. The
+full SDK regression is **2,563 pass / 6,762 assertions**, and the root production build passes.
+
+This closes the browser-testability prerequisite for Phase 3; it does not implement or enable the
+Phase 3 executor.
+
 ## 10. Phase 3 — Exact executor, Broker v2, tab roles, and recovery
 
 ### 10.1 Objective

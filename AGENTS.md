@@ -202,7 +202,7 @@ AXSDK group is reused, and additional tabs join through the user's visible drag.
 |---|---|
 | CDP port | **9334** |
 | profile | `%LOCALAPPDATA%/AXSDKChromeProfiles/axsdk-extension-cdp` |
-| extension id | `kmpjeabgdfgicnnplgiokmaolfilokko` |
+| extension id | `ihdaghiiieaomningbeokfdkcpnpihpb` — **the CWS item's own id**: the store item's public key sits in `src/manifest.json` `key`, so an unpacked dev load and the listed item share one id |
 | extension build | `../axsdk-sdk-js/packages/axsdk-extension-cdp/dist` |
 | harness | `npm run cdp -- <cmd>` (§6) |
 
@@ -2610,3 +2610,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   R2 product ("runs user-selected community web-automation scripts"), which R1 by definition does not do.
   Two releases need two true sentences; loosening the charter gate to cover both would leave neither
   provable.
+- **`key` in the manifest is refused by the store, and the same field is what keeps our dev id stable.** The
+  first upload answered "key 입력란은 매니페스트에 허용되지 않습니다" (measured 2026-08-26 on the real
+  console). The docs' "paste the item's public key into `key`" is for loading UNPACKED — the store derives
+  the id from its own key pair. So the two copies differ **by design**: the developer `dist` keeps `key`
+  (the CDP harness pins one profile and one id through it) and only the uploaded copy may not have it.
+  `tools/build-cws-release.mjs` strips `key`, `update_url` and `differential_fingerprint` in the release
+  STAGING copy — before any evidence is computed, so the release manifest hashes the bytes the store
+  actually receives — and then re-reads the EXTRACTED archive and refuses if a forbidden field survived.
+  Two tests pin it (upload copy clean + developer copy intact, and the manifest hash equal to the uploaded
+  bytes); mutation-checking the strip turns both red. **The release ZIP would have been rejected exactly
+  like the hand-made one**, so this was a real defect in the release path, not a packaging accident.
+- **The extension id moved to the store item's id, `ihdaghiiieaomningbeokfdkcpnpihpb`.** Deriving it is
+  first 16 bytes of `sha256(DER SubjectPublicKeyInfo)` in hex with each nibble mapped `0-f` → `a-p`; the
+  derivation was validated by reproducing the OLD id from the old key before being trusted. Six files
+  carried the old id as a string (this file, `COMMUNITY_SCRIPT_LIVE_SCENARIO.html`,
+  `tools/harness/cdp-session.test.mjs`, and three SDK test files) and moved with it. The dev profile's
+  `chrome.storage` under the old id is orphaned by that change — the harness re-provisions from `.env`,
+  verified live: `status` opened a session and reported 25 commands with `stored-lua:`, and a shopping turn
+  answered from Amazon.

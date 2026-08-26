@@ -116,6 +116,49 @@ test('the published archive is the staging archive that re-verified after extrac
   assert.deepEqual((await archiveApi.inspectCwsArchive({ archivePath })).entries, release.archive.entries);
 });
 
+test('the uploaded manifest carries no field the Chrome Web Store refuses', {
+  skip: !existsSync(archiveModulePath),
+}, async () => {
+  // Measured 2026-08-26 on the real console: an upload whose manifest declares `key` is refused with
+  // "key 입력란은 매니페스트에 허용되지 않습니다". The docs' advice to paste the item's public key into
+  // `key` is for loading UNPACKED during development, and our dev harness pins its extension id that
+  // way — so the developer copy keeps the field and only the uploaded copy may not have it.
+  const { root, distDir, backend } = await fixture();
+  const developer = { manifest_version: 3, version: '0.1.0', key: 'A'.repeat(392), update_url: 'https://clients2.google.com/service/update2/crx' };
+  await writeFile(join(distDir, 'manifest.json'), `${JSON.stringify(developer, null, 2)}\n`);
+  const archivePath = join(root, 'release.zip');
+  const archiveApi = await import(pathToFileURL(archiveModulePath).href);
+  await buildCwsRelease({ distDir, archivePath, backend, archiveApi });
+
+  const extracted = join(root, 'inspect');
+  await archiveApi.extractCwsArchive({ archivePath, outDir: extracted });
+  const uploaded = JSON.parse(await readFile(join(extracted, 'manifest.json'), 'utf8'));
+  assert.equal('key' in uploaded, false);
+  assert.equal('update_url' in uploaded, false);
+  assert.equal(uploaded.manifest_version, 3);
+  assert.equal(uploaded.version, '0.1.0');
+
+  const source = JSON.parse(await readFile(join(distDir, 'manifest.json'), 'utf8'));
+  assert.equal(source.key, developer.key, 'the developer copy keeps the id-pinning key');
+});
+
+test('the release manifest hashes the manifest the store receives, not the developer copy', {
+  skip: !existsSync(archiveModulePath),
+}, async () => {
+  const { root, distDir, backend } = await fixture();
+  const developer = { manifest_version: 3, version: '0.1.0', key: 'B'.repeat(392) };
+  await writeFile(join(distDir, 'manifest.json'), `${JSON.stringify(developer, null, 2)}\n`);
+  const archivePath = join(root, 'release.zip');
+  const archiveApi = await import(pathToFileURL(archiveModulePath).href);
+  const release = await buildCwsRelease({ distDir, archivePath, backend, archiveApi });
+
+  const extracted = join(root, 'inspect');
+  await archiveApi.extractCwsArchive({ archivePath, outDir: extracted });
+  const uploadedBytes = await readFile(join(extracted, 'manifest.json'));
+  assert.equal(release.manifest.extension.files['manifest.json'], hash(uploadedBytes));
+  assert.notEqual(release.manifest.extension.files['manifest.json'], hash(await readFile(join(distDir, 'manifest.json'))));
+});
+
 test('backend drift leaves a previously approved archive untouched', async () => {
   const { root, distDir, backend } = await fixture();
   const archivePath = join(root, 'release.zip');

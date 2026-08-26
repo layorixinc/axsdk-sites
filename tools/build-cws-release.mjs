@@ -27,6 +27,27 @@ export async function readBackendRelease({ baseUrl, appId, apiKey, fetchImpl = f
 }
 
 /**
+ * Fields the Chrome Web Store refuses in an uploaded manifest.
+ *
+ * `key` pins the extension id when a directory is loaded UNPACKED, which is how the dev harness keeps one
+ * profile and one id across builds — so the developer copy must keep it. The store derives the id from its
+ * own key pair and refuses the upload outright (measured 2026-08-26 on the console: "key 입력란은
+ * 매니페스트에 허용되지 않습니다"). `update_url` names an update server the store owns, and
+ * `differential_fingerprint` is written by the store's own packager.
+ */
+const UPLOAD_FORBIDDEN_MANIFEST_FIELDS = ['key', 'update_url', 'differential_fingerprint'];
+
+async function writeUploadManifest(stagedDist) {
+  const path = join(stagedDist, 'manifest.json');
+  const manifest = JSON.parse(await readFile(path, 'utf8'));
+  const removed = UPLOAD_FORBIDDEN_MANIFEST_FIELDS.filter((field) => field in manifest);
+  if (removed.length === 0) return removed;
+  for (const field of removed) delete manifest[field];
+  await writeFile(path, `${JSON.stringify(manifest, null, 2)}\n`);
+  return removed;
+}
+
+/**
  * Builds in a temporary directory and publishes only after the archive extracted from its own bytes
  * re-verifies. A backend mismatch therefore leaves the last approved artifact untouched.
  */
@@ -38,6 +59,8 @@ export async function buildCwsRelease({ distDir, archivePath, backend, archiveAp
     const stagedArchive = join(stagingRoot, 'extension.zip');
     const extracted = join(stagingRoot, 'extracted');
     await cp(distDir, stagedDist, { recursive: true });
+    // Before any evidence is computed, so the release manifest hashes the bytes the store receives.
+    const removedFields = await writeUploadManifest(stagedDist);
 
     // Validate drift before producing any archive bytes, then write exactly that evidence into staging.
     await createReleaseManifest({ distDir: stagedDist, backend });
@@ -47,6 +70,10 @@ export async function buildCwsRelease({ distDir, archivePath, backend, archiveAp
     const extractedManifest = JSON.parse(await readFile(join(extracted, 'release-manifest.json'), 'utf8'));
     await verifyReleaseManifest({ distDir: extracted, manifest: extractedManifest, backend });
     if (extractedManifest.releaseId !== manifest.releaseId) throw new Error('extracted release id does not match staging');
+    // The archive is what gets uploaded, so the refusal is read off the extracted bytes, not off intent.
+    const uploaded = JSON.parse(await readFile(join(extracted, 'manifest.json'), 'utf8'));
+    const forbidden = UPLOAD_FORBIDDEN_MANIFEST_FIELDS.filter((field) => field in uploaded);
+    if (forbidden.length > 0) throw new Error(`CWS archive manifest declares fields the store refuses: ${forbidden.join(', ')}`);
 
     const archiveBytes = await readFile(stagedArchive);
     await mkdir(dirname(archivePath), { recursive: true });
@@ -54,7 +81,7 @@ export async function buildCwsRelease({ distDir, archivePath, backend, archiveAp
     await writeFile(`${archivePath}.manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`);
     const published = await api.inspectCwsArchive({ archivePath });
     if (published.digest !== created.digest) throw new Error('published CWS archive differs from verified staging bytes');
-    return { manifest, archive: published };
+    return { manifest, archive: published, removedFields };
   } finally {
     await rm(stagingRoot, { recursive: true, force: true });
   }

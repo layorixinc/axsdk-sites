@@ -8,7 +8,7 @@ process.env.AXSDK_API_KEY = 'test-key';
 process.env.AXSDK_APP_ID = 'test-app';
 
 const OPTIONS_SESSION = 'options-session-1';
-const EXTENSION_ID = 'kmpjeabgdfgicnnplgiokmaolfilokko';
+const EXTENSION_ID = 'ihdaghiiieaomningbeokfdkcpnpihpb';
 const INDEX_MD = '# sites\n- amazon: amazon.com\n- bluemoonsoft: bluemoonsoft.com\n- thumbtack: thumbtack.com\n';
 
 const HOSTS = [

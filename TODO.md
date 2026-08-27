@@ -132,3 +132,21 @@ than missing consent — see `CWS_RELEASE_DESIGN.md` T4 for why it left the R1 c
 refuse when the user has narrowed access. Do **not** wire `productSitesFromIndex`: measured, its exact-host
 allowlist refuses 8 of the 19 hosts our own site data names, including every cart/checkout host on five
 stores. One probe first — confirm `contains` reflects the narrowing the way `getAll` does.
+
+## 10. The community charter contradicts the shipped community channel
+
+**Status: open, one decision away; belongs to the R2 track.**
+
+`community/release-policy.json` is validated by `build:cws` on every run and declares
+`trust.registrySigned: true`, `trust.unsignedScripts: false`, `trust.arbitraryUrlImport: false`. The
+shipped channel does the opposite by design: `community/from-url.ts` installs from a manifest URL the
+user pastes, with **no signature** — "the trust is that the USER chose the URL, which is how Tampermonkey
+and every other userscript manager works" (`from-url.ts:1-21`) — and the options page offers exactly that
+(`options.html:117`, "Install from a manifest URL").
+
+So a gate is enforcing a statement the product no longer makes. Neither side is wrong on its own: the
+unsigned from-URL model was a deliberate later decision, and the JSON was written before it.
+
+**Next**: when the R2 charter is written (D1 scoping), rewrite the trust block to the model that ships —
+unsigned user-chosen URLs with declared-digest verification, signed only for a reviewed registry if one
+ever exists — and keep the gate. Do not weaken the gate to accept both.

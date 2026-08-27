@@ -132,42 +132,31 @@ R1은 `store/single-purpose.md`에 자기 문장을 갖고 `check:listing`이 �
 각 트랙은 **먼저 실패하는 게이트**로 시작한다. 이 저장소에서 반복 확인된 이유 때문이다: 검증이 없으면 다음 사람이
 되돌릴 수 있고, 통과할 수 없는 선언은 통과하지 않는다는 사실조차 아무도 모른다.
 
-### T1 — 패키지 내장 pack 레지스트리 (R1의 핵심, 신규 메커니즘)
+### T1·T2 — **취소: R1은 pack 레이어를 싣지 않는다 (2026-08-26, 측정 결과)**
 
-**먼저 RED**: "임베드된 pack 2종이 신규 프로필에서 설치·활성 가능하다"를 주장하는 테스트. 오늘은
-`PACK_REGISTRIES = []`이므로 취득 자체가 불가능해 실패한다.
+D2를 (c) provider-only로 정하려던 순간의 선행 측정이 그 선택지를 **부정했고**, 그 결과 R1에서 pack 트랙 전체가
+사라졌다. 근거 두 개, 둘 다 코드에서 읽은 것이다.
 
-**설계**
+1. **provider pack은 단독으로 존재할 수 없다.** `composePackSet`은 agent pack 없는 세트를 거부한다 —
+   *"At least one enabled agent pack is required to compose an active pack set."*
+   (`axsdk-packs/src/composer.ts:264-269`), 그리고 provider는 특정 agent pack을 지목해야 한다
+   (`:1003` *"Provider X targets missing agent pack Y."*). 즉 임베드 세트에는 agent pack이 반드시 들어가고,
+   agent pack의 태스크는 `PACK_TASK_EXECUTOR` **호스팅 문서**를 요구한다(프로덕션 `undefined`).
+2. **우리 first-party pack은 이미 출시된 제품의 프로토타입이다.** `layorix.shopping`은
+   `prepare_search` / `search_provider` / `rank_provider_result` 세 명령과 amazon 프로바이더 하나 +
+   픽스처 `example.store-x`다(원본 4파일 합 19 KiB). 프로덕션 Lua 플로우는 **265,009 B · 29 모듈**로 10개
+   스토어, 모델 동일성 검증, 관련성 심사, 총액 비교, 가드된 카트, 체크아웃 검토, 기억, 견적을 이미 패키지에
+   담고 있다. pack 레이어를 R1에 넣는 것은 **같은 제품의 약한 두 번째 구현을, 호스팅 문서까지 새로 배포해서
+   싣는 일**이다.
 
-1. **생산자를 디스크로 내보낸다.** `tools/packs/first-party.ts`의 메모리 산출물을 패키지 레이아웃으로 쓰는
-   빌드 스크립트(`tools/build-pack-registry.mjs`)를 추가한다. 레이아웃은 `packs/registry.ts:152-158`이 이미 기대하는 모양:
-   `pack-registry/index.json`, `revocations.json`, `releases/<hex>.json`, `assets/<hex>`.
-2. **패키지 fetch 구현을 넣는다.** `packs/config.ts:17,22`가 유일한 진입점이다. `PACK_REGISTRIES`에 패키지
-   레지스트리 1개(고정 origin + 패키지된 Ed25519 신뢰 루트)를 싣고, `PACK_REGISTRY_FETCH`를
-   `chrome.runtime.getURL('pack-registry/…')`를 읽는 구현으로 바꾼다. **검증 우회는 없다**: 서명·다이제스트·스키마·
-   2단계 승인·비활성 기본값·합성 재검증이 모두 그대로 돈다. 같은 모양이 이미 두 곳에서 증명돼 있다 —
-   `packs/manual-qa.ts:209-213`(패키지된 서명 응답을 fetch로 서빙)과
-   `background/workspace-assets.ts:193-247`(`chrome.runtime.getURL` + 에셋별 다이제스트 확인).
-3. **실서명으로 바꾼다.** 플레이스홀더 `'A'×85+'Q'`는 R1에 나갈 수 없다. R1 서명 키의 보관 주체가 곧 R2의
-   레지스트리 키 관리자다 → **결정 D4**. 결정이 늦으면 R1은 빌드 키로 서명하고 "이 패키지 내부 무결성 한정,
-   R2에서 대체"라고 문서에 명시한다 — 다만 그 문장을 코드 주석이 아니라 릴리스 노트에 남긴다.
-4. **워크스페이스 매니페스트에 얹지 않는다.** C3는 Lua 참조 그래프(`.txt` 에셋)이고 pack은 서명 봉투 + 자체 바이트 상한을
-   가진 별개 주소 공간이다. 형제 디렉터리로 둔다.
+**따라서 R1의 "모든 것이 임베드"는 이미 참이다**: 실행 가능한 로직 전부가 C3 워크스페이스 에셋으로
+패키지에 있고 SHA-256으로 검증되며, `PACK_REGISTRIES`는 비어 있어 가져올 pack이 없고, 원격 소스 진입점은
+T3에서 닫혔다. 추가로 만들 임베드 메커니즘이 없다.
 
-**증거**: `build:cws`가 pack 레지스트리 파일 존재·해시·서명을 검증(신규 게이트) · 신규 프로필에서 pack 2종 설치→활성→
-합성 flowDocument 생성 · `test:packs` 그린 · 아티팩트 스모크에서 임베드 pack이 실제 턴을 수행.
+pack은 R2로 간다 — 원격 레지스트리, 실행 문서, 서명 결정을 **한 묶음으로** (§4.1).
 
-### T2 — pack 태스크 실행 문서
-
-**측정된 제약**: agent pack의 `execution.role = 'task'`는 `PACK_TASK_EXECUTOR` **URL 문서**에서 실행된다
-(`service-worker.ts:362-448`). 프로덕션은 `undefined`라서 임베드 pack을 넣어도 태스크는
-`no_executor_document`로 거부된다. `chrome.userScripts`는 확장 오리진 문서에 주입되지 않으므로 실제 웹 문서가 필요하다.
-
-**결정 필요(D2)**: (a) 우리 오리진의 정적 실행 문서를 배포하고 마커를 고정 검증할 것인가, (b) R1 pack을
-provider/read 계열로 한정해 태스크 역할을 쓰지 않을 것인가. (b)는 `layorix.shopping`이 `taskScript`를 **필수 에셋으로
-선언**하므로 pack 재설계를 뜻한다(`schemas.ts:736-737`).
-
-**먼저 RED**: 임베드 agent pack의 명령 1개를 실행하는 테스트 — 오늘 `no_executor_document`로 실패한다.
+**이 취소가 없앤 것**: 신규 패키지 레지스트리 메커니즘, 생산자 디스크 출력, 실행 문서 배포, 그리고 D4(서명 키
+보관 주체) — R1에서는 서명할 pack이 없다.
 
 ### T3 — 원격 소스 진입점 폐쇄 · **완료 2026-08-26**
 
@@ -289,20 +278,41 @@ R1이 나간 뒤 **켜는 일**이지, 새로 만드는 일이 아니다. 이미
 ### 4.1 켜지는 것
 
 1. `PACK_REGISTRIES`에 **원격 레지스트리 origin + 리뷰된 Ed25519 루트** 추가 (`packs/config.ts:17`).
-   R1의 패키지 레지스트리는 그대로 남는다 — 1차 당사자 pack은 계속 패키지에서 온다.
 2. 옵션 UI의 조회/새로고침/설치 흐름 활성화 (`options/packs.ts:283-290`의 "Installation stays closed" 해제).
-3. 취소 피드 폴링과 원자적 롤백(`updates.automatic: false`, `atomicRollback: true` — 정책 파일이 이미 못 박음).
+3. **태스크 실행 문서 배포** — agent pack의 `role: 'task'`는 `PACK_TASK_EXECUTOR` URL 문서에서 돌고,
+   `chrome.userScripts`는 확장 오리진 문서에 주입되지 않으므로 실제 웹 문서가 필요하다.
+4. 취소 피드 폴링과 원자적 롤백(`updates.automatic: false`, `atomicRollback: true`).
+
+**셋은 한 묶음이다**: 레지스트리 + 실행 문서 + 신뢰 모델. 하나라도 없으면 pack은 설치되지도, 합성되지도,
+실행되지도 않는다. R1에서 셋 다 없는 것은 결함이 아니라 범위다(§3 T1·T2).
+
+### 4.1.1 신뢰 모델은 채널별로 다르고, 그게 옳다
+
+이 저장소가 이미 두 개를 갖고 있다:
+
+| 채널 | 모델 | 근거 |
+|---|---|---|
+| 커뮤니티(사용자가 URL로 설치) | **서명 없음.** 사용자가 URL을 골랐다는 것이 신뢰의 전부. 대신 닫힌 스키마, 선언된 SHA-256 대조, 아티팩트 내 원격 로더 스캔, https 출처를 검사한다 | `community/from-url.ts:1-21` |
+| pack 원격 레지스트리 | Ed25519 서명 봉투 + 패키지된 신뢰 루트, 미등록 키는 `untrusted_signature` | `packs/registry.ts:220-228`, `axsdk-packs/src/schemas.ts:845` |
+
+**첫 파티 pack을 언젠가 임베드한다면 서명하지 않는다.** CRX 서명과 워크스페이스 해시 체인이 이미 그 바이트를
+덮으므로 봉투 서명은 아무것도 더 증명하지 않는다. 형식을 맞추려고 공개 저장소에 개인키를 커밋하는 것은
+나중에 취약점으로 읽힐 일이고, 릴리스마다 키를 새로 만들면 재현 가능한 releaseId가 깨진다. 대신
+**패키지 출처 전용 경로**를 둔다: 오리진이 `chrome-extension://`일 때만 허용하고, 다이제스트와 닫힌 스키마와
+원격 로더 스캔으로 검증하며, `keyId`가 정확히 `packaged-no-signature`가 아니면 거부한다. 커뮤니티 채널이
+이미 하고 있는 정직함과 같은 모양이고, 두 경로가 서로를 흉내낼 수 없다.
 
 ### 4.2 필요한 발행 인프라 (Phase 9, 오늘 RED)
 
-서명 키 관리자, 리뷰어 소유권, 발행 CI, Tier 2 검증기. **구현이 아니라 결정에 막혀 있다**(D4).
+원격 레지스트리의 **서명 키 관리자**와 **리뷰어 소유권**, 발행 CI, Tier 2 검증기. 구현이 아니라 결정에 막혀
+있다 — R1에는 서명할 pack이 없으므로 이 결정도 R2에서 처음 필요해진다.
 
 ### 4.3 그 다음 (선택) — Fengari 제거
 
 사이트 특화 Lua **7파일 4,207줄**(`61_rpc_storefront` 956 · `62_rpc_sites` 942 · `65_rpc_quote` 1,082 ·
 `67_rpc_cart` 463 · `64_rpc_thumbtack` 270 · `66_rpc_navigate` 269 · `68_rpc_checkout` 225)을 컴파일된 JS
-pack 스크립트로 옮기면 인터프리터가 소비자 빌드에서 사라진다. 엔진 로직 7파일 1,602줄(memory·offers·widget·zip·
-sitemap·pure·community)은 이전 대상이 아니다. 그때 `FENGARI_VERSION`을 마커 게이트에 넣는다.
+pack 스크립트로 옮기면 인터프리터가 소비자 빌드에서 사라진다. 엔진 로직 7파일 1,602줄(memory·offers·widget·
+zip·sitemap·pure·community)은 이전 대상이 아니다. 그때 `FENGARI_VERSION`을 마커 게이트에 넣는다.
 
 ---
 
@@ -310,43 +320,40 @@ sitemap·pure·community)은 이전 대상이 아니다. 그때 `FENGARI_VERSION
 
 ```mermaid
 graph LR
-  T1[T1 내장 pack 레지스트리] --> T2[T2 태스크 실행 문서]
-  T1 --> T3[T3 원격 표면 제거·게이트]
-  T3 --> T5[T5 소비자 인증·빌드 분리]
-  T3 --> T4[T4 도메인 게이트]
-  D1[D1 단일 목적] --> T6[T6 리스팅·프라이버시]
-  T2 --> T7[T7 백엔드 동기화·ZIP]
-  T4 --> T7
-  T5 --> T7
-  T6 --> T7
-  T7 --> SUB[R1 제출]
+  T3[T3 원격 진입점 폐쇄 · 완료] --> T5[T5 소비자 인증·빌드 분리]
+  D1[D1 단일 목적 · 완료] --> T6[T6 리스팅·프라이버시]
+  T5 --> SUB[R1 제출]
+  T6 --> SUB
+  T7[T7 백엔드 동기화·ZIP · 완료] --> SUB
   ONE[One Stop 문의 발송] --> SUB
-  SUB --> R2[R2 원격 pack 업데이트]
+  SUB --> R2[R2 pack 활성화: 레지스트리+실행문서+신뢰모델]
 ```
 
-T1이 선행인 이유: R1의 정체성(§2)과 T3의 게이트 문구, T6의 소명 문장이 모두 "pack이 어디서 오는가"에 달려 있다.
-T3·T4·T5·T6은 서로 독립이라 병렬로 간다.
+T3·D1·T7은 끝났고, 남은 것은 T5(결정 D3)와 T6의 사람 답변 9건이다. pack 트랙이 R1에서 빠지면서 선행 관계가
+하나 사라졌다 — 더 이상 "pack이 어디서 오는가"가 다른 트랙의 문구를 결정하지 않는다.
 
 ## 6. 제출 체크리스트
 
-- [ ] 단일 목적 문장(D1) · 짧은/긴 설명 · 카테고리
-- [ ] 스크린샷 ≥1(1280×800) · 타일 440×280 · 마키 1400×560
-- [ ] 권한 7종 + 광범위 호스트 소명(`debugger` 포함)
-- [ ] 개인정보 처리방침 URL(확장 전용 서술) · 지원 URL · 데이터 사용 공시 · Limited Use 확약
-- [ ] dist에 `raw.githubusercontent.com` 0회, `PACK_REGISTRIES`가 패키지 레지스트리 전용 — 게이트가 증명
-- [ ] 임베드 pack 2종이 신규 프로필에서 설치→활성→실제 턴 수행
-- [ ] 업로드 ZIP = `release:cws`가 검증·자기추출·재검증한 바이트, releaseId가 런타임 보고값과 동일
-- [ ] `test:cws:artifact` 그린(신규 프로필, 패키지 소스만, 주문 없음)
-- [ ] One Stop 문의 답변 수신
+- [x] 단일 목적 문장 (`store/single-purpose.md`, A안) · 짧은/긴 설명 · 카테고리 (`store/listing.md`)
+- [x] 권한 7종 + 광범위 호스트 소명 (`store/permissions.md`)
+- [x] 개인정보·지원 페이지와 그 URL (`docs/privacy.md`, `docs/support.md`, GitHub Pages)
+- [x] 업로드 ZIP = `release:cws`가 검증·자기추출·재검증한 바이트 (releaseId가 백엔드 revision 126에 바인딩)
+- [x] dist에 원격 소스 컨트롤 0 — 게이트가 증명 (`assertNoRemoteSourceControls`)
+- [ ] 스크린샷 ≥1(1280×800) · 타일 440×280 — **없음**, 라이브 시나리오로 촬영 필요
+- [ ] 데이터 사용 공시 체크박스와 Limited Use 확약 (대시보드 입력) · 백엔드 보관기간·사람 접근·하위 처리자명 확정
+- [ ] `_locales/ko|en` + 매니페스트 name/description을 `__MSG_*__`로
+- [ ] 소비자 인증 또는 비공개 배포 결정 (D3)
+- [ ] `test:cws:artifact` 재실행 (신규 프로필, 패키지 소스만, 주문 없음)
+- [ ] One Stop 문의 답변 수신 (D7)
 
 ## 7. 결정 필요 — 선택지와 권고
 
 | # | 결정 | 소유 | 막는 것 | SITES 권고 |
 |---|---|---|---|---|
 | D1 | R1 단일 목적 문장 + 헌장 범위 | BIZ + EXT | T6, 제출 | **A안 + 헌장 R2 범위 명시** |
-| D2 | pack 태스크 실행 문서 | EXT | T2 | **provider-only R1** (측정 후 확정) |
+| D2 | ~~pack 태스크 실행 문서~~ | — | — | **해소**: 측정이 provider-only를 부정 → pack 레이어 자체가 R2로 (§3 T1·T2) |
 | D3 | 소비자 인증 | BIZ + 백엔드 | T5 | **비공개(unlisted) R1** |
-| D4 | pack 서명 키 보관 · 리뷰어 | BIZ | T1, R2 | **CRX 키와 같은 보관 주체** |
+| D4 | pack 서명 — R1에는 없음 | BIZ | R2만 | **R1 무관**(서명할 pack 없음). R2: 원격은 Ed25519+관리자, 임베드는 서명 없이 다이제스트 |
 | D5 | 프로덕션 모듈 푸시 승인 | 사용자 | T7 | **승인** |
 | D6 | 호스트 권한을 좁힐 것인가 | EXT + BIZ | T6 소명 | **필수 all-hosts 유지 + T4 배선** |
 | D7 | One Stop 문의 발송 | BIZ | 제출 판단 | **지금 발송** |

@@ -181,6 +181,23 @@ function payloadOfCall(result) {
  * nothing has touched. `reuse: true` (the default) adopts the running session wherever the
  * agent has taken it; scenarios `open()` the page they need.
  */
+/**
+ * Harmony/channel markers: what a model emits AROUND its answer, and what the engine sometimes passes
+ * into the reply text verbatim.
+ *
+ * Measured 2026-08-27 on two unrelated flows. A live quote turn answered
+ * `<|channel|>commentary to=functions.collect_quote_contact <|constrain|>json<|message|>{ … } 이름, 성,
+ * 이메일, 전화번호를 알려주세요.`, and the store package answered
+ * `<|channel|>commentary to=functions.memory_record …`. The user reads the wrapper as well as the
+ * sentence, and a runner that only checks "non-empty" calls that a pass.
+ *
+ * Keyed on the WIRE markers, never on a tool name in prose: a reply may legitimately name a tool.
+ */
+const SCAFFOLDING_MARKERS = /<\|(?:channel|message|constrain|start|end|return)\|>|\bto=functions\./;
+
+export function detectRawScaffolding(text) {
+  return typeof text === 'string' && SCAFFOLDING_MARKERS.test(text);
+}
 export async function openCdpSession(options = {}, lib = undefined) {
   const {
     workspace: workspaceRoot = process.cwd(),
@@ -675,7 +692,13 @@ export async function openCdpSession(options = {}, lib = undefined) {
       // A paused flow renders its window through the tool, not a text part, so the question is the reply
       // the caller has to read. A turn that has both keeps the spoken text.
       const text_ = spoken !== '' ? spoken : (asked ?? '');
-      return { text: text_, parts: partsOf(turn.last), toolCalls, elapsedMs: Date.now() - startedAt };
+      return {
+        text: text_,
+        parts: partsOf(turn.last),
+        toolCalls,
+        rawScaffolding: detectRawScaffolding(text_),
+        elapsedMs: Date.now() - startedAt,
+      };
     },
 
     /**

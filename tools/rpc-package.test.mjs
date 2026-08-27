@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { readFileSync } from 'node:fs';
+import { parse as parseYaml } from 'yaml';
+
+import { buildRpcFlows, repoRoot } from './build-rpc-flows.mjs';
+import { buildStoreFlows } from './build-store-flows.mjs';
 import { packageHash, packageHashes, diffPackage, pushPackage } from './rpc-package.mjs';
+
+const read = (relative) => readFileSync(new URL(`../${relative}`, import.meta.url), 'utf8');
 
 // A package push replaces a whole app: flow document, sitemap, every module. The only way to know the
 // server is serving what we built is to compare hashes, and the only way to trust that comparison is to
@@ -138,4 +145,21 @@ test('a modules-only delivery refuses to invent a document', async () => {
     }),
     /document/i,
   );
+});
+
+test('the module delivery carries the AUTHORED set, which the shipped one is a subset of', () => {
+  // Two consumers, one backend app. The development overlay resolves its modules from the app, so a push
+  // narrowed to the store profile would leave the quote and memory flows without their Lua at the backend;
+  // the shipped package carries its own modules as content-addressed assets, and the release binds the
+  // backend copy of exactly those (`missing`/`stale` refuse). The authored set satisfies both, so that is
+  // what the push sends — and the store subset must never become the payload.
+  const authored = new Set(Object.keys(buildRpcFlows({ root: repoRoot, delivery: 'registry' }).__report.moduleSources));
+  const shipped = new Set(Object.values(parseYaml(buildStoreFlows(read('_common/flows.yaml')).yaml).flowTools ?? {})
+    .flatMap((tool) => tool?.execute?.modules ?? []));
+
+  assert.ok(shipped.size > 0, 'the store profile declares modules');
+  const notCarried = [...shipped].filter((name) => !authored.has(name));
+  assert.deepEqual(notCarried, [], `the push would not carry: ${notCarried.join(', ')}`);
+  assert.ok(authored.size > shipped.size,
+    'the authored set must be the larger one: it also serves the surfaces the store profile removes');
 });

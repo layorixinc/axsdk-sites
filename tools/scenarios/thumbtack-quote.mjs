@@ -93,6 +93,10 @@ async function send(session, label, text, timeoutMs = 300_000, expects = FLOW_TO
   // most likely to be read as "Thumbtack broke" (`turn-fault.mjs`).
   const fault = turnFault({ toolCalls: turn.toolCalls, failure: null }, { expects });
   if (fault) console.log(`  fault: ${fault.kind} — ${fault.detail}`);
+  // The engine sometimes passes the model's own harmony wrapper into the reply text (measured 2026-08-27,
+  // 52 occurrences in one run of this suite). The user reads it, so a run that saw it says so — every case
+  // below also fails on it, because a reply nobody can read is not a passing turn.
+  if (turn.rawScaffolding) console.log('  leak: the reply carries raw model scaffolding');
   return { ...turn, fault };
 }
 
@@ -115,9 +119,14 @@ async function main() {
   const { openCdpSession } = await import('../harness/cdp-session.mjs');
   const session = await openCdpSession({ url: 'https://www.thumbtack.com/' });
   const checks = [];
-  const check = (label, ok, detail = '') => {
-    checks.push([label, Boolean(ok), detail]);
-    console.log(`${ok ? 'PASS' : 'FAIL'} ${label}${detail ? ` — ${detail}` : ''}`);
+  const check = (label, ok, detail = '', turns = []) => {
+    const leaked = turns.filter((turn) => turn?.rawScaffolding);
+    const passed = Boolean(ok) && leaked.length === 0;
+    const why = leaked.length > 0
+      ? `${detail ? `${detail}; ` : ''}${leaked.length} repl${leaked.length === 1 ? 'y' : 'ies'} carried raw model scaffolding`
+      : detail;
+    checks.push([label, passed, why]);
+    console.log(`${passed ? 'PASS' : 'FAIL'} ${label}${why ? ` — ${why}` : ''}`);
   };
 
   try {
@@ -133,9 +142,11 @@ async function main() {
       'house cleaning 94101 — contact',
       '이름은 길동, 성은 홍, 이메일은 thumbtack-test@example.com, 전화번호는 415-555-0142예요.',
     );
-    check('house cleaning 94101 retains service, requirements, ZIP, and contact', collectionRetained(collection, searched));
+    check('house cleaning 94101 retains service, requirements, ZIP, and contact',
+      collectionRetained(collection, searched), '', [collection, searched]);
     const houseCancelled = await send(session, 'house cleaning 94101 — cancel', '취소', 120_000);
-    check('house cleaning 94101 cancellation contacts nobody', cancellationContactedNobody(houseCancelled));
+    check('house cleaning 94101 cancellation contacts nobody',
+      cancellationContactedNobody(houseCancelled), '', [houseCancelled]);
 
     await resetSession(session, 'handyman');
     const handyman = await send(
@@ -143,12 +154,12 @@ async function main() {
       'handyman 94103',
       '샌프란시스코 94103에서 핸디맨 견적 받아줘. 48시간 안에 선반 설치가 필요해요. 이름은 길동, 성은 홍, 이메일은 thumbtack-test@example.com, 전화번호는 415-555-0143예요.',
     );
-    check('handyman 94103 reaches classified live candidates', searchReachedCandidates(handyman));
+    check('handyman 94103 reaches classified live candidates', searchReachedCandidates(handyman), '', [handyman]);
     const ranked = await send(session, 'handyman — rank', '평점 높은 순', 120_000);
     const selected = await send(session, 'handyman — select', '1번, 2번, 3번', 120_000);
-    check('candidate selection resolves live numbered pros', candidateSelectionPassed(ranked, selected));
+    check('candidate selection resolves live numbered pros', candidateSelectionPassed(ranked, selected), '', [ranked, selected]);
     const wizard = await send(session, 'handyman — safe wizard', '예', 300_000);
-    check('wizard stops at the final safe boundary without sending', wizardStoppedBeforeSubmit(wizard));
+    check('wizard stops at the final safe boundary without sending', wizardStoppedBeforeSubmit(wizard), '', [wizard]);
 
     await resetSession(session, 'lawn mowing');
     const lawn = await send(
@@ -156,9 +167,9 @@ async function main() {
       'lawn mowing 94101',
       '샌프란시스코 94101에서 잔디 깎기 견적 받아줘. 이번 주에 앞마당을 한 번 깎아야 해요. 이름은 길동, 성은 홍, 이메일은 thumbtack-test@example.com, 전화번호는 415-555-0144예요.',
     );
-    check('lawn mowing 94101 reaches classified live candidates', searchReachedCandidates(lawn));
+    check('lawn mowing 94101 reaches classified live candidates', searchReachedCandidates(lawn), '', [lawn]);
     const lawnCancelled = await send(session, 'lawn mowing 94101 — cancel', '취소', 120_000);
-    check('lawn mowing 94101 cancellation contacts nobody', cancellationContactedNobody(lawnCancelled));
+    check('lawn mowing 94101 cancellation contacts nobody', cancellationContactedNobody(lawnCancelled), '', [lawnCancelled]);
 
     const passed = checks.filter(([, ok]) => ok).length;
     console.log(`\nTHUMBTACK QUOTE ${passed}/${checks.length} PASS`);

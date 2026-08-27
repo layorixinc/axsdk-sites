@@ -2891,7 +2891,8 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   overlay cannot delete a key the app declares. With our `record_memory` flow removed, the APP’s version
   ran — a MODEL node whose tool is `memory_record` — and the reply the user got was raw harmony text:
   `<|channel|>commentary to=functions.memory_record <|constrain|>json<|message|>{ "intent":
-  "site_intent_resolution" …`. The store profile now replaces the flow with a respond-less terminal
+  "site_intent_resolution" …` — **the leak itself is engine-level** (next entry); deleting the hook is what
+  made a leaking turn the user's ONLY sentence. The store profile now replaces the flow with a respond-less terminal
   (FLOWS.md §7.3): no tools, no modules, no model call, no output — and because ours still DEFINES the
   name, the app’s cannot serve it. **Removing our layer does not remove a capability the app layer also
   owns; it hands it over.**
@@ -2910,3 +2911,20 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   demo flow, and `defaultIntent: site_intent_resolution`. Our overlay overrides the default and neutralises
   the hook, so the shipped behaviour matches the sentence — but narrowing the app document itself is a
   BIZ/platform action (§9: an app push replaces production).
+- **The engine passes the model’s harmony wrapper into the reply text, and it is not ours to fix**
+  (`RPC_LUA_RUNTIME_REQUESTS_21.md`). Measured 2026-08-27 on two unrelated flows and two packages: a live
+  quote turn answered `<|channel|>commentary to=functions.collect_quote_contact <|constrain|>json<|message|>{ … } 이름, 성, 이메일, 전화번호를 알려주세요.`
+  — the correct sentence with the wrapper glued in front — and one suite run carried **52** occurrences.
+  **A/B ruled our own edits out**: the pre-edit planner document scores **3/7** where the current one
+  scores 4/7 · 5/7 · 5/7, and the leak appears in both.
+  What changed on our side: the shared driver flags every turn (`detectRawScaffolding` in
+  `tools/harness/cdp-session.mjs`, keyed on wire markers so a tool NAME in prose still passes), the
+  artifact smoke fails on any leaking turn, and the quote suite records how many replies were polluted per
+  case. The store package showed none across its six measured turns.
+- **`npm run test:thumbtack:live` is degraded to 4-5/7 and it is not the store profile.** Two cases fail
+  repeatedly: collection retention (the planner enters the flow FRESH on the contact reply — the second
+  turn re-runs `detect_cancellation`/`recall_saved_contact` and asks for the service again, where the gate
+  requires `present_quote_collection: resume`), and the wizard boundary (live Thumbtack rendered a step
+  whose options are all `checked=false`, so the driver reports `quote_stalled` honestly). §13 records this
+  retention case as historically flaky (3 of 8 clean sessions), and the A/B above shows the older document
+  is worse — so this is measured, unattributed, and NOT a regression of this stretch.

@@ -7,7 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { buildRpcFlows, repoRoot } from '../build-rpc-flows.mjs';
 import { buildCwsRelease } from '../build-cws-release.mjs';
 import { packageHash } from '../rpc-package.mjs';
-import { openCdpSession } from '../harness/cdp-session.mjs';
+import { detectRawScaffolding, openCdpSession } from '../harness/cdp-session.mjs';
 import { collectStoreResults, decode, isNormalizedCandidates } from './commerce-all-sites.mjs';
 import { findToolCall, lastToolOutput } from './multi-store-total-cost.mjs';
 import { checkoutRunsNoOrder } from './shopping.mjs';
@@ -42,14 +42,6 @@ const turnEvidence = (turn) => ({
   }),
 });
 
-/**
- * Harmony/channel scaffolding: what a model emits AROUND its answer. Measured 2026-08-27 on the store
- * package, the refusal turn answered
- * `<|channel|>commentary to=functions.memory_record <|constrain|>json<|message|>{ "intent": …` — the model
- * called a function the narrowed document no longer carries and the raw text became the reply. Non-empty
- * and tool-free is not enough: a reviewer reads the sentence.
- */
-const RAW_SCAFFOLDING = /<\|(channel|message|constrain|start|end)\|>|to=functions\./;
 
 /** Tools that only exist for a surface the store profile removes. Reaching one means the wrong package. */
 const OUTSIDE_PURPOSE_TOOLS = new Set([
@@ -82,7 +74,7 @@ export function artifactSmokeVerdict({
     ['comparison', text], ['cancel', cancelText], ['refusal', outsideSurface?.text],
     ['cart', guardedSelection?.text], ['checkout', checkoutStep?.text], ['refined', refinedComparison?.text],
   ]) {
-    if (typeof reply === 'string' && RAW_SCAFFOLDING.test(reply)) {
+    if (typeof reply === 'string' && detectRawScaffolding(reply)) {
       failures.push(`the ${label} reply carries raw model scaffolding`);
     }
   }

@@ -6,7 +6,7 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { openCdpSession } from './cdp-session.mjs';
+import { detectRawScaffolding, openCdpSession } from './cdp-session.mjs';
 
 // The driver never touches the filesystem for credentials when the environment carries them.
 process.env.AXSDK_API_KEY = 'test-key';
@@ -1255,4 +1255,40 @@ test('a session that never opens carries what the worker logged, not only what i
   assert.match(failure.message, /session:create/);
   assert.match(failure.message, /fetch failed/);
   assert.ok(Array.isArray(failure.events), 'the events travel as a fact, not only in the sentence');
+});
+
+test('a reply carrying the model\'s own scaffolding is flagged on the turn', async () => {
+  // Measured 2026-08-27, twice, on two different flows: a live quote turn answered
+  // `<|channel|>commentary to=functions.collect_quote_contact <|constrain|>json<|message|>{ … } 이름, 성,
+  // 이메일, 전화번호를 알려주세요.` and the store package answered
+  // `<|channel|>commentary to=functions.memory_record …`. The engine passes the model's raw harmony content
+  // into the reply text, so the user reads the wrapper as well as the sentence. Every live runner shares
+  // this driver, so the flag belongs here rather than in one runner's verdict.
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const before = [user('m1', 'hi')];
+  fake.seedConversation(before);
+  const leak = '<|channel|>commentary to=functions.collect_quote_contact <|constrain|>json<|message|>{} 이름을 알려주세요.';
+  fake.turns.push([
+    [...before, user('m2', '청소 견적'), assistant('m3', [textPart('p3', leak)])],
+  ]);
+  fake.turns.push([
+    [...before, user('m4', '청소 견적'), assistant('m5', [textPart('p5', '이름을 알려주세요.')])],
+  ]);
+
+  const leaked = await session.send('청소 견적');
+  assert.equal(leaked.rawScaffolding, true, 'a harmony wrapper in the reply must be flagged');
+
+  const clean = await session.send('청소 견적');
+  assert.equal(clean.rawScaffolding, false);
+  await session.close();
+});
+
+test('the scaffolding detector keys on the markers, not on the word', () => {
+  assert.equal(detectRawScaffolding('to=functions.memory_record'), true);
+  assert.equal(detectRawScaffolding('<|message|>{}'), true);
+  assert.equal(detectRawScaffolding('결제 페이지를 열어 검토하도록 도와드릴 수 있습니다.'), false);
+  // a legitimate reply may name a tool in prose; only the wire markers count
+  assert.equal(detectRawScaffolding('memory_record 라는 도구는 사용하지 않습니다.'), false);
+  assert.equal(detectRawScaffolding(undefined), false);
 });

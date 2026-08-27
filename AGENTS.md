@@ -2648,3 +2648,25 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   defaults turned 5 green tests red in two files; the contracts they defend (an absent value never
   reaches `AXSDK.init` as `undefined`; a switch drives its derived option) were unchanged, so the fix was
   to state `remote_sites: true` in the on-cases rather than to weaken the assertions.
+- **The domain gate was called a release gate, and the install warning says it is not.** Chrome shows
+  `debugger` with its own words — *"Access the page debugger backend."* and *"Read and change all your
+  data on all websites."* — so the broadest possible disclosure is what a user accepts at install, and a
+  product-scoped allowlist has no narrower promise to keep. Chrome keeps its debugging banner up for the
+  whole session and documents `DetachReason: "canceled_by_user"`, so the kill switch is the user's and we
+  cannot hide it; ops are already bounded to the session's tab group, which the user builds by dragging
+  tabs in. What actually survives is narrow: a user who LATER narrows Site Access gets no narrowing on
+  this channel — a post-install control mismatch, not missing consent, and no policy text we have read
+  names it as a rejection reason.
+  **The cost was measured before the reversal, not after**: `productSitesFromIndex` approves exact
+  hostnames from `index.md`, and 8 of the 19 hosts our own site data names would be refused — every
+  cart/checkout host on five stores, plus `item.gmarket.co.kr`, `buy.11st.co.kr` and the www-less
+  `ebay.com` — while gmarket search lands on `browse.gmarket.co.kr`, which the index never names. So
+  wiring it as built would have killed the guarded cart and checkout review to defend something the
+  install prompt already discloses.
+  If the control should ever mean something, the faithful fix is to honour the user's OWN choice —
+  `chrome.permissions.contains({ origins: [url] })` once per document — not to invent a host list: a
+  default install behaves exactly as today with nothing to maintain, and a narrowed profile is honoured
+  precisely. The module and its 25 tests stay in the tree, unwired.
+  Worth keeping for its own sake: **the challenge that produced this came from the user, and the check
+  that settled it was reading the permission-warning table** — one page, quoted, after a whole track had
+  been planned around the opposite assumption.

@@ -212,16 +212,39 @@ provider/read 계열로 한정해 태스크 역할을 쓰지 않을 것인가. (
 참이 **아닌** 것은 "바이트에 원격 취득 코드가 없다". 심사자가 정적 분석으로 문자열을 발견할 수 있으므로,
 D7(One Stop 문의)의 답이 이 칸을 어떻게 쓸지 결정한다. 게이트가 "No"를 증명한다고 쓰지 않는다.
 
-### T4 — 도메인 게이트 배선 (P0-3a)
+### T4 — 도메인 게이트 · **R1 필수 경로에서 제외 (2026-08-26 결정)**
 
-**먼저 RED**: 프로덕션 디스패처 생성이 도메인 게이트를 공급하는지 검사하는 테스트(오늘 실패).
+사용자 반박에서 나온 재검토이고, 원문 확인 결과 **제외가 맞다.**
 
-**변경 지점**: `background/service-worker.ts:1392`에 `createDomainGate` + `domainAllowlistFor` +
-`productSitesFromIndex` + `createNavigationInvalidatedDomainGate` + `createDebuggerLocationReader` 주입.
-모두 구현되어 있고 호출자가 없다.
+**필수가 아닌 이유 — 세 가지 모두 측정·원문 기반**
 
-**증거**: Site Access = *On click*에서 미승인 도메인 op가 `domain_not_approved`로 거부되고 승인 도메인은 통과 ·
-사용자에게 보이는 허용 목록 · `qa:real` 유지.
+1. `debugger` 권한의 **설치 경고 자체가 Chrome의 문구로** *"Access the page debugger backend."* +
+   *"Read and change all your data on all websites."*
+   (<https://developer.chrome.com/docs/extensions/reference/permissions-list>). 도메인 게이트가 지킬 **더 좁은
+   약속이 존재하지 않는다** — 가장 넓은 공시를 설치 시점에 사용자가 수락했다.
+2. 세션이 붙어 있는 동안 Chrome이 자체 디버깅 배너를 계속 띄우고, API가 `DetachReason: "canceled_by_user"`를
+   문서화한다. 우리가 통제하거나 숨길 수 없는 상시 중단 스위치가 사용자 손에 있다.
+3. 페이지 op는 이미 **세션 탭 그룹 멤버십**으로 제한된다(`dispatcher.ts:83-88`). 그 그룹은 사용자가 만들고
+   탭을 끌어 넣는다(P1-7 GREEN, 암묵적 편입 없음).
+
+**남는 것**은 더 좁다: 나중에 **Site Access를 좁힌 사용자**에게 이 채널은 좁혀지지 않는다. 설치 동의의 부재가
+아니라 사후 통제의 불일치이며, 우리가 읽은 어떤 정책 원문도 이를 반려 사유로 지목하지 않는다.
+
+**게이트를 그대로 배선하면 깨지는 것 (실측)**: `productSitesFromIndex`는 `index.md`의 **정확한 호스트**만
+승인하므로, 우리 사이트 데이터가 이름 붙인 19개 호스트 중 **8개가 거부**된다 — 카트/체크아웃 전부
+(`cart.ebay.com`, `cart.payments.ebay.com`, `cart.coupang.com`, `pay.ssg.com`, `cart.gmarket.co.kr`),
+`item.gmarket.co.kr`, `buy.11st.co.kr`, www 없는 `ebay.com`. 리다이렉트 착지는 더 나쁘다: 지마켓 검색은
+`browse.gmarket.co.kr`로 착지하고 인덱스에는 그 호스트가 없다. 즉 **다섯 스토어의 가드된 카트와 체크아웃 검토가
+죽는다.** 설치 경고가 이미 공시한 것을 막기 위해 제품 전용 허용 목록을 만드는 대가다.
+
+**그래도 통제를 의미 있게 만들려면, 목록을 발명하지 말고 사용자의 선택을 존중한다.** 문서당 한 번
+`chrome.permissions.contains({ origins: [url] })`를 확인하고 좁혀진 경우에만 거부한다 — 기본 설치(전체 허용)는
+오늘과 완전히 동일하게 동작하고 유지할 호스트 목록이 없으며, 좁힌 프로필은 정확히 그 선택대로 지켜진다.
+반박의 전부를 훨씬 낮은 비용으로 덮는다. 선행 측정 1건: `contains`가 `getAll`처럼 축소를 반영하는지 프로브.
+
+**지금 하는 일**: 없음. 모듈과 테스트 25개는 배선되지 않은 채 트리에 남는다(삭제하지 않는다).
+D7(One Stop) 답변이나 심사 지적이 제품 범위 경계를 요구하면 그때 위 두 방식 중 하나를 고른다.
+권한 소명(T6)은 이 사실들을 그대로 쓴다: `debugger` + 탭 그룹 범위 + 상시 배너 + 위험 동작 동의.
 
 ### T5 — 소비자 인증·온보딩 + 개발자/소비자 빌드 분리 (P0-2, Phase 8)
 

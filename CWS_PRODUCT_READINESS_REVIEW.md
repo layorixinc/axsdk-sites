@@ -388,12 +388,35 @@ to the user does not bound what the extension does.
 It also corrects an assumption worth naming: our manifest's `host_permissions` are for backend fetch
 and the DNR rule. They were never the page boundary.
 
-**Release gate.** Either bound page ops to a domain allowlist the user can see and control, or stop
-reaching pages through `chrome.debugger` in the consumer build. The domain gate is specified in
-`COMMUNITY_SCRIPT_LIVE_LOOP.md` §9.1 and is implementable without a platform change: the dispatcher
-already resolves the tab, `CdpPageApi.locationHref()` reads its address over the same channel, and
-evaluating the check and the op against one `Page.createIsolatedWorld` `executionContextId` makes it
-non-racy.
+**Revised 2026-08-26 — this is NOT a release gate, and the earlier wording overstated it.** The install
+warning Chrome shows for `debugger` is, in its own words, *"Access the page debugger backend."* and
+*"Read and change all your data on all websites."*
+(<https://developer.chrome.com/docs/extensions/reference/permissions-list>). So there is no narrower
+promise for a domain allowlist to keep: the broadest possible disclosure is what the user accepted at
+install, in Chrome's UI, before anything ran. Chrome also shows its debugging banner for the whole time a
+session is attached and documents `DetachReason: "canceled_by_user"`, so the user holds a kill switch we
+neither control nor can hide. And page ops are already bounded by session tab-group membership
+(`dispatcher.ts:83-88`), a group the user creates and drags tabs into (P1-7).
+
+What survives is narrower and worth stating plainly: a user who later narrows **Site Access** gets no
+narrowing on this channel. That is a post-install control mismatch, not missing consent, and no policy
+text we have read names it as a rejection reason.
+
+**Cost of the allowlist, measured 2026-08-26.** `productSitesFromIndex` approves exact hostnames from
+`index.md`, and **8 of the 19 hosts our own site data names would be refused** — every cart/checkout host
+(`cart.ebay.com`, `cart.payments.ebay.com`, `cart.coupang.com`, `pay.ssg.com`, `cart.gmarket.co.kr`),
+plus `item.gmarket.co.kr`, `buy.11st.co.kr` and the www-less `ebay.com`. Redirect landings are worse:
+gmarket search lands on `browse.gmarket.co.kr`, which the index never names. Wiring the gate as built
+would break the guarded cart and checkout review on five stores.
+
+**If the control is to mean something, honour the user's own choice instead of inventing a list.** Check
+`chrome.permissions.contains({ origins: [url] })` once per document and refuse when the user has narrowed
+access: a default install (all sites granted) behaves exactly as today with no host list to maintain,
+while a narrowed profile is honoured precisely. That is the whole objection, at a fraction of the cost,
+and it needs one probe to confirm `contains` reflects the narrowing the way `getAll` does.
+
+The domain-gate module and its 25 tests stay in the tree, unwired, for the case where a reviewer or the
+One Stop answer (D7) asks for a product-scoped boundary.
 
 ### P0-3b. `chrome.userScripts` is the sanctioned channel, and it is now proven live
 

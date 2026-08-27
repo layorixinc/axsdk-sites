@@ -116,3 +116,19 @@ is transport/review convenience, not a launch prerequisite.
   Owner: BIZ. Answers gate P0-1's "unreachable, default-off paths" question and the single-purpose wording.
 - **P0-3 single-purpose sentence** — three drafted options in `CWS_LAUNCH_PLAN.md` §P0-3. Owner: BIZ + EXT.
 - Everything else on the launch track lives in `CWS_RELEASE_DESIGN.md`; this file does not duplicate it.
+
+## 9. Honour a narrowed Site Access on the debugger channel
+
+**Status: deferred by decision (2026-08-26), not blocked.**
+
+A user who narrows this extension's Site Access gets no narrowing of `dom.*`/`nav.*`, because those ops
+travel `chrome.debugger`, which Site Access does not bound (measured: `chrome.scripting` refused,
+`chrome.userScripts` did not inject, `chrome.debugger` read the page). The install warning for `debugger`
+already discloses "Read and change all your data on all websites", so this is a control mismatch rather
+than missing consent — see `CWS_RELEASE_DESIGN.md` T4 for why it left the R1 critical path.
+
+**Next, if a reviewer or the One Stop answer (D7) asks**: check
+`chrome.permissions.contains({ origins: [url] })` once per document, cached like the existing gate, and
+refuse when the user has narrowed access. Do **not** wire `productSitesFromIndex`: measured, its exact-host
+allowlist refuses 8 of the 19 hosts our own site data names, including every cart/checkout host on five
+stores. One probe first — confirm `contains` reflects the narrowing the way `getAll` does.

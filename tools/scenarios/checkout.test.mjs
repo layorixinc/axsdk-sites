@@ -25,8 +25,8 @@ test('hitCheckout rejects a trace with no checkout routing', () => {
 test('checkoutCasePassed requires both the checkout node and an amazon url', () => {
   const trace = [{ name: 'run_checkout', status: 'done' }];
   assert.equal(checkoutCasePassed(trace, 'https://www.amazon.com/gp/cart'), true);
-  // Cross-nav case that never left the origin site must FAIL even though checkout tools ran.
-  assert.equal(checkoutCasePassed(trace, 'http://bluemoonsoft.com/'), false);
+  // Cross-nav case that never left the neutral start page must FAIL even though checkout tools ran.
+  assert.equal(checkoutCasePassed(trace, 'https://axsdk.ai/'), false);
   // Landing on amazon without the checkout node is not a pass either.
   assert.equal(checkoutCasePassed([{ name: 'search_product', status: 'done' }], 'https://www.amazon.com/'), false);
 });

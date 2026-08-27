@@ -17,5 +17,4 @@
   - 검색 호스트: [naver-shopping](https://search.shopping.naver.com/)
 - [ssg](https://www.ssg.com): 상품 가격·배송비·평점을 조회하고 접근이 허용된 경우 선택 상품을 가격 재확인 후 장바구니에 준비합니다.
 - [walmart](https://www.walmart.com): 상품 가격·배송·평점·리뷰를 조회하고 선택 상품을 가격 재확인 후 장바구니에 준비합니다.
-- [bluemoonsoft](http://bluemoonsoft.com): 회사·제품·보안 모듈 정보를 탐색하고 견적 문의 폼을 조회·입력·제출할 수 있습니다.
 - [thumbtack](https://www.thumbtack.com): 주소에서 ZIP을 확인해 지역 서비스 전문가를 검색하고, 검색 결과의 서비스 옵션(필터)을 조회·변경하며, 프로필·리뷰·서비스 정보를 조회하고 견적 요청 폼을 열고 입력할 수 있습니다.

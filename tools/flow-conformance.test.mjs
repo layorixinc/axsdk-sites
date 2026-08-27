@@ -39,12 +39,10 @@ function mutationIssue(adapter) {
 
 test('all production flow layers parse under flow document contract v1', () => {
   const common = parseFlow('_common/flows.yaml');
-  const bluemoonsoft = parseFlow('bluemoonsoft/flows.yaml');
   const thumbtack = parseFlow('thumbtack/flows.yaml');
 
   assert.equal(common.extends, 'app');
   assert.equal(common.defaults?.mapping, 'legacy');
-  assert.equal(bluemoonsoft.extends, 'app');
   assert.equal(thumbtack.extends, 'app');
 });
 
@@ -897,7 +895,7 @@ test('opening a store before a runtime search is not a step', () => {
   // an inline action cannot be shared — three flows on one entry tool compiles to "inline action duplicates
   // existing action". `run:` is not the way out: it resolves only against `kind: remote` actions, so it
   // answers "references missing action" for a runtime tool. Both were measured against the compiler.
-  for (const name of ['enter_shopping_site', 'enter_checkout_site', 'enter_bluemoonsoft']) {
+  for (const name of ['enter_shopping_site', 'enter_checkout_site']) {
     assert.equal(common.flowTools[name]?.execute?.implementation, 'lua', `${name} runs in the runtime`);
   }
   assert.ok(!common.flowTools.open_site, 'the shared opener is gone');
@@ -910,19 +908,6 @@ test('opening a store before a runtime search is not a step', () => {
   const worker = common.flows.shopping_search_one_store.nodes;
   assert.ok(!worker.open, 'the worker opens nothing');
   assert.equal(Object.keys(worker)[0], 'search', 'and starts at its search');
-});
-
-test('a same-site navigation runs in the runtime', () => {
-  // `AX_navigate` builds a URL from a link plus params and confirms arrival against an expected URL. That
-  // is `nav.navigate` + `nav.wait_for_navigation` + `dom.get_location_href` — the combination the search
-  // and quote paths already run. It was never a platform-owned command.
-  const common = parseFlow('_common/flows.yaml');
-  const tool = common.flowTools?.navigate_page?.execute ?? {};
-
-  assert.equal(tool.implementation, 'lua');
-  assert.ok(tool.modules?.includes('_common.66_rpc_navigate'));
-  assert.ok(tool.rpc?.allow?.includes('nav.navigate'));
-  assert.equal(common.flowTools.navigate_page.output.next, 'result.next');
 });
 
 test('the guarded cart runs in the runtime, and its guards live in the script', () => {
@@ -1062,25 +1047,6 @@ test('the cart module stays free of any way to order', () => {
   );
 });
 
-test('the sitemap search reads the SITE\'s sitemap, not the app package\'s', () => {
-  // The runtime's own `implementation: sitemap.search` reads the APP PACKAGE's sitemap. Measured live on
-  // production that is the extension's own pages (`/`, `/settings`, `/help`), so adopting it returned an
-  // empty hit list for every request and the flow fell back to the home page in silence — the worst
-  // shape a wrong answer can take. The tool stayed remote until the CLIENT shipped
-  // `sitemap.search_site`, which reads `sitesStore.currentSitemap`: the sitemap of the domain the tab is
-  // on. Same intent, right document. What this pins is WHICH op, because the names differ by one word.
-  const common = parseFlow('_common/flows.yaml');
-  const tool = common.flowTools?.sitemap_search ?? {};
-
-  assert.equal(tool.execute?.kind, 'runtime');
-  assert.deepEqual(tool.execute?.rpc?.allow, ['sitemap.search_site']);
-  assert.ok(
-    !JSON.stringify(tool.execute).includes('"sitemap.search"'),
-    'the app-package sitemap op must not come back',
-  );
-  assert.equal(tool.output?.sitemap_hits, 'result.chunks');
-});
-
 test('every node action reference resolves to a tool that exists', () => {
   // A whole site was dead and every gate was green. The navigation port replaced the shared `open_site`
   // remote tool with one thin runtime entry per flow, and `bluemoonsoft/flows.yaml` — which owns its
@@ -1091,7 +1057,7 @@ test('every node action reference resolves to a tool that exists', () => {
   //
   // Nothing here checked references, so the suite passed 89/89 over a document that cannot compile. The
   // site overlays are exactly where this hides: they replace a flow wholesale, so a base fix skips them.
-  const files = ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml']
+  const files = ['_common/flows.yaml', 'thumbtack/flows.yaml']
     .filter((path) => existsSync(new URL(path, root)));
 
   const defined = new Set(Object.keys(parseFlow('_common/flows.yaml').flowTools ?? {}));
@@ -2058,7 +2024,7 @@ test('no node repeats the default model block', () => {
 // unguarded nodes are gates that HOLD the user (`refine_item`, `checkout_confirm`). A false settled finding
 // is worse than no finding, because nobody re-checks it.
 test('every model node has a stall guard that names a real node', () => {
-  const files = ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+  const files = ['_common/flows.yaml', 'thumbtack/flows.yaml',
     'playground/_common/flows.yaml'];
   const missing = [];
   const dangling = [];
@@ -2102,13 +2068,10 @@ const COLLECTORS_WITHOUT_ACTIVE_NODE_ONLY = {
   'request_service_quote.collect_request': true,
   'shopping_single_site.collect_shopping': true,
   'shopping_multi_store_total_cost.collect_request': true,
-  // Navigation-only, no mutation behind it: the worst a stale text can do is open the wrong page, which the
-  // next turn corrects. bluemoonsoft never fills or submits a form.
-  'bluemoonsoft.assist': true,
 };
 
 test('every self-looping model gate has decided about active_node_only', () => {
-  const files = ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+  const files = ['_common/flows.yaml', 'thumbtack/flows.yaml',
     'playground/_common/flows.yaml'];
   const undecided = [];
   for (const path of files) {
@@ -2138,8 +2101,7 @@ test('every self-looping model gate has decided about active_node_only', () => {
 // 싶으신가요?", starting a fresh comparison instead of stopping. The cart was not mutated, so it failed safe,
 // but the user's no did nothing.
 //
-// The rule needs no allowlist: a flow that cannot mutate has nothing to cancel (bluemoonsoft pauses and only
-// navigates), and a flow that never pauses never holds a user to say no.
+// The rule needs no allowlist: a flow that cannot mutate has nothing to cancel, and a flow that never pauses never holds a user to say no.
 test('every node that HOLDS the user in a mutating flow can be told no', () => {
   // This was written per FLOW — any one node with a cancel branch satisfied the whole document — and that is
   // one node protected, not a rule. Measured 2026-08-16: `shopping_multi_store_total_cost.collect_request`
@@ -2149,14 +2111,14 @@ test('every node that HOLDS the user in a mutating flow can be told no', () => {
   // passed the old check because `choose_product` and `present_offers` do have cancel branches.
   //
   // A pausing node is one its own `next` map routes back to itself. No allowlist: a flow that cannot mutate
-  // has nothing to cancel (bluemoonsoft pauses and only navigates), and a node that never pauses never holds
+  // has nothing to cancel, and a node that never pauses never holds
   // a user to say no.
   // Mutation is DECLARED (`effect: mutation`, which the compiler enforces), and this used to guess it from
   // node names: `/add_.*cart|submit_quote|checkout|…/`. The multi-store flow mutates through
   // `shopping_add_selected_store_offer` and matched none of those words, so the flow holding the actual gap
   // was never examined at all — and any rename would have taken another flow out of scope silently.
   const gaps = [];
-  for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml']) {
+  for (const path of ['_common/flows.yaml', 'thumbtack/flows.yaml']) {
     if (!existsSync(new URL(path, root))) continue;
     const document = parseFlow(path);
     const declaresMutation = (node) => [node?.id, ...(node?.allowedTools ?? [])]
@@ -2229,7 +2191,7 @@ const UNEXERCISED_PLAYGROUND_FIXTURES = {
 
 test('a contract tool declares only state some node hands over', () => {
   const stray = [];
-  for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+  for (const path of ['_common/flows.yaml', 'thumbtack/flows.yaml',
     'playground/_common/flows.yaml']) {
     if (!existsSync(new URL(path, root))) continue;
     const document = parseFlow(path);
@@ -2277,7 +2239,7 @@ test('a contract tool declares only state some node hands over', () => {
 // declares as a non-boolean is a contradiction the document can check for itself.
 test('a require never demands true of a property declared as something else', () => {
   const contradictions = [];
-  for (const path of ['_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml',
+  for (const path of ['_common/flows.yaml', 'thumbtack/flows.yaml',
     'playground/_common/flows.yaml']) {
     if (!existsSync(new URL(path, root))) continue;
     const tools = parseFlow(path).flowTools ?? {};

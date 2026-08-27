@@ -17,8 +17,9 @@ the shared, site-agnostic base. The extension fetches these from GitHub
 (`raw.githubusercontent.com/layorixinc/axsdk-sites/main/...`) at runtime.
 
 Published sites (see `index.md`, keep it in sync): **11st**, **aliexpress**, **amazon**, **coupang**,
-**ebay**, **etsy**, **gmarket**, **naver-shopping**, **ssg**, **walmart**, **thumbtack**, and
-**bluemoonsoft** (`docuray/` is an empty placeholder — not supported data).
+**ebay**, **etsy**, **gmarket**, **naver-shopping**, **ssg**, **walmart**, and **thumbtack**.
+(`docuray/` is an empty placeholder — not supported data. **bluemoonsoft was removed 2026-08-26** —
+§13; measurements below that name it are records of what was true then.)
 
 ### Gitignored (never committed)
 `.env` (holds `AXSDK_API_KEY` and friends — **secret**; also `AXSDK_EXTENSION_ENABLED` /
@@ -43,11 +44,10 @@ _common/                      # site-agnostic layer (loads on EVERY host, before
   flows.yaml                  # flow-engine config: planner intents + request_service_quote flow (see FLOWS.md)
   flows.legacy.yaml           # backup (gitignored)
   scripts/*.lua               # AX_BASE + shared commands (see §4)
-<site>/                       # one per supported site (amazon, thumbtack, bluemoonsoft, ...)
+<site>/                       # one per supported site (amazon, ebay, thumbtack, ...)
   scripts/*.lua               # storefront config/registration input (runtime commands live in _common/rpc)
   CONTRACT.md                 # (thumbtack) live-measured ground truth for the rebuild
   flows.yaml                  # site-scoped flow overlay (thumbtack's is a 14-byte placeholder)
-  knowledge/, sitemap.md      # (bluemoonsoft) sitemap/knowledge data
 DEVTOOLS.md                   # console + ax cheat sheet (public)
 SCHEMA.md                     # LLM tool schemas (name/description/parameters only)
 FLOWS.md                      # flow-engine spec / authoring reference
@@ -176,10 +176,13 @@ the survivors. Removed rows are counted in the window.
 Cart mutation requires a separate offer-approval turn plus matching identity/comparison approval markers,
 and the storefront re-reads both model identity and price before clicking.
 
-### `bluemoonsoft/scripts/` — **gone.** The flow navigates, it does not fill
-Its `form.lua` overrode the extension's default `AX_get_form`/`AX_set_form`/`AX_submit_form` with
-site-specific selectors, and the bluemoonsoft flow is navigation-only ("Never fills or submits forms").
-Nothing reached it. The defaults apply there now, as on every other site.
+### `bluemoonsoft/` — **gone entirely** (2026-08-26)
+Its `form.lua` went first (it overrode the default form tools for a flow that never filled a form), and
+the site followed: one customer's site fit no single-purpose sentence, and CWS §1 prescribes *"better
+delivered as separate extensions"*. Removed with it: the site data, the flow overlay, the `bluemoonsoft`
+intent and route, the four tools it owned (`assist_decide`, `sitemap_search`, `enter_bluemoonsoft`,
+`navigate_page`) and `_common.72_rpc_sitemap`. **There is no sitemap capability in the product any more**
+— `sitemap.search_site` had exactly one caller.
 
 ---
 
@@ -2820,3 +2823,23 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   enforces 256 KiB of UTF-8 on `clientFlowDocument`. The open proof recorded there — pass a >256 KiB
   document from package assets to the compiler — is answered: **the backend refuses it before any
   compiler sees it.**
+- **bluemoonsoft is gone from the product (2026-08-26), and the cutover is the interesting part.** One
+  customer's site had its own flow overlay, its own intent and route, four tools nobody else called, and a
+  runtime module (`72_rpc_sitemap`) with exactly one caller. It fit no single-purpose sentence — every one
+  of `CWS_LAUNCH_PLAN.md`’s three options dropped it — so there was no decision left to wait for. What came
+  out with it, because nothing else reached them: `AX_RPC_NAV.navigate_page` plus the helpers only it used
+  (`N.resolve`, `N.query_string`, `N.origin`, `same_page`, `split_fragment`), the `bluemoonsoft` entry in
+  `N.EXTRA_HOME`, 28 offline tests, three gate exemptions (the `bluemoonsoft.assist` messagePolicy
+  allowlist entry, the third entry tool, the tracked-overlay lists) and two conformance tests whose subject
+  no longer exists. **A gate exemption is a liability that outlives its reason** — those three were the only
+  ones the rules carried, and the rules are stricter now without them.
+  Measured after: flow document 265,009 → **255,247 B** raw and **232.4 KiB canonical (94.2% → 90.8%** of
+  the backend limit, and the 96.8% site row is gone with the overlay); package 32 → **29 assets**;
+  `test:lua` 614 → 586, `check:flows` 216 → 214, everything else unchanged; `dead:lua` alive 38 · dead 0.
+  Live, one turn each in one session: the site request is classified `out_of_scope` and answered
+  "죄송합니다, 요청을 처리할 수 없습니다.", and a shopping request still returns 27 real Amazon listings.
+- **The honest refusal we own never reaches the user, and that is a separate gap** (`TODO.md` §12).
+  `router.fallbackIntent: unsupported_request` covers an intent NAME that does not resolve; a planner
+  `out_of_scope` answer carries `intents: []`, so the router runs nothing of ours and the app’s terminal
+  answers. Measured live: the trace holds the capture hook and an app-level `site_resolve`, no flow node
+  of ours. Not a regression — a bare apology claims no functionality, which is what §1 cares about.

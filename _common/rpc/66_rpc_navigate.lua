@@ -33,10 +33,6 @@ function N.host(url)
   return (tostring(url or ""):match("^https?://([^/]+)") or ""):lower()
 end
 
-function N.origin(url)
-  return tostring(url or ""):match("^(https?://[^/]+)") or ""
-end
-
 --- The registered base domain, so `www.x.com` and `x.com` are the same site.
 function N.base_domain(url)
   return (N.host(url):gsub("^www%.", ""))
@@ -49,134 +45,11 @@ function N.same_site(a, b)
     or right:sub(-(#left + 1)) == ("." .. left)
 end
 
---- A Lua table has no order, so the keys are sorted. That is what makes one navigation comparable to the
---- one before it — an unordered query string produces a different URL for the same request every run.
-function N.query_string(params)
-  if type(params) ~= "table" then return "" end
-  local keys = {}
-  for key, value in pairs(params) do
-    if value ~= nil and value ~= "" then keys[#keys + 1] = tostring(key) end
-  end
-  table.sort(keys)
-  local parts = {}
-  for index = 1, #keys do
-    local key = keys[index]
-    local value = params[key]
-    if type(value) == "boolean" then value = value and "true" or "false" end
-    parts[#parts + 1] = url_encode(key) .. "=" .. url_encode(value)
-  end
-  return table.concat(parts, "&")
-end
-
---- Resolves `link` against the page we are on. A path becomes an absolute URL on the current origin; an
---- absolute URL is taken as given.
-function N.resolve(link, here)
-  local target = trim(link)
-  if not target then return nil end
-  if target:match("^https?://") then return target end
-  local origin = N.origin(here)
-  if origin == "" then return nil end
-  if target:sub(1, 1) ~= "/" then target = "/" .. target end
-  return origin .. target
-end
-
---- True when the browser is already showing `target` (ignoring a trailing slash difference).
-local function same_page(here, target)
-  local function strip(url) return (tostring(url or ""):gsub("/+$", "")) end
-  return strip(here) == strip(target)
-end
-
---- Splits a URL into the document it names and the fragment it carries. The fragment never reaches the
---- server: a target that differs from the current page only by fragment is a same-document navigation.
-local function split_fragment(url)
-  local base, fragment = tostring(url or ""):match("^([^#]*)#(.+)$")
-  if base then return base, fragment end
-  return tostring(url or ""), nil
-end
-
---- Navigates the current page to a same-site path or URL, and confirms it landed.
----
---- Refusals are separate answers because they call for different things: `missing_link` is the caller's
---- mistake, `offsite_link` would silently leave the flow's site, `navigation_failed` means the browser
---- never moved, a fragment-only target is already open so it is not a move at all, and
---- `wrong_landing` means it moved somewhere else — a login bounce or a canonical rewrite — and names
---- where, because the next node has to decide what to do about it.
-function N.navigate_page(args)
-  args = type(args) == "table" and args or {}
-  local ok, here = pcall(dom.get_location_href)
-  if not ok then return { next = "error", error = "rpc_unavailable" } end
-
-  local link = trim(args.link) or trim(args.url)
-  if not link then return { next = "error", error = "missing_link" } end
-
-  local target = N.resolve(link, here)
-  if not target then return { next = "error", error = "missing_link" } end
-  if not N.same_site(target, here) then
-    return { next = "error", error = "offsite_link", href = here, target = target }
-  end
-
-  local query = N.query_string(args.params)
-  if query ~= "" then
-    target = target .. (target:find("?", 1, true) and "&" or "?") .. query
-  end
-
-  if same_page(here, target) then
-    return { next = "go", href = here, navigated = false }
-  end
-
-  local target_base, fragment = split_fragment(target)
-
-  -- A target that differs from the page only by fragment is a same-document move: no document is created,
-  -- so `wait_for_navigation` has nothing to wait for — and waiting destroys the evidence. Measured live
-  -- (bluemoonsoft): the fragment is readable immediately after `nav.navigate`, then the site's own router
-  -- consumes `#modal/...` and rewrites the URL without it, so a read taken after a wait shows the old URL
-  -- and was reported as `navigation_failed` — a false negative that asserts "the browser never moved".
-  -- Arrival is decided from one read taken immediately; the fragment being gone LATER is normal.
-  -- A fragment-only target names a section of the document we already have, so we are already there.
-  --
-  -- Measured live on bluemoonsoft: `nav.navigate` to such a target succeeds and does NOT move the hash
-  -- (six consecutive reads show the un-fragmented URL); no anchor for the fragment exists on the page
-  -- (`a[href*="#modal/docuray"]` matched 0, and the only docuray link leaves the site); and reaching the
-  -- same URL as a real cross-document navigation lands with the hash consumed on a body that already
-  -- contains the section's own words. Refusing told the caller a page could not be opened while the page
-  -- was open and readable — so the reader is what should decide, and firing a move the runtime will not
-  -- perform only costs a round trip and muddies the trace.
-  --
-  -- `navigated = "already_open"` keeps it distinguishable from a real load, and the fragment is reported
-  -- so a caller that genuinely needs that section can say the runtime cannot reach it.
-  if fragment and same_page((split_fragment(here)), target_base) then
-    return { next = "go", href = here, target = target, fragment = fragment,
-             navigated = "already_open" }
-  end
-
-  local fired = nav.navigate(target)
-  if type(fired) == "table" and fired.ok == false then
-    -- A refusal is an answer, not something to wait out: the browser never moved, which is exactly what
-    -- `navigation_failed` means — with the runtime's own reason attached.
-    return { next = "error", error = "navigation_failed", reason = fired.reason,
-             href = here, target = target }
-  end
-  -- Named target: a commit that beats the port's own baseline read is invisible to a change comparison,
-  -- and this wait then costs its whole ceiling before `landed` below decides the same thing anyway.
-  nav.wait_for_navigation({ url = target, timeout = 12000, interval = 250 })
-
-  local landed = href_or_nil()
-  if not landed or same_page(landed, here) then
-    return { next = "error", error = "navigation_failed", href = landed or here, target = target }
-  end
-  -- Against the document the target names, not the full target: a site that consumes the fragment it was
-  -- navigated to has still landed on the right document, which must not read as `wrong_landing`.
-  if not same_page(landed, target_base) and not landed:find(target_base, 1, true) then
-    return { next = "error", error = "wrong_landing", href = landed, target = target }
-  end
-  return { next = "go", href = landed, navigated = true }
-end
 --- Sites that are NOT commerce stores, so the generated site data does not carry them. Everything else
 --- comes from `RPC_SITES[slug].home_url` — two sources for "where does this site live" drift apart, and the
 --- one nobody exercises is the one that sends the browser to the wrong host.
 N.EXTRA_HOME = {
   thumbtack = "https://www.thumbtack.com/",
-  bluemoonsoft = "http://bluemoonsoft.com/",
 }
 
 function N.home_url(slug)
@@ -229,8 +102,8 @@ function N.resolve_site(requested, here)
 end
 
 --- Gets the browser onto a site's home page, for the steps that need to BE somewhere before they can act:
---- the checkout has to reach its cart, bluemoonsoft's page navigation is same-site only, and the
---- single-site shopping loop searches whichever store is open.
+--- the checkout has to reach its cart, and the single-site shopping loop searches whichever store is
+--- open.
 ---
 --- A flow whose next step navigates to a URL of its own does NOT need this — the search readers all build
 --- their own search URL, and opening a home page first is a whole page load spent to arrive somewhere the

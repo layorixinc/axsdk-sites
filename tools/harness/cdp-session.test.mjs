@@ -14,11 +14,11 @@ process.env.AXSDK_APP_ID = 'test-app';
 
 const OPTIONS_SESSION = 'options-session-1';
 const EXTENSION_ID = 'ihdaghiiieaomningbeokfdkcpnpihpb';
-const INDEX_MD = '# sites\n- amazon: amazon.com\n- bluemoonsoft: bluemoonsoft.com\n- thumbtack: thumbtack.com\n';
+const INDEX_MD = '# sites\n- amazon: amazon.com\n- ebay: ebay.com\n- thumbtack: thumbtack.com\n';
 
 const HOSTS = [
   ['amazon.', 'amazon'],
-  ['bluemoonsoft.com', 'bluemoonsoft'],
+  ['ebay.com', 'ebay'],
   ['thumbtack.com', 'thumbtack'],
 ];
 
@@ -413,7 +413,7 @@ function fakeExtension({ screenshotData = 'fake-png-bytes' } = {}) {
         root,
         indexMd: INDEX_MD,
         entries: [],
-        domains: ['amazon', 'bluemoonsoft', 'thumbtack'],
+        domains: ['amazon', 'ebay', 'thumbtack'],
         flows: {},
         lua: {},
         digest: 'abc123def456',
@@ -509,7 +509,7 @@ test('openCdpSession provisions the profile and reports the session', async () =
   assert.deepEqual(session.workspace, {
     root: '/ws',
     digest: 'abc123def456',
-    domains: ['amazon', 'bluemoonsoft', 'thumbtack'],
+    domains: ['amazon', 'ebay', 'thumbtack'],
     settings: 'written',
     stores: 'written',
   });

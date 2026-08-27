@@ -315,9 +315,9 @@ worker/document/nonce로 연결했다. 두 동시 그룹의 port와 pong도 섞�
 > broad array of functionality or entry points into services are better delivered as separate extensions
 
 현재 확장이 담고 있는 것: 멀티스토어 비교 · 단일 사이트 쇼핑 · 체크아웃 검토 · **서비스 견적(Thumbtack)**
-· **메모리** · **bluemoonsoft 사이트 탐색**.
+· **메모리**. (특정 고객사 사이트 탐색은 **2026-08-26 제품에서 삭제**됐다 — 아래 업데이트.)
 
-쇼핑 계열은 하나의 목적으로 묶인다. 견적·메모리·특정 고객사 사이트 탐색은 **묶음으로 보일 소지**가 있다.
+쇼핑 계열은 하나의 목적으로 묶인다. 견적·메모리는 여전히 **묶음으로 보일 소지**가 있다.
 
 그리고 이 결정이 데이터 정책과 맞물린다 — 2026-08-01 시행 [Limited Use](https://developer.chrome.com/docs/webstore/program-policies/limited-use)
 개정으로 **수집 데이터는 "공시된 단일 목적에 엄격히 필요한" 것이어야** 한다. 목적을 넓게 쓰면 "엄격히
@@ -354,7 +354,6 @@ worker/document/nonce로 연결했다. 두 동시 그룹의 port와 pong도 섞�
 | `end_conversation` | 없음 | ✅ | ✅ | ✅ |
 | `request_service_quote` | **제3자에 연락처 제출** | ❌ | ✅ | ✅ |
 | `memory` | **연락처 저장** | ❌ | ✅ | ✅ |
-| `bluemoonsoft` | 읽기 | ❌ | ❌ | ✅ |
 
 **측정에서 나온, 문장만으로는 안 보이는 사실 세 가지**
 
@@ -383,9 +382,14 @@ worker/document/nonce로 연결했다. 두 동시 그룹의 port와 pong도 섞�
 - **C** — 권하지 않는다. §1이 이름으로 지목하는 *"broad array of functionality or entry points into
   services"* 가 현재 구성이다.
 
-**bluemoonsoft는 세 안 모두에서 빠진다.** 특정 고객사 사이트 탐색은 어느 목적 문장에도 들어가지 않고,
-§1 자신이 처방을 적어 두었다 — *"better delivered as separate extensions"*. 데모/고객사 자산으로 남기고
-스토어 빌드에서만 빼면 된다(리포지터리에서 지울 필요 없음).
+**bluemoonsoft는 세 안 모두에서 빠졌고, 2026-08-26 실제로 삭제됐다.** 세 안이 공통으로 지목한 유일한
+항목이라 결정을 기다릴 이유가 없었다. 스토어 빌드에서 빼는 대신 **리포지터리에서 지웠다**: 사이트
+디렉터리, 플로우 오버레이, `bluemoonsoft` intent와 라우트, 그 플로우가 소유한 도구 4개
+(`assist_decide`, `sitemap_search`, `enter_bluemoonsoft`, `navigate_page`)와 `_common.72_rpc_sitemap`.
+플로우 문서는 265,009 → 255,247 B(**-9,762 B**), 이름으로 부르는 모듈은 25개 · 424.5 KiB, 그 사이트에
+관한 요청은 이제 `unsupported_request`로 간다. **남은 결정은 견적·메모리 두 개뿐이고, 위 표의 A·B는
+그대로 유효하다**(둘 다 이미 bluemoonsoft를 제외한 값). 데모가 필요하면 별도 확장이 §1의 처방이다 —
+*"better delivered as separate extensions"*.
 
 **SITES 권고는 A다.** 문장이 짧고 검증 가능하며(심사자가 그대로 재현할 수 있다), 수집하는 데이터가
 목적과 1:1로 대응하고(페이지의 상품·가격, 연락처 없음), 패키지가 24% 작아져 P0-5의 "코드량" 심사 지연

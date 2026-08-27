@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Live regression for checkout-from-anywhere (routes into the checkout flow -> run_checkout, the RPC
 // implementation in _common.68_rpc_checkout; no order):
-//  1) idle;  2) from another site (cross-nav to amazon);  3) mid-flow interrupt.
+//  1) idle;  2) from a neutral off-site page (cross-nav to amazon);  3) mid-flow interrupt.
 // Runs on the shipping CDP extension via tools/harness/cdp-session.mjs (contract C3). The flow
 // reaches a checkout REVIEW page and stops — no place-order selector exists anywhere in this file.
 import { FLOW_TOOLS, turnFault } from './turn-fault.mjs';
@@ -63,11 +63,11 @@ async function main() {
       return checkoutCasePassed(c1.res.toolCalls, c1.url);
     });
 
-    // 2) from bluemoonsoft (cross-domain)
-    await recordCase(checks, '2 other-site -> cross-nav to amazon + checkout', async () => {
-      await session.open('http://bluemoonsoft.com/');
+    // 2) from the harness's neutral page (cross-domain: axsdk.ai carries no site layer at all)
+    await recordCase(checks, '2 neutral page -> cross-nav to amazon + checkout', async () => {
+      await session.open('https://axsdk.ai/');
       await session.reset();
-      const c2 = await send(session, '2 checkout from bluemoonsoft', '장바구니 결제 진행해줘');
+      const c2 = await send(session, '2 checkout from neutral page', '장바구니 결제 진행해줘');
       return checkoutCasePassed(c2.res.toolCalls, c2.url);
     });
 

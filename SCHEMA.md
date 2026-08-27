@@ -1,31 +1,5 @@
 [
   {
-    "name": "assist_decide",
-    "description": "On arrival at BlueMoonSoft, choose whether to navigate to a requested page or ask the user what they need.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": [
-        "next"
-      ],
-      "properties": {
-        "next": {
-          "type": "string",
-          "enum": [
-            "navigate",
-            "ask"
-          ]
-        },
-        "question": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      }
-    }
-  },
-  {
     "name": "browse_service_candidates",
     "description": "Rank, filter, window, and select searched Thumbtack pros deterministically from the site data.",
     "parameters": {
@@ -889,7 +863,6 @@
                   "request_service_quote",
                   "shopping_single_site",
                   "shopping_multi_store_total_cost",
-                  "bluemoonsoft",
                   "end_conversation",
                   "checkout",
                   "memory"
@@ -1000,19 +973,6 @@
             "string",
             "null"
           ]
-        }
-      }
-    }
-  },
-  {
-    "name": "enter_bluemoonsoft",
-    "description": "Get the browser onto bluemoonsoft before its sitemap search and same-site navigation, and confirm it arrived.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "site": {
-          "type": "string"
         }
       }
     }
@@ -1163,22 +1123,6 @@
     "parameters": {
       "type": "object",
       "additionalProperties": true
-    }
-  },
-  {
-    "name": "navigate_page",
-    "description": "Navigate the current page to a same-site path or URL (a BlueMoonSoft sitemap page), and confirm it landed there.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "link"
-      ],
-      "properties": {
-        "link": {
-          "type": "string"
-        }
-      }
     }
   },
   {
@@ -3604,28 +3548,6 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {}
-    }
-  },
-  {
-    "name": "sitemap_search",
-    "description": "Search the current site's sitemap for pages matching a case-insensitive regex; returns matching lines (each with a path).",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "regex"
-      ],
-      "properties": {
-        "regex": {
-          "type": "string"
-        },
-        "limit": {
-          "type": [
-            "integer",
-            "number"
-          ]
-        }
-      }
     }
   },
   {

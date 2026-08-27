@@ -35,7 +35,7 @@ The equivalent whole-scope JSONPath forms (`$.global`, `$.flow`, `$.contexts`, a
 
 Edit authored sources only:
 
-- Production shared/site layers: `_common/flows.yaml`, `bluemoonsoft/flows.yaml`, and any populated `<site>/flows.yaml` overlay.
+- Production shared/site layers: `_common/flows.yaml` and any populated `<site>/flows.yaml` overlay.
 - Playground layers: `playground/_common/flows.yaml` and populated `playground/<site>/flows.yaml` overlays.
 
 Do not edit backups, generated snapshots, or live-scenario artifacts. This repository keeps `thumbtack/flows.yaml` and `playground/example/flows.yaml` as intentionally minimal overlays; an absent `planner` inherits the app planner.
@@ -232,7 +232,7 @@ npm run test:playground
 Then sync stored sources and run read-only extension scenarios:
 
 ```sh
-node tools/ax.mjs sync bluemoonsoft
+node tools/ax.mjs sync amazon
 node tools/playground.mjs sync --root=playground --no-launch
 ```
 
@@ -245,4 +245,4 @@ Inspect more than the terminal response. In the live trace or structured debug a
 5. adapter arguments match the action-contract selector; and
 6. terminal state includes only fields used by its response.
 
-A representative safe scenario is a BlueMoonSoft sitemap navigation for the production overlay and a read-only multi-store search for Playground. Do not use cart, checkout, form-submit, or quote-submit scenarios merely to validate selectors.
+A representative safe scenario is a read-only multi-store search, for both the production overlay and Playground. Do not use cart, checkout, form-submit, or quote-submit scenarios merely to validate selectors.

@@ -43,7 +43,6 @@ const SITE_HOSTS = [
   ['shopping.naver.com', 'naver-shopping'],
   ['ssg.com', 'ssg'],
   ['walmart.com', 'walmart'],
-  ['bluemoonsoft.com', 'bluemoonsoft'],
 ];
 
 export const SITE_HOME = {
@@ -58,7 +57,6 @@ export const SITE_HOME = {
   'naver-shopping': 'https://search.shopping.naver.com/search/all?query=%EC%87%BC%ED%95%91',
   ssg: 'https://www.ssg.com/',
   walmart: 'https://www.walmart.com/',
-  bluemoonsoft: 'http://bluemoonsoft.com/',
 };
 
 export function siteForUrl(url) {
@@ -806,8 +804,9 @@ export async function syncStore(session, { site, build = true, reload = true } =
   const commonLua = await readDist('_common.lua');
   const commonFlows = await readMaybe(join(repoRoot, '_common', 'flows.yaml'));
   // Remote Lua/flows are OFF in stored mode, so the store must carry EVERY published site (not just the
-  // one being synced) — otherwise a cross-site flow (e.g. bluemoonsoft -> shopping/amazon) lands on a
-  // site whose Lua is absent and a durable call fails "command unavailable". Slug == SDK domain (AGENTS §6).
+  // one being synced) — otherwise a cross-site flow (measured live on bluemoonsoft, a site since removed
+  // from the product: its flow hopped into shopping/amazon) lands on a site whose Lua is absent and a
+  // durable call fails "command unavailable". Slug == SDK domain (AGENTS §6).
   const siteSlugs = (await readdir(distDir)).filter(f => f.endsWith('.lua') && f !== '_common.lua').map(f => f.slice(0, -4)).sort();
   const lua = { ':': commonLua };
   const flows = { ':': commonFlows };
@@ -822,8 +821,9 @@ export async function syncStore(session, { site, build = true, reload = true } =
   // the extension keeps is a stub — `scripts: 0`, `flowsYaml: 0`, `sitemapMd: 0`, and no errors, because
   // nothing tried to fetch. Lua and flows are delivered here instead; the sitemap was not, and
   // `sitemap.search_site` then answered from the app's site INDEX (its documented fallback), so the
-  // bluemoonsoft flow resolved every request to lines about other sites and navigated home. Measured
-  // live: `currentSitemap` 0 bytes while `index.indexMd` held 1507.
+  // bluemoonsoft flow (a site since removed from the product) resolved every request to
+  // lines about other sites and navigated home. Measured live: `currentSitemap` 0 bytes while
+  // `index.indexMd` held 1507.
   const sitemaps = {};
   for (const s of siteSlugs) {
     const md = await readMaybe(join(repoRoot, s, 'sitemap.md'));

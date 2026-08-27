@@ -17,7 +17,7 @@ const root = new URL('../', import.meta.url);
 const dir = (path) => new URL(path, root);
 
 const FLOW_FILES = [
-  '_common/flows.yaml', 'bluemoonsoft/flows.yaml', 'thumbtack/flows.yaml', 'playground/_common/flows.yaml',
+  '_common/flows.yaml', 'thumbtack/flows.yaml', 'playground/_common/flows.yaml',
 ];
 
 /** Everything under `tools/`, concatenated. A command the dev CLI or a scenario runner calls is in use

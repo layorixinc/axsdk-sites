@@ -70,7 +70,7 @@ Naver Shopping's `access_denied` and Etsy's `no_relevant_offers` remain explicit
 | Cross-site navigation | 6/6 | Domains reached; Thumbtack quote searches still errored |
 | Thumbtack quote | 7/7 | Candidate selection, collection, approval, cancellation, and pre-submit stop are proven |
 | Coupang affiliate | Removed | HTTP 404 conversion path and its launch surface were deleted; guarded cart remains |
-| BlueMoonSoft navigation | Reached | Correct page, but reply does not present requested content |
+| BlueMoonSoft navigation | Removed | Site, flow, tools and sitemap module deleted from the product (2026-08-26) |
 
 ## P0 — submission blockers
 
@@ -310,16 +310,21 @@ remote-site loader enforce that limit on persisted/remote development values, bu
 do not pass through either one. A regression builds a valid >256 KiB flow asset, verifying that the
 producer and package format have no inherited store-value cap.
 
-No 256 KiB final compiler check was found in inspected source. The remaining capacity experiment is
-therefore precise: send a valid >256 KiB flow document from package assets directly to the compiler.
-If it succeeds, C3 has already removed the production storage boundary; canonical YAML remains a useful
-21,629 B transport/review reduction, not a launch prerequisite. Named/importable runtime actions or
+**Answered 2026-08-26, and it was not the compiler.** `POST /axsdk/v2/sessions` refuses a
+`clientFlowDocument` over **256 KiB of UTF-8** — 261,747 B accepted, 262,647 B refused,
+`data.message: "clientFlowDocument is too large"` — so no document that size ever reaches a compiler.
+The authored document was 265,009 B and the package-only artifact could not open a session at all, while
+stored-mode development sent the canonical 246,846 B and opened; the SDK canonicalises every layer now,
+so canonical YAML is a launch prerequisite rather than a nicety, and `check:flows` measures it. Named/importable runtime actions or
 document imports remain the long-term way to shrink the 135.5 KiB `flowTools` section by construction.
 
-### P1-6. BlueMoonSoft navigates but does not answer
+### P1-6. BlueMoonSoft is removed from the product
 
-The correct DocuRay/news page opens, but the assistant only says it navigated. Present the requested content or
-state clearly that the user should read the opened page.
+**Status: CLOSED 2026-08-26 by removal.** The flow answered "navigated" instead of presenting the page, and
+one customer's site fit no single-purpose sentence — §1 prescribes *"better delivered as separate
+extensions"*. The site directory, its flow overlay, the `bluemoonsoft` intent and route, the four tools it
+owned (`assist_decide`, `sitemap_search`, `enter_bluemoonsoft`, `navigate_page`) and `_common.72_rpc_sitemap`
+are deleted. A request about it now reaches `unsupported_request`, which states what the product does do.
 
 ### P1-7. Existing browser groups are no longer adopted implicitly
 

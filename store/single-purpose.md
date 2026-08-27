@@ -42,6 +42,11 @@ and the code work this choice implies (three intents and the memory-capture hook
 | B (+지역 서비스 견적) | 6 | 24 | 367.3 | 소매와 리드 생성이 다른 버티컬로 읽힌다 |
 | C (문장 없음) | 7 | 25 | 371.4 | §1이 이름으로 지목하는 구성 |
 
+> **2026-08-26 · bluemoonsoft는 세 안에서 사라졌다.** 표의 숫자는 그 이전 측정이다. 특정 고객사 사이트
+> 탐색은 어느 목적 문장에도 들어가지 않아 **제품에서 삭제**했다 — 플로우·도구·사이트 데이터와 전용
+> 모듈 `72_rpc_sitemap`(4.1 KiB)이 함께 사라졌으므로, C 안은 플로우 하나와 그 모듈만큼 줄어들고 §1
+> 위험도 그만큼 낮아진다. A·B 안의 숫자는 영향받지 않는다(둘 다 이미 bluemoonsoft를 제외한 값).
+
 A는 수집 데이터가 목적과 1:1로 대응한다 — 페이지의 상품·가격, 연락처 없음. 그래서 `docs/privacy.md`가
 짧고, 짧은 것이 방어 가능하다.
 
@@ -50,12 +55,12 @@ A는 수집 데이터가 목적과 1:1로 대응한다 — 페이지의 상품·
 R1 스토어 빌드에서 빠져야 하는 것들이다. 빼지 않으면 심사자가 아무 말이나 입력했을 때 리스팅과 다른
 답이 나오고, 그게 §1 위반의 가장 흔한 발견 경로다.
 
-- 라우터에서 `request_service_quote`(Thumbtack 견적) · `memory` · `bluemoonsoft` intent 제거
+- 라우터에서 `request_service_quote`(Thumbtack 견적) · `memory` intent 제거
 - `router.defaultIntent`를 쇼핑 플로우로 이전 — **지금 기본값이 `request_service_quote`다**
 - `hooks.beforeIntent: [record_memory]` **삭제**. 이게 남아 있으면 목적이 "상품 구매"인데 매 턴 연락처를
   추출하는 훅이 도는 상태이고, Limited Use에서 방어 불가다
-- 전용 모듈 제거: `64_rpc_thumbtack`, `65_rpc_quote`, `10_form_wizard`, `72_rpc_sitemap`, `70_rpc_memory`
-- `thumbtack/`, `bluemoonsoft/` 사이트 데이터를 스토어 빌드에서 제외 (저장소에서 지우지 않는다)
+- 전용 모듈 제거: `64_rpc_thumbtack`, `65_rpc_quote`, `10_form_wizard`, `70_rpc_memory`
+- `thumbtack/` 사이트 데이터를 스토어 빌드에서 제외 (저장소에서 지우지 않는다)
 
 게이트가 잡아준다: `dead:lua`, `check:flows`, `build:schema --check`.
 

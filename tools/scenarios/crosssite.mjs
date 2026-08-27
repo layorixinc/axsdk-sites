@@ -2,7 +2,7 @@
 // Cross-site, cross-domain live scenario for the AXSDK arrival-delivery fix.
 //
 // Drives ONE session through a journey that criss-crosses all three sites
-// (bluemoonsoft / thumbtack service-quote / amazon shopping), covering every DIRECTED site pair,
+// (amazon shopping / ebay shopping / thumbtack service-quote), covering every DIRECTED site pair,
 // so each leg forces a cross-origin navigation that the SDK's "complete-on-arrival" cross-nav must
 // survive (no "discarded because the active site changed", no "command unavailable").
 //
@@ -39,16 +39,16 @@ function quoteMsg(serviceKo, needKo, phoneTail) {
 }
 
 const LEGS = [
-  // starts on amazon (previous "계란 사줘" leg ended there)
+  // starts on amazon (main() opens it deterministically before the first leg)
   { label: 'amazon → thumbtack (quote: house cleaning)', target: 'thumbtack.com', timeout: 260000, reset: true,
     msg: quoteMsg('집 청소', '다음 주에 아파트 전체 청소가 필요해요.', '42') },
-  { label: 'thumbtack → bluemoonsoft (docuray)', target: 'bluemoonsoft.com', timeout: 160000,
-    msg: '블루문소프트 다큐레이 보여줘' },
-  { label: 'bluemoonsoft → amazon (shop: wireless mouse)', target: 'amazon.', timeout: 260000, reset: true,
-    msg: '무선 마우스 사줘' },
-  { label: 'amazon → bluemoonsoft (news)', target: 'bluemoonsoft.com', timeout: 160000,
-    msg: '블루문소프트 새소식 보여줘' },
-  { label: 'bluemoonsoft → thumbtack (quote: lawn mowing)', target: 'thumbtack.com', timeout: 260000, reset: true,
+  { label: 'thumbtack → ebay (shop: wireless mouse)', target: 'ebay.com', timeout: 260000, reset: true,
+    msg: '이베이에서 무선 마우스 사줘' },
+  { label: 'ebay → amazon (shop: wireless keyboard)', target: 'amazon.', timeout: 260000, reset: true,
+    msg: '아마존에서 무선 키보드 사줘' },
+  { label: 'amazon → ebay (shop: usb-c cable)', target: 'ebay.com', timeout: 260000, reset: true,
+    msg: '이베이에서 USB C 케이블 사줘' },
+  { label: 'ebay → thumbtack (quote: lawn mowing)', target: 'thumbtack.com', timeout: 260000, reset: true,
     msg: quoteMsg('잔디 깎기', '앞마당 잔디를 깎아야 해요.', '43') },
   { label: 'thumbtack → amazon (shop: airpods)', target: 'amazon.', timeout: 260000, reset: true,
     msg: 'airpods 사줘' },

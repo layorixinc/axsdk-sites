@@ -79,26 +79,25 @@ unset. A false settled finding is worse than none.
 
 ## 5. BlueMoonSoft answers "navigated" instead of the content
 
-**Status: open, product quality (readiness review P1-6).**
+**Status: closed 2026-08-26 — the site was removed from the product.**
 
-The correct DocuRay page opens and the reply is "BlueMoonSoft 페이지로 이동했습니다". The navigation work
-is closed (`AGENTS.md` §6.1: a fragment-only target is answered as `already_open`); what is missing is a
-flow that presents the opened page's content, or says plainly that the user should read it.
-
-**Next**: decide whether the bluemoonsoft overlay gets a read-and-present node or an honest terminal. This
-is flow/prompt work, not navigation — do not reopen the fragment investigation.
+bluemoonsoft was removed from the product on 2026-08-26: the flow, its four tools, the site data and
+`_common.72_rpc_sitemap` are gone, so there is no reply left to improve. Measured after the removal, one
+live turn: "블루문소프트 회사 정보 보여줘" is classified `out_of_scope` and answered
+"죄송합니다, 요청을 처리할 수 없습니다." — see item 12, which is where that answer comes from.
 
 ## 6. A >256 KiB flow document straight from package assets to the compiler
 
-**Status: open, single experiment; the last M1 capacity question.**
+**Status: closed by measurement (2026-08-26).**
 
-`_common/flows.yaml` is 251,083 B (**95.8%** of 256 KiB). `flowsStore.setFlows` and the remote-site loader
+`_common/flows.yaml` is 255,247 B raw / **232.4 KiB canonical (90.8%** of 256 KiB, after the bluemoonsoft removal). `flowsStore.setFlows` and the remote-site loader
 cap persisted/remote values at 256 KiB; C3 package assets bypass both, and a regression already builds a
 valid >256 KiB flow **asset**. No 256 KiB check was found in the final compiler.
 
-**Next**: pass a valid >256 KiB document from package assets directly to the compiler and record the
-answer. If it compiles, C3 has already removed the production ceiling and canonical YAML (21,629 B saved)
-is transport/review convenience, not a launch prerequisite.
+Measured 2026-08-26: `POST /axsdk/v2/sessions` refuses a `clientFlowDocument` over 256 KiB of UTF-8 —
+261,747 B accepted, 262,647 B refused with `data.message: "clientFlowDocument is too large"`. The backend
+refuses such a document before any compiler sees it, so package assets bypassing the client-side caps does
+not remove the production ceiling.
 
 ## 7. Watch list — instrumented, no action until it recurs
 
@@ -169,3 +168,24 @@ localize it, and the store takes one screenshot set for all locales.
 **Next**: decide whether R1 ships Korean-only UI (then the English listing must say so plainly, which it
 now does) or the renderers take a language parameter. The refine parser already accepts English phrases
 (`include unknown`, `show all`, `free shipping`, `under`), so input is not the gap — output is.
+
+## 12. An out-of-scope request never reaches our own refusal text
+
+**Status: open, small; observed 2026-08-26 while verifying the bluemoonsoft removal.**
+
+`router.fallbackIntent` is `unsupported_request`, whose terminal states what the product DOES do
+("service quotes, shopping, checkout review, and explicit memory requests"). That text has never been
+measured reaching a user. A planner `out_of_scope` answer carries `intents: []`, so the router runs
+nothing and the app's own terminal answers — measured live, the whole reply is
+"죄송합니다, 요청을 처리할 수 없습니다.", with a trace of the capture hook plus an app-level
+`site_resolve` and no flow node of ours. `fallbackIntent` covers an intent NAME that does not resolve,
+which is a different case.
+
+Not a regression and not urgent: a bare apology is honest and claims no functionality, which is what §1
+cares about. It is a quality gap — the one place the product could state its purpose in the user's own
+language, it says nothing.
+
+**Next**: decide between (a) the planner emitting `replace_current` with `intent: unsupported_request`
+for an out-of-scope message plus a route for it, or (b) leaving the app terminal and accepting the bare
+apology. (a) needs a live turn to confirm the branch, and a gate pinning that the route exists — a route
+nobody reaches is exactly what this entry is about.

@@ -353,7 +353,7 @@ graph TD
   H --> F1[request_service_quote 22 nodes]
   H --> F2[shopping_multi_store 24 nodes]
   H --> F3[shopping_single_site 12 nodes]
-  H --> F4[checkout 4 / bluemoonsoft 7 / memory 13]
+  H --> F4[checkout 4 / memory 13]
   F2 --> SUB[shopping_search_one_store<br/>subflow maxModelCalls=0]
   F1 --> T[flowTools 70개<br/>전부 kind=runtime]
   F2 --> T

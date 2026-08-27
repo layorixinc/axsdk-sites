@@ -19,7 +19,6 @@ const root = new URL('../', import.meta.url);
 /** Every flow file in the repo. A hand-kept list here would reintroduce the drift this file removes. */
 const FLOW_FILES = [
   '_common/flows.yaml',
-  'bluemoonsoft/flows.yaml',
   'thumbtack/flows.yaml',
   'playground/_common/flows.yaml',
 ];

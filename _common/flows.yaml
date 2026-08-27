@@ -53,7 +53,6 @@ planner:
     - request_service_quote — a quote/estimate for a local SERVICE (청소/house cleaning, 핸디맨/handyman, 잔디 깎기/lawn mowing, 열쇠공/locksmith, …).
     - shopping_single_site — find / buy / order one or more PRODUCTS (아이폰/iPhone, 신발/shoes, 계란/eggs, airpods, …).
     - shopping_multi_store_total_cost — compare one PRODUCT across any of the ten supported representative commerce sites (Amazon, Walmart, eBay, AliExpress, Etsy, Coupang, Naver Shopping, Gmarket, 11st, SSG) by item price plus shipping, then add only the offer the user explicitly selects. Use this when the request names multiple stores, asks for cross-store comparison, or asks for the cheapest shipping-inclusive/total cost.
-    - bluemoonsoft — explore BlueMoonSoft (블루문소프트), a Korean information-security software company: company/about info, products (다큐레이/DOCURAY), security modules (보안 모듈/서비스 모듈), news (새소식), customers/reference, patents, or the quote-inquiry page. NOT buying consumer products (that is shopping_single_site).
     - end_conversation — the user wants to STOP/END the conversation with no further task (farewell / thanks-and-done: "그만할게", "됐어 그만", "이제 그만", "고마워요", "종료").
     - checkout — proceed to PAYMENT/CHECKOUT for whatever is already in the shopping cart (체크아웃/결제/결제해줘/결제 진행/주문할게/장바구니 결제/checkout). NOT buying a new product (that is shopping_single_site) and NOT a service quote. No order is ever placed — it only opens the checkout page for review.
     - memory — explicitly save/remember, delete/forget, list/show, read, or search information the user asked AXSDK to remember. Memory requires an explicit memory action or a question asking to retrieve remembered information. A declarative statement that only supplies a value ("내 이메일은 ...이야", "my email is ...") is NEVER memory and MUST NOT be saved.
@@ -61,7 +60,7 @@ planner:
     PRODUCT ROUTING INVARIANT: use `shopping_multi_store_total_cost` for explicit multi-store or total-cost comparison across supported commerce sites; otherwise use `shopping_single_site`. These are the only valid product intent literals.
     NEVER emit `shopping`; that inherited base intent runs a different flow.
 
-    CURRENT SITE: The <current_site> context, when non-empty, names the website the user is currently on. If the latest message fits that site — it names a page/section/topic of the site, or is a generic "show/open/find X" that maps to the site's own content — and does NOT clearly match a different task (buying consumer products = shopping_single_site; a local SERVICE quote = request_service_quote; ending), classify it as that site's intent via replace_current EVEN IF the site name is omitted; do NOT return out_of_scope or clarify for such an on-site request. E.g. while on bluemoonsoft: "유튜브 보여줘" / "뉴스" / "다큐레이" / "견적 문의" → intent=bluemoonsoft.
+    CURRENT SITE: The <current_site> context, when non-empty, names the website the user is currently on. If the latest message fits that site — it names a page/section/topic of the site, or is a generic "show/open/find X" that maps to the site's own content — and does NOT clearly match a different task (buying consumer products = shopping_single_site; a local SERVICE quote = request_service_quote; ending), classify it as that site's intent via replace_current EVEN IF the site name is omitted; do NOT return out_of_scope or clarify for such an on-site request. E.g. while on amazon: "무선 마우스 찾아줘" → intent=shopping_single_site.
 
     action:
     - continue_current — an active flow is awaiting the user's answer (an active flow / active prompt exists) and the latest message is that answer. Put the active flow first so it resumes without losing accumulated state. A value-providing answer is NOT saved merely because it is reusable. If the answer also contains a separate explicit memory clause, queue memory after the active intent and preserve the shared value in both relevant requestText segments. EXCEPTION: if the latest message is a clear farewell / stop with no further task ("그만할게", "됐어 그만", "고마워요", "종료"), use replace_current with intent=end_conversation even while a flow is active; likewise if it is a clear CHECKOUT request (체크아웃/결제해줘/주문 진행/장바구니 결제 — proceeding to payment, NOT answering the current question), use replace_current with intent=checkout even while a flow is active.
@@ -74,7 +73,7 @@ planner:
       first task's entry is not finishing the job: RE-READ the message to its end and emit the trailing memory
       entry too, even when the earlier clause is a large task flow that could absorb the value.
     - clarify — ambiguous / unclassifiable: set `question` plus a single best-guess entry.
-    - out_of_scope — the message matches NO configured task intent. A service quote, product purchase, checkout, BlueMoonSoft topic, explicit memory request, or farewell is NEVER out_of_scope. Route explicit remember/save, forget/delete, list/show, exact-read questions, and memory-search requests to memory. Route a standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope; never reinterpret it as consent to save.
+    - out_of_scope — the message matches NO configured task intent. A service quote, product purchase, checkout, explicit memory request, or farewell is NEVER out_of_scope. Route explicit remember/save, forget/delete, list/show, exact-read questions, and memory-search requests to memory. Route a standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope; never reinterpret it as consent to save.
 
     MEMORY DELETE FOLLOW-UP: if activeFlow=memory and activeNode=choose_delete_keys, the latest
     message answers the pending deletion question. Always use continue_current with one memory intent,
@@ -138,7 +137,7 @@ planner:
     - "아이폰이랑 계란 사줘" → intents=[{intent:shopping_single_site, segments:["아이폰이랑 계란 사줘"], state:{requestText:"아이폰이랑 계란 사줘"}}]
     - "온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어." → replace_current, intents=[{intent:shopping_single_site, segments:["온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."], state:{requestText:"온라인에서 상품을 사고 싶어. 무엇을 살지는 아직 안 정했어."}}] — use shopping_single_site even when the product is still missing; that flow asks what to buy.
     - "고마워 그만할게" → replace_current, intents=[{intent:end_conversation, segments:["고마워 그만할게"], state:{requestText:"고마워 그만할게"}}]
-    - (on bluemoonsoft, <current_site> non-empty) "유튜브 보여줘" → replace_current, intents=[{intent:bluemoonsoft, segments:["유튜브 보여줘"], state:{requestText:"유튜브 보여줘"}}]
+    - (on amazon, <current_site> non-empty) "무선 마우스 찾아줘" → replace_current, intents=[{intent:shopping_single_site, segments:["무선 마우스 찾아줘"], state:{requestText:"무선 마우스 찾아줘"}}]
     - "체크아웃 해줘" / "결제 진행해줘" → replace_current, intents=[{intent:checkout, segments:["체크아웃 해줘"], state:{requestText:"체크아웃 해줘"}}]
     - "샌프란시스코 청소 견적 줘. 이름 홍길동, 이메일 a@b.com, 전화 415-555-0100" → replace_current, intents=[{intent:request_service_quote, segments:["샌프란시스코 청소 견적 줘 …"], state:{requestText:"샌프란시스코 청소 견적 줘. 이름 홍길동, 이메일 a@b.com, 전화 415-555-0100"}}] — contact STAYS in this quote requestText and is not automatically saved.
     - "내 이메일 thumbtack-test@example.com을 기억해" → replace_current, intents=[{intent:memory, segments:["내 이메일 thumbtack-test@example.com을 기억해"], state:{requestText:"내 이메일 thumbtack-test@example.com을 기억해"}}]
@@ -177,17 +176,6 @@ router:
         - 내가 아래 불러주는 물건 구매해줘
         - 아이팟 사줘
         - buy me some shoes
-    - intent: bluemoonsoft
-      entry: bluemoonsoft.start
-      description: Explore BlueMoonSoft (company info, DOCURAY/products, security
-        modules, news, customers) by navigating its website to the page that
-        matches the request.
-      examples:
-        - 블루문소프트 회사 정보 보여줘
-        - 다큐레이 알려줘
-        - 블루문소프트 보안 모듈 뭐 있어
-        - 블루문소프트 새소식 보여줘
-        - 블루문소프트 견적 문의 페이지 열어줘
     - intent: community_script
       entry: community_script.classify
       description: Answer from the community scripts the user installed for the page
@@ -432,7 +420,7 @@ flows:
         inputSelector: []
         respond: |-
           Reply briefly in the user's language. This request is unsupported. State that you can help
-          with service quotes, shopping, checkout review, BlueMoonSoft navigation, and explicit memory
+          with service quotes, shopping, checkout review, and explicit memory
           requests. Never claim anything was saved or deleted.
   community_script:
     goal: Answer from the community scripts the user installed for the page they are
@@ -2227,97 +2215,6 @@ flows:
         kind: terminal
         inputSelector: []
 
-  bluemoonsoft:
-    goal: Help the user explore BlueMoonSoft (company info, DOCURAY / products,
-      security modules, news, customers) by navigating bluemoonsoft.com to the
-      page that satisfies the request, resolved from the site sitemap. Never
-      fills or submits forms.
-    state:
-      site: bluemoonsoft
-      requestText: null
-      sitemap_hits: null
-      sitemap_source: null
-    nodes:
-      start:
-        kind: action_contract
-        id: site_entry
-        description: In-engine entry hop so the flow's first step is not a remote call.
-        inputSelector: []
-        next:
-          open: enter
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-      enter:
-        kind: action_contract
-        id: enter_bluemoonsoft
-        inputSelector:
-          - site
-        next:
-          search: assist
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      assist:
-        kind: action_unit
-        description: On arrival, route to sitemap navigation when the request already
-          names a target page/topic, otherwise announce arrival and ask what the
-          user needs.
-        inputSelector:
-          - requestText
-        allowedTools: [ assist_decide ]
-        prompt: |-
-          You are the BlueMoonSoft assistant, now on bluemoonsoft.com. One tool: assist_decide.
-          Look at the user's request (requestText / the latest message):
-          - If it names ANY specific BlueMoonSoft page, section, product, service, or topic to view (e.g. 회사 정보/about, 다큐레이/DOCURAY, 랜섬제로/ransomware, 보안 모듈/security modules, 새소식/news, 유튜브·영상/videos, 고객사/reference, 특허/patent, 오시는 길/contact, 견적 문의 — or any similar concrete target) → call assist_decide(next="navigate").
-          - Only if the message is generic with NO concrete target (e.g. just "블루문소프트", "홈 열어줘", "도와줘") → call assist_decide(next="ask", question="블루문소프트에서 무엇을 도와드릴까요? (회사 소개, 제품/다큐레이, 보안 모듈, 새소식, 유튜브, 견적 문의 등)"). Ask in the user's language.
-        next:
-          navigate: resolve
-          ask: assist
-          error: error
-        fallback: { invalidNext: ask, exhaustedNext: ask, maxStalledSteps: 2, stalledNext: error }
-
-      resolve:
-        kind: action_unit
-        description: Resolve the BlueMoonSoft page for the request by searching the site
-          sitemap. Dummy base — the bluemoonsoft site overlay
-          (bluemoonsoft/flows.yaml) provides the real sitemap-search prompt;
-          this base only keeps the flow compilable off-domain.
-        inputSelector:
-          - requestText
-        allowedTools: [ sitemap_search ]
-        prompt: |-
-          Dummy base node. The bluemoonsoft site overlay replaces this prompt. Call sitemap_search ONCE with a regex of the request's key terms, then stop.
-        next:
-          go: go_page
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
-
-      go_page:
-        kind: action_unit
-        description: Navigate to the chosen BlueMoonSoft page path from the sitemap
-          search hits. Dummy base — the bluemoonsoft site overlay provides the
-          real page-picking prompt.
-        inputSelector:
-          - requestText
-          - sitemap_hits
-        allowedTools: [ navigate_page ]
-        prompt: |-
-          Dummy base node. The bluemoonsoft site overlay replaces this prompt. Pick the best path from sitemap_hits for the request and call navigate_page(link=<that path>); if none match, navigate_page(link="/front/main").
-        next:
-          go: served
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
-
-      served:
-        kind: terminal
-        inputSelector: []
-        respond: |-
-          Reply in the user's language: confirm you moved to the BlueMoonSoft page that matches the user's request, and invite them to ask for anything else (another page, product, or info). Do not invent page contents.
-
-      error:
-        kind: terminal
-        inputSelector: []
-        respond: 블루문소프트에서 원하는 페이지를 찾지 못했어요. 무엇을 찾으시는지 다시 알려주세요.
 
   end_conversation:
     nodes:
@@ -4015,7 +3912,6 @@ flowTools:
                       request_service_quote,
                       shopping_single_site,
                       shopping_multi_store_total_cost,
-                      bluemoonsoft,
                       end_conversation,
                       checkout,
                       memory
@@ -4649,21 +4545,6 @@ flowTools:
         site: { type: [ string, "null" ], enum: [ amazon, ebay, walmart, aliexpress, etsy, coupang, 11st, gmarket, ssg, naver-shopping, null ] }
         message: { type: string }
 
-  assist_decide:
-    description: On arrival at BlueMoonSoft, choose whether to navigate to a
-      requested page or ask the user what they need.
-    execute:
-      kind: runtime
-      implementation: passthrough
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: true
-      required: [ next ]
-      properties:
-        next: { type: string, enum: [ navigate, ask ] }
-        question: { type: string }
-        message: { type: string }
 
 
   shopping_screen_site_candidates:
@@ -4705,46 +4586,6 @@ flowTools:
         # `{type: array}` is refused before the script runs.
         candidates: { type: [ array, "null" ], items: { type: object, additionalProperties: true } }
 
-  sitemap_search:
-    description: Search the current site's sitemap for pages matching a
-      case-insensitive regex; returns matching lines (each with a path).
-    # The runtime's own `sitemap.search` reads the APP PACKAGE's sitemap — measured live, the extension's
-    # own `/`, `/settings`, `/help` — so adopting it once returned no hits for every bluemoonsoft request
-    # and the flow fell back to /front/main in silence. `sitemap.search_site` is the CLIENT op that reads
-    # the other document: the sitemap of the domain the tab is on. Same intent, right data.
-    execute:
-      kind: runtime
-      implementation: lua
-      modules: [ "_common.72_rpc_sitemap" ]
-      rpc:
-        allow: [ sitemap.search_site ]
-        opTimeoutMs: 4000
-        deadlineMs: 30000
-      entry: run
-      lua: |
-        function run(args)
-          return AX_RPC_SITEMAP.search(args)
-        end
-    output:
-      next: { if: [ { var: result.error }, "error", "go" ] }
-      sitemap_hits: result.chunks
-      # WHICH document answered is the whole basis of the refusal, and it was computed and never
-      # published — so a live `site_sitemap_missing` could not be told apart from "the site's sitemap
-      # loaded and matched nothing". Measured: the trace carried `sitemap_hits: {}` and no source.
-      sitemap_source: result.source
-      # The raw reason rides along. A category alone cannot separate an op the client never registered
-      # from one we called wrongly, and a live `sitemap_unavailable` said nothing about which.
-      error:
-        {
-          if: [ { var: result.reason }, { var: result.reason }, { var: result.error } ]
-        }
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [ regex ]
-      properties:
-        regex: { type: string }
-        limit: { type: [ integer, number ] }
 
   community_classify:
     description: Decide, without a model, whether the user named a community command
@@ -4922,63 +4763,7 @@ flowTools:
       properties:
         site: { type: [ string, "null" ] }
 
-  enter_bluemoonsoft:
-    description: Get the browser onto bluemoonsoft before its sitemap search and
-      same-site navigation, and confirm it arrived.
-    execute:
-      kind: runtime
-      implementation: lua
-      modules: [ "_common.62_rpc_sites", "_common.66_rpc_navigate" ]
-      rpc:
-        allow: [ dom.get_location_href, nav.navigate ]
-        opTimeoutMs: 2000
-        deadlineMs: 60000
-      entry: run
-      lua: |
-        function run(args)
-          args = type(args) == "table" and args or {}
-          args.site = args.site or "bluemoonsoft"
-          return AX_RPC_NAV.open_site(args)
-        end
-    output:
-      next: result.next
-      error: result.error
-      page_href: result.href
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        site: { type: string }
 
-  navigate_page:
-    description: Navigate the current page to a same-site path or URL (a
-      BlueMoonSoft sitemap page), and confirm it landed there.
-    execute:
-      kind: runtime
-      implementation: lua
-      modules: [ "_common.66_rpc_navigate" ]
-      rpc:
-        # Read the current location, fire the navigation, poll for arrival. Nothing else.
-        allow: [ dom.get_location_href, nav.navigate ]
-        opTimeoutMs: 2000
-        deadlineMs: 60000
-      entry: run
-      lua: |
-        function run(args)
-          return AX_RPC_NAV.navigate_page(args)
-        end
-    output:
-      # The script confirms arrival, so it is the only thing that knows whether the page moved, refused, or
-      # landed somewhere else. Deriving a branch from `result.error` here would flatten those three.
-      next: result.next
-      error: result.error
-      page_href: result.href
-    parameters:
-      type: object
-      additionalProperties: false
-      required: [ link ]
-      properties:
-        link: { type: string }
 
   next_product:
     description: Record the item just processed into shop_results and pick the next

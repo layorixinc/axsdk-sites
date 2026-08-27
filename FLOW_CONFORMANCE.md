@@ -10,9 +10,9 @@ purposes and must not be substituted for one another.
 | Production client overlay | `_common/flows.yaml` plus the active `<site>/flows.yaml` | `extends: app` overlay | Stored or remote site flows are deep-merged onto the base app flow by the extension/runtime. |
 | SDK playground reference | `../axsdk-sdk-js/packages/axsdk-react/apps/browser-extension/flows.yaml` | Full `version: 1` app document | Imported by `packages/axsdk-react/src/App.tsx` for the SDK playground. It is not the production site flow. |
 
-The production overlays currently tracked by the conformance check are `_common/flows.yaml`,
-`bluemoonsoft/flows.yaml`, and `thumbtack/flows.yaml`. A new populated site flow must be added to the
-check in the same change that introduces it.
+The production overlays currently tracked by the conformance check are `_common/flows.yaml` and
+`thumbtack/flows.yaml`. A new populated site flow must be added to the check in the same change that
+introduces it.
 
 The SDK shopping example retains two LLM-managed sequential-loop nodes for compatibility. Both are
 marked `LEGACY PLAYGROUND LOOP`; new multi-item or multi-site work must use `flow.map` plus deterministic

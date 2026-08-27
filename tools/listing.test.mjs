@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import {
   assertListingAssets, assertListingStructure, assertBilingualCopy, outstandingConfirmations,
-  LISTING_ASSETS, LISTING_ASSET_LOCALES, LISTING_FILES,
+  LISTING_ASSETS, LISTING_ASSET_LOCALES, LISTING_FILES, LISTING_TILE,
 } from './listing.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -162,4 +162,32 @@ test('a surface missing the English half names itself', async () => {
  */
 test('screenshots cover the locales whose UI actually exists', () => {
   assert.deepEqual([...LISTING_ASSET_LOCALES], ['ko']);
+});
+
+/**
+ * The promotional tile is the one required asset that is NOT a screenshot, and the store is specific
+ * about it: 440x280, brand rather than a screenshot, no text. Size is the half a gate can read.
+ */
+test('the promotional tile is present at the size the store requires', () => {
+  const bytes = readFileSync(join(repoRoot, LISTING_TILE.path));
+  assert.equal(bytes.readUInt32BE(16), LISTING_TILE.width);
+  assert.equal(bytes.readUInt32BE(20), LISTING_TILE.height);
+  assert.equal(LISTING_TILE.width, 440);
+  assert.equal(LISTING_TILE.height, 280);
+});
+
+test('a tile at the wrong size is refused by the asset gate', async () => {
+  const { mkdtemp, mkdir, writeFile, cp } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(join(tmpdir(), 'axsdk-tile-'));
+  for (const locale of LISTING_ASSET_LOCALES) {
+    await mkdir(join(root, 'store', 'assets', locale), { recursive: true });
+    for (const file of LISTING_ASSETS) {
+      await cp(join(repoRoot, 'store', 'assets', locale, file), join(root, 'store', 'assets', locale, file));
+    }
+  }
+  const wrong = Buffer.from(readFileSync(join(repoRoot, LISTING_TILE.path)));
+  wrong.writeUInt32BE(300, 16);
+  await writeFile(join(root, LISTING_TILE.path), wrong);
+  assert.throws(() => assertListingAssets(root), /tile-small.png is 300x280/);
 });

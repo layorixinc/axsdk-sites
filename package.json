@@ -44,7 +44,8 @@
     "test:packs": "bun test tools/packs",
     "test:commerce:live:cart": "node tools/scenarios/cart-live.mjs",
     "test:extraction:live": "node tools/scenarios/extraction-audit-live.mjs",
-    "check:listing": "node tools/listing.mjs"
+    "check:listing": "node tools/listing.mjs",
+    "build:tile": "node tools/store-tile.mjs"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

@@ -37,6 +37,13 @@ export const LISTING_ASSETS = ['1-comparison.png', '2-refine.png', '3-choices.pn
  * localize it. The mechanism stays per-locale so the set can be added the day the renderer is.
  */
 export const LISTING_ASSET_LOCALES = ['ko'];
+
+/**
+ * The one required asset that is not a screenshot. The store asks for brand rather than a shrunken
+ * screenshot and says **avoid text**; `tools/store-tile.mjs` draws it from geometry with no font, so that
+ * rule holds by construction and the tile can be regenerated (`npm run build:tile`).
+ */
+export const LISTING_TILE = { path: 'store/assets/tile-small.png', width: 440, height: 280 };
 const ASSET_WIDTH = 1280;
 const ASSET_HEIGHT = 800;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -60,6 +67,21 @@ export function assertListingAssets(root) {
         throw new Error(`${relative} is ${width}x${height}, and the store takes ${ASSET_WIDTH}x${ASSET_HEIGHT}`);
       }
     }
+  }
+
+  let tile;
+  try {
+    tile = readFileSync(join(root, LISTING_TILE.path));
+  } catch {
+    throw new Error(`promotional tile is missing: ${LISTING_TILE.path}`);
+  }
+  if (tile.length < 24 || !tile.subarray(0, 8).equals(PNG_SIGNATURE)) {
+    throw new Error(`${LISTING_TILE.path} is not a PNG`);
+  }
+  const tileWidth = tile.readUInt32BE(16);
+  const tileHeight = tile.readUInt32BE(20);
+  if (tileWidth !== LISTING_TILE.width || tileHeight !== LISTING_TILE.height) {
+    throw new Error(`${LISTING_TILE.path} is ${tileWidth}x${tileHeight}, and the store takes ${LISTING_TILE.width}x${LISTING_TILE.height}`);
   }
 }
 

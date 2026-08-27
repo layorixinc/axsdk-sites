@@ -132,7 +132,7 @@ GitHub Pages 설정: 저장소 **Settings → Pages → Deploy from a branch →
 |---|---|---|
 | 스토어 아이콘 | 128×128 | 패키지에 있음 (assets/icon-128.png) |
 | 스크린샷 | 1280×800 | **4장 있음** — store/assets/, 라이브 턴에서 촬영 |
-| 작은 프로모 타일 | 440×280 | 없음 <!-- BIZ-CONFIRM: 타일 제작 -->|
+| 작은 프로모 타일 | 440×280 | **있음** — `store/assets/tile-small.png`, `npm run build:tile` 로 재생성 |
 | 마키 타일 | 1400×560 (선택) | 생략 |
 | 프로모 영상 | YouTube (선택) | 생략 |
 
@@ -143,6 +143,11 @@ GitHub Pages 설정: 저장소 **Settings → Pages → Deploy from a branch →
 2. **2-refine** — 같은 창에 "미확인 포함"을 말했을 때 접혔던 행이 돌아오는 모습 (총 6개 / 1-2 페이지)
 3. **3-choices** — 한 스토어의 번호 붙은 후보 목록, 사용자의 선택을 기다리는 상태
 4. **4-cart** — 쿠팡 장바구니 페이지에서의 담김 확인 + "주문은 진행되지 않습니다" 문장
+
+타일은 스크린샷 축소본이 **아니다**. 스토어 규칙이 그것을 금지하고(*"Don't just use a screenshot"*) 텍스트도
+피하라고 하므로, `tools/store-tile.mjs` 가 **글리프 없이 도형만으로** 그린다 — 폰트가 없는 렌더러는 텍스트
+규칙을 위반할 수 없다. 확장 아이콘의 브랜드(인디고 · 흰 커서 · 스파클)에 제품의 한 가지 아이디어를 얹었다:
+여러 후보 중 총액이 이기는 하나. `check:listing` 이 440×280을 PNG 헤더에서 확인한다.
 
 네 장 모두 Chrome 자체의 **"AXSDK is controlling this page / Stop"** 배너가 함께 찍혀 있어, 동작 중임이
 사용자에게 보인다는 사실이 리스팅에서 그대로 확인된다. 계정 로그인 상태가 아니어서 PII는 없다.

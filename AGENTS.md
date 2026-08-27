@@ -2738,3 +2738,12 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   why in its own comment. Input is not the gap: the refine parser already accepts `include unknown`,
   `show all`, `free shipping`, `under`. Output is. Tracked as `TODO.md` §11, and the English listing now
   states plainly that the assistant answers in Korean rather than implying otherwise.
+- **The promotional tile is the one required asset the store forbids you to make from a screenshot.**
+  Its rules are specific — 440x280, brand rather than a screenshot, **avoid text**, fill the region,
+  saturated colour, not a lot of white (<https://developer.chrome.com/docs/webstore/images>). So
+  `tools/store-tile.mjs` draws it from geometry: no font, no browser, no glyphs, which makes the text
+  rule hold by construction rather than by care, and `npm run build:tile` regenerates it byte-for-byte.
+  The other rules became assertions on decoded pixels: every corner opaque and not white (full bleed),
+  light pixels under 25%, saturated pixels over 50%, and an edge share at half size between 0.2% and 20%
+  so a tile of thin lines cannot pass. Looking at the first render is what caught the two real defects a
+  test could not: the sparkle was clipped by the right edge and the cursor tail read as detached.

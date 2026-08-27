@@ -2773,13 +2773,50 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   turned out empty, which is itself the finding: **the extension records nothing when a session never
   opens.**
 - **Three hypotheses were refuted by measurement before the real one was found.** (a) The backend
-  refusing: `POST /axsdk/v2/sessions` answers **200 with a session id**. (b) The extension origin: the
-  same POST answers 200 for the store id, for a path-derived id, and for `http://localhost`, echoing each
-  in CORS. (c) The keyless load: injecting the pinned `key` back into the extracted archive fails
-  **identically**.
-  **The cause is `provision: 'config-only'` in a fresh profile**, measured by splitting one variable at a
-  time: archive + config-only → fails; dev dist + config-only → fails the same way; dev dist + full
-  provisioning → **opens in 11.4 s**. So it is neither the artifact nor the archive: a fresh profile that
-  is given credentials but no workspace stores never gets a backend session, and says nothing about it.
-  Next step is the service worker's own console in that state — the stores are empty, so the evidence is
-  not in them.
+  refusing: `POST /axsdk/v2/sessions` answers **200 with a session id** — for an EMPTY body, which is what
+  made that reading wrong; it refuses a large one. (b) The extension origin: the same POST answers 200 for
+  the store id, for a path-derived id, and for `http://localhost`, echoing each in CORS. (c) The keyless
+  load: injecting the pinned `key` back into the extracted archive fails **identically**. Splitting one
+  variable at a time then isolated `provision: 'config-only'`: archive + config-only → fails; dev dist +
+  config-only → fails the same way; dev dist + full provisioning → **opens in 11.4 s**.
+- **CLOSED 2026-08-26: the backend refuses a client flow document over 256 KiB, and the SHIPPED path was
+  the one sending the larger document.** Full chain, every number measured:
+
+  |step|measurement|
+  |---|---|
+  |the refusal|`POST /axsdk/v2/sessions` → 400 `BadRequest`, `data.message: "clientFlowDocument is too large"`|
+  |the limit|**256 KiB of UTF-8**: 261,747 B accepted, 262,647 B refused|
+  |what shipped|the authored `_common/flows.yaml` verbatim — **265,009 B, 2,865 over**|
+  |what the dev path sent|the same document canonicalised — **246,846 B**, and it opened|
+
+  `mergeClientFlowsYaml` re-emits YAML when it merges two layers and used to pass a LONE layer through
+  verbatim (`flowmerge.ts:54-55`). Stored-mode development always has two layers (package + store), so it
+  sent 246,846 B; the package-only artifact has one, so it sent 265,009 B with its 285 comment lines.
+  **The development path was smaller than the shipped one** — which is why every offline gate and every
+  stored-mode live run stayed green while the artifact could not open a session at all. A lone layer is
+  canonicalised now; an unparseable one is still returned untouched with its parse error reported, because
+  a document we cannot parse is still the only document there is.
+- **The reason sat on the error object for four diagnostic runs and never reached a human.** `ApiError`
+  already carried the parsed body as `response` while its message was `HTTP error! status: 400`, so runs
+  of 50, 40 and 20 minutes each ended without the field name. `describeApiFailure` now puts the server's
+  own `code: message` into the sentence (a nested `error` object is read too), bounded at 160 characters,
+  reason fields only — a body may carry more than a reason, and a log is not a place for a payload. First
+  run after it: `HTTP error! status: 400 — BadRequest: BadRequest`, whose `data.message` named the size.
+  **A refusal must carry its raw reason** — §13 says that about our own ops; it is equally true of the
+  transport.
+- **`check:flows` now measures the document the way the backend does**: canonical, in UTF-8 **bytes**, per
+  shipped layer (`_common`, plus each site overlay added to it as an upper bound on the merge). Live
+  reading: `_common` 241.1 KiB (**94.2%**), bluemoonsoft 247.9 KiB (**96.8%**), thumbtack 241.1 KiB. The
+  byte/character distinction is pinned by its own assertion rather than by today's document: this document
+  is Korean-heavy, the two differ by ~5.8 KB, and a character-counting gate would have called the refused
+  265,009 B document a passing 259,165.
+- **`sha256:dcad4162…` is the first artifact that opens a session** (archive `sha256:0fe3015010f4…`,
+  8.47 MiB / 56 entries): comparison 19.6 s across amazon+ebay, refinement 6.4 s, cancel 5.3 s with no
+  mutation, a site-confirmed cart add 21.8 s, checkout review 46.4 s with no order — `stores unchanged`,
+  script ownership `axsdk-default-form-tools,packaged-lua:`.
+- **Correction to the last entry of this section: package assets do NOT bypass the 256 KiB boundary.**
+  They bypass the persisted STORE's 256 KiB physical value, which is a different limit in a different
+  place. The document still travels to `POST /sessions` on every session creation, and that endpoint
+  enforces 256 KiB of UTF-8 on `clientFlowDocument`. The open proof recorded there — pass a >256 KiB
+  document from package assets to the compiler — is answered: **the backend refuses it before any
+  compiler sees it.**

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { parseDocument } from 'yaml';
+import YAML, { parseDocument } from 'yaml';
 
 import { buildRpcFlows } from './build-rpc-flows.mjs';
 import { auditRpcAllow } from './rpc-allow.mjs';
@@ -2404,4 +2404,53 @@ test('a context is selected by the node AND declared by the tool, and is never a
     }
   }
   assert.deepEqual(problems, [], problems.join('\n'));
+});
+
+/**
+ * The size the BACKEND refuses, measured against the live endpoint on 2026-08-26.
+ *
+ * `POST /axsdk/v2/sessions` answers 400 `BadRequest` with `data.message: "clientFlowDocument is too
+ * large"` above 256 KiB of UTF-8: 261,747 B accepted, 262,647 B refused. Nothing local enforced it, so
+ * the authored document reached 265,009 B and the shipped package-only artifact could not open a session
+ * at all — while every offline gate and every stored-mode live run stayed green, because merging two
+ * layers re-emitted the document canonically at 246,846 B and only the SHIPPED path sent it verbatim.
+ *
+ * The metric is therefore the CANONICAL size (the SDK canonicalises every layer since that measurement),
+ * and it is UTF-8 bytes, not characters: this document is Korean-heavy, so the two differ by ~5.8 KB.
+ */
+const SESSION_DOCUMENT_LIMIT = 256 * 1024;
+
+test('every shipped flow document fits the backend session limit once canonicalised', () => {
+  const { stringify, parse } = YAML;
+  const canonicalBytes = (yaml) => Buffer.byteLength(stringify(parse(yaml)).trimEnd(), 'utf8');
+
+
+  // The metric itself, pinned independently of today's document: bytes, not characters. This is the
+  // distinction the whole defect hid behind — the document is Korean-heavy, so the two differ by ~5.8 KB,
+  // and a gate that counted characters would have called a refused 265,009 B document a passing 259,165.
+  const korean = 'note: 가나다라마바사';
+  assert.ok(
+    canonicalBytes(korean) > stringify(parse(korean)).trimEnd().length,
+    'the size gate must measure UTF-8 bytes, not characters',
+  );
+  const common = read('_common/flows.yaml');
+  const measured = [{ label: '_common', bytes: canonicalBytes(common) }];
+
+  // A site session sends common MERGED with that site's overlay. The sum is an upper bound on the merge
+  // (shared keys are written once), which is the safe direction for a gate.
+  for (const entry of readdirSync(new URL('.', root), { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('.') || entry.name.startsWith('_')) continue;
+    const path = `${entry.name}/flows.yaml`;
+    if (!existsSync(new URL(path, root))) continue;
+    const overlay = read(path);
+    if (overlay.trim() === '') continue;
+    measured.push({ label: entry.name, bytes: measured[0].bytes + canonicalBytes(overlay) });
+  }
+
+  const over = measured.filter((item) => item.bytes > SESSION_DOCUMENT_LIMIT);
+  const report = measured
+    .map((item) => `${item.label} ${(item.bytes / 1024).toFixed(1)} KiB (${((item.bytes / SESSION_DOCUMENT_LIMIT) * 100).toFixed(1)}%)`)
+    .join(' · ');
+  assert.deepEqual(over, [], `over the 256 KiB session document limit: ${report}`);
+  console.log(`FLOW DOCUMENT ${report}`);
 });

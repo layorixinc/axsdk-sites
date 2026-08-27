@@ -68,16 +68,17 @@ contains no affiliate links and injects no tracking parameters (that code was de
 | Where | What | For how long |
 |---|---|---|
 | Local browser storage | Conversations, traces, settings | Until you clear them; removed with the extension |
-| Local browser storage | Values you **explicitly asked** to remember (name, email, phone, postal code) | Until you ask to delete them |
+
 | AXSDK backend | Sessions and messages | <!-- BIZ-CONFIRM: retention period --> |
 
-Memory is written **only on an explicit request**. Without a phrase like "remember this", a value that
-appears in conversation is not stored — this is enforced in code and pinned by tests.
+This release stores **no contact details**. It has no memory feature: nothing you type is saved as a name,
+email, phone number or postal code, and no code path in the shipped package can save one. The single
+purpose is comparing and buying a product (`store/single-purpose.md`), and a shopping comparison needs no
+contact detail — so under Limited Use there is nothing here to justify.
 
 ### How to delete it
 
-- **Conversation and memory**: clear them in the extension options, or ask in conversation ("forget my
-  phone number") — the assistant lists what matches and deletes what you confirm.
+- **Conversation**: clear it in the extension options.
 - **Everything local**: removing the extension removes it.
 - **Backend copies**: <!-- BIZ-CONFIRM: deletion request channel and turnaround -->
 
@@ -143,15 +144,17 @@ Questions and deletion requests: [Support](support.html)
 | 어디 | 무엇 | 기간 |
 |---|---|---|
 | 브라우저 로컬(`chrome.storage.local`) | 세션별 대화, 실행 흔적, 설정 | 당신이 지울 때까지. 확장 삭제 시 함께 사라진다 |
-| 브라우저 로컬 | 기억해 달라고 **명시적으로 요청한** 값(이름·이메일·전화·우편번호) | 당신이 삭제를 요청할 때까지 |
+
 | AXSDK 백엔드 | 세션과 메시지 | <!-- BIZ-CONFIRM: 보관 기간 --> |
 
-기억(memory)은 **명시적 요청이 있을 때만** 저장된다. "기억해 줘"와 같은 문구가 없으면 값이 대화에
-등장해도 저장되지 않는다 — 이건 코드로 강제되고 테스트로 고정돼 있다.
+이 릴리스는 **연락처를 저장하지 않는다.** 기억 기능이 없다 — 이름·이메일·전화번호·우편번호로 저장되는
+값이 없고, 출시 패키지에는 저장할 코드 경로 자체가 없다. 단일 목적은 상품 비교와 구매이며
+(`store/single-purpose.md`), 상품 비교에는 연락처가 필요하지 않다 — Limited Use 관점에서 정당화할
+대상이 애초에 없다.
 
 ## 삭제하는 방법
 
-- **대화·기억**: 확장 옵션에서 지우거나, 대화로 "기억 지워 줘"라고 요청한다(목록 확인 → 삭제).
+- **대화**: 확장 옵션에서 지운다.
 - **전부**: 확장을 삭제하면 로컬 저장분이 모두 사라진다.
 - **백엔드 보관분**: <!-- BIZ-CONFIRM: 삭제 요청 채널(이메일 또는 폼)과 처리 기간 -->
 

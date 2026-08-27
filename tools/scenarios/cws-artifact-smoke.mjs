@@ -42,9 +42,26 @@ const turnEvidence = (turn) => ({
   }),
 });
 
+/**
+ * Harmony/channel scaffolding: what a model emits AROUND its answer. Measured 2026-08-27 on the store
+ * package, the refusal turn answered
+ * `<|channel|>commentary to=functions.memory_record <|constrain|>json<|message|>{ "intent": …` — the model
+ * called a function the narrowed document no longer carries and the raw text became the reply. Non-empty
+ * and tool-free is not enough: a reviewer reads the sentence.
+ */
+const RAW_SCAFFOLDING = /<\|(channel|message|constrain|start|end)\|>|to=functions\./;
+
+/** Tools that only exist for a surface the store profile removes. Reaching one means the wrong package. */
+const OUTSIDE_PURPOSE_TOOLS = new Set([
+  'search_service', 'open_quote', 'submit_quote', 'browse_service_candidates', 'present_service_results',
+  'collect_quote_service', 'collect_quote_contact', 'finish_quote_request', 'recall_saved_contact',
+  'plan_memory', 'set_memory', 'get_memory', 'search_memory', 'list_memory', 'delete_memory',
+  'capture_memory_clause', 'write_captured_memory', 'present_memory_result',
+]);
+
 export function artifactSmokeVerdict({
   workspaceStores, scriptIds, toolCalls, text, cancelToolCalls, cancelText, refinedComparison,
-  guardedSelection, checkoutStep, expectedSites = ['amazon', 'walmart'],
+  guardedSelection, checkoutStep, outsideSurface, expectedSites = ['amazon', 'walmart'],
 }) {
   const failures = [];
   if (workspaceStores !== 'unchanged') failures.push('harness wrote workspace stores');
@@ -61,6 +78,14 @@ export function artifactSmokeVerdict({
   if (!pausedComparison) failures.push('comparison window was not paused for a user choice');
   if (mutation) failures.push(`mutation tool ran: ${mutation.name}`);
   if (typeof text !== 'string' || text.trim() === '') failures.push('assistant reply is empty');
+  for (const [label, reply] of [
+    ['comparison', text], ['cancel', cancelText], ['refusal', outsideSurface?.text],
+    ['cart', guardedSelection?.text], ['checkout', checkoutStep?.text], ['refined', refinedComparison?.text],
+  ]) {
+    if (typeof reply === 'string' && RAW_SCAFFOLDING.test(reply)) {
+      failures.push(`the ${label} reply carries raw model scaffolding`);
+    }
+  }
   if (typeof cancelText !== 'string' || cancelText.trim() === '') failures.push('cancel reply is empty');
   const cancelled = (cancelToolCalls ?? []).some((call) => decode(call?.output)?.next === 'cancel');
   if (!cancelled) failures.push('cancel branch was not observed');
@@ -112,6 +137,22 @@ export function artifactSmokeVerdict({
   }
   if (![...outcomes.values()].some((outcome) => outcome.status === 'candidates')) {
     failures.push('the archive produced no comparable candidate');
+  }
+
+  // The store profile is only ever true of what SHIPS (`store/single-purpose.md`), so the artifact is
+  // asked directly: a request for a removed surface must be ANSWERED and must reach none of its tools. A
+  // run that never asked cannot claim it.
+  if (outsideSurface === undefined) {
+    failures.push('the run never asked whether a surface outside the single purpose is refused');
+  } else {
+    const reached = (outsideSurface.toolCalls ?? []).map((call) => toolName(call))
+      .filter((name) => OUTSIDE_PURPOSE_TOOLS.has(name));
+    if (reached.length > 0) {
+      failures.push(`outside the single purpose: the package still reached ${reached.join(', ')}`);
+    }
+    if (typeof outsideSurface.text !== 'string' || outsideSurface.text.trim() === '') {
+      failures.push('the refusal turn answered nothing');
+    }
   }
   return { ok: failures.length === 0, failures };
 }
@@ -217,6 +258,12 @@ export async function runArtifactSmoke() {
     const checkoutTurn = await stage('review checkout without ordering', () => session.send('체크아웃 해줘', { timeoutMs: 300_000 }));
     const checkoutStep = { err: null, text: checkoutTurn.text, toolCalls: checkoutTurn.toolCalls };
     const status = await stage('read the scripts once more', () => session.status());
+    // The store profile is a claim about what SHIPS, so the artifact is asked directly. A fresh
+    // conversation first: a paused window would read the next message as a selection.
+    await stage('start a third clean conversation', () => session.reset());
+    const outsideTurn = await stage('ask for a surface outside the single purpose',
+      () => session.send('샌프란시스코 청소 견적 받아줘', { timeoutMs: 180_000 }));
+    const outsideSurface = { text: outsideTurn.text, toolCalls: outsideTurn.toolCalls };
     const verdict = artifactSmokeVerdict({
       workspaceStores: session.workspace.stores,
       scriptIds: packageStatus.scriptIds,
@@ -228,6 +275,7 @@ export async function runArtifactSmoke() {
       refinedComparison,
       expectedSites: ['amazon', 'ebay'],
       checkoutStep,
+      outsideSurface,
     });
     if (!verdict.ok) {
       throw new Error(
@@ -254,6 +302,7 @@ export async function runArtifactSmoke() {
       scriptIds: packageStatus.scriptIds,
       finalScriptIds: status.scriptIds,
       outcomes: Object.fromEntries([...collectStoreResults(turn.toolCalls)].map(([site, outcome]) => [site, outcome.status ?? outcome.error])),
+    refusal: String(outsideSurface.text ?? '').replace(/\s+/g, ' ').slice(0, 120),
       elapsedMs: turn.elapsedMs,
       cancelElapsedMs: cancelled.elapsedMs,
       refineElapsedMs: refinedTurn.elapsedMs,
@@ -296,6 +345,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     console.log(`  outcomes ${Object.entries(result.outcomes).map(([site, status]) => `${site}:${status}`).join(', ')}`);
     console.log(`  compare ${(result.elapsedMs / 1000).toFixed(1)}s · refine ${(result.refineElapsedMs / 1000).toFixed(1)}s · cancel ${(result.cancelElapsedMs / 1000).toFixed(1)}s · no mutation`);
     console.log(`  cart ${(result.guardedElapsedMs / 1000).toFixed(1)}s · checkout ${(result.checkoutElapsedMs / 1000).toFixed(1)}s · no order`);
+  // What the shipped package answers when asked for a surface the single purpose does not carry: the
+  // §1 claim is only as good as this sentence, so every run records it.
+  console.log(`  refused "${result.refusal}"`);
     process.exit(0);
   } catch (error) {
     console.error(`CWS ARTIFACT SMOKE FAIL ${error instanceof Error ? error.message : String(error)}`);

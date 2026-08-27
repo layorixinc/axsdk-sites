@@ -52,47 +52,36 @@ const checkoutStep = {
   toolCalls: [{ name: 'run_checkout', status: 'completed', output: { next: 'done', status: 'checkout' } }],
 };
 
+const passingVerdictInput = () => ({
+  workspaceStores: 'unchanged',
+  scriptIds: ['axsdk-default-form-tools', 'packaged-lua:'],
+  toolCalls,
+  text: 'comparison window',
+  cancelToolCalls: [{ name: 'present_store_offers', status: 'completed', output: { next: 'cancel' } }],
+  cancelText: '취소했습니다. 장바구니는 그대로입니다.',
+  refinedComparison,
+  guardedSelection,
+  checkoutStep,
+  outsideSurface: {
+    text: '이 요청은 도와드릴 수 없어요. 쇼핑 비교와 장바구니, 결제 검토를 도와드릴 수 있습니다.',
+    toolCalls: [],
+  },
+});
+
 test('an extracted package passes only with untouched stores and verified package assets', () => {
-  const verdict = artifactSmokeVerdict({
-    workspaceStores: 'unchanged',
-    scriptIds: ['axsdk-default-form-tools', 'packaged-lua:'],
-    toolCalls,
-    text: 'comparison window',
-    cancelToolCalls: [{ name: 'shopping_present_store_offers', status: 'completed', output: { next: 'cancel' } }],
-    cancelText: '비교를 취소했습니다. 장바구니에는 아무것도 추가하지 않았습니다.',
-    guardedSelection,
-    refinedComparison,
-    checkoutStep,
-  });
+  const verdict = artifactSmokeVerdict(passingVerdictInput());
 
   assert.deepEqual(verdict, { ok: true, failures: [] });
 });
 
 test('the exact artifact must cancel its paused comparison without reaching a mutation', () => {
-  const missing = artifactSmokeVerdict({
-    workspaceStores: 'unchanged',
-    scriptIds: ['axsdk-default-form-tools', 'packaged-lua:'],
-    toolCalls,
-    text: 'comparison window',
-    cancelToolCalls: [],
-    cancelText: '',
-    guardedSelection,
-    refinedComparison,
-    checkoutStep,
-  });
+  const missing = artifactSmokeVerdict({ ...passingVerdictInput(), cancelToolCalls: [], cancelText: '' });
   assert.equal(missing.ok, false);
   assert.match(missing.failures.join('\n'), /cancel/i);
 
   const cancelled = artifactSmokeVerdict({
-    workspaceStores: 'unchanged',
-    scriptIds: ['axsdk-default-form-tools', 'packaged-lua:'],
-    toolCalls,
-    text: 'comparison window',
+    ...passingVerdictInput(),
     cancelToolCalls: [{ name: 'shopping_present_store_offers', status: 'completed', output: { next: 'cancel' } }],
-    cancelText: '비교를 취소했습니다. 장바구니에는 아무것도 추가하지 않았습니다.',
-    guardedSelection,
-    refinedComparison,
-    checkoutStep,
   });
   assert.deepEqual(cancelled, { ok: true, failures: [] });
 });
@@ -140,6 +129,10 @@ test('the exact artifact must preserve and re-present an Amazon-only refined sna
     refinedComparison: { text: '비교 내용을 읽을 수 없습니다.', toolCalls: [] },
     guardedSelection,
     checkoutStep,
+    outsideSurface: {
+      text: '이 요청은 도와드릴 수 없어요. 쇼핑을 도와드릴 수 있습니다.',
+      toolCalls: [],
+    },
   });
   assert.equal(verdict.ok, false);
   assert.match(verdict.failures.join('\n'), /refin/i);
@@ -184,4 +177,59 @@ test('the failure keeps the original error rather than wrapping it away', async 
   const original = new Error('rpc_timeout');
   const caught = await stage('selection', async () => { throw original; }, { log: () => {} }).catch((error) => error);
   assert.equal(caught.cause, original);
+});
+
+test('the exact artifact must prove that a surface outside the single purpose is refused', () => {
+  // The store profile is only true of what SHIPS, so the artifact has to be asked. A quote request must
+  // reach no quote tool and must still be answered — a silent turn would prove nothing, and a turn that
+  // reached a quote tool would mean the package was built from the development profile.
+  const base = passingVerdictInput();
+  assert.ok(artifactSmokeVerdict({
+    ...base,
+    outsideSurface: {
+      text: '이 요청은 도와드릴 수 없어요. 쇼핑 비교와 장바구니, 결제 검토를 도와드릴 수 있습니다.',
+      toolCalls: [],
+    },
+  }).ok);
+
+  const reachedQuote = artifactSmokeVerdict({
+    ...base,
+    outsideSurface: {
+      text: '견적을 준비했습니다',
+      toolCalls: [{ name: 'search_service', output: JSON.stringify({ next: 'done' }) }],
+    },
+  });
+  assert.equal(reachedQuote.ok, false);
+  assert.match(reachedQuote.failures.join(' '), /outside the single purpose|quote/i);
+
+  const silent = artifactSmokeVerdict({ ...base, outsideSurface: { text: '', toolCalls: [] } });
+  assert.equal(silent.ok, false);
+
+  // and the check must be present at all: a run that never asked cannot claim it
+  const { outsideSurface: _asked, ...withoutTheQuestion } = base;
+  const neverAsked = artifactSmokeVerdict(withoutTheQuestion);
+  assert.equal(neverAsked.ok, false);
+  assert.match(neverAsked.failures.join(' '), /outside the single purpose|not asked/i);
+});
+
+test('a reply carrying raw model scaffolding fails, whichever turn it came from', () => {
+  // Measured 2026-08-27 on the store package: with the memory hook deleted, the refusal turn answered
+  // `<|channel|>commentary to=functions.memory_record <|constrain|>json<|message|>{ "intent": …` — the
+  // model tried to call a function the narrowed document no longer carries and the raw harmony text became
+  // the user-facing reply. The old check passed it: the text was non-empty and named none of the tools it
+  // was watching for. A reviewer would have read that.
+  const base = passingVerdictInput();
+  const leak = '<|channel|>commentary to=functions.memory_record <|constrain|>json<|message|>{}';
+  for (const field of ['text', 'cancelText']) {
+    const verdict = artifactSmokeVerdict({ ...base, [field]: leak });
+    assert.equal(verdict.ok, false, `${field} leaked raw scaffolding and passed`);
+    assert.match(verdict.failures.join(' '), /raw model|scaffolding|channel/i);
+  }
+  for (const turn of ['outsideSurface', 'guardedSelection', 'checkoutStep', 'refinedComparison']) {
+    const verdict = artifactSmokeVerdict({
+      ...base,
+      [turn]: { ...base[turn], text: leak },
+    });
+    assert.equal(verdict.ok, false, `${turn} leaked raw scaffolding and passed`);
+  }
 });

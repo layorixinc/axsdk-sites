@@ -2843,3 +2843,70 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `out_of_scope` answer carries `intents: []`, so the router runs nothing of ours and the app’s terminal
   answers. Measured live: the trace holds the capture hook and an app-level `site_resolve`, no flow node
   of ours. Not a regression — a bare apology claims no functionality, which is what §1 cares about.
+- **The listing promised shopping only while the package still shipped quotes and memory — so the single
+  purpose became a BUILD PROFILE (2026-08-27).** `store/single-purpose.md` had been settled for a while and
+  the manifest description already said "compares total cost with shipping across stores"; what shipped
+  carried the Thumbtack quote flow, the memory flow and a capture hook that ran on EVERY turn. A reviewer
+  typing something the listing never mentions and getting an answer is the most common way a §1 mismatch is
+  found.
+  `tools/build-store-flows.mjs` narrows the authored document instead of a second copy being maintained:
+  name the two intents, and the flows follow, then the tools, then the modules. Measured, dev → store:
+  10 → **8** flows, 79 → **41** tools, 25 → **20** modules (`64_rpc_thumbtack`, `65_rpc_quote`,
+  `10_form_wizard`, `70_rpc_memory`, `71_rpc_zip` — one more than the plan listed, because ZIP resolution
+  was quote-only), 29 → **23** package assets, document 255.2 → **130.1 KiB**, `defaultIntent`
+  `request_service_quote` → **`shopping_multi_store_total_cost`**, and the capture hook neutralised rather
+  than merely unroutable — a hook runs regardless of routing, so removing the intent alone would have left
+  memory COLLECTION alive under a purpose that never mentions contact details.
+  **Nothing was deleted from the repository**: §1 itself prescribes *"better delivered as separate
+  extensions"*, so the quote surface stays authored and only the package is narrowed.
+- **Prose cannot be sliced by rule the way structure can, and the first attempt proved it.** Narrowing the
+  planner prompt by dropping any UNIT that mentioned a removed surface silently dropped three of the four
+  action bullets (each mentions the memory clause inside guidance that has nothing to do with memory) and
+  cut one sentence mid-clause, because sentences WRAP across lines and the filter ran per line. Two rules
+  fixed it and both are pinned: a whole-unit drop is decided by the unit HEAD (a bullet’s label, a
+  heading’s title plus the `activeFlow=` it keys on), never its body; and sentence surgery joins the unit
+  first. Three authored sentences that genuinely mixed a removed surface with shopping guidance were
+  SPLIT in the dev document — the honest fix, since the alternative is losing one of the two. The gate
+  that catches the next one is `no paragraph in the store prompt ends mid-sentence`, and the build FAILS
+  with the surviving name quoted rather than shipping a prompt that advertises a route the router lacks.
+- **A narrowed package makes an old drift rule wrong.** `release:cws` refused any backend module the
+  package does not declare (`orphan`), which was right while the package carried everything; the store
+  profile legitimately declares fewer, and the backend app still serves the development surface. A module
+  no tool names is inert — the flow document is what names modules — so those are now RECORDED as
+  `unusedBackendModules`, while `missing`/`stale` still refuse. There is no full-surface branch, because
+  `singlePurposeEvidence` has already refused a package that is not the store profile: a second rule keyed
+  on the same fact would be a limb with no caller.
+- **The §1 claim is only as good as the sentence the artifact answers with, so the smoke asks.** A new
+  stage sends a quote request to the extracted package: the reply must be non-empty and must reach NONE of
+  the quote/memory tools, and a run that never asked FAILS rather than claiming it. Live on the store
+  package: `CWS ARTIFACT SMOKE PASS sha256:be7a9787…` (archive 8.22 MiB / 47 entries, 20 modules,
+  `stores unchanged`, `packaged-lua:`) — comparison 23.6 s, refine 7.4 s, cancel 7.8 s with no mutation,
+  site-confirmed cart add 21.0 s, checkout review 47.0 s with no order, and the refusal turn 11.1 s.
+- **`release:cws` still refuses, and correctly: `stale _common.66_rpc_navigate`.** The bluemoonsoft cutover
+  changed that module and the backend app carries the old bytes. Shipping needs a backend module push for
+  the app the release binds to; the artifact smoke synthesises its own backend evidence, which is why it
+  passes while the release does not.
+- **A hook must be NEUTRALISED, not deleted, because the hook list belongs to the APP document.**
+  `hooks.beforeIntent: [record_memory]` is declared by the platform app document (rev 126, line 91) and an
+  overlay cannot delete a key the app declares. With our `record_memory` flow removed, the APP’s version
+  ran — a MODEL node whose tool is `memory_record` — and the reply the user got was raw harmony text:
+  `<|channel|>commentary to=functions.memory_record <|constrain|>json<|message|>{ "intent":
+  "site_intent_resolution" …`. The store profile now replaces the flow with a respond-less terminal
+  (FLOWS.md §7.3): no tools, no modules, no model call, no output — and because ours still DEFINES the
+  name, the app’s cannot serve it. **Removing our layer does not remove a capability the app layer also
+  owns; it hands it over.**
+- **The gate that would have caught it is "no reply carries raw model scaffolding", and it now covers every
+  turn.** The first version of the refusal check passed that leak: the text was non-empty and named none of
+  the tools it watched for. Non-empty and tool-free is not a sentence a reviewer can read.
+- **The refusal then advertised two features the package no longer had.** `unsupported_request`’s terminal
+  said "…대신 서비스 견적, 쇼핑, 결제 검토 및 명시적인 메모리 요청에 대해 도와드릴 수 있습니다." — measured
+  live on the store package, in the one sentence a reviewer is most likely to read. Narrowing the planner
+  prompt was never enough: a terminal `respond` is prose too, and an ENUMERATION cannot be filtered
+  sentence by sentence (a list is not a sentence). So that one string is an explicit override, and
+  `buildStoreFlows` now walks EVERY string in the emitted document and refuses to emit one that still names
+  a removed surface. Live after: "죄송하지만 해당 요청은 지원되지 않습니다. 대신, 지원되는 매장에서 …
+  결제 페이지를 열어 검토하도록 도와드릴 수 있습니다." — the single purpose, in the user’s language.
+- **What remains outside this repo**: the app document still carries `memory_record`/`memory_skip`, a memory
+  demo flow, and `defaultIntent: site_intent_resolution`. Our overlay overrides the default and neutralises
+  the hook, so the shipped behaviour matches the sentence — but narrowing the app document itself is a
+  BIZ/platform action (§9: an app push replaces production).

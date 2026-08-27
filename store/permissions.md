@@ -39,7 +39,7 @@ supported stores ships inside the package and is not refreshed remotely.
 
 ### `storage`
 
-Settings (backend credentials), the conversation, contact details the user explicitly asked to save, and
+Settings (backend credentials), the conversation, and
 execution traces — all in local browser storage. `chrome.storage.sync` is not used.
 
 ### `tabGroups`
@@ -110,7 +110,7 @@ Chrome은 이 권한을 설치 시점에 *"Read and change all your data on all 
 
 ## `storage`
 
-설정(백엔드 자격 정보), 대화 기록, 사용자가 명시적으로 저장을 요청한 연락처, 실행 흔적을 브라우저 로컬에
+설정(백엔드 자격 정보), 대화 기록, 실행 흔적을 브라우저 로컬에
 둡니다. 원격 동기화를 사용하지 않습니다(`chrome.storage.sync` 미사용).
 
 ## `tabGroups`

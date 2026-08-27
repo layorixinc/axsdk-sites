@@ -29,7 +29,21 @@ async function fixture() {
 
   const source = {
     index: '# Sites\n- [demo](https://demo.example.com)\n',
-    flow: 'flowTools:\n  demo:\n    execute:\n      modules: ["_common.demo"]\n',
+    // Store-shaped on purpose: the release refuses a package whose document routes a surface outside the
+    // single purpose, so a fixture without a router would be asserting against a document that cannot ship.
+    flow: [
+      'router:',
+      '  defaultIntent: shopping_single_site',
+      '  fallbackIntent: unsupported_request',
+      '  routes:',
+      '    - intent: shopping_single_site',
+      '      entry: shopping_single_site.start',
+      'flowTools:',
+      '  demo:',
+      '    execute:',
+      '      modules: ["_common.demo"]',
+      '',
+    ].join('\n'),
     module: 'return { release = true }\n',
   };
   const ref = Object.fromEntries(Object.entries(source).map(([key, text]) => [key, hash(text)]));
@@ -175,4 +189,117 @@ test('backend drift leaves a previously approved archive untouched', async () =>
   }), /backend module drift/i);
   assert.equal(archiveCalled, false);
   assert.deepEqual(await readFile(archivePath), approved);
+});
+
+test('a package that still carries a surface outside the single purpose is not releasable', async () => {
+  // The listing promises shopping only (`store/single-purpose.md`), and the package is what a reviewer
+  // installs. A release built from the development profile would ship the quote and memory surfaces under
+  // that sentence — the most common way a §1 mismatch is found is a reviewer typing something the listing
+  // never mentions and getting an answer.
+  const { distDir, backend, ref } = await fixture();
+  const manifestPath = join(distDir, 'workspace-manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const devFlow = [
+    'router:',
+    '  defaultIntent: request_service_quote',
+    '  routes:',
+    '    - intent: request_service_quote',
+    '      entry: request_service_quote.entry',
+    'hooks:',
+    '  beforeIntent: [ record_memory ]',
+    'flowTools:',
+    '  demo:',
+    '    execute:',
+    '      modules: ["_common.demo"]',
+    '',
+  ].join('\n');
+  const devRef = hash(devFlow);
+  manifest.workspace.flows[':'] = devRef;
+  manifest.assets[devRef] = { bytes: Buffer.byteLength(devFlow) };
+  delete manifest.assets[ref.flow];
+  manifest.digest = hash(stable(manifest.workspace));
+  await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+  await writeFile(join(distDir, 'workspace-assets', `${devRef.slice(7)}.txt`), devFlow);
+
+  await assert.rejects(createReleaseManifest({ distDir, backend }),
+    /single purpose|request_service_quote|record_memory/);
+});
+
+test('a backend module the narrowed package does not use is recorded, not called drift', async () => {
+  // The backend app serves the development surface too, so a store-profile package legitimately declares
+  // FEWER modules than the backend carries. Refusing that made the artifact smoke unrunnable the moment
+  // the package was narrowed, while a module nothing declares is inert: the flow document is what names
+  // modules. What must still refuse is a module the package DOES declare arriving missing or stale.
+  const { distDir, backend } = await fixture();
+  const withExtra = {
+    ...backend,
+    hash: {
+      luaModules: {
+        ...backend.hash.luaModules,
+        '_common.65_rpc_quote': packageHash('return { quote = true }\n'),
+      },
+    },
+  };
+
+  const manifest = await createReleaseManifest({ distDir, backend: withExtra });
+  assert.deepEqual(manifest.backend.unusedBackendModules, ['_common.65_rpc_quote']);
+  assert.ok(Object.hasOwn(manifest.backend.moduleHashes, '_common.demo'));
+
+  // still refused: a declared module the backend does not have
+  const withoutOurs = { ...backend, hash: { luaModules: {} } };
+  await assert.rejects(createReleaseManifest({ distDir, backend: withoutOurs }), /missing _common\.demo/);
+});
+
+test('a hook is releasable only as a no-op, because absence hands it to the app layer', async () => {
+  // The app document declares `hooks.beforeIntent: [record_memory]` itself, and an overlay cannot delete a
+  // key the app declares — so a package with NO hook flow lets the app’s model-driven version run. The
+  // release therefore checks neutrality: the hook exists, reaches no tool, and says nothing.
+  const { distDir, backend } = await fixture();
+  const manifestPath = join(distDir, 'workspace-manifest.json');
+
+  const baseManifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const baseRef = baseManifest.workspace.flows[':'];
+  const baseFlow = await readFile(join(distDir, 'workspace-assets', `${baseRef.slice(7)}.txt`), 'utf8');
+  const withHook = async (hookYaml) => {
+    const manifest = JSON.parse(JSON.stringify(baseManifest));
+    const flowRef = baseRef;
+    const flow = baseFlow;
+    const next = flow.replace('flowTools:', `${hookYaml}flowTools:`);
+    const nextRef = hash(next);
+    manifest.workspace.flows[':'] = nextRef;
+    delete manifest.assets[flowRef];
+    manifest.assets[nextRef] = { bytes: Buffer.byteLength(next) };
+    manifest.digest = hash(stable(manifest.workspace));
+    await writeFile(manifestPath, `${JSON.stringify(manifest)}\n`);
+    await writeFile(join(distDir, 'workspace-assets', `${nextRef.slice(7)}.txt`), next);
+  };
+
+  await withHook([
+    'hooks:',
+    '  beforeIntent: [ record_memory ]',
+    'flows:',
+    '  record_memory:',
+    '    nodes:',
+    '      skip:',
+    '        kind: terminal',
+    '',
+  ].join('\n'));
+  const ok = await createReleaseManifest({ distDir, backend });
+  assert.deepEqual(ok.singlePurpose.neutralHooks, ['record_memory']);
+
+  await withHook([
+    'hooks:',
+    '  beforeIntent: [ record_memory ]',
+    'flows:',
+    '  record_memory:',
+    '    nodes:',
+    '      capture:',
+    '        kind: action_contract',
+    '        id: demo',
+    '        next: { ok: done }',
+    '      done:',
+    '        kind: terminal',
+    '',
+  ].join('\n'));
+  await assert.rejects(createReleaseManifest({ distDir, backend }), /hook record_memory/);
 });

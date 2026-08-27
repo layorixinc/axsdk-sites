@@ -189,3 +189,32 @@ language, it says nothing.
 for an out-of-scope message plus a route for it, or (b) leaving the app terminal and accepting the bare
 apology. (a) needs a live turn to confirm the branch, and a gate pinning that the route exists — a route
 nobody reaches is exactly what this entry is about.
+
+## 13. The app document still carries the surfaces the store profile removed
+
+**Status: open, owned outside this repo (BIZ/platform); measured 2026-08-27.**
+
+The platform app document (`browser-extension`, revision 126, 78,713 B) declares its own
+`hooks.beforeIntent: [record_memory]`, a `record_memory` flow whose tools are `memory_record`/
+`memory_skip`, a memory demo flow, and `defaultIntent: site_intent_resolution`. Our overlay overrides the
+default intent and REPLACES the hook flow with a no-op, so the shipped behaviour matches the single
+purpose — proven by the artifact smoke, which asks the package for a quote and reads its refusal.
+
+Why it still matters: the neutralisation is a shadow, not a removal. An app-document change (or a
+store-specific app id) is what would remove the memory surface at the source, and an app push replaces
+production (`AGENTS.md` §9), so it is not ours to do.
+
+**Next**: BIZ decides whether R1 ships against `browser-extension` as it stands (overlay shadowing, which
+the gates now pin) or a narrowed app document/app id is created for the store build.
+
+## 14. The backend module set no longer matches the shipped package
+
+**Status: open, blocks `release:cws`; measured 2026-08-27.**
+
+`release:cws` refuses with `backend module drift: stale _common.66_rpc_navigate` — the bluemoonsoft cutover
+changed that module and the app revision the release binds to still carries the old bytes. The artifact
+smoke passes because it synthesises its own backend evidence for a transient candidate.
+
+**Next**: push the runtime modules to the app the release binds to, then re-run `release:cws`. The five
+modules the store profile dropped stay at the backend and are recorded as `unusedBackendModules` — inert,
+because the flow document is what names modules.

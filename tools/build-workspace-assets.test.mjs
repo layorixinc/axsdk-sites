@@ -9,6 +9,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 
+import { buildPackage, repoRoot } from './build-workspace-assets.mjs';
+
 const here = dirname(fileURLToPath(import.meta.url));
 const script = join(here, 'build-workspace-assets.mjs');
 const exec = promisify(execFile);
@@ -164,4 +166,78 @@ test('an unresolvable declared module fails before any manifest is written', asy
   assert.notEqual(build.code, 0);
   assert.match(build.stderr, /_common\.99_missing/);
   await assert.rejects(readFile(manifestPath(root), 'utf8'));
+});
+
+test('the store profile narrows the package to the single purpose', async () => {
+  // The package is what a reviewer installs, so the single purpose has to be true of THIS graph, not of
+  // a variant somebody remembers to build. Everything the narrowing decides — flows, tools, modules — is
+  // a closure over the two excluded intents (`tools/build-store-flows.mjs`).
+  const dev = await buildPackage({ root: repoRoot });
+  const store = await buildPackage({ root: repoRoot, profile: 'store' });
+
+  const modulesOf = (built) => new Set(Object.keys(built.manifest.workspace.modules[":"] ?? {}));
+  const devModules = modulesOf(dev);
+  const storeModules = modulesOf(store);
+  for (const name of ['_common.64_rpc_thumbtack', '_common.65_rpc_quote', '_common.10_form_wizard',
+    '_common.70_rpc_memory', '_common.71_rpc_zip']) {
+    assert.ok(devModules.has(name), `${name} rides in the development package`);
+    assert.ok(!storeModules.has(name), `${name} must not ride in the store package`);
+  }
+  assert.ok(storeModules.has('_common.61_rpc_storefront'), 'the storefront reader stays');
+  assert.ok(storeModules.size < devModules.size);
+
+  // A site whose only flow left with the profile is not a supported site any more.
+  const storeIndex = store.sourceByRef.get(store.manifest.workspace.index);
+  assert.ok(!storeIndex.includes('thumbtack'), 'the store index drops the quote site');
+  assert.ok(dev.sourceByRef.get(dev.manifest.workspace.index).includes('thumbtack'));
+  assert.ok(!Object.hasOwn(store.manifest.workspace.flows, ':thumbtack'), 'and its flow layer');
+
+  // Two profiles are two packages: the digest is what the installer keys on.
+  assert.notEqual(store.manifest.digest, dev.manifest.digest);
+  const storeFlow = store.sourceByRef.get(store.manifest.workspace.flows[":"]);
+  assert.ok(!storeFlow.includes('request_service_quote'), 'the packaged document still routes the quote flow');
+  // `record_memory` SURVIVES as a no-op: the app document declares the hook and an overlay cannot delete a
+  // key the app declares, so a package without it lets the app's model-driven version answer the user
+  // (measured: raw channel scaffolding reached the reply). What must be gone is the work it used to do.
+  assert.ok(storeFlow.includes('record_memory'), 'the neutralised hook must still be defined');
+  assert.ok(!storeFlow.includes('capture_memory_clause') && !storeFlow.includes('write_captured_memory'),
+    'but nothing in it may record');
+});
+
+test('the store profile refuses a document it would have to break', async () => {
+  // The narrowing is a closure over a reference graph; a graph it cannot close is a refusal, because a
+  // dangling reference fails the WHOLE document at the extension.
+  const root = await mkdtemp(join(tmpdir(), 'store-profile-'));
+  await mkdir(join(root, '_common', 'rpc'), { recursive: true });
+  await writeFile(join(root, 'index.md'),
+    '# sites\n\n- [amazon](https://www.amazon.com): storefront\n');
+  await writeFile(join(root, '_common', 'flows.yaml'), [
+    'extends: app',
+    'router:',
+    '  defaultIntent: shopping_single_site',
+    '  fallbackIntent: unsupported_request',
+    '  routes:',
+    '    - intent: shopping_single_site',
+    '      entry: shopping_single_site.start',
+    '    - intent: memory',
+    '      entry: memory.start',
+    'flows:',
+    '  shopping_single_site:',
+    '    nodes:',
+    '      start:',
+    '        kind: terminal',
+    '        next: { ok: memory.start }',
+    '  memory:',
+    '    nodes:',
+    '      start:',
+    '        kind: terminal',
+    '  unsupported_request:',
+    '    nodes:',
+    '      reply:',
+    '        kind: terminal',
+    '',
+  ].join('\n'));
+
+  await assert.rejects(buildPackage({ root, profile: 'store' }), /memory\.start/);
+  await rm(root, { recursive: true, force: true });
 });

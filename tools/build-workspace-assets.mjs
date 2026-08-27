@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYaml } from 'yaml';
 
 import { loadWorkspace } from '../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/workspace.mjs';
+import { buildStoreFlows } from './build-store-flows.mjs';
 
 export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export const MANIFEST_NAME = 'workspace-manifest.json';
@@ -35,8 +36,8 @@ async function readIfPresent(path) {
 }
 
 /** Every module named by a flow must have one source in the package graph. */
-export async function resolveDeclaredModules(root) {
-  const source = await readIfPresent(join(root, '_common', 'flows.yaml'));
+export async function resolveDeclaredModules(root, flowSource) {
+  const source = flowSource ?? await readIfPresent(join(root, '_common', 'flows.yaml'));
   if (source === undefined || source.trim() === '') return [];
   const declaredBy = new Map();
   const parsed = parseYaml(source);
@@ -72,10 +73,51 @@ function addAsset(table, source) {
   return ref;
 }
 
+/**
+ * Applies the store profile to a loaded workspace: the narrowed flow document, and with it the site
+ * layers and modules that document no longer names. `store/single-purpose.md` is the sentence this
+ * enforces; `tools/build-store-flows.mjs` is the closure that decides what goes.
+ *
+ * A site whose only flow left with the profile is not a supported site any more, so it leaves the index
+ * too — otherwise the extension recognises a domain it has nothing to do on.
+ */
+function applyStoreProfile(workspace) {
+  const authored = workspace.flows[':'];
+  if (authored === undefined) throw new Error('the store profile needs a common flow layer');
+  const built = buildStoreFlows(authored);
+  const keptFlowSites = Object.keys(workspace.flows)
+    .filter((key) => key !== ':')
+    .filter((key) => !UNSUPPORTED_SITES.has(key.slice(1)));
+  const declared = new Set(Object.values(parseYaml(built.yaml).flowTools ?? {})
+    .flatMap((tool) => tool?.execute?.modules ?? []));
+  return {
+    ...workspace,
+    indexMd: workspace.indexMd
+      .split(/\r?\n/)
+      .filter((line) => ![...UNSUPPORTED_SITES].some((site) => line.includes(site)))
+      .join('\n'),
+    flows: {
+      ':': `${built.yaml}\n`,
+      ...Object.fromEntries(keptFlowSites.map((key) => [key, workspace.flows[key]])),
+    },
+    modules: Object.fromEntries(Object.entries(workspace.modules).map(([layer, modules]) => [
+      layer,
+      Object.fromEntries(Object.entries(modules).filter(([name]) => declared.has(name))),
+    ])),
+    sitemaps: Object.fromEntries(Object.entries(workspace.sitemaps)
+      .filter(([site]) => !UNSUPPORTED_SITES.has(site))),
+    storeProfile: built.report,
+  };
+}
+
+/** Sites the store profile does not support, because the flow that served them left with it. */
+const UNSUPPORTED_SITES = new Set(['thumbtack']);
+
 /** Creates format C3 without touching disk. */
-export async function buildPackage({ root, generatedAt = Date.now() } = {}) {
-  const workspace = await loadWorkspace(root, { storeLimits: false });
-  const declaredModules = await resolveDeclaredModules(root);
+export async function buildPackage({ root, generatedAt = Date.now(), profile = 'dev' } = {}) {
+  const loaded = await loadWorkspace(root, { storeLimits: false });
+  const workspace = profile === 'store' ? applyStoreProfile(loaded) : loaded;
+  const declaredModules = await resolveDeclaredModules(root, workspace.flows[':']);
   const sourceByRef = new Map();
   const refs = (layers) => Object.fromEntries(Object.entries(layers).map(([key, source]) => [
     key,
@@ -122,7 +164,7 @@ export async function writePackage({ out, built }) {
 }
 
 /** Rebuilds in memory and verifies the manifest and every referenced file. Writes nothing. */
-export async function checkPackage({ root, out }) {
+export async function checkPackage({ root, out, profile = 'dev' }) {
   const text = await readIfPresent(out);
   if (text === undefined) return { ok: false, reason: `no manifest at ${out}; run build:bundle first` };
   let current;
@@ -130,7 +172,7 @@ export async function checkPackage({ root, out }) {
   if (current.version !== 2) return { ok: false, reason: `unrecognised manifest version ${JSON.stringify(current.version)}` };
   const generatedAt = Date.parse(current.generatedAt);
   if (!Number.isFinite(generatedAt)) return { ok: false, reason: 'generatedAt is not a date' };
-  const built = await buildPackage({ root, generatedAt });
+  const built = await buildPackage({ profile, root, generatedAt });
   if (stable(current) !== stable(built.manifest)) return { ok: false, reason: 'manifest graph drift' };
 
   const assetDirectory = join(dirname(out), ASSET_DIRECTORY);
@@ -175,8 +217,10 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   let root = repoRoot;
   let out;
   let check = false;
+  let profile = 'dev';
   for (const arg of process.argv.slice(2)) {
     if (arg === '--check') check = true;
+    else if (arg.startsWith('--profile=')) profile = arg.slice('--profile='.length);
     else if (arg.startsWith('--root=')) root = resolve(arg.slice('--root='.length));
     else if (arg.startsWith('--out=')) out = resolve(arg.slice('--out='.length));
     else { console.error(`unknown argument: ${arg}`); process.exit(2); }
@@ -184,11 +228,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   out ??= join(root, 'dist', MANIFEST_NAME);
   try {
     if (check) {
-      const result = await checkPackage({ root, out });
+      const result = await checkPackage({ root, out, profile });
       if (!result.ok) { console.error(`workspace-manifest check FAILED: ${result.reason}`); process.exit(1); }
       console.log(`workspace-manifest check ok — ${result.digest}, ${result.assetCount} assets`);
     } else {
-      const built = await buildPackage({ root });
+      const built = await buildPackage({ root, profile });
       await mkdir(dirname(out), { recursive: true });
       await writePackage({ out, built });
       console.log(report({ out, ...built }));

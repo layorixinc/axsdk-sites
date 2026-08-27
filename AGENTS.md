@@ -2629,3 +2629,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `chrome.storage` under the old id is orphaned by that change — the harness re-provisions from `.env`,
   verified live: `status` opened a session and reported 25 commands with `stored-lua:`, and a shopping turn
   answered from Amazon.
+- **A remote source is now unreachable from the UI, and the loader is still compiled in — those are two
+  different statements and only the first one is provable today.** R1 ships every source inside the
+  package, so the entry points were closed rather than the code deleted (user decision): the four remote
+  flags default **false** (`shared/config.ts:67-79`), the options form binds none of them
+  (`options/fields.ts`, extracted from `main.ts` first so the bound set is a testable contract), the four
+  checkboxes and the index-URL input are gone from `options.html`, and `assertNoRemoteSourceControls`
+  refuses a dist that puts one back. The gate matches **HTML ids**, not bundle text: the config keys and
+  the loader carry the same names and are supposed to stay, so a byte scan for `remoteLuaEnabled` would
+  fail forever on code we keep. Mutation-checked in both directions (control restored -> gate red; field
+  rebound -> form contract red); live, the packaged options page exposes none while the local
+  `storedFlowsEnabled`/`storedLuaEnabled` switches remain and an 11st turn still runs.
+  **What this does NOT buy**: `raw.githubusercontent.com` (3 bundles x 5) and Fengari (227,867 B) are
+  still in the artifact, so the CWS Privacy tab cannot be answered with "no remote code" on the strength
+  of this change — only "no reachable path executes it". Do not write that gate into a claim it cannot
+  support.
+- **A default-value change surfaces every test that asserted the whole object.** Flipping the remote
+  defaults turned 5 green tests red in two files; the contracts they defend (an absent value never
+  reaches `AXSDK.init` as `undefined`; a switch drives its derived option) were unchanged, so the fix was
+  to state `remote_sites: true` in the on-cases rather than to weaken the assertions.

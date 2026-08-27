@@ -169,30 +169,48 @@ provider/read 계열로 한정해 태스크 역할을 쓰지 않을 것인가. (
 
 **먼저 RED**: 임베드 agent pack의 명령 1개를 실행하는 테스트 — 오늘 `no_executor_document`로 실패한다.
 
-### T3 — 원격 코드 표면 제거 + 마커 게이트
+### T3 — 원격 소스 진입점 폐쇄 · **완료 2026-08-26**
 
-**먼저 RED**: `scripts/cws-package.mjs`의 마커 스캔(현재 manual-QA 12종)에 `raw.githubusercontent.com`을 추가한다.
-오늘 dist에는 3번들 × 5회가 있으므로 `build:cws`가 즉시 실패한다.
+결정(사용자): **코드는 제거하지 않고 진입점만 닫는다.** 로더와 인터프리터는 컴파일된 채 남고, 원격 소스를
+무장할 수 있는 **표면**이 사라진다.
 
-**변경 지점**
+**먼저 RED — 세 개의 관찰 가능한 계약, 4건 실패로 시작**
 
-1. 빌드 상수 `__AXSDK_REMOTE_SOURCES__ = false` (`vite.worker/pages/content/page.config.ts`의 `define`,
-   기존 `packManualQaDefines` 패턴 그대로).
-2. `src/shared/sdk-config.ts:42-57`의 런타임 분기를 그 상수로 → `sites:{source}`·`remote_lua`·`remote_widgets`·
-   `clientFlows.remoteSites`가 죽고 `axsdk-core/src/sites.ts` 로더가 트리셰이킹된다. 셰이킹이 안 되면 코어에서
-   사이트 로더를 별도 subpath export로 분리한다.
-3. `src/shared/config.ts:70-76` 기본값 `false` (방어선 이중화).
-4. `options.html:55-56` + `options/main.ts:246-249`의 원격 체크박스 제거.
-5. **`PACK_REGISTRIES`가 R1에서 패키지 레지스트리 **하나만** 갖고 원격 origin을 갖지 않음**을 게이트로 고정
-   (T1이 넣는 항목이 `chrome-extension://` 스킴임을 검사).
-6. community 채널의 `from-url` 설치(`options/community.ts:22` → `community/from-url.ts`)는 R1 소비자 빌드에서 제외한다
-   — R1에 "사용자가 URL로 스크립트를 설치"하는 표면이 있으면 §2의 단일 목적 문장이 다시 흔들린다.
+1. `src/shared/config.test.ts` — 저장소가 아무 말도 하지 않을 때 원격 플래그 4종이 모두 off. (당시 기본값 `true`)
+2. `src/options/fields.test.ts` — 옵션 폼이 바인딩하는 필드 집합에 원격 소스 설정이 없다. 이걸 테스트 가능한
+   계약으로 만들려고 `TEXT_FIELDS`/`FLAG_FIELDS`를 `src/options/fields.ts`로 먼저 **기계적으로** 분리했다
+   (동작 무변경 확인: 1271 pass).
+3. `scripts/cws-remote-surface-gate.test.mjs` — `assertNoRemoteSourceControls`가 원격 컨트롤을 선언한 트리를
+   거부하고, **이 저장소가 실제로 싣는 옵션 페이지에는 하나도 없다**. 마지막 케이스가 그날의 RED였다.
 
-**하지 않는 것**: Fengari 제거. R1의 내장 플로우 엔진이 그것으로 돈다. 마커 게이트에 `FENGARI_VERSION`을 넣는 것은
-R2 이후 마이그레이션(§4.3)이 끝난 뒤다 — 통과 불가능한 게이트는 게이트가 아니다.
+**변경 지점 (구현)**
 
-**심사 대응 문장**(리스팅·소명에 그대로 쓸 사실): 인터프리터는 **패키지에서 SHA-256으로 검증된 바이트만** 실행하고,
-바이트 안에 원격 취득 경로가 없음을 빌드 게이트가 매번 증명한다.
+| 위치 | 변경 |
+|---|---|
+| `src/shared/config.ts:67-79` | `remote_sites`·`remoteSiteFlowsEnabled`·`remoteLuaEnabled`·`remoteWidgetsEnabled` 기본값 **false**. 명시적 `true`로만 무장 |
+| `src/options/fields.ts` | 원격 5종(`sitesSource` 포함)을 바인딩 집합에서 제거 |
+| `src/options/options.html:50-63` | 원격 체크박스 4종 + 인덱스 Git URL 입력 + `siteLayers` 필드셋 제거. 이유를 주석으로 남김. 로컬 스위치(`storedFlowsEnabled`/`storedLuaEnabled`)는 유지 |
+| `src/options/main.ts` | `syncSiteLayers`와 그 리스너 삭제, 레코더 힌트가 읽던 `remoteLuaEnabled` 체크박스 참조 제거 |
+| `scripts/cws-package.mjs` | `assertNoRemoteSourceControls`를 `build:cws`의 dist 단계에 배선 (manual-QA 마커 스캔과 같은 자리) |
+
+게이트는 **HTML의 id**를 본다. 같은 이름의 설정 키와 로더 코드는 남아 있어야 하므로 번들 텍스트를 스캔하면
+영원히 실패한다 — id는 컨트롤이 도달 가능해지는 지점이고, 그것이 닫으려던 대상이다.
+
+**증거**: 뮤테이션 2건(컨트롤 되살리기 → 게이트 red, 원격 필드 재바인딩 → 폼 계약 red) · 확장 스위트
+**1281 pass 0 fail** · `axsdk-core 834` · `build:cws` 그린 · dist 옵션 페이지 원격 컨트롤 **0**, 로컬 스위치 2종 유지 ·
+라이브 11st 검색 턴 정상.
+
+**기본값 변경이 드러낸 것**: 기존 테스트 5건이 옛 기본값을 통째로 비교하고 있었다. 계약(`undefined`가
+`AXSDK.init`에 닿지 않는다, 스위치가 파생 옵션을 구동한다)은 그대로이고 출발점만 옮겨, "on" 케이스가 이제
+`remote_sites: true`를 명시한다.
+
+**하지 않는 것**: Fengari와 사이트 로더 코드 제거(§4.3). 따라서 dist에는 여전히
+`raw.githubusercontent.com` 문자열(3번들 × 5회)과 Fengari 227,867 B가 있다.
+
+**Privacy 탭 Remote code 답변에 대한 정직한 정리**: 이제 참인 것은 "**도달 가능한 경로로는 원격 코드를 실행하지
+않는다**" — 기본값 off, 옵션 페이지에 컨트롤 없음, 세션 시작마다 강제 off, 그리고 그 상태를 빌드 게이트가 고정.
+참이 **아닌** 것은 "바이트에 원격 취득 코드가 없다". 심사자가 정적 분석으로 문자열을 발견할 수 있으므로,
+D7(One Stop 문의)의 답이 이 칸을 어떻게 쓸지 결정한다. 게이트가 "No"를 증명한다고 쓰지 않는다.
 
 ### T4 — 도메인 게이트 배선 (P0-3a)
 

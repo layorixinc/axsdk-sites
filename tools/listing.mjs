@@ -18,34 +18,73 @@ export const LISTING_FILES = [
 
 
 /**
- * The graphic assets the dashboard requires, and the size it requires them at.
+ * The graphic assets the dashboard requires, per locale, and the size it requires them at.
  *
- * Read out of the PNG header rather than trusted: a capture taken at whatever window a developer had
- * open looks identical in a file listing and is refused at upload. `tools/scenarios/store-screenshots.mjs`
- * produces these from live turns, so they show what the product actually answers.
+ * Screenshots ARE localizable (the small promo tile and the marquee are not), and ours differ by more
+ * than language: the widget answers in the user's language, and the stores a Korean shopper compares are
+ * not the ones an English shopper does. So each locale gets its own live capture.
+ *
+ * Sizes are read out of the PNG header rather than trusted: a capture taken at whatever window a
+ * developer had open looks identical in a file listing and is refused at upload.
  */
 export const LISTING_ASSETS = ['1-comparison.png', '2-refine.png', '3-choices.png', '4-cart.png'];
+/**
+ * Only `ko` today, and the reason is a product fact rather than an omission: the window the screenshots
+ * show is Korean BY CONSTRUCTION. Measured 2026-08-26 — 87 lines of Korean string literals across the
+ * renderers (`45_offer_view` 60, `54_comparison` 24, `55_offers` 3): store names, the shipping and
+ * rating labels, the folded-row note, every refusal sentence. An English request today produces an
+ * English reply around a Korean window, so an `en` capture would misrepresent the product rather than
+ * localize it. The mechanism stays per-locale so the set can be added the day the renderer is.
+ */
+export const LISTING_ASSET_LOCALES = ['ko'];
 const ASSET_WIDTH = 1280;
 const ASSET_HEIGHT = 800;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export function assertListingAssets(root) {
-  for (const file of LISTING_ASSETS) {
-    const path = join(root, 'store', 'assets', file);
-    let bytes;
+  for (const locale of LISTING_ASSET_LOCALES) {
+    for (const file of LISTING_ASSETS) {
+      const relative = `store/assets/${locale}/${file}`;
+      let bytes;
+      try {
+        bytes = readFileSync(join(root, 'store', 'assets', locale, file));
+      } catch {
+        throw new Error(`listing screenshot is missing: ${relative}`);
+      }
+      if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
+        throw new Error(`${relative} is not a PNG`);
+      }
+      const width = bytes.readUInt32BE(16);
+      const height = bytes.readUInt32BE(20);
+      if (width !== ASSET_WIDTH || height !== ASSET_HEIGHT) {
+        throw new Error(`${relative} is ${width}x${height}, and the store takes ${ASSET_WIDTH}x${ASSET_HEIGHT}`);
+      }
+    }
+  }
+}
+
+/**
+ * Both languages on every dashboard surface.
+ *
+ * The reviewer reads the single purpose, the permission justifications and the privacy policy, and reads
+ * them in English; the users this product is built for read Korean. A surface that exists in one language
+ * is one someone improvises a translation for at submission time, which is exactly when it is worst.
+ *
+ * Matched on headings rather than by guessing at language: a file states which halves it carries.
+ */
+const ENGLISH_HEADING = '## English';
+const KOREAN_HEADING = '## 한국어';
+
+export function assertBilingualCopy(root) {
+  for (const file of LISTING_FILES) {
+    let text;
     try {
-      bytes = readFileSync(path);
+      text = readFileSync(join(root, file), 'utf8');
     } catch {
-      throw new Error(`listing screenshot is missing: store/assets/${file}`);
+      throw new Error(`listing surface is missing: ${file}`);
     }
-    if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
-      throw new Error(`store/assets/${file} is not a PNG`);
-    }
-    const width = bytes.readUInt32BE(16);
-    const height = bytes.readUInt32BE(20);
-    if (width !== ASSET_WIDTH || height !== ASSET_HEIGHT) {
-      throw new Error(`store/assets/${file} is ${width}x${height}, and the store takes ${ASSET_WIDTH}x${ASSET_HEIGHT}`);
-    }
+    if (!text.includes(ENGLISH_HEADING)) throw new Error(`${file} has no English section (${ENGLISH_HEADING})`);
+    if (!text.includes(KOREAN_HEADING)) throw new Error(`${file} has no Korean section (${KOREAN_HEADING})`);
   }
 }
 
@@ -97,6 +136,7 @@ if (process.argv[1] && (await import('node:url')).fileURLToPath(import.meta.url)
   const root = (await import('node:path')).resolve((await import('node:url')).fileURLToPath(new URL('.', import.meta.url)), '..');
   assertListingStructure(root);
   assertListingAssets(root);
+  assertBilingualCopy(root);
   const outstanding = outstandingConfirmations(root);
   console.log(`LISTING OK ${LISTING_FILES.length} surfaces`);
   // Reported, never fatal: a page waiting on a retention answer is honest, and a permanently red gate

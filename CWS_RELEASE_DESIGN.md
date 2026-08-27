@@ -339,9 +339,10 @@ T3·D1·T7은 끝났고, 남은 것은 T5(결정 D3)와 T6의 사람 답변 9건
 - [x] 개인정보·지원 페이지와 그 URL (`docs/privacy.md`, `docs/support.md`, GitHub Pages)
 - [x] 업로드 ZIP = `release:cws`가 검증·자기추출·재검증한 바이트 (releaseId가 백엔드 revision 126에 바인딩)
 - [x] dist에 원격 소스 컨트롤 0 — 게이트가 증명 (`assertNoRemoteSourceControls`)
-- [ ] 스크린샷 ≥1(1280×800) · 타일 440×280 — **없음**, 라이브 시나리오로 촬영 필요
+- [x] 스크린샷 4장 1280×800 (라이브 턴, `store/assets/ko/`) · [ ] 작은 타일 440×280 · [ ] 영어 스크린샷은 렌더러가 한국어 고정이라 보류(TODO §11)
 - [ ] 데이터 사용 공시 체크박스와 Limited Use 확약 (대시보드 입력) · 백엔드 보관기간·사람 접근·하위 처리자명 확정
-- [ ] `_locales/ko|en` + 매니페스트 name/description을 `__MSG_*__`로
+- [x] 대시보드 문안 5종이 영어·한국어 양쪽 (게이트: assertBilingualCopy) — 심사자가 읽는 단일 목적·권한 소명·프라이버시가 영어로 존재
+- [x] `_locales/ko|en` + 매니페스트 name/description을 `__MSG_*__`로 (게이트: assertLocalizedManifest)
 - [ ] 소비자 인증 또는 비공개 배포 결정 (D3)
 - [ ] `test:cws:artifact` 재실행 (신규 프로필, 패키지 소스만, 주문 없음)
 - [ ] One Stop 문의 답변 수신 (D7)

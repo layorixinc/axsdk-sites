@@ -7,6 +7,79 @@
 
 ---
 
+## English
+
+Paste each paragraph into the matching field. Every claim is measured and reproducible by the reviewer.
+Single purpose: `store/single-purpose.md`.
+
+### `debugger`
+
+Every page read, click and keystroke this extension performs travels this channel. It injects no content
+script into the page world; it uses the DevTools protocol `DOM`, `Runtime` and `Page` domains to read the
+values it needs. The evaluated expressions are code shipped inside the extension, never text fetched at
+runtime.
+
+Two bounds apply. First, only tabs in the **agent tab group the user created** are addressed — a normal
+browser group is never adopted wholesale; the starting tab is moved into a dedicated group and other tabs
+join only when the user visibly drags them in. Second, before an irreversible action (adding to a cart,
+submitting a form) the extension reads the button's actual label and asks for confirmation.
+
+Chrome discloses this permission at install as *"Read and change all your data on all websites"* and
+keeps its own debugging banner visible for the whole session, from which the user can stop it instantly.
+
+`chrome.scripting` cannot express this product: one task crosses several stores, each with tab
+navigations and reloads, and the state has to survive them as one session.
+
+### `host_permissions` (`http://*/*`, `https://*/*`)
+
+**Not the page boundary.** Needed for exactly two things: `fetch` from the extension service worker to
+the backend (`api.axsdk.ai`), and one `declarativeNetRequestWithHostAccess` rule that attaches the
+extension origin to those backend requests. The page boundary is the agent tab group above. The list of
+supported stores ships inside the package and is not refreshed remotely.
+
+### `storage`
+
+Settings (backend credentials), the conversation, contact details the user explicitly asked to save, and
+execution traces — all in local browser storage. `chrome.storage.sync` is not used.
+
+### `tabGroups`
+
+A session IS a tab group: the extension creates a dedicated one and treats only its members as
+addressable. Without this permission the "only inside this group" boundary cannot exist.
+
+### `scripting`
+
+Injects the activity indicator and the page widget into an **isolated** world. Nothing is injected into
+the page world.
+
+### `offscreen`
+
+Runs the agent runtime in a worker inside an offscreen document (`reasons: [WORKERS]`), one worker per
+session, so work in progress is not cut off when the MV3 service worker goes idle.
+
+### `userScripts`
+
+The channel for running user-selected scripts in a dedicated `USER_SCRIPT` world. **This release ships no
+path that fetches a script**: what can execute is packaged in the extension and hash-verified. Letting
+users install their own scripts is a later update, and this justification will be updated with it.
+
+### `declarativeNetRequestWithHostAccess`
+
+One dynamic rule: it attaches the extension origin header to backend requests. It is not used to block
+ads or trackers or to modify page content; the rule is derived in code from the backend URL and the
+extension's own origin.
+
+### Remote code field
+
+This release packages all executable logic (flows, Lua modules, site data) inside the extension and
+verifies it by SHA-256 on every service-worker start. Remote source switches default to off, the options
+page exposes no control for them, and a build gate refuses a tree that reintroduces one.
+
+The package still contains a Lua interpreter (Fengari) and development-time remote-loader code. No
+reachable path executes remote code, but those bytes are present.
+
+## 한국어
+
 ## `debugger`
 
 이 확장의 페이지 읽기·클릭·입력이 전부 이 통로로 이뤄집니다. 콘텐츠 스크립트를 페이지 세계에 주입하지

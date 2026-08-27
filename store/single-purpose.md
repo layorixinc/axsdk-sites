@@ -14,6 +14,22 @@ English (listing is bilingual; the store field takes one language at a time):
 
 ---
 
+## English
+
+The sentence for the dashboard field, in the language the reviewer reads:
+
+> Compare one product's total cost including shipping across supported online stores, then add the
+> product the user picked to that store's cart and take them to its checkout review. It never places an
+> order or pays.
+
+Why this one: Quality Guidelines §1 refuses "bundles of unrelated functionality", and the 2026-08-01
+Limited Use revision requires collected data to be strictly necessary for the disclosed purpose.
+Shopping alone satisfies both — what is read is the product name, price and shipping fee on a page, and
+no contact detail. The Korean section carries the measured comparison of the three candidate sentences
+and the code work this choice implies (three intents and the memory-capture hook leave the store build).
+
+## 한국어
+
 ## 왜 이 문장인가 (측정 첨부)
 
 `CWS_LAUNCH_PLAN.md` §P0-3의 세 안 중 **A안**이다. 판단 축은 취향이 아니라 Quality Guidelines §1의

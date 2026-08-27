@@ -5,6 +5,8 @@ title: 개인정보 처리방침 — AXSDK 확장
 
 # 개인정보 처리방침 (Chrome 확장)
 
+[English](#english) · [한국어](#한국어)
+
 AXSDK 회사 전체 방침이 아니라 **이 확장이 하는 일만** 적는다. Chrome Web Store 리스팅의 개인정보
 처리방침 URL이 이 페이지를 가리킨다.
 
@@ -18,6 +20,94 @@ AXSDK 회사 전체 방침이 아니라 **이 확장이 하는 일만** 적는�
 최종 갱신: 2026-08-26 · 확장 버전 0.1.0
 
 ---
+
+## English
+
+This describes **only what the extension does** — not AXSDK company practices in general. The Chrome Web
+Store listing's privacy policy URL points here.
+
+Purpose:
+
+> Compare one product's total cost including shipping across supported online stores, then add the
+> product the user picked to that store's cart and take them to its checkout review. It never places an
+> order or pays.
+
+Everything collected below is needed for that.
+
+### What is collected
+
+The agent operates only in tabs inside **the agent tab group you created**. Tabs outside it, other
+windows and other profiles are not read.
+
+| Item | What it is | Why |
+|---|---|---|
+| Page content (partial) | Product title, price, shipping fee, rating, review count and stock wording read from the tabs the agent drives | Comparing totals requires reading the numbers printed on the card |
+| Page address | The URL of that tab and the product identifier | To tell products and stores apart, and to re-verify the same product before it is added to a cart |
+| Conversation | Your requests and the assistant replies | To interpret the request and choose the next step |
+| Execution trace | Which tool ran in what order, and error codes | So a failure can say what failed |
+
+**Not collected**: passwords, payment methods and card numbers are neither read nor stored; login and
+payment fields are not filled. A login wall or bot check is reported and the run stops. Full browsing
+history, other tabs, bookmarks and cookies are not collected.
+
+### Where it goes
+
+1. **The AXSDK backend (`api.axsdk.ai`)** receives the conversation and the page-derived values needed to
+   choose the next step, passes them to a language model to decide, and returns that decision.
+2. **The language-model provider** receives data only through the backend; the extension never contacts a
+   model provider directly.
+3. **The store you are shopping** receives your search terms and the cart addition you approved — which is
+   what a browser does anyway.
+
+Data is **not sold**, not used for advertising or profiling, and not given to data brokers. This extension
+contains no affiliate links and injects no tracking parameters (that code was deleted from the product on
+2026-08-18).
+
+### How long it stays
+
+| Where | What | For how long |
+|---|---|---|
+| Local browser storage | Conversations, traces, settings | Until you clear them; removed with the extension |
+| Local browser storage | Values you **explicitly asked** to remember (name, email, phone, postal code) | Until you ask to delete them |
+| AXSDK backend | Sessions and messages | <!-- BIZ-CONFIRM: retention period --> |
+
+Memory is written **only on an explicit request**. Without a phrase like "remember this", a value that
+appears in conversation is not stored — this is enforced in code and pinned by tests.
+
+### How to delete it
+
+- **Conversation and memory**: clear them in the extension options, or ask in conversation ("forget my
+  phone number") — the assistant lists what matches and deletes what you confirm.
+- **Everything local**: removing the extension removes it.
+- **Backend copies**: <!-- BIZ-CONFIRM: deletion request channel and turnaround -->
+
+### Permissions
+
+See `store/permissions.md` for the full field-by-field justification. In short: `debugger` is how pages
+are read and driven, and Chrome both discloses it at install and shows a banner while it is in use; the
+broad host permission is for backend access and one network rule, not for page reach.
+
+### Children and sensitive data
+
+Not directed at children under 13. No health, financial, biometric, political or religious data is
+collected.
+
+### Limited Use
+
+This extension complies with the Chrome Web Store **Limited Use** requirements:
+
+1. Data collected is used only as needed for the single purpose disclosed above.
+2. It is **not sold** to third parties.
+3. It is not used or transferred for advertising purposes, including personalization or retargeting.
+4. It is not used for creditworthiness or lending purposes.
+5. Humans do not read the data except with your consent, for security, to comply with law, or in
+   aggregated/anonymized form for operations. <!-- BIZ-CONFIRM: human access procedure -->
+
+### Contact
+
+Questions and deletion requests: [Support](support.html)
+
+## 한국어
 
 ## 무엇을 수집하는가
 

@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
-  assertListingAssets, assertListingStructure, outstandingConfirmations, LISTING_ASSETS, LISTING_FILES,
+  assertListingAssets, assertListingStructure, assertBilingualCopy, outstandingConfirmations,
+  LISTING_ASSETS, LISTING_ASSET_LOCALES, LISTING_FILES,
 } from './listing.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -89,9 +90,13 @@ test('a screenshot at the wrong size names itself and its size', async () => {
   const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const root = await mkdtemp(join(tmpdir(), 'axsdk-assets-'));
-  await mkdir(join(root, 'store', 'assets'), { recursive: true });
+  for (const locale of LISTING_ASSET_LOCALES) {
+    await mkdir(join(root, 'store', 'assets', locale), { recursive: true });
+  }
   for (const file of LISTING_ASSETS) {
-    await writeFile(join(root, 'store', 'assets', file), png(640, 480));
+    for (const locale of LISTING_ASSET_LOCALES) {
+      await writeFile(join(root, 'store', 'assets', locale, file), png(640, 480));
+    }
   }
   assert.throws(() => assertListingAssets(root), /640x480.*1280x800|1280x800.*640x480/s);
 });
@@ -100,7 +105,9 @@ test('a missing screenshot is named', async () => {
   const { mkdtemp, mkdir } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const root = await mkdtemp(join(tmpdir(), 'axsdk-assets-'));
-  await mkdir(join(root, 'store', 'assets'), { recursive: true });
+  for (const locale of LISTING_ASSET_LOCALES) {
+    await mkdir(join(root, 'store', 'assets', locale), { recursive: true });
+  }
   assert.throws(() => assertListingAssets(root), new RegExp(LISTING_ASSETS[0]));
 });
 
@@ -108,8 +115,12 @@ test('something that is not a PNG is refused rather than measured', async () => 
   const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const root = await mkdtemp(join(tmpdir(), 'axsdk-assets-'));
-  await mkdir(join(root, 'store', 'assets'), { recursive: true });
-  for (const file of LISTING_ASSETS) await writeFile(join(root, 'store', 'assets', file), 'not a png');
+  for (const locale of LISTING_ASSET_LOCALES) {
+    await mkdir(join(root, 'store', 'assets', locale), { recursive: true });
+  }
+  for (const locale of LISTING_ASSET_LOCALES) {
+    for (const file of LISTING_ASSETS) await writeFile(join(root, 'store', 'assets', locale, file), 'not a png');
+  }
   assert.throws(() => assertListingAssets(root), /not a PNG/);
 });
 
@@ -122,3 +133,33 @@ function png(width, height) {
   ihdr.writeUInt32BE(height, 12);
   return Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), ihdr]);
 }
+
+/**
+ * Two audiences, not one. The reviewer reads the single purpose, the permission justifications and the
+ * privacy policy — in English — while the users this product is built for read Korean. A surface that
+ * exists in one language is a surface someone will improvise a translation for at submission time.
+ */
+test('every dashboard surface carries both languages', () => {
+  assertBilingualCopy(repoRoot);
+});
+
+test('a surface missing the English half names itself', async () => {
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(join(tmpdir(), 'axsdk-copy-'));
+  await mkdir(join(root, 'store'), { recursive: true });
+  await mkdir(join(root, 'docs'), { recursive: true });
+  for (const file of LISTING_FILES) {
+    await writeFile(join(root, file), '# 한국어만 있는 문서\n\n## 한국어\n\n내용\n');
+  }
+  assert.throws(() => assertBilingualCopy(root), /English/);
+});
+
+/**
+ * The locales we have screenshots FOR, which is not the same as the locales the listing is written in.
+ * The rendered comparison window is Korean by construction (87 Korean string literals across the
+ * renderers), so an English capture would show an English reply around a Korean window.
+ */
+test('screenshots cover the locales whose UI actually exists', () => {
+  assert.deepEqual([...LISTING_ASSET_LOCALES], ['ko']);
+});

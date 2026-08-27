@@ -150,3 +150,22 @@ unsigned from-URL model was a deliberate later decision, and the JSON was writte
 **Next**: when the R2 charter is written (D1 scoping), rewrite the trust block to the model that ships —
 unsigned user-chosen URLs with declared-digest verification, signed only for a reviewed registry if one
 ever exists — and keep the gate. Do not weaken the gate to accept both.
+
+## 11. The rendered comparison window is Korean by construction
+
+**Status: open, product work; surfaced by the listing assets.**
+
+The listing is bilingual and `_locales/{en,ko}` localize the store name and description, but the window
+the user actually reads is assembled from Korean literals in the flow layer. Measured 2026-08-26: **87
+lines with Korean string literals** across the renderers — `_common/scripts/45_offer_view.lua` 60,
+`54_comparison.lua` 24, `55_offers.lua` 3 — covering store names (`아마존`, `11번가`), the shipping and
+rating labels, the folded-row note, and every refusal sentence (`price_currency_unknown`, `no_matches`,
+`unparsed`).
+
+So an English request today produces an English reply wrapped around a Korean window. That is why
+`LISTING_ASSET_LOCALES` is `["ko"]` alone: an `en` capture would misrepresent the product rather than
+localize it, and the store takes one screenshot set for all locales.
+
+**Next**: decide whether R1 ships Korean-only UI (then the English listing must say so plainly, which it
+now does) or the renderers take a language parameter. The refine parser already accepts English phrases
+(`include unknown`, `show all`, `free shipping`, `under`), so input is not the gap — output is.

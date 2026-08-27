@@ -20,42 +20,75 @@ import { openCdpSession } from '../harness/cdp-session.mjs';
 
 const OUT = 'store/assets';
 
-const SCENES = [
-  {
-    file: '1-comparison.png',
-    site: 'https://www.11st.co.kr/',
-    // An exact model skips discovery and reaches the comparison window directly; both of these stores
-    // were measured stating a shipping fee, so the rows carry complete totals instead of folding.
-    text: '로지텍 M185 마우스를 11번가, 지마켓에서 배송비 포함 총액으로 비교해줘',
-    what: 'total-cost comparison across two stores',
-  },
-  {
-    file: '2-refine.png',
-    // A visible difference rather than a re-render: the folded incomplete row comes back into the window.
-    text: '미확인 포함',
-    what: 'the folded incomplete-total row, shown on request',
-    continues: true,
-  },
-  {
-    file: '3-choices.png',
-    site: 'https://www.coupang.com/',
-    text: '이 사이트에서 로지텍 M185 마우스 찾아줘',
-    what: 'numbered products on one store, waiting for the user to choose',
-  },
-  {
-    file: '4-cart.png',
-    // The gate reads a bare number; a sentence around it routes elsewhere (measured).
-    text: '1번',
-    what: 'guarded cart add, confirmed on the store cart page',
-    continues: true,
-  },
-];
+/**
+ * One set per listing locale. The widget answers in the language of the request, and the stores a
+ * Korean shopper compares are not the ones an English shopper does — so these differ by more than
+ * wording, which is why the store lets screenshots be localized at all.
+ */
+const SCENES = {
+  ko: [
+    {
+      file: '1-comparison.png',
+      site: 'https://www.11st.co.kr/',
+      // An exact model skips discovery and reaches the comparison window directly; both stores were
+      // measured stating a shipping fee, so the rows carry complete totals instead of folding.
+      text: '로지텍 M185 마우스를 11번가, 지마켓에서 배송비 포함 총액으로 비교해줘',
+      what: 'total-cost comparison across two stores',
+    },
+    {
+      file: '2-refine.png',
+      // A visible difference rather than a re-render: the folded incomplete row comes back.
+      text: '미확인 포함',
+      what: 'the folded incomplete-total row, shown on request',
+      continues: true,
+    },
+    {
+      file: '3-choices.png',
+      site: 'https://www.coupang.com/',
+      text: '이 사이트에서 로지텍 M185 마우스 찾아줘',
+      what: 'numbered products on one store, waiting for the user to choose',
+    },
+    {
+      file: '4-cart.png',
+      // The gate reads a bare number; a sentence around it routes elsewhere (measured).
+      text: '1번',
+      what: 'guarded cart add, confirmed on the store cart page',
+      continues: true,
+    },
+  ],
+  en: [
+    {
+      file: '1-comparison.png',
+      site: 'https://www.amazon.com/',
+      text: 'Compare the Logitech M185 mouse on amazon and ebay by total cost including shipping',
+      what: 'total-cost comparison across two stores',
+    },
+    {
+      file: '2-refine.png',
+      text: 'include the unknown ones',
+      what: 'the folded incomplete-total row, shown on request',
+      continues: true,
+    },
+    {
+      file: '3-choices.png',
+      site: 'https://www.amazon.com/',
+      text: 'find a Logitech M185 mouse on this site',
+      what: 'numbered products on one store, waiting for the user to choose',
+    },
+    {
+      file: '4-cart.png',
+      text: '1',
+      what: 'guarded cart add, confirmed on the store cart page',
+      continues: true,
+    },
+  ],
+};
 
-async function main() {
+async function main(locale) {
   const session = await openCdpSession();
   const captured = [];
   try {
-    for (const scene of SCENES) {
+    for (const scene of SCENES[locale]) {
       if (!scene.continues) {
         // A paused window would read the next message as a selection, so each independent scene starts clean.
         await session.reset();
@@ -65,7 +98,7 @@ async function main() {
       const answer = await session.send(scene.text, { timeoutMs: 300_000 })
         .catch((error) => ({ text: `ERR ${error?.message ?? error}`, toolCalls: [] }));
       const elapsed = ((Date.now() - started) / 1000).toFixed(1);
-      const shot = await session.screenshot({ path: `${OUT}/${scene.file}` });
+      const shot = await session.screenshot({ path: `${OUT}/${locale}/${scene.file}` });
       captured.push({ ...scene, shot, elapsed, reply: String(answer?.text ?? '').replace(/\s+/g, ' ').slice(0, 120) });
       console.log(`\n=== ${scene.file} (${elapsed}s) — ${scene.what}`);
       console.log(`  url   ${shot.url}`);
@@ -82,7 +115,7 @@ async function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main().catch((error) => {
+  main(process.argv.find((a) => a.startsWith('--locale='))?.slice(9) ?? 'ko').catch((error) => {
     console.error('FATAL', error?.stack ?? error);
     process.exitCode = 1;
   });

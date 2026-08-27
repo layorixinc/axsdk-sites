@@ -2724,3 +2724,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   wrong-sized capture is indistinguishable in a file listing and is refused at upload.
   One honest caveat is recorded as an outstanding answer rather than prose: the cart frame shows five
   leftover items from earlier test runs, so it wants a re-capture on an empty cart.
+- **The listing needed two languages, and asking for them exposed a product gap the copy could not paper
+  over.** The reviewer-facing fields — single purpose, permission justifications, privacy policy — are
+  read in English, while the users this product is built for read Korean, so `assertBilingualCopy`
+  requires an `## English` and a `## 한국어` section on all five surfaces (matched on headings, because a
+  file should state which halves it carries rather than have a script guess at language). The outstanding
+  count went 9 → 13 for the right reason: the same unanswered question now exists in both languages.
+  **What could not be translated is the product.** An English capture set was attempted and deleted: the
+  window the screenshots show is Korean BY CONSTRUCTION — measured 87 lines of Korean string literals
+  across the renderers (`45_offer_view` 60, `54_comparison` 24, `55_offers` 3), covering store names, the
+  shipping and rating labels, the folded-row note and every refusal sentence. An English request produces
+  an English reply wrapped around a Korean window, so `LISTING_ASSET_LOCALES` is `["ko"]` alone and says
+  why in its own comment. Input is not the gap: the refine parser already accepts `include unknown`,
+  `show all`, `free shipping`, `under`. Output is. Tracked as `TODO.md` §11, and the English listing now
+  states plainly that the assistant answers in Korean rather than implying otherwise.

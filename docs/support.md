@@ -5,7 +5,58 @@ title: 지원 — AXSDK 확장
 
 # 지원
 
+[English](#english) · [한국어](#한국어)
+
 Chrome Web Store 리스팅의 **Support URL**이 이 페이지를 가리킨다.
+
+## English
+
+The Chrome Web Store listing's **Support URL** points here.
+
+### Contact
+
+- Bugs and questions: <https://github.com/layorixinc/axsdk-sites/issues>
+- Privacy and data deletion: <!-- BIZ-CONFIRM: public contact email -->
+
+What makes an issue answerable in one round: which store, what you typed, the sentence on screen
+verbatim, and the extension version (bottom of the options page).
+
+### Check these first
+
+**"The agent will not start."** With credentials empty the extension refuses to start, opens Settings, and
+creates no tab group and no session — the message on screen names what is missing.
+
+**"This tab cannot be driven."** `chrome://` pages, extension pages and blank tabs cannot be attached to.
+Start again on an ordinary web page.
+
+**"A debugging banner appeared at the top of the browser."** That is expected: this extension reads and
+drives pages through Chrome's DevTools protocol, so the browser announces it. Stopping it there ends the
+session.
+
+**"Shipping shows as unknown."** The store card did not state a fee. Rows whose total is unknown are
+folded out of the default list and counted; ask to include them and they come back. They are never
+assumed to be zero, because that would make that store look cheapest for free.
+
+**"A store says a security check is required."** That store showed a bot check. The extension does not
+bypass them — pass it yourself in that tab and ask again.
+
+**"I am not sure the item was added."** The extension says a product was added only after re-reading the
+store's own cart page and finding the product identifier there. If it cannot confirm, it says so and
+claims nothing.
+
+### What this extension will not do
+
+- **It never orders and never pays.** It stops at the checkout review page; the order button is read, not
+  clicked, and a code gate holds that.
+- It does not fill login forms or payment fields.
+- It does not bypass bot checks or login walls.
+- It does not read tabs outside the agent tab group.
+
+### Data
+
+What is collected and where it goes: [Privacy policy](privacy.html).
+
+## 한국어
 
 ## 문의
 

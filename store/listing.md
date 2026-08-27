@@ -4,6 +4,60 @@
 
 ---
 
+## English
+
+### Name
+
+```
+AXSDK Shopping Assistant
+```
+
+### Short description (132 characters max)
+
+```
+Compares total cost with shipping across stores, then adds the product you chose to that store's cart. Never orders.
+```
+
+### Detailed description
+
+```
+Knowing which store is actually cheaper means adding the shipping fee. AXSDK does that arithmetic for you.
+
+What it does
+· Finds the product you asked for on supported stores and compares them by price + shipping = total
+· Verifies the manufacturer model before comparing, so accessories and other models do not slip in
+· Never assumes a missing shipping fee is zero: rows whose total is unknown are folded away and counted,
+  and shown when you ask for them
+· Re-sorts or filters the same list when you say what you want ("cheapest first", "under 30,000", "free
+  shipping only")
+· Adds the product you picked to that store's cart, then re-reads the cart page to confirm it is there
+· Takes you to the checkout review page and stops
+
+What it does not do
+· It never places an order, never pays, and never reads or stores a payment method
+· It does not fill login forms or payment fields
+· It does not bypass bot checks — it tells you it hit one and stops
+· It does not read tabs outside the agent tab group you created
+
+How it works
+It reads the pages your browser already opens. The agent only operates inside a dedicated tab group you
+create, and Chrome itself shows a banner across the top for as long as it is attached, which you can stop
+at any time. Before anything irreversible it reads the actual label on the button and asks.
+
+Supported stores
+Amazon, eBay, Walmart, AliExpress, Etsy, Coupang, 11st, Gmarket, SSG, Naver Shopping (read-only)
+
+Privacy: https://layorixinc.github.io/axsdk-sites/privacy.html
+Support: https://layorixinc.github.io/axsdk-sites/support.html
+```
+
+**The assistant currently answers in Korean**: the comparison window is rendered from Korean labels in
+the flow layer (measured — 87 Korean string literals across the renderers). The English listing is
+accurate about what the extension DOES; the screenshots are Korean because the UI is. Localizing the
+renderer is product work, tracked in `TODO.md`.
+
+## 한국어
+
 ## 제품명
 
 ```

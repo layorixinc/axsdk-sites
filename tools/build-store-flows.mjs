@@ -36,6 +36,38 @@ const NEUTRALISED_HOOK_FLOWS = {
 };
 
 /**
+ * Sentences the authored prompt states about BOTH surfaces at once, rewritten for the store profile.
+ *
+ * The first attempt split these in the authored document so the unit/sentence rules could filter them. That
+ * cost the live quote suite **5/7 → 2/7** with a healthy provider (three turns reached no node, three were
+ * misrouted into shopping): reordering "A service quote, product purchase, checkout … is NEVER
+ * out_of_scope." and hedging "a service quote … where those exist" changed how the planner reads its own
+ * catalogue. **The document the dev path runs stays as it was measured**, and the profile pays for its own
+ * narrowing here.
+ *
+ * Each key must match EXACTLY. A reworded authored sentence fails the build rather than silently missing.
+ */
+const STORE_PROMPT_OVERRIDES = [
+  [
+    ", e.g. the name/email/phone/ZIP given for a service quote)",
+    ')',
+  ],
+  [
+    '; saving several keys and deleting several exact keys is one memory intent.',
+    '.',
+  ],
+  [
+    'A service quote, product purchase, checkout, explicit memory request, or farewell is NEVER out_of_scope.'
+    + ' Route explicit remember/save, forget/delete, list/show, exact-read questions, and memory-search requests to memory.',
+    'A product purchase, a checkout, or a farewell is NEVER out_of_scope.',
+  ],
+  [
+    'product or a different task (a service quote, checkout, memory, farewell).',
+    'product or a different task (a checkout or a farewell).',
+  ],
+];
+
+/**
  * Prose that ENUMERATES the surfaces, which no rule can narrow: a list is not a sentence, so dropping the
  * items that left would rewrite the sentence rather than filter it.
  *
@@ -170,6 +202,18 @@ function withRespondOverrides(flowName, flow) {
   };
 }
 
+/** Applies `STORE_PROMPT_OVERRIDES`, refusing when an authored sentence has been reworded. */
+function applyPromptOverrides(prompt) {
+  let text = String(prompt);
+  for (const [from, to] of STORE_PROMPT_OVERRIDES) {
+    if (!text.includes(from)) {
+      throw new Error(`the store profile cannot narrow this prompt: it no longer says "${from.slice(0, 60)}…"`);
+    }
+    text = text.split(from).join(to);
+  }
+  return text;
+}
+
 export function buildStoreFlows(source) {
   const document = parseYaml(source);
   const routes = document.router?.routes ?? [];
@@ -211,7 +255,7 @@ export function buildStoreFlows(source) {
       ...document.planner,
       ...(document.planner?.prompt === undefined
         ? {}
-        : { prompt: narrowPrompt(document.planner.prompt, forbidden, headForbidden) }),
+        : { prompt: narrowPrompt(applyPromptOverrides(document.planner.prompt), forbidden, headForbidden) }),
     },
     router: {
       ...document.router,

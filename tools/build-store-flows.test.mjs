@@ -261,3 +261,23 @@ test('no text the user can read promises a surface the profile removed', () => {
   walk({ ...store, flows: promisingFlows, hooks: undefined }, '');
   assert.deepEqual(offenders, [], `the store document still promises:\n${offenders.join('\n')}`);
 });
+
+test('the AUTHORED prompt is never edited for the store profile\'s convenience', () => {
+  // Measured 2026-08-27, A/B with a healthy provider: splitting three sentences in the authored planner
+  // prompt so the store narrowing could filter them took the live quote suite from **5/7 to 2/7** — three
+  // turns reached no node at all and three were misrouted into shopping. The store profile pays for its own
+  // narrowing (`STORE_PROMPT_OVERRIDES`); the document the dev path runs stays as it was measured.
+  const prompt = String(dev.planner?.prompt ?? '');
+  for (const sentence of [
+    'A service quote, product purchase, checkout, explicit memory request, or farewell is NEVER out_of_scope.',
+    'e.g. the name/email/phone/ZIP given for a service quote',
+    'product or a different task (a service quote, checkout, memory, farewell).',
+  ]) {
+    assert.ok(prompt.includes(sentence), `the authored prompt lost: ${sentence}`);
+  }
+  // and the store prompt still says none of it
+  const storePrompt = String(store.planner?.prompt ?? '');
+  for (const name of ['service quote', 'memory', 'request_service_quote']) {
+    assert.ok(!storePrompt.includes(name), `the store prompt still says ${name}`);
+  }
+});

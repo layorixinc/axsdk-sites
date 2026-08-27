@@ -250,8 +250,9 @@ prove the rest. Keeping it means the listing should say so in words a reviewer c
 
 A user-facing reply can carry `<|channel|>commentary to=functions.<tool> <|constrain|>json<|message|>{…}`
 in front of the real sentence. Measured on two flows and two packages; one `test:thumbtack:live` run
-carried 52 occurrences. A/B against the pre-edit planner document (3/7 vs 4-5/7) rules out our own
-authoring as the cause.
+carried 52 occurrences. The leak appears in every run, including the pre-edit planner document (52 occurrences there too), so it
+is not our authoring. The first A/B recorded for it was measured during an exhausted-API-balance outage
+and is retracted.
 
 Our side is done: the shared session driver flags it per turn, the artifact smoke fails on it, and the
 quote suite names how many replies were polluted. There is nothing further to fix in this repo — the
@@ -259,20 +260,28 @@ text is assembled by the engine.
 
 **Next**: runtime team applies one of the three options in the request document.
 
-## 17. `test:thumbtack:live` is 4-5/7 and the two failures are not attributed
+## 17. `test:thumbtack:live` is 5/7 — one channel error, twice counted
 
-**Status: open, measured 2026-08-27; not a regression of the store-profile work.**
+**Status: open, measured 2026-08-27 on a healthy provider; not a flow defect.**
 
-- **Collection retention**: on the contact reply the planner enters `request_service_quote` FRESH — the
-  second turn re-runs `detect_cancellation` and `recall_saved_contact` and asks for the service again,
-  while the gate requires `present_quote_collection: resume`. `AGENTS.md` §13 records this exact case as
-  historically flaky (3 of 8 clean sessions) before the recall gate was tightened.
-- **Wizard boundary**: live Thumbtack rendered a step whose options are all `checked=false`, so the driver
-  reported `quote_stalled` with the option/button snapshot. Honest refusal, site-side state.
+Both failures come from one `search_service(error)` — "브라우저 연결을 확인할 수 없어서" — on the RESUMED
+turn of the house-cleaning case. Retention itself worked: `present_quote_collection: resume` →
+`collect` → `done` → `verify_request: ok`, and only the search errored. The cancel case then fails
+downstream, because the flow had already ended and "취소" reached no node.
 
-A/B: the pre-edit document scores **3/7**, the current one 4/7 · 5/7 · 5/7 — so the planner edits of this
-stretch did not cause it.
+Reproduced identically on the pre-edit planner document, and the other two searches in the same run
+succeeded — so it is transient on that turn, not a site or planner problem.
 
-**Next**: decide whether the retention case needs a deterministic resume (a planner rule cannot be tuned
-further — `AGENTS.md` §13 stops prompt tuning after the third formulation), and re-measure the wizard case
-when Thumbtack renders a normal step. Neither blocks the CWS release: the store package has no quote flow.
+**Next**: instrument which op refused (`AGENTS.md` §13: a transient op refusal is not a page fact) and
+decide whether the search should retry once on a channel refusal, as the quote wizard already does for
+its own dom reads. Does not block the CWS release: the store package has no quote flow.
+
+## 18. The store profile must never edit the authored planner prompt
+
+**Status: closed 2026-08-27 by measurement, recorded so it is not retried.**
+
+Splitting three mixed sentences in `_common/flows.yaml` so the store narrowing could filter them took the
+live quote suite from **5/7 to 2/7** (3 turns reached no node, 3 were misrouted into shopping); restoring
+them and moving the rewrite into `STORE_PROMPT_OVERRIDES` returned it to **5/7**. The overrides are keyed
+on the exact authored text, so a rewording fails the build instead of silently missing, and
+`build-store-flows.test.mjs` pins the authored sentences verbatim.

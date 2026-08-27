@@ -2915,16 +2915,34 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   (`RPC_LUA_RUNTIME_REQUESTS_21.md`). Measured 2026-08-27 on two unrelated flows and two packages: a live
   quote turn answered `<|channel|>commentary to=functions.collect_quote_contact <|constrain|>json<|message|>{ … } 이름, 성, 이메일, 전화번호를 알려주세요.`
   — the correct sentence with the wrapper glued in front — and one suite run carried **52** occurrences.
-  **A/B ruled our own edits out**: the pre-edit planner document scores **3/7** where the current one
-  scores 4/7 · 5/7 · 5/7, and the leak appears in both.
+  **A/B rules our own edits out**: the leak appears in EVERY run, including the pre-edit planner document
+  (52 occurrences there too). The first A/B recorded here (3/7 vs 4-5/7) was **measured while the provider
+  was refusing on an exhausted API balance and is retracted** — a suite score taken during a provider
+  outage measures the outage.
   What changed on our side: the shared driver flags every turn (`detectRawScaffolding` in
   `tools/harness/cdp-session.mjs`, keyed on wire markers so a tool NAME in prose still passes), the
   artifact smoke fails on any leaking turn, and the quote suite records how many replies were polluted per
   case. The store package showed none across its six measured turns.
-- **`npm run test:thumbtack:live` is degraded to 4-5/7 and it is not the store profile.** Two cases fail
-  repeatedly: collection retention (the planner enters the flow FRESH on the contact reply — the second
-  turn re-runs `detect_cancellation`/`recall_saved_contact` and asks for the service again, where the gate
-  requires `present_quote_collection: resume`), and the wizard boundary (live Thumbtack rendered a step
-  whose options are all `checked=false`, so the driver reports `quote_stalled` honestly). §13 records this
-  retention case as historically flaky (3 of 8 clean sessions), and the A/B above shows the older document
-  is worse — so this is measured, unattributed, and NOT a regression of this stretch.
+- **Editing the AUTHORED planner prompt so the store profile could filter it cost 5/7 → 2/7, and the
+  A/B is the only reason we know.** Three sentences state something about the shopping surface AND about
+  quotes/memory in one breath, so the store narrowing could only drop both or keep both; splitting them
+  looked free. Measured on a healthy provider, one run each:
+
+  |planner document|`test:thumbtack:live`|no-node|misroute|
+  |---|---|---|---|
+  |as measured before this stretch|**5/7**|1|0|
+  |with the three sentences split|**2/7**|3|3|
+  |restored, narrowing moved into the profile|**5/7**|1|0|
+
+  The failure MODE is what identifies it: a handyman quote request answered "지원되지 않습니다" on its first
+  turn, and ranking/selection utterances were misrouted into `shopping_single_site`. Reordering "A service
+  quote, product purchase, checkout … is NEVER out_of_scope." and hedging "a service quote … where those
+  exist" changed how the planner reads its own catalogue. **The document the dev path runs is not a place
+  to pay for the store profile’s convenience**: `STORE_PROMPT_OVERRIDES` rewrites those sentences at build
+  time, keyed on the exact authored text so a rewording fails the build, and a test pins the authored
+  sentences verbatim.
+- **What is left in that suite is one channel error, not a flow defect.** Both remaining failures trace to
+  a single `search_service(error)` — "브라우저 연결을 확인할 수 없어서" — on the RESUMED turn: retention
+  itself worked (`present_quote_collection: resume` → `verify_request: ok`), and the cancel case fails
+  downstream because the flow had already ended, so "취소" reached no node. Reproduced identically on the
+  pre-edit document, and the other two searches in the same run succeeded.

@@ -64,7 +64,7 @@ planner:
 
     action:
     - continue_current — an active flow is awaiting the user's answer (an active flow / active prompt exists) and the latest message is that answer. Put the active flow first so it resumes without losing accumulated state. A value-providing answer is NOT saved merely because it is reusable. If the answer also contains a separate explicit memory clause, queue memory after the active intent and preserve the shared value in both relevant requestText segments. EXCEPTION: if the latest message is a clear farewell / stop with no further task ("그만할게", "됐어 그만", "고마워요", "종료"), use replace_current with intent=end_conversation even while a flow is active; likewise if it is a clear CHECKOUT request (체크아웃/결제해줘/주문 진행/장바구니 결제 — proceeding to payment, NOT answering the current question), use replace_current with intent=checkout even while a flow is active.
-    - replace_current — a NEW request. Find EVERY distinct task and emit ONE intents entry per task, IN THE ORDER stated. Per entry set `intent`, `segments` (the exact phrase(s) for that task), and `state.requestText` (that task's portion of the message — never ANOTHER task's text, but INCLUDE every detail THIS task needs). For a service quote that detail is the name/email/phone/ZIP given in the message. Different tasks => multiple entries (they run in sequence). The SAME intent with multiple items is ONE entry: "아이폰이랑 계란 사줘" is one shopping_single_site intent. Saving several keys and deleting several exact keys is likewise one memory intent.
+    - replace_current — a NEW request. Find EVERY distinct task and emit ONE intents entry per task, IN THE ORDER stated. Per entry set `intent`, `segments` (the exact phrase(s) for that task), and `state.requestText` (that task's portion of the message — never ANOTHER task's text, but INCLUDE every detail THIS task needs, e.g. the name/email/phone/ZIP given for a service quote). Different tasks => multiple entries (they run in sequence). The SAME intent with multiple items is ONE entry: "아이폰이랑 계란 사줘" is one shopping_single_site intent; saving several keys and deleting several exact keys is one memory intent.
     - EXPLICIT MEMORY CLAUSE — a message containing "기억해줘" / "기억해" / "remember" / "저장해줘" / "잊어줘" / "forget" ALWAYS produces its own `memory` entry, even when another task in the same message uses the same value, and that entry's `segments` and `state.requestText` MUST carry the VALUE itself. The other task keeps the value too if it needs it; a value both tasks need is not "another task's text". Measured live, both ways it can go wrong: the memory entry once arrived as "전화번호 기억해줘" with the number stripped, so the save had nothing to save and answered with an operation outside its enum; and when the value was shown only inside the quote's requestText, the planner read the whole message as a quote-with-contact and emitted NO memory entry at all — three runs out of three, and nothing was ever saved. "Contact stays in the quote requestText and is not automatically saved" governs a message with NO memory clause; it never cancels one that has it.
       A memory clause is USUALLY THE LAST clause of the message, and a trailing one is the case that gets
       dropped. Measured, one run each and consistent with three runs of the first: "…견적 줘. 내 전화번호 …
@@ -73,7 +73,7 @@ planner:
       first task's entry is not finishing the job: RE-READ the message to its end and emit the trailing memory
       entry too, even when the earlier clause is a large task flow that could absorb the value.
     - clarify — ambiguous / unclassifiable: set `question` plus a single best-guess entry.
-    - out_of_scope — the message matches NO configured task intent. A product purchase, a checkout, or a farewell is NEVER out_of_scope. A service quote or an explicit memory request is NEVER out_of_scope either, and explicit remember/save, forget/delete, list/show, exact-read questions and memory-search requests all route to memory. Route a standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope; never reinterpret it as consent to save.
+    - out_of_scope — the message matches NO configured task intent. A service quote, product purchase, checkout, explicit memory request, or farewell is NEVER out_of_scope. Route explicit remember/save, forget/delete, list/show, exact-read questions, and memory-search requests to memory. Route a standalone declarative personal fact with no remember/save/retrieve instruction to out_of_scope; never reinterpret it as consent to save.
 
     MEMORY DELETE FOLLOW-UP: if activeFlow=memory and activeNode=choose_delete_keys, the latest
     message answers the pending deletion question. Always use continue_current with one memory intent,
@@ -124,8 +124,7 @@ planner:
     while that listing is on screen — asking "어떤 제품을 비교하고 싶으신가요?" discards
     it exactly as replacing it would. The decidable test: if the message names no product and no other task, it
     is an ANSWER, whatever else it looks like. Use replace_current only when the message names a DIFFERENT
-    product, or names a different task altogether. A different task means a checkout or a farewell here, and
-    a service quote or a memory request where those exist.
+    product or a different task (a service quote, checkout, memory, farewell).
 
     Also set conversationSummary (brief running summary) and latestMessageInterpretation (your reading of the latest message).
 

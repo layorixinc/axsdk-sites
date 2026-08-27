@@ -334,18 +334,35 @@ T3·D1·T7은 끝났고, 남은 것은 T5(결정 D3)와 T6의 사람 답변 9건
 
 ## 6. 제출 체크리스트
 
+측정 기준 2026-08-27 (`npm run release:cws`, `npm run test:cws:artifact`, `npm run check:listing`).
+
 - [x] 단일 목적 문장 (`store/single-purpose.md`, A안) · 짧은/긴 설명 · 카테고리 (`store/listing.md`)
+- [x] **단일 목적이 코드가 됐다** — `tools/build-store-flows.mjs`가 패키지를 문장에 맞게 좁힌다:
+      플로우 10→8 · flowTools 79→41 · 모듈 25→20 · 자산 29→23 · 문서 255.2→132.0 KiB ·
+      `defaultIntent`를 쇼핑으로 · 캡처 훅 무력화. `release:cws`가 문장 밖 표면이 남은 패키지를 거부한다
 - [x] 권한 7종 + 광범위 호스트 소명 (`store/permissions.md`)
 - [x] 개인정보·지원 페이지와 그 URL (`docs/privacy.md`, `docs/support.md`, GitHub Pages)
-- [x] 업로드 ZIP = `release:cws`가 검증·자기추출·재검증한 바이트 (releaseId가 백엔드 revision 126에 바인딩)
-- [x] dist에 원격 소스 컨트롤 0 — 게이트가 증명 (`assertNoRemoteSourceControls`)
-- [x] 스크린샷 4장 1280×800 (라이브 턴, `store/assets/ko/`) · [ ] 작은 타일 440×280 · [ ] 영어 스크린샷은 렌더러가 한국어 고정이라 보류(TODO §11)
+- [x] 업로드 ZIP = `release:cws`가 검증·자기추출·재검증한 바이트 — releaseId `sha256:8fb64675…`가 백엔드
+      **revision 127** 에 바인딩 (D5 승인 후 모듈 푸시 완료, `unusedBackendModules` 5건 기록)
+- [x] dist에 원격 소스 **컨트롤** 0 — 게이트가 증명 (`assertNoRemoteSourceControls`)
+- [ ] **dist에 원격 소스 코드가 남아 있다 (P0-1)** — 측정: `raw.githubusercontent.com` **15회**
+      (`service-worker.js`·`assets/session-worker-*.js`·`widget.js` 각 5) + fengari 132회. 능력은
+      `axsdk-core/src/sites.ts`의 GitHub raw URL 빌더/검증이고, 인스톨러가 설정으로 끄지만 번들에는 남는다.
+      기존 게이트는 **HTML의 토글만** 본다 — 번들 문자열은 검사하지 않는다
+- [ ] **community `from-url` 설치 표면이 R1 산출물에 있다 (D8은 제외 권고)** — 측정:
+      `options/options.html`의 "Install from a manifest URL", `from-url` 코드 8회씩
+      (service-worker·session-worker·widget), 매니페스트에 `userScripts` 권한. 정책 파일은
+      `trust.arbitraryUrlImport: false`
 - [ ] 데이터 사용 공시 체크박스와 Limited Use 확약 (대시보드 입력) · 백엔드 보관기간·사람 접근·하위 처리자명 확정
+      — `check:listing`이 남은 **12건**을 이름으로 센다
 - [x] 대시보드 문안 5종이 영어·한국어 양쪽 (게이트: assertBilingualCopy) — 심사자가 읽는 단일 목적·권한 소명·프라이버시가 영어로 존재
 - [x] `_locales/ko|en` + 매니페스트 name/description을 `__MSG_*__`로 (게이트: assertLocalizedManifest)
-- [ ] 소비자 인증 또는 비공개 배포 결정 (D3)
-- [ ] `test:cws:artifact` 재실행 (신규 프로필, 패키지 소스만, 주문 없음)
-- [ ] One Stop 문의 답변 수신 (D7)
+- [x] 스크린샷 4장 1280×800 (`store/assets/ko/`) · 작은 타일 440×280 (`store/assets/tile-small.png`, 11.0 KiB)
+      · 영어 스크린샷은 렌더러가 한국어 고정이라 보류 (TODO §11, `LISTING_ASSET_LOCALES=['ko']`)
+- [x] 배포 형태 결정 (D3) — **Unlisted 로 R1 제출** (2026-08-26)
+- [x] `test:cws:artifact` 재실행 — 2026-08-27 PASS `sha256:0c79dc6b…`: 비교 27.9s · 정제 4.8s ·
+      취소 5.6s(무변경) · 카트 18.0s · 결제 검토 44.9s(주문 없음) · 문장 밖 요청은 단일 목적으로 거부
+- [x] One Stop 문의 (D7) — **생략 결정**: 비공개 심사가 더 빠른 답이다 (§7 D7)
 
 ## 7. 결정 필요 — 선택지와 권고
 

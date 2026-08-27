@@ -270,7 +270,6 @@ No branch is allowed to infer success from `dom.click(...) == true`, a URL chang
 | `AX_update_search` | results identity -> select-filter action -> observe selected filter/results identity | Selected option and results surface match | Only migrate after exact selected-filter evidence exists. |
 | `AX_open_quote` / `AX_answer_quote` | profile preparation -> dialog-open action -> per-question answer/Next action sequence -> observe active-step fingerprint | Expected dialog/step fingerprint changes | The overlay remains an SPA; polling controls the sequence, not document arrival. |
 | `AX_submit_quote` | explicit confirmation binding -> final form preflight -> `submit_quote` action -> observe receipt/terminal response | Positive submission receipt or unambiguous site completion state | Never infer success just because the submit button disappeared. Standard live tests do not actually submit a quote. |
-| Bluemoonsoft form submit | form readiness -> idempotent values -> `submit_form` action -> observe acknowledgement | Site acknowledgement / receipt | Do not persist form contents in the operation record. |
 
 A site command is not migrated until its success and gate selectors are specific enough to support this table. If the site cannot provide strong evidence, retain the command's durable implementation or return a terminal unsupported/indeterminate result; do not invent a success condition.
 
@@ -376,7 +375,7 @@ Exit criterion: every duplicate poll call returns controller state only; the add
 
 1. Model each quote Next/Submit as a separate action sequence bound to the active-step fingerprint.
 2. Add the final submit operation only with explicit confirmation and a positive receipt detector.
-3. Convert Bluemoonsoft submit after a stable acknowledgement detector exists.
+3. ~~Convert Bluemoonsoft submit~~ — **withdrawn 2026-08-26**: the site was removed from the product.
 
 ### Phase 5 - remove migrated durable branches
 

@@ -57,7 +57,9 @@ Amazon, eBay, Walmart, AliExpress, Etsy, 쿠팡, 11번가, G마켓, SSG, 네이�
 ## 카테고리 · 언어
 
 - 카테고리: Shopping
-- 언어: 한국어, English (`_locales/ko`, `_locales/en` — <!-- BIZ-CONFIRM: 리스팅 영어 상세 설명 번역 확정 -->)
+- 언어: 한국어, English — 매니페스트 이름·설명·툴바 툴팁은 `_locales/{en,ko}` 에서 오고(기본 `en`),
+  `assertLocalizedManifest`가 빌드마다 두 로케일의 키 집합과 132자 상한을 검사한다.
+  대시보드의 **상세 설명**은 로케일 파일이 아니라 리스팅 입력이다 — <!-- BIZ-CONFIRM: 영어 상세 설명 번역 확정 -->
 
 ## URL
 

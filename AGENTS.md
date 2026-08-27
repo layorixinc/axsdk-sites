@@ -2691,3 +2691,19 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   listing would have found two different products, which is the §1 "bundle" finding in its cheapest
   form. The homepage is now R1, and the four community pages sit under an explicit "next update"
   heading rather than being deleted.
+- **A localized manifest and its message files are one contract, and the copy step is what forgets.**
+  `__MSG_key__` resolves against `_locales/<default_locale>/messages.json`; when the directory is
+  missing Chrome does not error — it shows the raw placeholder as the extension name — and when a
+  translation omits a key it silently falls back to the default language for that one line. So
+  `assertLocalizedManifest` (wired into `build:cws` beside the other dist gates) requires
+  `default_locale`, the referenced keys in every locale, identical key sets across locales, and the
+  store's 132-character ceiling on the description — measured en 116 / ko 64. Two mutations pin it:
+  deleting `dist/_locales` fails the build with "manifest is localized but _locales/en/messages.json
+  did not ship", and dropping one `ko` key turns the suite red.
+  **The first version of the source-tree test was vacuous** — it asserted only that the gate PASSES on
+  our own tree, and the gate returns early for a manifest with no placeholders, so it passed before any
+  work was done. It now asserts the localization first (name and description are placeholders,
+  `default_locale` is `en`, locales are exactly `en`+`ko`) and only then runs the gate.
+  Live: Chrome refuses to load an extension whose placeholder cannot resolve, so a harness session that
+  opens and answers a shopping turn is the proof — it did, and the archive carries
+  `_locales/{en,ko}/messages.json` with the release manifest hashing both.

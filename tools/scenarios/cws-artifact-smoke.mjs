@@ -141,6 +141,26 @@ async function waitForChromeExit(port) {
   throw new Error(`artifact-smoke Chrome on ${port} did not exit`);
 }
 
+/**
+ * One named step of the live run.
+ *
+ * Six turns with 1,560 seconds of timeouts between them used to print nothing until the run was over, so
+ * a hang left no evidence at all — the same failure shape the commerce sweep fixed by naming stages. A
+ * start line with no end line IS the diagnosis, which is why both are printed rather than only the end.
+ */
+export async function stage(name, run, { log = (line) => console.log(line) } = {}) {
+  log(`→ ${name}`);
+  const started = Date.now();
+  try {
+    const value = await run();
+    log(`✓ ${name} ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    return value;
+  } catch (error) {
+    log(`✗ ${name} ${((Date.now() - started) / 1000).toFixed(1)}s`);
+    throw new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
+  }
+}
+
 export async function runArtifactSmoke() {
   const temp = await mkdtemp(join(tmpdir(), 'axsdk-cws-artifact-smoke-'));
   const archivePath = join(temp, 'candidate.zip');
@@ -149,8 +169,6 @@ export async function runArtifactSmoke() {
   const distDir = resolve(repoRoot, '..', 'axsdk-sdk-js', 'packages', 'axsdk-extension-cdp', 'dist');
   const archiveModulePath = resolve(repoRoot, '..', 'axsdk-sdk-js', 'packages', 'axsdk-extension-cdp', 'scripts', 'cws-archive.mjs');
   const archiveApi = await import(pathToFileURL(archiveModulePath).href);
-  const browserSession = await import(pathToFileURL(resolve(dirnameOf(archiveModulePath), 'browser-session.mjs')).href);
-  const chromeLaunch = await import(pathToFileURL(resolve(dirnameOf(archiveModulePath), 'chrome-launch.mjs')).href);
   const built = buildRpcFlows({ root: repoRoot, delivery: 'registry' });
   const moduleSources = built.__report.moduleSources;
   const backend = {
@@ -166,39 +184,39 @@ export async function runArtifactSmoke() {
   const port = await availablePort();
   let session;
   try {
-    const release = await buildCwsRelease({ distDir, archivePath, backend, archiveApi });
-    await archiveApi.extractCwsArchive({ archivePath, outDir: extracted });
+    const release = await stage('build the candidate archive', () => buildCwsRelease({ distDir, archivePath, backend, archiveApi }));
+    await stage('extract it', () => archiveApi.extractCwsArchive({ archivePath, outDir: extracted }));
     process.env.AXSDK_PROFILE_ROOT = profileRoot;
-    session = await openCdpSession({
+    session = await stage('install it in a fresh profile and open a session', () => openCdpSession({
       workspace: repoRoot,
       extensionDir: extracted,
       provision: 'config-only',
       reuse: false,
       port,
       url: 'https://www.amazon.com/',
-    });
-    const runningRelease = await session.releaseInfo();
+    }));
+    const runningRelease = await stage('read the running release id', () => session.releaseInfo());
     if (runningRelease?.releaseId !== release.manifest.releaseId) {
       throw new Error(
         `running release mismatch: archive ${release.manifest.releaseId}, runtime ${runningRelease?.releaseId ?? '-'}`,
       );
     }
-    const packageStatus = await session.status();
-    await session.reset();
+    const packageStatus = await stage('read the loaded scripts', () => session.status());
+    await stage('start a clean conversation', () => session.reset());
     const requestText = 'Compare the Logitech M185 wireless mouse total cost at Amazon and eBay';
-    const turn = await session.send(requestText, { timeoutMs: 360_000 });
-    const cancelled = await session.send('취소', { timeoutMs: 120_000 });
+    const turn = await stage('compare amazon and ebay', () => session.send(requestText, { timeoutMs: 360_000 }));
+    const cancelled = await stage('cancel the paused window', () => session.send('취소', { timeoutMs: 120_000 }));
 
-    await session.reset();
-    await session.open('https://www.amazon.com/');
-    const guardedComparison = await session.send(requestText, { timeoutMs: 360_000 });
-    const refinedTurn = await session.send('amazon만 보여줘', { timeoutMs: 120_000 });
+    await stage('start a second clean conversation', () => session.reset());
+    await stage('open amazon again', () => session.open('https://www.amazon.com/'));
+    const guardedComparison = await stage('compare again, for the cart path', () => session.send(requestText, { timeoutMs: 360_000 }));
+    const refinedTurn = await stage('refine to amazon only', () => session.send('amazon만 보여줘', { timeoutMs: 120_000 }));
     const refinedComparison = { err: null, text: refinedTurn.text, toolCalls: refinedTurn.toolCalls };
-    const selectedTurn = await session.send('1번', { timeoutMs: 300_000 });
+    const selectedTurn = await stage('select offer 1 and add it to the cart', () => session.send('1번', { timeoutMs: 300_000 }));
     const guardedSelection = { err: null, text: selectedTurn.text, toolCalls: selectedTurn.toolCalls };
-    const checkoutTurn = await session.send('체크아웃 해줘', { timeoutMs: 300_000 });
+    const checkoutTurn = await stage('review checkout without ordering', () => session.send('체크아웃 해줘', { timeoutMs: 300_000 }));
     const checkoutStep = { err: null, text: checkoutTurn.text, toolCalls: checkoutTurn.toolCalls };
-    const status = await session.status();
+    const status = await stage('read the scripts once more', () => session.status());
     const verdict = artifactSmokeVerdict({
       workspaceStores: session.workspace.stores,
       scriptIds: packageStatus.scriptIds,
@@ -245,25 +263,10 @@ export async function runArtifactSmoke() {
   } finally {
     if (session) {
       await session.shutdown().catch(() => {});
-    } else {
-      // Acquisition can fail after Chrome launched but before a session object was returned. Only reach for
-      // it when something is actually listening: launching a browser in order to close it is how a cleanup
-      // path creates the very process it is trying to reap.
-      const listening = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) })
-        .then(() => true).catch(() => false);
-      if (listening) {
-        try {
-          const launched = await browserSession.launchChrome({
-            profileName: chromeLaunch.PROFILE_NAME,
-            profileRoot,
-            port,
-          });
-          await launched.cdp.send('Browser.close').catch(() => {});
-          launched.cdp.close();
-          launched.chrome?.unref?.();
-        } catch {}
-      }
     }
+    // Nothing to reap by hand: `openCdpSession` kills a dedicated browser it launched when the open
+    // fails (a temporary profile is nobody's to reuse). The previous version launched Chrome again in
+    // order to close it and hung there, which is how two runs never printed their failure at all.
     // Cleanup must not replace the failure that brought us here. A browser that will not confirm its exit
     // is worth reporting; it is not worth losing the diagnosis for, and this masked one for a whole run.
     await waitForChromeExit(port).catch((error) => {
@@ -282,11 +285,23 @@ function dirnameOf(path) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
-  const result = await runArtifactSmoke();
-  console.log(`CWS ARTIFACT SMOKE PASS ${result.releaseId}`);
-  console.log(`  archive ${result.archiveDigest} ${(result.archiveSize / 1024 / 1024).toFixed(2)} MiB · ${result.entries} entries`);
-  console.log(`  modules ${result.moduleCount} · stores ${result.workspaceStores} · ${result.scriptIds.join(',')}`);
-  console.log(`  outcomes ${Object.entries(result.outcomes).map(([site, status]) => `${site}:${status}`).join(', ')}`);
-  console.log(`  compare ${(result.elapsedMs / 1000).toFixed(1)}s · refine ${(result.refineElapsedMs / 1000).toFixed(1)}s · cancel ${(result.cancelElapsedMs / 1000).toFixed(1)}s · no mutation`);
-  console.log(`  cart ${(result.guardedElapsedMs / 1000).toFixed(1)}s · checkout ${(result.checkoutElapsedMs / 1000).toFixed(1)}s · no order`);
+  // A dedicated temporary browser that will not confirm its exit keeps node's event loop alive, and the
+  // failure then never reaches the terminal — one run spent 50 minutes proving that. So the report is
+  // printed here and the process leaves rather than waiting for a handle it already gave up on.
+  try {
+    const result = await runArtifactSmoke();
+    console.log(`CWS ARTIFACT SMOKE PASS ${result.releaseId}`);
+    console.log(`  archive ${result.archiveDigest} ${(result.archiveSize / 1024 / 1024).toFixed(2)} MiB · ${result.entries} entries`);
+    console.log(`  modules ${result.moduleCount} · stores ${result.workspaceStores} · ${result.scriptIds.join(',')}`);
+    console.log(`  outcomes ${Object.entries(result.outcomes).map(([site, status]) => `${site}:${status}`).join(', ')}`);
+    console.log(`  compare ${(result.elapsedMs / 1000).toFixed(1)}s · refine ${(result.refineElapsedMs / 1000).toFixed(1)}s · cancel ${(result.cancelElapsedMs / 1000).toFixed(1)}s · no mutation`);
+    console.log(`  cart ${(result.guardedElapsedMs / 1000).toFixed(1)}s · checkout ${(result.checkoutElapsedMs / 1000).toFixed(1)}s · no order`);
+    process.exit(0);
+  } catch (error) {
+    console.error(`CWS ARTIFACT SMOKE FAIL ${error instanceof Error ? error.message : String(error)}`);
+    for (let cause = error?.cause, depth = 0; cause !== undefined && depth < 4; cause = cause?.cause, depth += 1) {
+      console.error(`  caused by ${cause instanceof Error ? cause.stack ?? cause.message : String(cause)}`);
+    }
+    process.exit(1);
+  }
 }

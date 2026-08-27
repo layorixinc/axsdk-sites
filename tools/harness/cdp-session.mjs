@@ -215,7 +215,12 @@ export async function openCdpSession(options = {}, lib = undefined) {
     if (released) return;
     released = true;
     cdp.close();
-    if (reused !== true && launched !== undefined) launched.unref?.();
+    if (reused === true || launched === undefined) return;
+    // A shared dev browser is left up for the next call to reuse — that is why the launcher attaches.
+    // A DEDICATED one (`reuse: false`) is this run's alone: nobody will reuse it, and leaving it
+    // listening is how a cleanup path ends up launching Chrome again to close it and hanging there.
+    if (reuse === false) launched.kill?.();
+    else launched.unref?.();
   };
   try {
   const extensionDir = requestedExtensionDir ?? sdk.extensionDir;

@@ -945,6 +945,39 @@ test('close releases the browser it launched so the process can exit', async () 
   assert.equal(killed, 0, 'and the browser stays up for the next run to reuse');
 });
 
+/**
+ * A DEDICATED browser is different: `reuse: false` means the profile is this run's alone, and nobody is
+ * going to reuse it. Measured 2026-08-26 — the exact-artifact smoke failed to open a session, unref'd its
+ * temporary browser, and then the cleanup path launched Chrome again to close it and hung there; two runs
+ * spent 50 and 40 minutes never printing the failure. Releasing is right for the shared dev browser and
+ * wrong here, so a failed dedicated open kills what it started.
+ */
+test('a failed open of a dedicated browser kills it rather than leaving it listening', async () => {
+  const fake = fakeExtension();
+  let released = 0;
+  let killed = 0;
+  fake.chromeChild = { unref: () => { released += 1; }, kill: () => { killed += 1; } };
+  fake.chromeReused = false;
+  fake.lib.ensureExtension = async () => { throw new Error('backend did not open a session'); };
+
+  await assert.rejects(() => openSession(fake, { reuse: false }), /backend did not open a session/);
+  assert.equal(killed, 1, 'a temporary browser nobody will reuse is not left running');
+  assert.equal(fake.cdpToken.closed, true);
+});
+
+test('a failed open of the SHARED browser still only releases it', async () => {
+  const fake = fakeExtension();
+  let released = 0;
+  let killed = 0;
+  fake.chromeChild = { unref: () => { released += 1; }, kill: () => { killed += 1; } };
+  fake.chromeReused = false;
+  fake.lib.ensureExtension = async () => { throw new Error('extension setup failed'); };
+
+  await assert.rejects(() => openSession(fake), /extension setup failed/);
+  assert.equal(released, 1, 'the daily harness keeps its browser for the next call');
+  assert.equal(killed, 0);
+});
+
 test('a failed open releases the browser handle before it throws', async () => {
   const fake = fakeExtension();
   let released = 0;

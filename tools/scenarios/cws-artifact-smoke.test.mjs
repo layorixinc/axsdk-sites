@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { artifactSmokeVerdict } from './cws-artifact-smoke.mjs';
+import { artifactSmokeVerdict, stage } from './cws-artifact-smoke.mjs';
 
 const toolCalls = [{
   name: 'shopping_build_offer_screening',
@@ -154,4 +154,34 @@ test('store provisioning or a mutation makes the artifact smoke fail', () => {
 
   assert.equal(verdict.ok, false);
   assert.match(verdict.failures.join('\n'), /workspace stores|persisted Lua|mutation|reply/i);
+});
+
+/**
+ * A run of six live turns with 1,560 seconds of timeouts between them printed nothing until it was over.
+ * When it hung, the only evidence was a cleanup warning — so which turn stalled was unattributable, and
+ * the honest fix is the same one this repo already made for the commerce sweep: name the stage.
+ */
+test('a stage reports its name and how long it took', async () => {
+  const lines = [];
+  const value = await stage('comparison', async () => 'answered', { log: (line) => lines.push(line) });
+
+  assert.equal(value, 'answered');
+  assert.equal(lines.length, 2, 'one line when it starts, one when it ends — a start with no end IS the evidence');
+  assert.match(lines[0], /^→ comparison$/);
+  assert.match(lines[1], /^✓ comparison \d+\.\ds$/);
+});
+
+test('a stage that throws carries its name into the failure', async () => {
+  const lines = [];
+  await assert.rejects(
+    stage('checkout', async () => { throw new Error('deadline exceeded'); }, { log: (line) => lines.push(line) }),
+    /checkout: deadline exceeded/,
+  );
+  assert.match(lines.at(-1), /^✗ checkout \d+\.\ds/);
+});
+
+test('the failure keeps the original error rather than wrapping it away', async () => {
+  const original = new Error('rpc_timeout');
+  const caught = await stage('selection', async () => { throw original; }, { log: () => {} }).catch((error) => error);
+  assert.equal(caught.cause, original);
 });

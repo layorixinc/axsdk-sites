@@ -29,6 +29,26 @@ export const CART_SITES = {
     removeLabels: ['삭제'],
     confirmLabels: ['확인', '삭제'],
   },
+  '11st': {
+    home: 'https://www.11st.co.kr/',
+    // Values taken from the shipped site data (`_common/rpc/62_rpc_sites.lua`), so the tool and the
+    // product agree on where this store's cart lives.
+    cartHref: 'CartAction.tmall',
+    cartMarker: 'buy.11st.co.kr/cart',
+    removeLabels: ['삭제', '선택삭제'],
+    confirmLabels: ['확인', '삭제'],
+  },
+  gmarket: {
+    home: 'https://www.gmarket.co.kr/',
+    cartHref: '/cart',
+    cartMarker: 'cart.gmarket.co.kr',
+    // Measured 2026-08-27: the row control is `button.btn_del`; matching the WORD 삭제 instead pressed the
+    // "recently viewed" layer's own delete button 20 times and removed nothing (the cap caught it). A store
+    // that names its control gets used by name — word-based class, so §10 is satisfied.
+    removeSelector: 'button.btn_del',
+    removeLabels: ['삭제', '선택삭제'],
+    confirmLabels: ['확인', '삭제'],
+  },
   amazon: {
     home: 'https://www.amazon.com/',
     cartHref: '/gp/cart/view.html',
@@ -62,6 +82,17 @@ export function clearVerdict({ before, after, reason }) {
   return { ok: false, detail: `${after} item(s) left` };
 }
 
+const visibleBySelector = (selector) => `(() => [...document.querySelectorAll(${JSON.stringify(selector)})]
+  .filter((node) => node.getClientRects().length > 0).length)()`;
+
+const clickBySelector = (selector) => `(() => {
+  const hit = [...document.querySelectorAll(${JSON.stringify(selector)})]
+    .find((node) => node.getClientRects().length > 0);
+  if (!hit) return { clicked: false };
+  hit.click();
+  return { clicked: true, tag: hit.tagName };
+})()`;
+
 const visibleControls = (labels) => `(() => {
   const wanted = ${JSON.stringify(labels)};
   return [...document.querySelectorAll('div, a, button, span, input[type=submit]')].filter((node) => {
@@ -92,6 +123,32 @@ const clickByText = (labels) => `(() => {
  * Reaches the cart the way a person does — the store's own header link — then presses the remove control
  * until the row count stops changing. Returns evidence, never a claim.
  */
+
+/**
+ * Presses the first visible match with REAL input events.
+ *
+ * Measured 2026-08-27 on gmarket: 20 `Element.click()` calls on `button.btn_del` removed nothing (the cap
+ * caught it), because its cart is an SPA that listens for trusted pointer events. §13 records the same
+ * class of failure for a synthetic click on a submit button. CDP can dispatch the real thing.
+ */
+async function pressReal(page, selector) {
+  const box = await evaluatePage(page, `(() => {
+    const hit = [...document.querySelectorAll(${JSON.stringify(selector)})]
+      .find((node) => node.getClientRects().length > 0);
+    if (!hit) return null;
+    hit.scrollIntoView({ block: 'center' });
+    const rect = hit.getBoundingClientRect();
+    return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+  })()`);
+  if (!box) return { clicked: false };
+  for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+    await page.send('Input.dispatchMouseEvent', {
+      type, x: box.x, y: box.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1,
+    });
+  }
+  return { clicked: true };
+}
+
 export async function clearCart({ site, port, dryRun = false, survey = false, log = (line) => console.log(line) }) {
   const config = CART_SITES[site];
   if (!config) throw new Error(`no cart configuration for ${site}`);
@@ -138,11 +195,18 @@ export async function clearCart({ site, port, dryRun = false, survey = false, lo
   const { page } = await attachActive(options.cdp, options, { match: cartTarget.url.slice(0, 40) });
   created.push(page);
   log(`${site}: attached to ${String(cartTarget.url).slice(0, 60)}`);
+  const countExpression = config.removeSelector
+    ? visibleBySelector(config.removeSelector)
+    : visibleControls(config.removeLabels);
+  const pressExpression = config.removeSelector
+    ? clickBySelector(config.removeSelector)
+    : clickByText(config.removeLabels);
+
   try {
     // A row is a row because it offers its own remove control — measured on coupang, the row containers
     // are `twc-*` utility classes (build-generated, which §10 forbids depending on) while every visible
     // row carries exactly one 삭제.
-    const before = Number(await evaluatePage(page, visibleControls(config.removeLabels))) || 0;
+    const before = Number(await evaluatePage(page, countExpression)) || 0;
     let items = before;
     let pressed = 0;
     let reason = 'press';
@@ -175,28 +239,33 @@ export async function clearCart({ site, port, dryRun = false, survey = false, lo
       return { site, ok: null, survey: seen, before: null, after: null };
     }
     if (dryRun) {
-      const controls = Number(await evaluatePage(page, visibleControls(config.removeLabels))) || 0;
+      const controls = Number(await evaluatePage(page, countExpression)) || 0;
       return { site, ok: null, before, after: before, pressed: 0, controls, detail: 'dry run' };
     }
 
     for (;;) {
-      const controls = Number(await evaluatePage(page, visibleControls(config.removeLabels))) || 0;
+      const controls = Number(await evaluatePage(page, countExpression)) || 0;
       const action = nextAction({ items, controls, pressed });
       reason = action.reason;
       if (action.done) break;
-      const clicked = await evaluatePage(page, clickByText(config.removeLabels));
+      const clicked = config.removeSelector
+        ? await pressReal(page, config.removeSelector)
+        : await evaluatePage(page, pressExpression);
       if (!clicked?.clicked) { reason = 'no_control'; break; }
       pressed += 1;
       await new Promise((resolve) => setTimeout(resolve, 1500));
-      if (config.confirmLabels.length > 0) {
+      if (config.confirmSelector) {
+        await pressReal(page, config.confirmSelector).catch(() => undefined);
+        await new Promise((resolve) => setTimeout(resolve, 900));
+      } else if (config.confirmLabels.length > 0) {
         await evaluatePage(page, clickByText(config.confirmLabels)).catch(() => undefined);
         await new Promise((resolve) => setTimeout(resolve, 800));
       }
-      items = Number(await evaluatePage(page, visibleControls(config.removeLabels))) || 0;
+      items = Number(await evaluatePage(page, countExpression)) || 0;
       log(`  pressed ${pressed} → ${items} left`);
     }
 
-    const after = Number(await evaluatePage(page, visibleControls(config.removeLabels))) || 0;
+    const after = Number(await evaluatePage(page, countExpression)) || 0;
     const verdict = clearVerdict({ before, after, reason });
     return { site, ...verdict, before, after, pressed, reason };
   } finally {

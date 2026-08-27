@@ -2670,3 +2670,24 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   Worth keeping for its own sake: **the challenge that produced this came from the user, and the check
   that settled it was reading the permission-warning table** — one page, quoted, after a whole track had
   been planned around the opposite assumption.
+- **The release gate went green for the first time (2026-08-26), and the missing piece was one approved
+  push.** `rpc-package.mjs push . --app=browser-extension --modules-only` moved the backend registry
+  **125 -> 126** (26 modules, "serving exactly what this workspace builds"), after which `release:cws`
+  produced `dist/axsdk-extension-cdp-cws.zip` — 8.47 MiB, 54 entries, releaseId bound to that revision.
+  Verified by extracting the archive: no `key`/`update_url`, 7 permissions, no remote-source control in
+  the options page, 32 workspace assets / 26 modules, and `manifest.json`'s hash in the release manifest
+  equal to the extracted bytes — which is the strip-before-evidence ordering proving itself end to end.
+- **Listing surfaces are files in the repo, not prose typed at submission time.** `store/` is what gets
+  pasted into the dashboard (single purpose, listing copy, permission justifications) and `docs/` is what
+  the URLs serve through GitHub Pages (`Settings -> Pages -> main /docs`, repo already public):
+  `docs/privacy.html` and `docs/support.html` are the two URLs the dashboard requires, and
+  `homepage_url` now names the site. `npm run check:listing` asserts the five surfaces exist and
+  **reports** the lines still waiting on a person (`BIZ-CONFIRM`, 9 today) without failing — a
+  permanently red gate is one nobody reads — while `check:listing -- --submission` makes them fatal for
+  the day of the upload. The privacy page states only measured behaviour; backend retention, human
+  access and the sub-processor name are the outstanding ones.
+- **The Pages site described the wrong product.** `docs/index.md` was the community-script story (user
+  installs scripts from a URL), which R1 does not do — a reviewer reading the homepage next to the
+  listing would have found two different products, which is the §1 "bundle" finding in its cheapest
+  form. The homepage is now R1, and the four community pages sit under an explicit "next update"
+  heading rather than being deleted.

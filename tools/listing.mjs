@@ -16,6 +16,39 @@ export const LISTING_FILES = [
   'docs/support.md',
 ];
 
+
+/**
+ * The graphic assets the dashboard requires, and the size it requires them at.
+ *
+ * Read out of the PNG header rather than trusted: a capture taken at whatever window a developer had
+ * open looks identical in a file listing and is refused at upload. `tools/scenarios/store-screenshots.mjs`
+ * produces these from live turns, so they show what the product actually answers.
+ */
+export const LISTING_ASSETS = ['1-comparison.png', '2-refine.png', '3-choices.png', '4-cart.png'];
+const ASSET_WIDTH = 1280;
+const ASSET_HEIGHT = 800;
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+export function assertListingAssets(root) {
+  for (const file of LISTING_ASSETS) {
+    const path = join(root, 'store', 'assets', file);
+    let bytes;
+    try {
+      bytes = readFileSync(path);
+    } catch {
+      throw new Error(`listing screenshot is missing: store/assets/${file}`);
+    }
+    if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) {
+      throw new Error(`store/assets/${file} is not a PNG`);
+    }
+    const width = bytes.readUInt32BE(16);
+    const height = bytes.readUInt32BE(20);
+    if (width !== ASSET_WIDTH || height !== ASSET_HEIGHT) {
+      throw new Error(`store/assets/${file} is ${width}x${height}, and the store takes ${ASSET_WIDTH}x${ASSET_HEIGHT}`);
+    }
+  }
+}
+
 /** A line a person still has to answer. Countable on purpose — see `outstandingConfirmations`. */
 const CONFIRM = 'BIZ-CONFIRM';
 
@@ -63,6 +96,7 @@ export function assertSubmissionReady(root) {
 if (process.argv[1] && (await import('node:url')).fileURLToPath(import.meta.url) === (await import('node:path')).resolve(process.argv[1])) {
   const root = (await import('node:path')).resolve((await import('node:url')).fileURLToPath(new URL('.', import.meta.url)), '..');
   assertListingStructure(root);
+  assertListingAssets(root);
   const outstanding = outstandingConfirmations(root);
   console.log(`LISTING OK ${LISTING_FILES.length} surfaces`);
   // Reported, never fatal: a page waiting on a retention answer is honest, and a permanently red gate

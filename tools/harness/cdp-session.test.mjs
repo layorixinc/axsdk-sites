@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { existsSync } from 'node:fs';
+import { mkdtemp, readFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { openCdpSession } from './cdp-session.mjs';
 
 // The driver never touches the filesystem for credentials when the environment carries them.
@@ -45,14 +50,27 @@ function envelope(state, version = 0) {
  * - a host restart RE-READS the persisted chat: a reset that forgets to remove the chat key
  *   gets the old conversation (and the old backend session) back, exactly like the product.
  */
-function fakeExtension() {
+function fakeExtension({ screenshotData = 'fake-png-bytes' } = {}) {
   const storage = new Map();
   const pageGlobal = {}; // the options page's globalThis
   const cdpToken = {
     closed: false,
     sent: [],
+    // Params too, because a capture is only correct if the viewport it was taken at is the store's.
+    sentCalls: [],
     close() { this.closed = true; },
-    async send(method) { this.sent.push(method); return {}; },
+    async send(method, params, sessionId) {
+      this.sent.push(method);
+      this.sentCalls.push({ method, params, sessionId });
+      if (method === 'Target.getTargets') {
+        return { targetInfos: [{ type: 'page', targetId: 'page-target', url: 'https://www.amazon.com/' }] };
+      }
+      if (method === 'Target.attachToTarget') return { sessionId: 'page-session' };
+      if (method === 'Page.captureScreenshot') {
+        return screenshotData === '' ? {} : { data: Buffer.from(screenshotData).toString('base64') };
+      }
+      return {};
+    },
   };
   const calls = {
     ensureExtension: [], writeConfig: [], writeWorkspaceStores: [], cleared: 0, luaRequests: [],
@@ -1097,4 +1115,41 @@ test('a stalled turn is not made to carry an error store lookup', async () => {
     return true;
   });
   await session.close();
+});
+
+test('a screenshot forces the listing viewport, captures, and puts the metrics back', async () => {
+  // The store wants 1280x800 exactly, and the window a developer happens to have open is not that. So the
+  // override is part of the capture rather than a setup step someone remembers — and it has to be cleared,
+  // because the same browser keeps driving live turns afterwards.
+  const fake = fakeExtension();
+  const session = await openSession(fake);
+  const shot = join(await mkdtemp(join(tmpdir(), 'axsdk-shot-')), 'scene.png');
+
+  const answered = await session.screenshot({ path: shot });
+
+  assert.equal(answered.path, shot);
+  assert.equal(answered.width, 1280);
+  assert.equal(answered.height, 800);
+  const methods = fake.cdpToken.sentCalls.map((call) => call.method);
+  const override = methods.indexOf('Emulation.setDeviceMetricsOverride');
+  const capture = methods.indexOf('Page.captureScreenshot');
+  const cleared = methods.indexOf('Emulation.clearDeviceMetricsOverride');
+  assert.ok(override >= 0 && capture > override, 'the viewport must be set before the capture');
+  assert.ok(cleared > capture, 'the override must be cleared after the capture');
+  const metrics = fake.cdpToken.sentCalls[override].params;
+  assert.equal(metrics.width, 1280);
+  assert.equal(metrics.height, 800);
+  assert.equal(metrics.deviceScaleFactor, 1);
+  assert.deepEqual(await readFile(shot), Buffer.from('fake-png-bytes'));
+  await session.close().catch(() => {});
+});
+
+test('a capture that answers no data reports it instead of writing an empty file', async () => {
+  const fake = fakeExtension({ screenshotData: '' });
+  const session = await openSession(fake);
+  const shot = join(await mkdtemp(join(tmpdir(), 'axsdk-shot-')), 'scene.png');
+
+  await assert.rejects(session.screenshot({ path: shot }), /captureScreenshot/);
+  assert.equal(existsSync(shot), false);
+  await session.close().catch(() => {});
 });

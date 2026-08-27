@@ -2707,3 +2707,20 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   Live: Chrome refuses to load an extension whose placeholder cannot resolve, so a harness session that
   opens and answers a shopping turn is the proof — it did, and the archive carries
   `_locales/{en,ko}/messages.json` with the release manifest hashing both.
+- **Listing screenshots come from live turns, and the first set was unusable for the reason a staged one
+  would never reveal.** `tools/scenarios/store-screenshots.mjs` drives four real turns and captures each
+  at 1280×800 through a new `session.screenshot()` — the viewport override is part of the capture, since
+  the window a developer has open is not the store's size, and it is cleared afterwards because the same
+  browser keeps driving turns (two mutations pin that ordering). The first run produced four correctly
+  sized images of the product FAILING: a comparison that asked for a model name, a flow that restarted,
+  a cart that never got the pick, and Amazon's login wall. Fixing them was fixing the SCENES — an exact
+  model skips discovery, `미확인 포함` makes the folded row come back visibly, and the single-site gate
+  reads a bare `1번` where a sentence around it routes elsewhere.
+  What the images show, checked by looking at them: the widget renders the whole comparison window
+  (5 rows with 상품가 + 배송비 = 총액), and **Chrome's own "AXSDK is controlling this page / Stop" banner
+  is in every frame** — the visible-control story the permission justification makes, evidenced in the
+  listing itself. No account is signed in, so there is no PII to redact.
+  `check:listing` reads 1280×800 out of the PNG header rather than trusting the filename, because a
+  wrong-sized capture is indistinguishable in a file listing and is refused at upload.
+  One honest caveat is recorded as an outstanding answer rather than prose: the cart frame shows five
+  leftover items from earlier test runs, so it wants a re-capture on an empty cart.

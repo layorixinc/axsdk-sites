@@ -445,6 +445,42 @@ export async function openCdpSession(options = {}, lib = undefined) {
       return response?.release;
     },
 
+    /**
+     * A PNG of the tab this session drives, taken at the size the store asks for.
+     *
+     * The viewport override is part of the capture rather than a setup step: the window a developer
+     * happens to have open is not 1280x800, and a listing screenshot at the wrong size is rejected by
+     * the dashboard. It is cleared afterwards because the same browser keeps driving live turns.
+     */
+    async screenshot({ path, width = 1280, height = 800 } = {}) {
+      if (typeof path !== 'string' || path === '') throw new Error('screenshot needs a path');
+      const url = await pageUrl();
+      const targets = await cdp.send('Target.getTargets');
+      const target = (targets?.targetInfos ?? []).find((entry) => entry?.type === 'page' && entry?.url === url)
+        ?? (targets?.targetInfos ?? []).find((entry) => entry?.type === 'page' && entry?.url?.startsWith('http'));
+      if (target === undefined) throw new Error('screenshot found no page target');
+      const attached = await cdp.send('Target.attachToTarget', { targetId: target.targetId, flatten: true });
+      const pageSession = attached?.sessionId;
+      if (pageSession === undefined) throw new Error('screenshot could not attach to the page');
+      try {
+        await cdp.send('Emulation.setDeviceMetricsOverride', {
+          width, height, deviceScaleFactor: 1, mobile: false,
+        }, pageSession);
+        const shot = await cdp.send('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }, pageSession);
+        if (typeof shot?.data !== 'string' || shot.data === '') {
+          throw new Error(`Page.captureScreenshot answered no data for ${target.url}`);
+        }
+        const { mkdir, writeFile } = await import('node:fs/promises');
+        const { dirname } = await import('node:path');
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, Buffer.from(shot.data, 'base64'));
+        return { path, width, height, url: target.url };
+      } finally {
+        await cdp.send('Emulation.clearDeviceMetricsOverride', {}, pageSession).catch(() => {});
+        await cdp.send('Target.detachFromTarget', { sessionId: pageSession }).catch(() => {});
+      }
+    },
+
     /** Durable-style run of an AX_* command; resolves the command payload, not an envelope. */
     run: (command, args, { timeoutMs = LUA_TIMEOUT_MS } = {}) =>
       luaRequest('run', command, args, timeoutMs).then(payloadOfRun),

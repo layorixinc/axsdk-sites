@@ -119,7 +119,32 @@ Amazon, eBay, Walmart, AliExpress, Etsy, 쿠팡, 11번가, G마켓, SSG, 네이�
 - 카테고리: Shopping
 - 언어: 한국어, English — 매니페스트 이름·설명·툴바 툴팁은 `_locales/{en,ko}` 에서 오고(기본 `en`),
   `assertLocalizedManifest`가 빌드마다 두 로케일의 키 집합과 132자 상한을 검사한다.
-  대시보드의 **상세 설명**은 로케일 파일이 아니라 리스팅 입력이다 — <!-- BIZ-CONFIRM: 영어 상세 설명 번역 확정 -->
+  대시보드의 **상세 설명**은 로케일 파일이 아니라 리스팅 입력이다 — 두 언어를 아래에 함께 둔다.
+
+### 상세 설명 (English) — 확정 2026-08-27
+
+```
+AXSDK Shopping Assistant compares one product's total cost across the stores you choose.
+
+Tell it what you want to buy and which stores to check. It opens each store’s own search, reads the
+product name, price and shipping fee from the results, converts them to one currency, and shows a
+numbered comparison of the total cost — item price plus shipping, not just the sticker price. Rows whose
+shipping is unknown are folded away and counted, so a missing fee never looks like a free one.
+
+You choose by number. Only then does it add that one offer to that store’s cart, after re-reading the
+product page to confirm the model and price still match what you compared. It can then open the store’s
+checkout page so you can review the order.
+
+It never places an order and never pays. Payment and order placement are always yours.
+
+Supported stores: Amazon, Walmart, eBay, AliExpress, Etsy, Coupang, Naver Shopping, Gmarket, 11st, SSG.
+
+The assistant reads only the page you are on, and only while you are using it. It stores no contact
+details: this release has no memory feature.
+
+Privacy: https://layorixinc.github.io/axsdk-sites/privacy.html
+Support: https://layorixinc.github.io/axsdk-sites/support.html
+```
 
 ## URL
 

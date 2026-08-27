@@ -59,6 +59,9 @@ history, other tabs, bookmarks and cookies are not collected.
 3. **The store you are shopping** receives your search terms and the cart addition you approved — which is
    what a browser does anyway.
 
+**Subprocessor**: conversation text is passed to a language-model inference provider (model
+`openai/gpt-oss-120b`) and to no other third party.
+
 Data is **not sold**, not used for advertising or profiling, and not given to data brokers. This extension
 contains no affiliate links and injects no tracking parameters (that code was deleted from the product on
 2026-08-18).
@@ -69,7 +72,7 @@ contains no affiliate links and injects no tracking parameters (that code was de
 |---|---|---|
 | Local browser storage | Conversations, traces, settings | Until you clear them; removed with the extension |
 
-| AXSDK backend | Sessions and messages | <!-- BIZ-CONFIRM: retention period --> |
+| AXSDK backend | Sessions and messages | **30 days**, then deleted |
 
 This release stores **no contact details**. It has no memory feature: nothing you type is saved as a name,
 email, phone number or postal code, and no code path in the shipped package can save one. The single
@@ -80,7 +83,7 @@ contact detail — so under Limited Use there is nothing here to justify.
 
 - **Conversation**: clear it in the extension options.
 - **Everything local**: removing the extension removes it.
-- **Backend copies**: <!-- BIZ-CONFIRM: deletion request channel and turnaround -->
+- **Backend copies**: email <support@layorix.ai>. We delete them within **7 business days** and reply when done.
 
 ### Permissions
 
@@ -102,7 +105,11 @@ This extension complies with the Chrome Web Store **Limited Use** requirements:
 3. It is not used or transferred for advertising purposes, including personalization or retargeting.
 4. It is not used for creditworthiness or lending purposes.
 5. Humans do not read the data except with your consent, for security, to comply with law, or in
-   aggregated/anonymized form for operations. <!-- BIZ-CONFIRM: human access procedure -->
+   aggregated/anonymized form for operations.
+
+In practice there are **two** cases where a person reads a stored conversation: you asked for support and
+named it, or a security incident is being investigated. Both are limited to designated operators and are
+logged. No one reads it for advertising, profiling or model training.
 
 ### Contact
 
@@ -137,7 +144,8 @@ Questions and deletion requests: [Support](support.html)
 **판매·광고·프로파일링에 사용하지 않는다.** 데이터 브로커에 제공하지 않는다. 이 확장에는 어필리에이트
 링크나 추적 파라미터 삽입이 없다(해당 코드는 2026-08-18에 제품에서 삭제됐다).
 
-<!-- BIZ-CONFIRM: 백엔드 보관 기간, 사람에 의한 접근 조건, 하위 처리자(모델 공급자) 명칭을 확정해 이 절에 명시 -->
+**하위 처리자**: 대화 텍스트는 언어모델 추론을 위해 추론 사업자에게 전달된다(모델 `openai/gpt-oss-120b`).
+그 밖의 제3자에게는 전달되지 않는다. <!-- BIZ-CONFIRM: 추론 사업자명 한 단어 -->
 
 ## 얼마나 남아 있는가
 
@@ -145,7 +153,7 @@ Questions and deletion requests: [Support](support.html)
 |---|---|---|
 | 브라우저 로컬(`chrome.storage.local`) | 세션별 대화, 실행 흔적, 설정 | 당신이 지울 때까지. 확장 삭제 시 함께 사라진다 |
 
-| AXSDK 백엔드 | 세션과 메시지 | <!-- BIZ-CONFIRM: 보관 기간 --> |
+| AXSDK 백엔드 | 세션과 메시지 | **30일**, 그 후 삭제 |
 
 이 릴리스는 **연락처를 저장하지 않는다.** 기억 기능이 없다 — 이름·이메일·전화번호·우편번호로 저장되는
 값이 없고, 출시 패키지에는 저장할 코드 경로 자체가 없다. 단일 목적은 상품 비교와 구매이며
@@ -156,7 +164,7 @@ Questions and deletion requests: [Support](support.html)
 
 - **대화**: 확장 옵션에서 지운다.
 - **전부**: 확장을 삭제하면 로컬 저장분이 모두 사라진다.
-- **백엔드 보관분**: <!-- BIZ-CONFIRM: 삭제 요청 채널(이메일 또는 폼)과 처리 기간 -->
+- **백엔드 보관분**: <support@layorix.ai> 로 요청하면 **영업일 7일 이내** 삭제하고 완료를 회신한다.
 
 ## 권한을 왜 요구하는가
 
@@ -181,7 +189,11 @@ Questions and deletion requests: [Support](support.html)
 3. 광고 목적(개인화·재타겟팅·광고 성과 측정)으로 사용하거나 이전하지 않는다.
 4. 신용도 평가나 대출 목적에 사용하지 않는다.
 5. 사람이 데이터를 읽는 것은 다음의 경우로 한정한다: 사용자 동의, 보안 목적, 법적 요구, 그리고
-   집계·익명화된 형태의 서비스 운영. <!-- BIZ-CONFIRM: 사람 접근 절차 확정 -->
+   집계·익명화된 형태의 서비스 운영.
+
+실제로 사람이 저장된 대화를 읽는 경우는 **둘뿐이다**: 사용자가 지원을 요청하며 그 대화를 지목한 경우와,
+보안 사고를 조사하는 경우. 두 경우 모두 지정된 운영자에 한정되고 기록된다. 광고·프로파일링·모델 학습을
+위해 읽지 않는다.
 
 ## 연락
 

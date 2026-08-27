@@ -16,7 +16,7 @@ The Chrome Web Store listing's **Support URL** points here.
 ### Contact
 
 - Bugs and questions: <https://github.com/layorixinc/axsdk-sites/issues>
-- Privacy and data deletion: <!-- BIZ-CONFIRM: public contact email -->
+- Privacy and data deletion: <support@layorix.ai> (we reply within 7 business days)
 
 What makes an issue answerable in one round: which store, what you typed, the sentence on screen
 verbatim, and the extension version (bottom of the options page).
@@ -61,7 +61,7 @@ What is collected and where it goes: [Privacy policy](privacy.html).
 ## 문의
 
 - 버그·질문: GitHub 이슈 — <https://github.com/layorixinc/axsdk-sites/issues>
-- 개인정보·데이터 삭제 요청: <!-- BIZ-CONFIRM: 공개 연락 이메일 확정 -->
+- 개인정보·데이터 삭제 요청: <support@layorix.ai> (영업일 7일 이내 회신)
 
 이슈를 열 때 다음이 있으면 원인이 한 번에 잡힌다: 어떤 스토어였는지, 무엇을 입력했는지, 화면에 나온
 문장 그대로, 그리고 확장 버전(옵션 페이지 하단).

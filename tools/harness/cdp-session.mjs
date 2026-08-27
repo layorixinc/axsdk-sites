@@ -187,6 +187,8 @@ export async function openCdpSession(options = {}, lib = undefined) {
     url = DEFAULT_URL,
     port = DEFAULT_PORT,
     reuse = true,
+    // Overridable so a test can bound it, and so a runner that knows the backend is slow can say so.
+    backendTimeoutMs = BACKEND_TIMEOUT_MS,
     provision = true,
     extensionDir: requestedExtensionDir,
   } = options ?? {};
@@ -289,6 +291,32 @@ export async function openCdpSession(options = {}, lib = undefined) {
    * and this driver never saw a status. Summarised, never dumped: the status and the code are what a reader
    * needs, and a whole payload is how a secret ends up in a log.
    */
+  /**
+   * What the worker LOGGED, as a few short lines.
+   *
+   * Measured on a fresh profile: the errors store existed and was empty while the debug store held the
+   * story, so a diagnosis reading only errors reported silence about a worker that had plenty to say.
+   * Summarised the same way — type, status, one detail — because a whole payload is how a secret reaches
+   * a log.
+   */
+  const readRecordedEvents = async () => {
+    const stored = await stateGet(`s${groupId}:axsdk:debug-events`).catch(() => undefined);
+    if (stored === undefined) return undefined;
+    let entries;
+    try {
+      const state = JSON.parse(stored)?.state;
+      entries = Array.isArray(state?.events) ? state.events : Array.isArray(state) ? state : undefined;
+    } catch { entries = undefined; }
+    if (entries === undefined || entries.length === 0) return undefined;
+    return entries.slice(-4).map((entry) => {
+      if (entry === null || typeof entry !== 'object') return String(entry).slice(0, 80);
+      const parts = [entry.type ?? entry.event ?? entry.name, entry.status, entry.code,
+        entry.detail ?? entry.message ?? entry.reason]
+        .filter((value) => value !== undefined && value !== null && value !== '');
+      return parts.join(' ').slice(0, 120);
+    });
+  };
+
   const readRecordedErrors = async () => {
     const stored = await stateGet(`s${groupId}:axsdk:errors`).catch(() => undefined);
     if (stored === undefined) return undefined;
@@ -391,10 +419,29 @@ export async function openCdpSession(options = {}, lib = undefined) {
 
   // The backend session id only exists once `POST /sessions` was accepted — the difference
   // between "a worker is running" and "the extension is actually talking to the backend".
-  const opened = await poll(async () => {
+  // The bare version of this named two things to check and offered evidence about neither, which cost the
+  // artifact smoke three runs. The diagnosis costs nothing until the wait actually runs out.
+  const opened = await pollWithDiagnosis(async () => {
     const now = await readChat();
     return now.sessionId === undefined ? undefined : now;
-  }, 'the backend to open a session (check the credentials and the base url)', BACKEND_TIMEOUT_MS);
+  }, 'the backend to open a session (check the credentials and the base url)', backendTimeoutMs, async () => {
+    const recorded = await readRecordedErrors();
+    const events = await readRecordedEvents();
+    const keys = await sdk.evaluate(cdp, optionsSession,
+      'chrome.storage.local.get(null).then((all) => Object.keys(all).join(","))').catch(() => undefined);
+    const said = [
+      recorded === undefined ? undefined : `recorded: ${recorded}`,
+      events === undefined ? undefined : `logged: ${events.join(' | ')}`,
+    ].filter((part) => part !== undefined);
+    return {
+      text: said.length === 0
+        ? `The extension said nothing; its stores are ${keys ?? '(unreadable)'}.`
+        : `The extension ${said.join('; ')}.`,
+      recorded,
+      events,
+      storeKeys: typeof keys === 'string' ? keys.split(',') : undefined,
+    };
+  });
 
   const session = {
     sessionId: opened.sessionId,

@@ -2747,3 +2747,39 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   light pixels under 25%, saturated pixels over 50%, and an edge share at half size between 0.2% and 20%
   so a tile of thin lines cannot pass. Looking at the first render is what caught the two real defects a
   test could not: the sparkle was clipped by the right edge and the cursor tail read as detached.
+- **The exact-artifact smoke could not be run for three attempts, and none of them printed why.** Runs of
+  50, 40 and 20 minutes ended with a cleanup warning and nothing else. Three separate defects, each fixed
+  with its own test:
+  1. **The `finally` threw over the failure.** `waitForChromeExit` raised inside cleanup and replaced the
+     original error — the diagnosis was destroyed by the code meant to tidy up after it. It warns now.
+  2. **Cleanup launched Chrome in order to close it.** When acquisition failed the `else` branch called
+     `launchChrome` again and hung there. It only reaches for a browser that is actually listening, and
+     `openCdpSession` now **kills** a dedicated browser it launched when the open fails: releasing is
+     right for the shared dev browser and wrong for a temporary profile nobody will reuse.
+  3. **Nothing named the stage.** Six live turns with 1,560 s of timeouts between them printed nothing
+     until the end, so a hang was unattributable. `stage()` prints a start line and an end line — a start
+     with no end IS the diagnosis — and the CLI prints the cause chain and exits instead of waiting for a
+     handle it already gave up on. The same run now fails in **75 s naming its stage**.
+- **`key` stripped from the archive broke the smoke, which is the cutover finding it should be.**
+  `ensureExtension` derived the extension id from `manifest.key`, and the release archive no longer has
+  one, so the smoke died at 2.6 s. A keyless load's id belongs to Chrome and `Extensions.loadUnpacked`
+  answers with it; the cost is stated where it is paid — with no id to probe first, a keyless build
+  installs every time.
+- **The session-open timeout now carries evidence, and the first thing it proved was its own gap.** The
+  wait said "check the credentials and the base url" and offered nothing about either. It now reports what
+  the extension **recorded** (`s<group>:axsdk:errors`) and what it **logged**
+  (`s<group>:axsdk:debug-events`) — the second half was added because the first run showed an EMPTY errors
+  store, so "recorded nothing" would have been silence about a worker that might have been talking. Both
+  turned out empty, which is itself the finding: **the extension records nothing when a session never
+  opens.**
+- **Three hypotheses were refuted by measurement before the real one was found.** (a) The backend
+  refusing: `POST /axsdk/v2/sessions` answers **200 with a session id**. (b) The extension origin: the
+  same POST answers 200 for the store id, for a path-derived id, and for `http://localhost`, echoing each
+  in CORS. (c) The keyless load: injecting the pinned `key` back into the extracted archive fails
+  **identically**.
+  **The cause is `provision: 'config-only'` in a fresh profile**, measured by splitting one variable at a
+  time: archive + config-only → fails; dev dist + config-only → fails the same way; dev dist + full
+  provisioning → **opens in 11.4 s**. So it is neither the artifact nor the archive: a fresh profile that
+  is given credentials but no workspace stores never gets a backend session, and says nothing about it.
+  Next step is the service worker's own console in that state — the stores are empty, so the evidence is
+  not in them.

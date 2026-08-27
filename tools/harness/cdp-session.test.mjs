@@ -93,6 +93,14 @@ function fakeExtension({ screenshotData = 'fake-png-bytes' } = {}) {
     },
     // Queue of turns; each turn is a list of chat-store snapshots served one per read.
     turns: [],
+    /** A worker that starts but never gets a session out of the backend — what a fresh profile looked like. */
+    openBackend: true,
+    /** What such a worker records for itself. The harness clears session-owned stores on open, so a seeded
+     *  one is gone before the wait begins; the extension writing it is both faithful and what happens. */
+    backendError: undefined,
+    /** What it logged on the way there. Measured on a fresh profile: the errors store was EMPTY while the
+     *  debug store had the story, so a diagnosis that reads only errors says "recorded nothing". */
+    backendEvents: undefined,
     // What `launchChrome` hands back. Default: a browser that was already running, so nothing is ours.
     chromeChild: undefined,
     chromeReused: true,
@@ -130,6 +138,16 @@ function fakeExtension({ screenshotData = 'fake-png-bytes' } = {}) {
    * keeps its messages and its backend session; a removed key starts fresh on a new one.
    */
   function spawnBackend(target) {
+    if (!fake.openBackend) {
+      writeChat(target, [], undefined);
+      if (fake.backendError !== undefined) {
+        storage.set(`s${target.id}:axsdk:errors`, envelope({ errors: [fake.backendError] }));
+      }
+      if (fake.backendEvents !== undefined) {
+        storage.set(`s${target.id}:axsdk:debug-events`, envelope({ events: fake.backendEvents }));
+      }
+      return;
+    }
     const stored = storage.get(`s${target.id}:axsdk:chat`);
     if (typeof stored === 'string') {
       let state;
@@ -1185,4 +1203,56 @@ test('a capture that answers no data reports it instead of writing an empty file
   await assert.rejects(session.screenshot({ path: shot }), /captureScreenshot/);
   assert.equal(existsSync(shot), false);
   await session.close().catch(() => {});
+});
+
+/**
+ * The artifact smoke spent three runs (50, 40 and 20 minutes) never learning why a fresh profile did not
+ * reach the backend, and the sentence it finally printed — "Timed out after 60000ms waiting for the
+ * backend to open a session (check the credentials and the base url)" — names two things to check and no
+ * evidence about either. The same treatment the send path already has: on the timeout path only, say what
+ * the extension recorded and what state exists.
+ */
+test('a session that never opens says what the extension recorded', async () => {
+  const fake = fakeExtension();
+  // A worker that never publishes a session id: the chat store exists, with no session.
+  fake.openBackend = false;
+  fake.backendError = { status: 402, code: 'LimitExceeded', detail: 'monthly quota' };
+
+  const failure = await openSession(fake, { backendTimeoutMs: 300 }).catch((error) => error);
+
+  assert.match(failure.message, /backend to open a session/);
+  assert.match(failure.message, /402/);
+  assert.match(failure.message, /LimitExceeded/);
+  assert.equal(failure.recorded?.includes('402'), true, 'the fact travels on the error, not only in prose');
+});
+
+test('a session that never opens and recorded nothing says exactly that', async () => {
+  const fake = fakeExtension();
+  fake.openBackend = false;
+
+  const failure = await openSession(fake, { backendTimeoutMs: 300 }).catch((error) => error);
+
+  assert.match(failure.message, /backend to open a session/);
+  assert.match(failure.message, /said nothing/);
+  assert.equal(failure.recorded, undefined);
+});
+
+/**
+ * Measured on a fresh profile 2026-08-26: the session-open timeout said "recorded nothing" while
+ * `s<group>:axsdk:debug-events` existed alongside an EMPTY errors store. A diagnosis that reads only the
+ * errors store therefore reports silence about a worker that was logging the whole time.
+ */
+test('a session that never opens carries what the worker logged, not only what it errored', async () => {
+  const fake = fakeExtension();
+  fake.openBackend = false;
+  fake.backendEvents = [
+    { type: 'session:create', status: 'start' },
+    { type: 'session:create', status: 'failed', detail: 'fetch failed' },
+  ];
+
+  const failure = await openSession(fake, { backendTimeoutMs: 300 }).catch((error) => error);
+
+  assert.match(failure.message, /session:create/);
+  assert.match(failure.message, /fetch failed/);
+  assert.ok(Array.isArray(failure.events), 'the events travel as a fact, not only in the sentence');
 });

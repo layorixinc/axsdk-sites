@@ -47,6 +47,9 @@ at any time. Before anything irreversible it reads the actual label on the butto
 Supported stores
 Amazon, eBay, Walmart, AliExpress, Etsy, Coupang, 11st, Gmarket, SSG, Naver Shopping (read-only)
 
+This release is an unlisted distribution for users who already have an AXSDK account (API key).
+Consumer sign-in is coming; until then the extension asks for a key in its options page.
+
 Privacy: https://layorixinc.github.io/axsdk-sites/privacy.html
 Support: https://layorixinc.github.io/axsdk-sites/support.html
 ```
@@ -104,6 +107,9 @@ Compares total cost with shipping across stores, then adds the product you chose
 지원 스토어
 Amazon, eBay, Walmart, AliExpress, Etsy, 쿠팡, 11번가, G마켓, SSG, 네이버쇼핑(읽기 전용)
 
+이 릴리스는 AXSDK 계정(API 키)이 있는 사용자를 위한 비공개 배포입니다. 소비자 로그인은 준비 중이며,
+그때까지는 옵션 화면에서 키를 입력합니다.
+
 개인정보: https://layorixinc.github.io/axsdk-sites/privacy.html
 지원: https://layorixinc.github.io/axsdk-sites/support.html
 ```
@@ -156,5 +162,10 @@ GitHub Pages 설정: 저장소 **Settings → Pages → Deploy from a branch →
 
 ## 배포 (Distribution 탭)
 
-- Visibility: **결정 D3에 따름** — 소비자 로그인이 없으므로 첫 릴리스는 비공개(Unlisted)를 권고
+- Visibility: **Unlisted** (결정 D3 = c, 2026-08-26). 검색·목록에 노출되지 않고 URL을 아는 사람만 설치한다.
+  Private/테스터가 아니라 Unlisted로 게시하는 이유: 공식 이미지 문서가 *"Images from 'Draft' or 'Trusted
+  testers' items will not show an image status. You will need to publish the item in order to get your
+  promo image approved"* 라고 적고 있어, 타일 심사를 받으려면 게시가 필요하다.
+- **상세 설명에 전제를 명시한다**: 이 릴리스는 AXSDK 계정(API 키)이 있는 사용자를 위한 비공개 배포다.
+  소비자 로그인은 공개 등재의 조건으로 남는다(P0-2).
 - 지역: All regions

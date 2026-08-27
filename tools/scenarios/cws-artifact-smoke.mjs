@@ -246,22 +246,34 @@ export async function runArtifactSmoke() {
     if (session) {
       await session.shutdown().catch(() => {});
     } else {
-      // Acquisition can fail after Chrome launched but before a session object was returned.
-      try {
-        const launched = await browserSession.launchChrome({
-          profileName: chromeLaunch.PROFILE_NAME,
-          profileRoot,
-          port,
-        });
-        await launched.cdp.send('Browser.close').catch(() => {});
-        launched.cdp.close();
-        launched.chrome?.unref?.();
-      } catch {}
+      // Acquisition can fail after Chrome launched but before a session object was returned. Only reach for
+      // it when something is actually listening: launching a browser in order to close it is how a cleanup
+      // path creates the very process it is trying to reap.
+      const listening = await fetch(`http://127.0.0.1:${port}/json/version`, { signal: AbortSignal.timeout(500) })
+        .then(() => true).catch(() => false);
+      if (listening) {
+        try {
+          const launched = await browserSession.launchChrome({
+            profileName: chromeLaunch.PROFILE_NAME,
+            profileRoot,
+            port,
+          });
+          await launched.cdp.send('Browser.close').catch(() => {});
+          launched.cdp.close();
+          launched.chrome?.unref?.();
+        } catch {}
+      }
     }
-    await waitForChromeExit(port);
+    // Cleanup must not replace the failure that brought us here. A browser that will not confirm its exit
+    // is worth reporting; it is not worth losing the diagnosis for, and this masked one for a whole run.
+    await waitForChromeExit(port).catch((error) => {
+      console.error(`WARN ${error instanceof Error ? error.message : String(error)}`);
+    });
     if (previousProfileRoot === undefined) delete process.env.AXSDK_PROFILE_ROOT;
     else process.env.AXSDK_PROFILE_ROOT = previousProfileRoot;
-    await rm(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });
+    await rm(temp, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 }).catch((error) => {
+      console.error(`WARN could not remove ${temp}: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 }
 

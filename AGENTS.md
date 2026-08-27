@@ -2946,3 +2946,33 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   itself worked (`present_quote_collection: resume` → `verify_request: ok`), and the cancel case fails
   downstream because the flow had already ended, so "취소" reached no node. Reproduced identically on the
   pre-edit document, and the other two searches in the same run succeeded.
+- **P0-1 and D8 are build-time removals now, and nothing was deleted (2026-08-27).** The shipped bundle
+  carried `raw.githubusercontent.com` **15 times** and the options page carried "Install from a manifest
+  URL" — while the installer forces remote sources off by CONFIG and `CWS_RELEASE_DESIGN.md` D8 recommends
+  excluding the URL install from R1. A reviewer reads the bundle and clicks the page, so config is not the
+  answer; deleting the code is not either, because both are real development features.
+  `AXSDK_CWS_BUILD=1` (set by `build:cws` through `scripts/cws-build.mjs` — a shell-inline `VAR=1` is not
+  portable, npm hands it to cmd on Windows) defines `__AXSDK_REMOTE_SOURCES__` and
+  `__AXSDK_COMMUNITY_URL_INSTALL__` false, `scripts/cws-strip.mjs` removes every `cws:strip:*` fenced block
+  from the BUILT tree, and two gates prove it on the tree that ships: `assertNoRemoteSourceCode` (bundle
+  wide — the capability must be gone) and `assertNoUrlInstallSurface` (markup only — the control must be
+  unclickable; the handler stays compiled, which is what "hide, do not delete" means).
+  Measured: store build **0** host references and **0** control in markup; development build unchanged at
+  **15** and **2**. Artifact smoke on the stripped package: PASS `sha256:fde24f40…`, comparison 39.8 s,
+  cart 24.7 s, checkout 47.6 s with no order.
+- **A module constant folded to `false` does not reach the function bodies that need it.** The first
+  attempt read the flag once into `const REMOTE_SOURCES` and guarded with `if (!REMOTE_SOURCES)`; the
+  identifier was replaced correctly (0 left in the extension bundle) and **all 15 strings survived**,
+  because the value crosses two bundlers (core builds to `dist/lib.js`, then the extension bundles that)
+  and neither propagates a `var` into a function. The condition has to be literal AT the branch:
+  `if (typeof __AXSDK_REMOTE_SOURCES__ !== 'undefined' && !__AXSDK_REMOTE_SOURCES__) return null;` — and
+  the `typeof` half is what keeps a build that defines nothing on the development path.
+- **`need()` would have taken the whole community section down with the stripped block.** The options page
+  reads the four URL-install elements as REQUIRED; removing the markup makes `need` throw, and the catalog
+  surface dies with it. They are read through `optional()` now — a detached node keeps every downstream
+  write working while the control is absent from the page.
+- **`userScripts` stays in the manifest, and that is not the from-url path.** Measured:
+  `chrome.userScripts` is what EXECUTES an installed community script (8 call sites in the service
+  worker), so hiding the URL install does not remove the permission. Dropping it would mean hiding the
+  community catalog too — a wider decision than D8 (`TODO.md` §15). Also corrected: the `from-url` hits
+  counted earlier in the workers were `fromUrl` on the durable NAVIGATION state, not the install path.

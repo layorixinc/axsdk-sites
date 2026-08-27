@@ -345,14 +345,16 @@ T3·D1·T7은 끝났고, 남은 것은 T5(결정 D3)와 T6의 사람 답변 9건
 - [x] 업로드 ZIP = `release:cws`가 검증·자기추출·재검증한 바이트 — releaseId `sha256:8fb64675…`가 백엔드
       **revision 127** 에 바인딩 (D5 승인 후 모듈 푸시 완료, `unusedBackendModules` 5건 기록)
 - [x] dist에 원격 소스 **컨트롤** 0 — 게이트가 증명 (`assertNoRemoteSourceControls`)
-- [ ] **dist에 원격 소스 코드가 남아 있다 (P0-1)** — 측정: `raw.githubusercontent.com` **15회**
-      (`service-worker.js`·`assets/session-worker-*.js`·`widget.js` 각 5) + fengari 132회. 능력은
-      `axsdk-core/src/sites.ts`의 GitHub raw URL 빌더/검증이고, 인스톨러가 설정으로 끄지만 번들에는 남는다.
-      기존 게이트는 **HTML의 토글만** 본다 — 번들 문자열은 검사하지 않는다
-- [ ] **community `from-url` 설치 표면이 R1 산출물에 있다 (D8은 제외 권고)** — 측정:
-      `options/options.html`의 "Install from a manifest URL", `from-url` 코드 8회씩
-      (service-worker·session-worker·widget), 매니페스트에 `userScripts` 권한. 정책 파일은
-      `trust.arbitraryUrlImport: false`
+- [x] **dist에 원격 소스 코드 0 (P0-1) — 빌드타임 제거, 코드는 그대로** — `AXSDK_CWS_BUILD=1`이
+      `__AXSDK_REMOTE_SOURCES__`를 false로 정의해 GitHub raw URL 빌더/검증이 접힌다. 측정:
+      스토어 빌드 `raw.githubusercontent.com` **0** (이전 15) · 개발 빌드는 **15** 그대로.
+      게이트 `assertNoRemoteSourceCode`가 번들 전체를 검사한다. fengari(Lua 인터프리터)는 남는다 —
+      실행할 원격 텍스트가 없으면 인터프리터 자체는 원격 코드가 아니다
+- [x] **community `from-url` 설치 표면 숨김 (D8) — 마크업에서 제거, 핸들러는 컴파일된 채 도달 불가**
+      — `cws:strip:url-install` 펜스를 `scripts/cws-strip.mjs`가 빌드 산출물에서 제거하고
+      `assertNoUrlInstallSurface`가 마크업으로 증명한다. 측정: 스토어 빌드 컨트롤 **0** · 개발 빌드 **2**.
+      `userScripts` 권한은 남는다 — 커뮤니티 스크립트 **실행**이 쓰는 권한이고, 그걸 빼려면 카탈로그까지
+      숨기는 더 넓은 결정이 필요하다(`TODO.md` §15)
 - [ ] 데이터 사용 공시 체크박스와 Limited Use 확약 (대시보드 입력) · 백엔드 보관기간·사람 접근·하위 처리자명 확정
       — `check:listing`이 남은 **12건**을 이름으로 센다
 - [x] 대시보드 문안 5종이 영어·한국어 양쪽 (게이트: assertBilingualCopy) — 심사자가 읽는 단일 목적·권한 소명·프라이버시가 영어로 존재

@@ -209,15 +209,17 @@ the gates now pin) or a narrowed app document/app id is created for the store bu
 
 ## 14. The backend module set no longer matches the shipped package
 
-**Status: open, blocks `release:cws`; measured 2026-08-27.**
+**Status: closed 2026-08-27 by the cart-removal pushes.**
 
-`release:cws` refuses with `backend module drift: stale _common.66_rpc_navigate` — the bluemoonsoft cutover
-changed that module and the app revision the release binds to still carries the old bytes. The artifact
-smoke passes because it synthesises its own backend evidence for a transient candidate.
+`release:cws` refused with `backend module drift: stale _common.66_rpc_navigate` — the bluemoonsoft cutover
+changed that module and the app revision the release binds to still carried the old bytes.
 
-**Next**: push the runtime modules to the app the release binds to, then re-run `release:cws`. The five
-modules the store profile dropped stay at the backend and are recorded as `unusedBackendModules` — inert,
-because the flow document is what names modules.
+Closed by doing what the entry named: the removal work pushed runtime modules five times
+(`rpc-package.mjs push . --app=browser-extension --modules-only`, revisions 127 → 136), and
+`npm run release:cws` now builds — `CWS RELEASE sha256:14abc6c6ba27`, backend `browser-extension`
+revision 136, 21 runtime modules, archive 8.24 MiB / 48 entries. `verify --modules-only` reports
+"serving exactly what this workspace builds" for all 26 modules. The five modules the store profile drops
+stay at the backend as `unusedBackendModules` — inert, because the flow document is what names modules.
 
 ## 15. `community_script` is routable in the store package and is not in the sentence
 

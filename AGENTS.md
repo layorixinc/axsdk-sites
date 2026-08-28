@@ -58,6 +58,7 @@ FLOWS_IMPROVEMENTS.md         # measured authoring review of both flow documents
 CWS_LAUNCH_PLAN.md            # Chrome Web Store launch blockers + owners, quoted from current policy
 CWS_PRODUCT_READINESS_REVIEW.md # end-user CWS readiness verdict, live evidence, and TDD gate order
 CWS_RELEASE_DESIGN.md         # R1 embeds every pack, R2 turns on remote packs: tracks, gates, decisions
+EXTERNAL_PACK_TASK_PLAN.md    # load a pack from a published registry and route to its task, measured
 TODO.md                       # deferred-work register: why not now, what unblocks it
 AFFILIATE_DESIGN.md           # retired M1 affiliate design; historical until server + policy gates exist
 SITE_DATA_SPLIT_DESIGN.md     # selectors as remote DATA so a store fix does not need a review

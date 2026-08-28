@@ -1,8 +1,8 @@
 # External Pack Task — Design and Work Plan
 
-**Status:** design measured 2026-08-27. Scenario decided: comparative service quotes (§9). **X0 is closed —
-all four measurements are in, and two of them corrected the design** (§9.2 rewrote the scenario twice; X0-3
-moved X2 ahead of X4). Next action is X1.
+**Status:** design measured 2026-08-27. Scenario decided: comparative service quotes (§9). **X0 closed**
+(all four measured; two corrected the design) and **X1 done** (`6a74428`, `f2dac2b` in `axsdk-sdk-js`).
+Next action is X2 — publish the signed registry, which now also unblocks the first live `pack.catalog`.
 **Scope:** load a Pack from a **published external registry** into the shipping CDP extension, and route a
 user request to the **new agentic task it carries**, without changing the submitted CWS artifact.
 
@@ -190,20 +190,35 @@ green, then live-verify. No package is "done" on a green unit test alone.
    read as a price. 크몽 publishes fixed prices per listing. Sites that answer only behind a login or a bot
    wall are dropped, never worked around.
 
-### X1 — SDK: the op wire and two build defines (1–2 days)
+### X1 — SDK: the op wire and two build defines — **DONE 2026-08-27**
 
-- `src/ops/table.ts`: add `pack.catalog`, `pack.invoke` to the forwarded set. Test first: an op named as an
-  `extra` stays out of `LOCAL_OPS` (that test already exists for the inverse; extend it).
-- `background/service-worker.ts`: handlers delegating to the existing `routePackTaskCommand` /
-  `handlePackTaskActionMessage` path. No new authority, no new tab logic.
-- `src/packs/config.ts`: `PACK_REGISTRIES` and `PACK_TASK_EXECUTOR` gain values **only** under a new
-  `__AXSDK_PACK_EXTERNAL__` define, exactly as `manual-qa` does today (`packs/manual-qa.ts` is the pattern:
-  presentation authority lives in the define, so a compiled-out caller cannot leak the literal — that
-  regression is recorded in MV-0A).
-- `scripts/pack-external-vite.ts` beside `pack-manual-vite.ts`; ordinary builds define the surface closed.
-- **Acceptance:** `bun test src/packs src/ops` green; a probe turn from the harness reaches
-  `pack.catalog` and gets an empty list on a profile with no Pack installed (not an error — absent is not
-  failure); with `__AXSDK_PACK_EXTERNAL__` off, both ops answer a closed refusal.
+Two commits in `axsdk-sdk-js`: `6a74428` (the wire) and `f2dac2b` (the defines).
+
+**The wire.** `src/ops/packs.ts` is new: `pack.catalog` and `pack.invoke`, forwarded to the realm that
+owns the broker, merged into the dispatcher's host ops beside `tabs.*`. Authority does not move — the
+caller supplies a binding id and a JSON argument string, while the session id, tab group and pinned
+composition digest are derived from the same pin the session worker used, and dispatch goes through
+`routePackTaskCommand` so composition, binding and executor-lease checks all run before the broker
+re-authorizes. `pack.*` is in `needsNoTab`, because a Pack command runs in the executor document rather
+than the tab a frame names. A refusal is a field; only a caller mistake is `bad_params`.
+
+**The defines.** `scripts/pack-external-vite.ts` emits `__AXSDK_PACK_EXTERNAL__` /
+`__AXSDK_PACK_EXTERNAL_CONFIG__`, both configs spread it, `src/packs/external.ts` re-parses it in the
+realm that uses it, and `packs/config.ts` takes `PACK_REGISTRIES` / `PACK_TASK_EXECUTOR` from it — a
+manual-QA build still wins. Both gates apply the runtime's own predicates, so a loopback registry and a
+directory executor URL are refused at build time with the field named. `assertNoPackExternalSurface`
+refuses the origin, executor URL, registry id and both markers anywhere in the dist tree, and `main`
+runs it.
+
+**Measured:** 1,359 tests / 2,559 assertions pass, typecheck clean, and a real `bun run build` produces a
+dist tree with **zero** external markers. Fifteen mutations across the two commits are each caught,
+including a caller-supplied digest being trusted, the production dispatcher losing the wire, the config
+ignoring the external registries, and the build path dropping the CWS gate.
+
+**Open, deliberately:** the catalog carries no route `description`/`examples` for a command that has
+none of its own — `CommandContractV1` has no description field, so the classifier in X5 matches command
+names and the composition's `routes`, exactly as `75_rpc_community.lua` does. And no live turn has
+reached `pack.catalog` yet: with no registry published there is nothing to install, which is X2.
 
 ### X2 — SITES: publish a signed registry (2 days)
 

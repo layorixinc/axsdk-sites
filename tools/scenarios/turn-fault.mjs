@@ -33,4 +33,5 @@ export const FLOW_TOOLS = {
   checkout: ['checkout', 'enter_checkout_site', 'shopping_checkout'],
   quote: ['request_service_quote', 'search_service', 'browse_service_candidates', 'open_quote', 'quote'],
   memory: ['memory', 'capture_memory_clause', 'write_captured_memory', 'recall_saved_contact'],
+  cartRemove: ['cart_open_lines', 'cart_present_lines', 'cart_remove_line'],
 };

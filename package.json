@@ -22,6 +22,7 @@
     "test:playground": "node --test \"tools/harness/*.test.mjs\" \"tools/playground/*.test.mjs\"",
     "test:commerce": "bun tools/test_multi_store_total_cost.mjs && bun tools/test_representative_commerce_sites.mjs",
     "test:commerce:sites": "bun tools/test_representative_commerce_sites.mjs",
+    "test:cart-remove:live": "node tools/scenarios/cart-remove.mjs",
     "test:commerce:live": "node tools/scenarios/multi-store-total-cost.mjs",
     "test:commerce:live:all": "node tools/scenarios/commerce-all-sites.mjs",
     "test:commerce:live:expanded": "node tools/scenarios/multi-store-total-cost.mjs --cancel --stores=11st,walmart",

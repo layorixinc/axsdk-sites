@@ -285,3 +285,26 @@ live quote suite from **5/7 to 2/7** (3 turns reached no node, 3 were misrouted 
 them and moving the rewrite into `STORE_PROMPT_OVERRIDES` returned it to **5/7**. The overrides are keyed
 on the exact authored text, so a rewording fails the build instead of silently missing, and
 `build-store-flows.test.mjs` pins the authored sentences verbatim.
+
+## 19. The shipped single-site ADD did not land while a plain click did
+
+**Status: open, measured 2026-08-27 on the dev profile; not the removal, and not attributable from here.**
+
+Same profile, minutes apart:
+
+| path | result |
+|---|---|
+| `shopping_single_site` → `shopping_add_to_cart` | `add_error: add_to_cart_pending`, cart count stays **0** (twice; once as `cart_missing_product` before the cart scope was fixed) |
+| `#add-to-cart-button` clicked in a tab the runner opens | `/cart/smart-wagon?newItems=…,1`, `nav-cart-count: 1`, confirmation panel present (3/3) |
+
+So amazon accepts a synthetic click on that control and the flow's add did not reach the cart. The
+earlier part of the same session had a real guarded add working, so it is not categorically broken.
+Candidates, none confirmed: the add fires before the buy box is interactive (the product page's first
+document is a shell — `AGENTS.md` §13, the same read that made a full cart look empty), a refusal in the
+identity/price/variation pre-checks reported as `pending`, or amazon declining repeated automated adds.
+
+**Next**: instrument `AX_RPC_CART.add_to_cart` to publish WHICH step it stopped at (control found /
+click returned / count moved / confirmation read) instead of one `add_to_cart_pending` for four facts —
+§13's "`add_to_cart_pending` used to answer for three different facts" rule, applied one level deeper.
+The removal is unaffected and live-verified 3/3; `cart-remove.mjs` reports which path seeded its cart so
+a green removal can never be read as a green add.

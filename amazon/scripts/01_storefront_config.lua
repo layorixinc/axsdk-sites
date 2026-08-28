@@ -103,13 +103,47 @@ local CONFIG = {
   -- Cart LINES, measured live 2026-08-26 on a populated cart: `.sc-list-item` = 5, exactly the five rows,
   -- and all five [data-asin] elements are those rows. The same page carried 60 `a[href*="/dp/"]` of which
   -- **26 were inside recommendation carousels**, so a document-wide id probe there confirms a suggestion.
-  cart_item_scopes = { ".sc-list-item", "#sc-active-cart .sc-list-item" },
+  --
+  -- The unscoped `.sc-list-item` that stood beside this is GONE, and it was not a redundancy. Measured live
+  -- 2026-08-27: amazon renders **"Saved for later" with the same `.sc-list-item[data-asin]` markup and its
+  -- own `input[value="Delete"]`**, on the same page, below the cart. With the unscoped scope the id probe
+  -- confirmed against a SAVED row — so an add could be reported for an item sitting in the wrong list, and
+  -- a removal pressed that list's Delete: the page's own announcements read "<title> was removed from Saved
+  -- for Later." while the cart's own count stayed 0. Only the container tells the two lists apart.
+  cart_item_scopes = { "#sc-active-cart .sc-list-item" },
   cart_count_selectors = { "#nav-cart-count", "#sc-subtotal-label-activecart" },
+  -- Removing ONE line. Measured live 2026-08-27 on a populated cart: five delete controls, one per row,
+  -- reachable as `input[value="Delete"]` and as `[data-feature-id="item-delete-button"]`. `{id}` is where
+  -- the product id goes — a specific line can only be pressed through a selector that carries its id,
+  -- because the runtime's `query_all` answers text with no per-element selector.
+  --
+  -- Every one of them is scoped to `#sc-active-cart` for the reason above: the same control exists in the
+  -- saved list, and a press that lands there mutates a list the user never named.
+  cart_remove_selectors = {
+    '#sc-active-cart .sc-list-item[data-asin="{id}"] input[value="Delete"]',
+    '#sc-active-cart [data-asin="{id}"] input[value="Delete"]',
+    '#sc-active-cart [data-asin="{id}"] [data-feature-id="item-delete-button"] input',
+    '#sc-active-cart [data-asin="{id}"] [data-action="delete"] input',
+  },
   -- Checkout REVIEW only. `place_order_selectors` is read to tell the user whether the button is there;
   -- nothing clicks it. The cart-page keys are here too because reaching the review starts from the cart.
   cart_ready_selector = '#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart',
   cart_empty_selector = "#sc-empty-cart",
-  cart_item_selector = '.sc-list-item[data-asin]',
+  -- Scoped for the same measured reason as `cart_item_scopes`: unscoped, this listed "Saved for later"
+  -- rows as cart lines, and the window offered the user a number for a product that was not in the cart.
+  cart_item_selector = '#sc-active-cart .sc-list-item[data-asin]',
+  -- Where a cart LINE states its own id. Measured live: the five `.sc-list-item` rows are exactly the five
+  -- `[data-asin]` elements on the page, so the row IS the element that names the product. A cart the
+  -- listing surface cannot identify line by line is refused by name rather than rendered as empty.
+  cart_item_id_attr = "data-asin",
+  -- What separates a cart LINE from the panel amazon leaves in its place after a delete. Measured live
+  -- 2026-08-27 INSIDE `#sc-active-cart`, in the instant after a removal that worked: the removed line's
+  -- `data-asin` is still there, `input[value="Delete"]` count is **0**, and one `Undo` control has
+  -- appeared — so the id probe answered "still in the cart" and every successful removal reported
+  -- `remove_unconfirmed`. Pointing the other way, an ADD could be confirmed against the Undo panel of a
+  -- line that had just been removed. A line that is IN the cart carries its own remove control; the panel
+  -- does not. The word "Removed" is not usable: `dom` resolves standard CSS only, and it is locale-bound.
+  cart_active_line_filter = ':has(input[value="Delete"])',
   cart_subtotal_selectors = { "#sc-subtotal-amount-activecart", "#sc-subtotal-label-activecart" },
   checkout_button_selectors = {
     'input[name="proceedToRetailCheckout"]',

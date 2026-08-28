@@ -109,6 +109,89 @@
     }
   },
   {
+    "name": "cart_open_lines",
+    "description": "Read the cart of the store the user is on and carry its lines to the turn that shows them. Touches nothing.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "cart_present_lines",
+    "description": "Render the cart's lines as one numbered window, pause on it, and read the user's answer deterministically.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [],
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "cart_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "choice_stage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "cart_remove_line",
+    "description": "Remove ONE approved line from the cart. Never adds, never enters checkout, never places an order.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product_id"
+      ],
+      "properties": {
+        "site": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "product_id": {
+          "type": "string"
+        },
+        "cart_approval": {
+          "type": "string",
+          "enum": [
+            "user_confirmed_removal"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "checkout",
     "description": "Navigate to the cart and open the checkout REVIEW page so the user can read the order total, address and payment method. Never places an order.",
     "parameters": {

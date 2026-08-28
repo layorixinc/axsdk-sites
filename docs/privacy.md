@@ -59,8 +59,12 @@ history, other tabs, bookmarks and cookies are not collected.
 3. **The store you are shopping** receives your search terms and the cart addition you approved — which is
    what a browser does anyway.
 
-**Subprocessor**: conversation text is passed to a language-model inference provider (model
-`openai/gpt-oss-120b`) and to no other third party.
+**Subprocessor**: conversation text is passed to **OpenRouter** (model `openai/gpt-oss-120b`) for
+language-model inference. OpenRouter is a broker, so it forwards that request to an upstream inference
+provider. No other third party receives it.
+
+If you configure your own model key (BYOK), the text goes to the provider that key points at — that
+choice is yours.
 
 Data is **not sold**, not used for advertising or profiling, and not given to data brokers. This extension
 contains no affiliate links and injects no tracking parameters (that code was deleted from the product on
@@ -144,8 +148,12 @@ Questions and deletion requests: [Support](support.html)
 **판매·광고·프로파일링에 사용하지 않는다.** 데이터 브로커에 제공하지 않는다. 이 확장에는 어필리에이트
 링크나 추적 파라미터 삽입이 없다(해당 코드는 2026-08-18에 제품에서 삭제됐다).
 
-**하위 처리자**: 대화 텍스트는 언어모델 추론을 위해 추론 사업자에게 전달된다(모델 `openai/gpt-oss-120b`).
-그 밖의 제3자에게는 전달되지 않는다. <!-- BIZ-CONFIRM: 추론 사업자명 한 단어 -->
+**하위 처리자**: 대화 텍스트는 언어모델 추론을 위해 **OpenRouter**(모델 `openai/gpt-oss-120b`)에
+전달된다. OpenRouter는 중계 사업자이므로, 그 요청은 다시 상위 추론 사업자에게 전달된다. 그 밖의
+제3자에게는 전달되지 않는다.
+
+자신의 모델 키를 설정한 경우(BYOK), 대화 텍스트는 그 키가 가리키는 공급자에게 전달된다 — 그 선택은
+사용자의 것이다.
 
 ## 얼마나 남아 있는가
 

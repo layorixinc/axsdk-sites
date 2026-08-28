@@ -126,6 +126,14 @@ planner:
     is an ANSWER, whatever else it looks like. Use replace_current only when the message names a DIFFERENT
     product or a different task (a service quote, checkout, memory, farewell).
 
+    CART REMOVAL FOLLOW-UP: if activeFlow=cart_remove_item and activeNode is present, the cart's own lines
+    are on screen numbered and the latest message is the user answering it. Always use continue_current with
+    that flow and copy the reply verbatim into segments and state.requestText — a bare number ("2번", "3"),
+    a refusal ("취소", "아니요", "됐어"), or anything else. Replacing the flow throws away the listing whose
+    numbers the user is about to pick from, and a refusal belongs to this flow's own cancel branch, which
+    states that nothing was removed. A message that names a DIFFERENT task (a purchase, a service quote,
+    checkout, memory, farewell) is the only replace_current here.
+
     Also set conversationSummary (brief running summary) and latestMessageInterpretation (your reading of the latest message).
 
 
@@ -206,6 +214,16 @@ router:
         - 주문할게
         - 장바구니 결제
         - checkout
+    - intent: cart_remove_item
+      entry: cart_remove_item.open
+      description: Remove an item that is already in the shopping cart of the store
+        the user is on. Shows the cart's own lines numbered and removes only the
+        one the user picks. Never adds and never places an order.
+      examples:
+        - 장바구니에서 하나 빼줘
+        - 카트에 담은 마우스 삭제해줘
+        - remove an item from my cart
+        - 장바구니 정리해줘
     - intent: memory
       entry: memory.handle
       description: Save, delete, list, read, or search explicitly requested memory.
@@ -1383,6 +1401,84 @@ flows:
           (login_required, cart_empty, checkout_unavailable, checkout_pending, captcha_required), say the
           checkout could not be completed and state the reason briefly. ALWAYS state clearly that NO order has
           been placed. Do NOT invent addresses, totals, or payment details.
+  cart_remove_item:
+    goal: Remove ONE line the user names from the cart of the store they are on.
+      Reads the cart, shows it numbered, and removes only the line the user
+      picks. Never adds, never enters checkout, never places an order.
+    state:
+      site: null
+      cart_state: null
+      cart_count: null
+      choice_stage: null
+      product_id: null
+      product_title: null
+      cart_approval: null
+      remove_status: null
+      remove_error: null
+    nodes:
+      open:
+        kind: action_contract
+        id: cart_open_lines
+        description: In-engine entry hop that reads the cart of the open store, so the
+          flow's first step is not a remote call.
+        inputSelector: [ site ]
+        next:
+          show: present
+          empty: nothing_to_remove
+          error: report
+        fallback: { invalidNext: error, exhaustedNext: error }
+      present:
+        # No model node in this loop, deliberately. §13 records a live turn where the user typed 취소 and an
+        # offer was ADDED TO CART because a model gate re-sent the previous turn's "3번"; the presenter
+        # renders, pauses on its own question, and classifies the reply itself.
+        kind: action_contract
+        id: cart_present_lines
+        description: Render the cart's lines numbered, pause on that question, and read
+          the user's answer.
+        inputSelector:
+          - requestText
+          - userMessages
+          - cart_state
+          - choice_stage
+        next:
+          ask: present
+          remove: remove
+          cancel: cancelled
+          error: report
+        fallback: { invalidNext: error, exhaustedNext: error }
+      remove:
+        kind: action_contract
+        id: cart_remove_line
+        description: Press the remove control of the ONE line the user picked and report
+          what the store's cart says afterwards.
+        inputSelector: [ site, product_id, cart_approval ]
+        next:
+          done: report
+          error: report
+        fallback: { invalidNext: error, exhaustedNext: error }
+      nothing_to_remove:
+        kind: terminal
+        inputSelector: [ site, cart_count ]
+        respond: |-
+          Reply in the user's language: the store's cart is empty, so there was nothing to remove. State
+          that nothing was changed. Do NOT invent items.
+      cancelled:
+        kind: terminal
+        inputSelector: [ site ]
+        respond: |-
+          Reply in the user's language: the removal was cancelled and NOTHING was removed from the cart. Do
+          not re-list the cart and do not ask again.
+      report:
+        kind: terminal
+        inputSelector: [ site, remove_status, remove_error, product_title, cart_count ]
+        respond: |-
+          Reply in the user's language, using the Flow state JSON. If remove_status is "removed", confirm
+          that item (product_title when present) is no longer in the cart and state cart_count when present.
+          If remove_status is "already_absent", say that line was not in the cart, so nothing was changed.
+          Otherwise say the item could NOT be removed and state remove_error briefly
+          (approval_required, remove_not_configured, remove_control_missing, remove_unconfirmed,
+          cart_read_not_configured, login_required, captcha_required). ALWAYS make clear that nothing was
+          ordered. Do NOT claim a removal the state does not report.
   shopping_multi_store_total_cost:
     goal: Discover and lock one grounded product identity, compare only equivalent
       live offers across explicitly selected supported commerce sites by
@@ -4883,6 +4979,140 @@ flowTools:
       properties:
         candidates: { type: [ array, "null" ] }
 
+  cart_open_lines:
+    description: Read the cart of the store the user is on and carry its lines to the
+      turn that shows them. Touches nothing.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.62_rpc_sites",
+          "_common.67_rpc_cart",
+          "_common.74_rpc_cart_view"
+        ]
+      rpc:
+        allow: [ nav.navigate, dom.get_location_href, dom.exists, dom.get_text, dom.query_all ]
+        opTimeoutMs: 2000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_CART_VIEW.open(args)
+        end
+    output:
+      next: result.next
+      site: result.site
+      cart_count: result.cart_count
+      cart_state: result.cart_state
+      remove_error: result.error
+      remove_status: result.status
+    parameters:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        site: { type: [ string, "null" ] }
+  cart_present_lines:
+    description: Render the cart's lines as one numbered window, pause on it, and read
+      the user's answer deterministically.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.62_rpc_sites",
+          "_common.67_rpc_cart",
+          "_common.74_rpc_cart_view"
+        ]
+      rpc:
+        # Rendering and classifying a reply touch no page. The compiler refuses an empty allow-list, so
+        # this names the cheapest read there is and the script never calls it.
+        allow: [ dom.get_location_href ]
+        deadlineMs: 30000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_CART_VIEW.present(args)
+        end
+    output:
+      next: result.next
+      question: result.question
+      choice_stage: result.choice_stage
+      cart_state: result.cart_state
+      cart_count: result.cart_count
+      site: result.site
+      product_id: result.product_id
+      product_title: result.product_title
+      # The marker the mutation requires, written by the turn the user chose in.
+      cart_approval: result.cart_approval
+      remove_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      # Nothing is required: this is projected from flow state and the first pass has no reply at all. A
+      # required key state does not carry is REJECTED before the script runs.
+      required: []
+      properties:
+        # UNDECLARED IS DROPPED: selected but never declared, "취소" never reaches the script.
+        requestText: { type: [ string, "null" ] }
+        userMessages: { type: [ array, "null" ], items: { type: string } }
+        cart_state: { type: [ string, "null" ] }
+        choice_stage: { type: [ string, "null" ] }
+  cart_remove_line:
+    description: Remove ONE approved line from the cart. Never adds, never enters
+      checkout, never places an order.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.62_rpc_sites", "_common.67_rpc_cart" ]
+      rpc:
+        allow:
+          [
+            nav.navigate,
+            dom.get_location_href,
+            dom.exists,
+            dom.get_text,
+            dom.get_attr,
+            dom.click
+          ]
+        opTimeoutMs: 2000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_CART.remove_from_cart(args)
+        end
+    output:
+      next: result.next
+      site: result.site
+      cart_count: result.cart_count
+      remove_status: { if: [ { var: result.removed }, "removed", { var: result.status } ] }
+      remove_error: result.error
+    effect: mutation
+    consent: required
+    idempotent: true
+    # The gate is `present`, where the user picked THIS line out of the cart's own listing. The platform
+    # refuses a mutation adapter with no `require`, and this one is SATISFIABLE because the value is a
+    # literal that gate writes into state — never `{ product_id: true }`, which compares by EQUALITY and
+    # demands the id BE the boolean true (§13).
+    require: { cart_approval: user_confirmed_removal }
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ product_id ]
+      properties:
+        site: { type: [ string, "null" ] }
+        product_id: { type: string }
+        cart_approval: { type: string, enum: [ user_confirmed_removal ] }
   shopping_add_to_cart:
     description: Add the picked product to the cart with the requested quantity.
       Navigates to the product page, revalidates the price, clicks Add to Cart,

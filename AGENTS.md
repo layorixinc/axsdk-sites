@@ -144,9 +144,18 @@ The extension also ships **default form tools** present on every site: `AX_get_f
 Every production commerce, memory, navigation, sitemap, and Thumbtack action is a
 `kind: runtime` flow tool whose `modules:` list names these files. `61_rpc_storefront.lua` is the one
 storefront reader; `62_rpc_sites.lua` is generated from the ten site configs; `67_rpc_cart.lua` and
-`68_rpc_checkout.lua` own cart mutation and order-free checkout review; `64`/`65` own Thumbtack; `66` and
+`68_rpc_checkout.lua` own cart mutation and order-free checkout review; `74_rpc_cart_view.lua` owns the
+cart LISTING surface the removal flow pauses on (render + deterministic reply reading, no page writes);
+`64`/`65` own Thumbtack; `66` and
 `69`–`73` own navigation, widgets, memory, ZIP, sitemap, and offer persistence. The unavailable affiliate
 module was removed from the launch surface. There is no second site-local command stack.
+
+**Removing a cart line** (`cart_remove_item`, 2026-08-27): `cart_open_lines` reads the store's cart,
+`cart_present_lines` renders it numbered and PAUSES on that question, and `cart_remove_line` presses the
+one line the user picked (`effect: mutation`, `require: { cart_approval: user_confirmed_removal }` written
+by the turn the user chose in). No model node stands between the numbers and the press. Only amazon
+declares the removal keys (`cart_remove_selectors`, `cart_item_id_attr`, `cart_active_line_filter`); every
+other store is refused BY NAME rather than guessed at. Live gate: `npm run test:cart-remove:live`.
 
 ### `thumbtack/scripts/` — **gone.** Thumbtack runs entirely in the runtime
 Nothing durable is left on thumbtack.com. The page detector, the search, the results filter, the quote
@@ -2976,3 +2985,35 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   worker), so hiding the URL install does not remove the permission. Dropping it would mean hiding the
   community catalog too — a wider decision than D8 (`TODO.md` §15). Also corrected: the `from-url` hits
   counted earlier in the workers were `fromUrl` on the durable NAVIGATION state, not the install path.
+- **A cart page holds MORE THAN ONE list, and an unscoped selector mutated the wrong one.** Amazon renders
+  "Saved for later" below the cart with the SAME `.sc-list-item[data-asin]` markup and its own
+  `input[value="Delete"]`. With `.sc-list-item` among `cart_item_scopes` (it was, unscoped, beside the
+  scoped one) three things followed, all measured live 2026-08-27: the listing offered rows that were not
+  in the cart ("장바구니 5건" for a cart holding one), the press landed in the saved list — the page's own
+  announcements read "<title> **was removed from Saved for Later**." while the cart count stayed 0 — and
+  an ADD could be confirmed against a row sitting in a list nobody named. Only the container tells them
+  apart, so every amazon cart key is scoped to `#sc-active-cart` now and the unscoped scope is deleted.
+  A guarded mutation that can reach a second list is not guarded.
+- **The row a store leaves in place after a delete keeps its id and loses its control.** Measured INSIDE
+  `#sc-active-cart` in the instant after a removal that worked: the removed line's `data-asin` is still
+  there, `input[value="Delete"]` is **0**, and one `Undo` has appeared. So the id probe answered "still in
+  the cart" and every successful removal reported `remove_unconfirmed` (three for three), while the same
+  shape could confirm an add for a line just removed. `cart_active_line_filter` is the store's own
+  statement of what a live row has that the panel does not; the word "Removed" is unusable (`dom` resolves
+  standard CSS only, and it is locale-bound). Both readings that produced the earlier, wrong version of
+  this finding were taken PAGE-WIDE across the two lists — measure per region or measure nothing.
+- **`session.pageHtml()` can answer the SHELL, and counting rows there reports an empty cart.** Measured:
+  one moment after `open()` the amazon cart is 128 KiB with `nav-cart-count: 5`, zero rows and zero delete
+  controls; the body arrives ~1s later at 615-640 KiB. `sc-active-cart` is NOT a settle marker — it
+  appears in the shell's own scripts. The live runner settles on a row control or an explicit empty state
+  (`cartBodyRendered`). This blocked its two mutation cases and reported 1/3 for a reason that was not the
+  product; the same class also explains why `wait_for("body")` after a product nav is not a wait for the
+  add button (the buy box arrives on the second read).
+- **[OPEN] the shipped single-site ADD answered `add_to_cart_pending` while a plain click landed the item.**
+  Measured 2026-08-27, same profile, minutes apart: `shopping_add_to_cart` → `add_error:
+  add_to_cart_pending` with the cart's own count staying 0 (twice), and a `#add-to-cart-button` click in a
+  tab the runner opens → `/cart/smart-wagon?newItems=…,1`, `nav-cart-count: 1`, confirmation panel
+  present (three for three). So amazon accepts a synthetic click and the flow's add did not land — NOT
+  attributable from here, and not the removal: the removal is live-verified 3/3 against a cart seeded that
+  way. `cart-remove.mjs` seeds through the shipped flow first and says which path seeded, so a green
+  removal run can never be read as a green add.

@@ -156,6 +156,9 @@ function R.cart_contains(config, product_id)
   end
   if on_cart then
     local id = tostring(product_id or ""):gsub('["\\]', "")
+    -- Each scope names the cart's own container. Measured live 2026-08-27: amazon renders "Saved for later"
+    -- with the same `.sc-list-item[data-asin]` markup and its own Delete control, so an unscoped scope
+    -- confirmed an add against a row in a DIFFERENT list — the store is what tells them apart, not us.
     local scopes = config.cart_item_scopes or {}
     if id ~= "" and #scopes > 0 then
       -- One selector per scope, all four id shapes inside it: a cart line states the id as a link to the
@@ -164,6 +167,10 @@ function R.cart_contains(config, product_id)
       for index = 1, #scopes do
         local scope = tostring(scopes[index] or "")
         if scope ~= "" then
+          -- ...and only rows that are still IN it. A store may leave the removed line in place as an undo
+          -- panel keeping its id (amazon does, measured); the store declares what a live row has that the
+          -- panel does not.
+          scope = scope .. tostring(config.cart_active_line_filter or "")
           parts[#parts + 1] = scope .. ' a[href*="' .. id .. '"]'
           parts[#parts + 1] = scope .. ' [data-product-id="' .. id .. '"]'
           parts[#parts + 1] = scope .. ' [data-item-id="' .. id .. '"]'
@@ -458,5 +465,198 @@ function R.add_to_cart(args)
     confirmation = confirmed
       and (first_text(config.confirmation_text_selectors or {}) or "Added to cart") or nil,
     cart_url = confirmed and here() or nil,
+  }
+end
+
+--- One label per cart line: the ROW'S OWN TEXT, cut.
+---
+--- No store declares a title selector for a cart LINE, and inventing one would be a selector nobody
+--- measured (§10). The row text rides in the same batched `query_all` that fetches the id, so the label
+--- costs nothing extra and cannot drift from the row it names.
+function R.line_label(text)
+  local label = trim(text)
+  if not label then return nil end
+  if #label <= 90 then return label end
+  return label:sub(1, 90)
+end
+
+--- The cart's own lines, in the order the page renders them.
+---
+--- A store with no measured line selector answers nil rather than an empty list: "this cart is empty" and
+--- "nobody measured this cart" are different facts, and the second one must not be rendered as the first.
+function R.cart_lines(config, limit)
+  local selector = trim(config.cart_item_selector)
+  local attr = trim(config.cart_item_id_attr)
+  if not selector or not attr then return nil end
+  -- Only rows still in the cart: an undo panel keeps the id and loses the remove control, and listing it
+  -- would offer the user a number for a product they have already taken out.
+  selector = selector .. tostring(config.cart_active_line_filter or "")
+  local rows = probe(function()
+    return dom.query_all(selector, { text = true, root_id = { attr = attr } }, limit or 12)
+  end)
+  if type(rows) ~= "table" then return nil end
+  local out, seen = {}, {}
+  for index = 1, #rows do
+    local row = rows[index]
+    if type(row) == "table" then
+      local id = trim(row.root_id)
+      -- Responsive duplicates render the same line twice (§10); the id is what makes them one line.
+      if id and not seen[id] then
+        seen[id] = true
+        out[#out + 1] = { product_id = id, title = R.line_label(row.text) }
+      end
+    end
+  end
+  return out
+end
+
+--- The selectors that can press ONE cart line, built from the store's templates.
+---
+--- A specific line is reachable only through a selector that carries its id: the runtime's `query_all`
+--- answers `{ text }` with no per-element selector, so "the delete control of the row that names B0TEST"
+--- has to be expressible in CSS or it cannot be pressed at all. Each template names `{id}`.
+function R.remove_selectors(config, product_id)
+  local id = tostring(product_id or ""):gsub('["\\]', "")
+  local out = {}
+  for index = 1, #(config.cart_remove_selectors or {}) do
+    local template = tostring(config.cart_remove_selectors[index] or "")
+    if template ~= "" then
+      out[#out + 1] = (template:gsub("{id}", id))
+    end
+  end
+  return out
+end
+
+--- Stands on the store's cart and reports what stopped it, or nil when it got there.
+---
+--- Reading the cart and removing a line need the SAME arrival: resolve the store, move only when the page
+--- is not already there, and read the wall on the page we actually landed on. Two copies of that would be
+--- two places for a wall to go unclassified.
+local function reach_cart(config)
+  local function on_cart()
+    local href = tostring(here() or "")
+    for index = 1, #(config.cart_url_markers or {}) do
+      if href:find(config.cart_url_markers[index], 1, true) then return true end
+    end
+    return false
+  end
+
+  if not on_cart() then
+    local cart_url = trim(config.cart_url)
+    if not cart_url then return { error = "cart_not_configured" } end
+    probe(function() return nav.navigate(cart_url) end)
+    -- Named target, or the wait spends its whole ceiling on a navigation that already committed (§13).
+    probe(function()
+      return nav.wait_for_navigation({ url = cart_url, timeout = 15000, interval = 250 })
+    end)
+    wait_for("body", config.cart_timeout or 10000)
+  end
+
+  local kind, reason = R.access_error(config, here())
+  if kind == "blocked" then return { error = reason, status = "blocked" } end
+  if kind == "login" then return { error = "login_required", status = "login_required" } end
+  return nil
+end
+
+--- Resolves the store from the argument or from the open page.
+local function cart_config(args)
+  if type(args.config) == "table" then return args.config end
+  local site = trim(args.site) or R.site_for_href(here())
+  local config = site and type(RPC_SITES) == "table" and RPC_SITES[site] or nil
+  if config then return config end
+  return nil, trim(args.site) and "site_not_ported" or "missing_site"
+end
+
+--- Reads the cart so the user can be shown what is in it. Touches nothing.
+function R.read_cart(args)
+  args = type(args) == "table" and args or {}
+  local config, missing = cart_config(args)
+  if not config then return { next = "error", error = missing } end
+
+  local stopped = reach_cart(config)
+  if stopped then
+    return { next = "error", site = config.site, error = stopped.error, status = stopped.status }
+  end
+
+  local lines = R.cart_lines(config)
+  if not lines then
+    -- A store whose cart lines nobody measured is refused BY NAME. Rendering "0건" here would state that
+    -- the cart is empty on the strength of a selector that was never written.
+    return { next = "error", site = config.site, error = "cart_read_not_configured" }
+  end
+  if #lines == 0 then
+    return { next = "empty", site = config.site, cart_count = R.cart_count(config) }
+  end
+  return { next = "ok", site = config.site, lines = lines, cart_count = R.cart_count(config) }
+end
+
+--- Removes ONE line the user asked to remove. Never adds, never checks out, never orders.
+---
+--- The approval marker is checked first and costs no round trip: a call that should not touch the page
+--- must not touch it. And the SITE decides whether the line went — §13 records what reading our own click
+--- back instead cost the add path (`added = true` on a cart that never received the item).
+function R.remove_from_cart(args)
+  args = type(args) == "table" and args or {}
+  if args.cart_approval ~= "user_confirmed_removal" then
+    return { next = "error", removed = false, error = "approval_required" }
+  end
+
+  local config, missing = cart_config(args)
+  if not config then return { next = "error", removed = false, error = missing } end
+
+  local product_id = R.product_id(config, args.product_id or args.id)
+    or trim(args.product_id) or trim(args.id)
+  if not product_id then
+    return { next = "error", site = config.site, removed = false, error = "missing_product_id" }
+  end
+
+  -- A store nobody measured is refused BY NAME, before anything moves. Guessing a control here would
+  -- press whatever happens to carry the word: measured on gmarket, the row-looking button removed nothing
+  -- 20 times in a row, synthetic and real input alike.
+  local selectors = R.remove_selectors(config, product_id)
+  if #selectors == 0 then
+    return { next = "error", site = config.site, product_id = product_id, removed = false,
+             error = "remove_not_configured" }
+  end
+
+  local stopped = reach_cart(config)
+  if stopped then
+    return { next = "error", site = config.site, product_id = product_id, removed = false,
+             error = stopped.error, status = stopped.status }
+  end
+
+  local before_count = R.cart_count(config)
+  if not R.cart_contains(config, product_id) then
+    -- Nothing to do is not a failure, and it is not a removal either: the user gets the truth.
+    return { next = "done", site = config.site, product_id = product_id, removed = false,
+             status = "already_absent", cart_count = before_count }
+  end
+
+  local pressed = false
+  for index = 1, #selectors do
+    if not pressed and exists(selectors[index]) then
+      pressed = click(selectors[index])
+    end
+  end
+  if not pressed then
+    return { next = "error", site = config.site, product_id = product_id, removed = false,
+             error = "remove_control_missing", cart_count = before_count }
+  end
+
+  -- The page is what answers. A confirm step is a per-store fact, so it is pressed only when the store
+  -- named one; and the line is re-read afterwards rather than assumed gone.
+  local confirm = first_existing(config.cart_remove_confirm_selectors or {})
+  if confirm then click(confirm) end
+  wait_for("body", config.cart_timeout or 10000)
+
+  local still_there = R.cart_contains(config, product_id)
+  return {
+    next = still_there and "error" or "done",
+    site = config.site,
+    product_id = product_id,
+    removed = not still_there,
+    error = still_there and "remove_unconfirmed" or nil,
+    previous_cart_count = before_count,
+    cart_count = R.cart_count(config),
   }
 end

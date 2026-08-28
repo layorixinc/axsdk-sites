@@ -1,0 +1,7 @@
+{
+  "probe": "axsdk-pack-registry-host",
+  "why": "Measures whether GitHub Pages can host a Pack registry: exact-path JSON, no redirect, byte-identical body. See EXTERNAL_PACK_TASK_PLAN.md X0-2.",
+  "created": "2026-08-27",
+  "bytes_expected": 31,
+  "asset": "assets/2d3154d7f0aebb099d5890677bc0cb451f89a813b349abc1b699bf4392e6b32a"
+}

@@ -1,57 +1,305 @@
-# CWS 대시보드 입력표 — 사람이 눌러야 하는 것만
+# CWS 제출 — 대시보드에 넣을 내용 (붙여넣기용)
 
-작성 2026-08-27 · 출처는 모두 이 저장소의 확정 문서(`docs/privacy.md`, `docs/support.md`,
-`store/listing.md`, `store/permissions.md`)이며, 값을 새로 정하지 않았습니다. `check:listing`이 검사하는
-마커는 이 표의 값들로 이미 0개입니다(리스팅 캡처 1건만 별도로 열려 있음).
+작성 2026-08-27 · 모든 문구는 이 저장소의 확정 문서에서 그대로 가져왔습니다(새로 만든 값 없음).
+검증: `npm run check:listing` **미결 0건**, 짧은 설명 EN 116자 / KO 64자 (제한 132).
 
-이 파일은 **대시보드에서만 할 수 있는 입력**을 모아둔 것입니다. 저장소에서 할 수 있는 일은 이미 반영돼
-있으므로, 아래는 붙여넣기와 체크박스뿐입니다.
+업로드할 파일: `dist/axsdk-extension-cdp-cws.zip` (8.22 MiB)
 
 ---
 
-## 1. Privacy practices — 데이터 사용 공시 (Data usage)
+## 0. 순서
 
-| 항목 | 입력할 값 | 근거 |
+1. **Package** 탭 — ZIP 업로드
+2. **Store listing** 탭 — 이름 · 짧은 설명 · 상세 설명 · 카테고리 · 언어 · 스크린샷 4장 · 프로모 타일 · URL 3개
+3. **Privacy** 탭 — 단일 목적 · 권한 사유(8칸) · 원격 코드 · 데이터 사용 공시 · Limited Use 확약
+4. **Distribution** 탭 — Unlisted · 전체 지역
+5. 저장 → **Submit for review**
+
+---
+
+## 1. Store listing 탭
+
+### 이름 (Name)
+
+```
+AXSDK Shopping Assistant
+```
+
+### 짧은 설명 (Short description · 132자 제한)
+
+한국어 리스팅으로 제출하는 경우:
+
+```
+여러 쇼핑몰의 배송비 포함 총액을 한 번에 비교하고, 고른 상품을 장바구니까지 담아 줍니다. 주문은 하지 않습니다.
+```
+
+영어로 제출하는 경우:
+
+```
+Compares total cost with shipping across stores, then adds the product you chose to that store's cart. Never orders.
+```
+
+### 상세 설명 (Detailed description)
+
+한국어:
+
+```
+같은 상품이 어느 스토어에서 실제로 더 싼지 알려면 배송비까지 더해 봐야 합니다. AXSDK는 그 계산을 대신
+합니다.
+
+무엇을 하나요
+· 요청한 상품을 지원 스토어에서 찾고, 상품가와 배송비를 더한 총액으로 나란히 비교합니다
+· 같은 제조사 모델인지 확인한 뒤 비교합니다 — 액세서리나 다른 모델이 섞이지 않습니다
+· 배송비를 알 수 없는 행은 0원으로 가정하지 않고 "미확인"으로 접어 두고, 몇 건이 접혔는지 알려줍니다
+· 조건을 말하면(예: "3만원 이하만", "평점 높은 순") 그 자리에서 다시 정리합니다
+· 고른 상품을 그 스토어 장바구니에 담고, 장바구니 페이지에서 상품이 맞는지 다시 확인합니다
+· 결제 화면까지 안내하고 멈춥니다
+
+무엇을 하지 않나요
+· 주문하지 않습니다. 결제하지 않습니다. 결제수단을 읽거나 저장하지 않습니다
+· 로그인 폼과 결제 필드를 채우지 않습니다
+· 봇 확인 화면을 우회하지 않습니다 — 그 사실을 알리고 멈춥니다
+· 에이전트 탭 그룹 밖의 탭은 읽지 않습니다
+
+어떻게 동작하나요
+브라우저가 이미 여는 페이지를 읽습니다. 에이전트는 사용자가 만든 전용 탭 그룹 안에서만 동작하고,
+동작 중에는 Chrome이 직접 상단에 알림 배너를 띄웁니다. 되돌릴 수 없는 동작 앞에서는 버튼의 실제 문구를
+읽어 확인을 받습니다.
+
+지원 스토어
+Amazon, eBay, Walmart, AliExpress, Etsy, 쿠팡, 11번가, G마켓, SSG, 네이버쇼핑(읽기 전용)
+
+이 릴리스는 AXSDK 계정(API 키)이 있는 사용자를 위한 비공개 배포입니다. 소비자 로그인은 준비 중이며,
+그때까지는 옵션 화면에서 키를 입력합니다.
+
+개인정보: https://layorixinc.github.io/axsdk-sites/privacy.html
+지원: https://layorixinc.github.io/axsdk-sites/support.html
+```
+
+영어:
+
+```
+Knowing which store is actually cheaper means adding the shipping fee. AXSDK does that arithmetic for you.
+
+What it does
+· Finds the product you asked for on supported stores and compares them by price + shipping = total
+· Verifies the manufacturer model before comparing, so accessories and other models do not slip in
+· Never assumes a missing shipping fee is zero: rows whose total is unknown are folded away and counted,
+  and shown when you ask for them
+· Re-sorts or filters the same list when you say what you want ("cheapest first", "under 30,000", "free
+  shipping only")
+· Adds the product you picked to that store's cart, then re-reads the cart page to confirm it is there
+· Takes you to the checkout review page and stops
+
+What it does not do
+· It never places an order, never pays, and never reads or stores a payment method
+· It does not fill login forms or payment fields
+· It does not bypass bot checks — it tells you it hit one and stops
+· It does not read tabs outside the agent tab group you created
+
+How it works
+It reads the pages your browser already opens. The agent only operates inside a dedicated tab group you
+create, and Chrome itself shows a banner across the top for as long as it is attached, which you can stop
+at any time. Before anything irreversible it reads the actual label on the button and asks.
+
+Supported stores
+Amazon, eBay, Walmart, AliExpress, Etsy, Coupang, 11st, Gmarket, SSG, Naver Shopping (read-only)
+
+This release is an unlisted distribution for users who already have an AXSDK account (API key).
+Consumer sign-in is coming; until then the extension asks for a key in its options page.
+
+Privacy: https://layorixinc.github.io/axsdk-sites/privacy.html
+Support: https://layorixinc.github.io/axsdk-sites/support.html
+```
+
+### 카테고리 · 언어
+
+| 칸 | 값 |
+|---|---|
+| Category | Shopping |
+| Language | 한국어 (스크린샷·위젯이 한국어이므로 리스팅 언어도 한국어) |
+
+### 그래픽
+
+| 칸 | 파일 | 규격 |
 |---|---|---|
-| Personally identifiable information | **수집하지 않음(No)** | `docs/privacy.md` — 대화·트레이스·설정은 **로컬 브라우저 저장소**, 확장 제거 시 함께 삭제. 이름·이메일·전화·주소를 저장하는 기능이 없다 |
-| Health information | No | 해당 기능 없음 |
-| Financial and payment information | No | 결제는 스토어 자신의 페이지에서 사용자가 진행. 확장은 **주문을 넣지 않음**(`68_rpc_checkout.lua`는 검토만 읽음) |
-| Authentication information | No | 자격증명을 읽거나 저장하지 않음 |
-| Personal communications | No | |
-| Location | No | |
-| Web history | **No** | 방문 이력을 수집하지 않음. 사용자가 요청한 그 페이지만 읽는다 |
-| User activity | **Yes** — 세션·메시지 | 백엔드에 세션과 메시지가 **30일** 보관된 뒤 삭제 |
-| Website content | **Yes** — 요청한 페이지의 상품 정보 | 비교·장바구니를 위해 사용자가 지목한 스토어 페이지를 읽음 |
+| 스토어 아이콘 | 패키지 내 `assets/icon-128.png` | 128×128 |
+| 스크린샷 1 | `store/assets/ko/1-comparison.png` | 1280×800 |
+| 스크린샷 2 | `store/assets/ko/2-refine.png` | 1280×800 |
+| 스크린샷 3 | `store/assets/ko/3-choices.png` | 1280×800 |
+| 스크린샷 4 | `store/assets/ko/4-cart.png` | 1280×800 |
+| 작은 프로모 타일 | `store/assets/tile-small.png` | 440×280 |
 
-**보관·삭제 문구(그대로 사용 가능)**
+### URL
 
-- 보관: `Sessions and messages are kept 30 days, then deleted.`
-- 삭제 요청 채널: `support@layorix.ai` — `Backend deletion within 7 business days` (요청 완료 시 회신)
+| 칸 | 값 |
+|---|---|
+| Homepage URL | `https://layorixinc.github.io/axsdk-sites/` |
+| Support URL | `https://layorixinc.github.io/axsdk-sites/support.html` |
+| Privacy policy URL | `https://layorixinc.github.io/axsdk-sites/privacy.html` |
 
-## 2. Limited Use 확약 (Certification)
+> GitHub Pages: 저장소 **Settings → Pages → Deploy from a branch → `main` / `/docs`**. 이 세 URL이
+> 200으로 열려야 제출이 통과합니다.
 
-세 항목 모두 **동의(체크)**. 근거 문장은 `docs/privacy.md`의 Limited Use 절에 이미 있습니다:
+---
 
-1. 사용 목적 제한 — 단일 목적(지원 스토어 총비용 비교 · 장바구니 담기 · 결제 페이지 검토) 외 사용 없음.
-2. 제3자 전송 제한 — 광고·프로파일링·데이터 브로커 판매 없음. 모델 추론 위임은 하위 처리자 공시로 처리.
-3. 사람의 접근 제한 — 사용자의 명시적 요청, 보안 목적, 법적 요구, 또는 **집계·익명화된 형태**에 한정.
+## 2. Privacy 탭
 
-## 3. 하위 처리자(모델 공급자) 공시
+### 단일 목적 (Single purpose) — 한 줄
+
+```
+Compare one product's total cost including shipping across supported online stores, then add the product the user picked to that store's cart and take them to its checkout review. It never places an order or pays.
+```
+
+한국어로 넣는 경우:
+
+```
+지원하는 온라인 쇼핑몰에서 한 상품의 배송비 포함 총액을 비교하고, 사용자가 고른 상품을 장바구니에 넣고 결제 화면까지 안내한다. 주문이나 결제는 하지 않는다.
+```
+
+### 권한 사유 (각 칸에 해당 문단을 붙여넣기)
+
+#### `debugger`
+
+```
+Every page read, click and keystroke this extension performs travels this channel. It injects no content
+script into the page world; it uses the DevTools protocol `DOM`, `Runtime` and `Page` domains to read the
+values it needs. The evaluated expressions are code shipped inside the extension, never text fetched at
+runtime.
+
+Two bounds apply. First, only tabs in the **agent tab group the user created** are addressed — a normal
+browser group is never adopted wholesale; the starting tab is moved into a dedicated group and other tabs
+join only when the user visibly drags them in. Second, before an irreversible action (adding to a cart,
+submitting a form) the extension reads the button's actual label and asks for confirmation.
+
+Chrome discloses this permission at install as *"Read and change all your data on all websites"* and
+keeps its own debugging banner visible for the whole session, from which the user can stop it instantly.
+
+`chrome.scripting` cannot express this product: one task crosses several stores, each with tab
+navigations and reloads, and the state has to survive them as one session.
+```
+
+#### 호스트 권한 `http://*/*`, `https://*/*`
+
+```
+**Not the page boundary.** Needed for exactly two things: `fetch` from the extension service worker to
+the backend (`api.axsdk.ai`), and one `declarativeNetRequestWithHostAccess` rule that attaches the
+extension origin to those backend requests. The page boundary is the agent tab group above. The list of
+supported stores ships inside the package and is not refreshed remotely.
+```
+
+#### `storage`
+
+```
+Settings (backend credentials), the conversation, and
+execution traces — all in local browser storage. `chrome.storage.sync` is not used.
+```
+
+#### `tabGroups`
+
+```
+A session IS a tab group: the extension creates a dedicated one and treats only its members as
+addressable. Without this permission the "only inside this group" boundary cannot exist.
+```
+
+#### `scripting`
+
+```
+Injects the activity indicator and the page widget into an **isolated** world. Nothing is injected into
+the page world.
+```
+
+#### `offscreen`
+
+```
+Runs the agent runtime in a worker inside an offscreen document (`reasons: [WORKERS]`), one worker per
+session, so work in progress is not cut off when the MV3 service worker goes idle.
+```
+
+#### `userScripts`
+
+```
+The channel for running user-selected scripts in a dedicated `USER_SCRIPT` world. **This release ships no
+path that fetches a script**: what can execute is packaged in the extension and hash-verified. Letting
+users install their own scripts is a later update, and this justification will be updated with it.
+```
+
+#### `declarativeNetRequestWithHostAccess`
+
+```
+One dynamic rule: it attaches the extension origin header to backend requests. It is not used to block
+ads or trackers or to modify page content; the rule is derived in code from the backend URL and the
+extension's own origin.
+```
+
+### 원격 코드 사용 (Are you using remote code?)
+
+**아니요 (No, I am not using remote code)** 를 선택하고, 설명 칸에:
+
+```
+This release packages all executable logic (flows, Lua modules, site data) inside the extension and
+verifies it by SHA-256 on every service-worker start. Remote source switches default to off, the options
+page exposes no control for them, and a build gate refuses a tree that reintroduces one.
+
+The package still contains a Lua interpreter (Fengari) and development-time remote-loader code. No
+reachable path executes remote code, but those bytes are present.
+```
+
+### 데이터 사용 공시 (Data usage) — 체크 상태
+
+| 항목 | 선택 | 근거 |
+|---|---|---|
+| Personally identifiable information | ☐ 아니요 | 이름·이메일·전화·주소를 저장하는 기능이 없음 |
+| Health information | ☐ 아니요 | 해당 기능 없음 |
+| Financial and payment information | ☐ 아니요 | 결제는 스토어 페이지에서 사용자가 진행, 확장은 **주문하지 않음** |
+| Authentication information | ☐ 아니요 | 자격증명을 읽거나 저장하지 않음 |
+| Personal communications | ☐ 아니요 | 해당 기능 없음 |
+| Location | ☐ 아니요 | 해당 기능 없음 |
+| Web history | ☐ 아니요 | 방문 이력을 수집하지 않음 — 사용자가 지목한 페이지만 읽음 |
+| **User activity** | ☑ **예** | 세션과 메시지가 백엔드에 **30일** 보관된 뒤 삭제 |
+| **Website content** | ☑ **예** | 비교·담기를 위해 사용자가 지목한 스토어 페이지의 상품명·가격·배송비를 읽음 |
+
+보관/삭제 문구가 필요한 칸에는:
+
+```
+Sessions and messages are kept 30 days, then deleted. Deletion requests go to support@layorix.ai and are completed within 7 business days.
+```
+
+### Limited Use 확약 — 세 항목 모두 체크
+
+1. ☑ 공시한 단일 목적 외 사용 없음
+2. ☑ 제3자 전송/판매 없음 (광고·프로파일링·데이터 브로커 없음)
+3. ☑ 사람의 접근은 사용자 요청·보안·법적 요구·집계 익명화에 한정
+
+### 하위 처리자(모델 공급자) — 물어보는 칸이 있을 때
 
 | 항목 | 값 |
 |---|---|
-| 사업자 | **OpenRouter** |
+| 사업자 | OpenRouter |
 | 모델 | `openai/gpt-oss-120b` |
-| BYOK | 사용자가 자기 키를 넣으면 그 공급자로 전달됨(공시 반영됨) |
+| BYOK | 사용자가 자기 키를 넣으면 그 공급자로 전달 (개인정보 문서에 공시됨) |
 
-## 4. Distribution
+---
 
-| 항목 | 값 | 결정 |
+## 3. Distribution 탭
+
+| 칸 | 값 | 근거 |
 |---|---|---|
-| Visibility | **Unlisted** | D3 = c (2026-08-26) |
-| 지역 | 전체 | `store/listing.md` |
+| Visibility | **Unlisted** | 결정 D3 = c (2026-08-26). 검색·목록에 노출되지 않고 URL을 아는 사람만 설치 |
+| 지역 | All regions | `store/listing.md` |
+| 가격 | 무료 | |
 
-## 5. 남은 저장소 작업 1건 (제 몫, 대시보드 아님)
+---
 
-`store/listing.md:186`의 마커 — `4-cart.png`를 **빈 장바구니**에서 재촬영. 2026-08-27 현재 촬영이 막힌
-이유는 스토어 접근 상태이며, 측정값은 `CWS_BIZ_ANSWERS_DRAFT.md`의 재시도 기록에 있습니다.
+## 4. 제출 전 마지막 확인 (제가 이미 통과시킨 것)
+
+| 확인 | 상태 |
+|---|---|
+| `npm run check:listing` 미결 답변 | **0건** |
+| 스크린샷 4장 1280×800 · 타일 440×280 | PNG 헤더로 확인 |
+| 패키지에 원격 소스 경로 없음 | `assertNoRemoteSourceCode` 통과 |
+| URL 설치 표면 제거됨 | `assertNoUrlInstallSurface` 통과 |
+| 실제 턴으로 동작 증명 | `test:cws:artifact` PASS (비교·정제·취소·담기·결제검토 무주문·삭제) |
+| 백엔드 모듈 정합 | `release:cws` — backend revision 144와 해시 일치 |
+
+제출 후 심사 의견이 오면 그 문장을 그대로 주십시오 — 어느 산출물을 고쳐야 하는지 대응시켜 드립니다.

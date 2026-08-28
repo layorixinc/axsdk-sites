@@ -2416,3 +2416,21 @@ test('every shipped flow document fits the backend session limit once canonicali
   assert.deepEqual(over, [], `over the 256 KiB session document limit: ${report}`);
   console.log(`FLOW DOCUMENT ${report}`);
 });
+
+test('every routable intent is one the planner can actually emit', () => {
+  // §13: "a next the enum does not carry is a next the model cannot emit" — the same holds one level up.
+  // Measured 2026-08-27: `cart_remove_item` was added as a router route and its intent was never added to
+  // `decide`'s enum, so the planner could not route to it deliberately and the CART REMOVAL FOLLOW-UP rule
+  // had no way to name the flow it tells the planner to continue. It worked only because the router
+  // matches on its own examples.
+  for (const file of ['_common/flows.yaml', 'playground/_common/flows.yaml']) {
+    const document = parseFlow(file);
+    const routes = (document.router?.routes ?? []).map((route) => route.intent).filter(Boolean);
+    if (routes.length === 0) continue;
+    const decide = document.flowTools?.decide;
+    if (!decide) continue;
+    const enumerated = decide.parameters?.properties?.intents?.items?.properties?.intent?.enum ?? [];
+    const missing = routes.filter((intent) => !enumerated.includes(intent));
+    assert.deepEqual(missing, [], `${file}: routable but not emittable: ${missing.join(', ')}`);
+  }
+});

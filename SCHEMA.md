@@ -948,7 +948,9 @@
                   "shopping_multi_store_total_cost",
                   "end_conversation",
                   "checkout",
-                  "memory"
+                  "memory",
+                  "cart_remove_item",
+                  "community_script"
                 ]
               },
               "segments": {

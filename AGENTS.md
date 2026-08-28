@@ -2994,14 +2994,36 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   an ADD could be confirmed against a row sitting in a list nobody named. Only the container tells them
   apart, so every amazon cart key is scoped to `#sc-active-cart` now and the unscoped scope is deleted.
   A guarded mutation that can reach a second list is not guarded.
-- **The row a store leaves in place after a delete keeps its id and loses its control.** Measured INSIDE
-  `#sc-active-cart` in the instant after a removal that worked: the removed line's `data-asin` is still
-  there, `input[value="Delete"]` is **0**, and one `Undo` has appeared. So the id probe answered "still in
-  the cart" and every successful removal reported `remove_unconfirmed` (three for three), while the same
-  shape could confirm an add for a line just removed. `cart_active_line_filter` is the store's own
-  statement of what a live row has that the panel does not; the word "Removed" is unusable (`dom` resolves
-  standard CSS only, and it is locale-bound). Both readings that produced the earlier, wrong version of
-  this finding were taken PAGE-WIDE across the two lists — measure per region or measure nothing.
+- **The remove control is the one the STORE names; its LABEL is the locale's.** Measured on one amazon cart
+  in two locales 2026-08-27: the button is an `input[type="submit"]` inside `[data-action="delete-active"]`
+  (`.sc-action-delete-active`) whose `value` is `Delete` in en-US and `삭제` in ko — the SAME dev profile
+  switching after one `/-/ko/` navigation. So `input[value="Delete"]` is a selector that works until the
+  user's language changes, and it is why the packaged build answered `cart_lines_unreadable` for a cart
+  whose own container stated `data-cart-total-item-count="1"`.
+- **`[data-action="delete"]` on that page is the HIDDEN success panel, not the control.**
+  `.sc-list-item-removed-msg-delete`, `data-feature-id="delete-success-message"`, `display:none` — and it
+  matches FIRST in document order, so a press keyed on it landed on an invisible div and reported
+  `remove_unconfirmed` for a click that did nothing. Two plausible readings were wrong before this one
+  (a "Removed/Undo placeholder", then a second cart "variant"); both came from counting page-wide across
+  two lists. Measure the ROW, per region, before naming a control.
+- **A removal is confirmed by TWO facts, and neither is our own click.** The line may stay matchable after
+  a removal that worked — measured live in ko: the header count went 1 → 0 while the row and a
+  `[data-action="delete-active"]` element were still there, so the id probe alone answered
+  `remove_unconfirmed` for a cart the store had already emptied. The count is the store's own number and
+  survives whatever markup remains; the id probe is the precise one. Either is enough; a press that moved
+  NEITHER is claimed as nothing (`<`, never `<=` — with `<=` an untouched cart reads as removed).
+- **A byte cut splits a Korean title and kills the whole listing.** Lua strings are bytes: cutting a label
+  at 90 bytes split a 3-byte character and `cart_present_lines` answered "cannot convert invalid utf8 to
+  javascript string" on the packaged artifact — the user read a generic failure while the cart was fine.
+  `R.cut` steps back off UTF-8 continuation bytes (`10xxxxxx`). The store's titles are Korean in this
+  locale, so this is the NORMAL case, not an edge one.
+- **Four fixture traps met in one feature, each hiding a real check:** a flat array of tool calls where the
+  run produces TWO turns (the smoke's own verdict then could not be satisfied by any real run while the
+  unit test passed); `dom` values written as strings where the stub answers `row.text`, so every count
+  assertion passed vacuously; a `:has(a, b)` filter whose comma the stub's top-level split cannot read
+  (express variants as a selector LIST instead); and `dom.wait_for_selector` asserted as a wire op when
+  the runtime prelude SYNTHESISES it by polling `dom.exists` — asserting on the synthesised name passes
+  offline and fails live, which is the opposite of what a fixture is for.
 - **`session.pageHtml()` can answer the SHELL, and counting rows there reports an empty cart.** Measured:
   one moment after `open()` the amazon cart is 128 KiB with `nav-cart-count: 5`, zero rows and zero delete
   controls; the body arrives ~1s later at 615-640 KiB. `sc-active-cart` is NOT a settle marker — it

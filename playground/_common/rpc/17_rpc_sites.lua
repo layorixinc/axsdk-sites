@@ -256,16 +256,16 @@ RPC_SITES["amazon"] = {
     "#sc-subtotal-label-activecart"
   },
   cart_remove_selectors = {
-    "#sc-active-cart .sc-list-item[data-asin=\"{id}\"] input[value=\"Delete\"]",
-    "#sc-active-cart [data-asin=\"{id}\"] input[value=\"Delete\"]",
-    "#sc-active-cart [data-asin=\"{id}\"] [data-feature-id=\"item-delete-button\"] input",
-    "#sc-active-cart [data-asin=\"{id}\"] [data-action=\"delete\"] input"
+    "#sc-active-cart [data-asin=\"{id}\"] [data-action=\"delete-active\"] input",
+    "#sc-active-cart [data-asin=\"{id}\"] [data-action=\"delete-active\"]"
   },
   cart_ready_selector = "#sc-active-cart, .sc-list-item[data-asin], #sc-empty-cart, #sc-subtotal-label-activecart",
   cart_empty_selector = "#sc-empty-cart",
   cart_item_selector = "#sc-active-cart .sc-list-item[data-asin]",
   cart_item_id_attr = "data-asin",
-  cart_active_line_filter = ":has(input[value=\"Delete\"])",
+  cart_active_line_filters = {
+    ":has([data-action=\"delete-active\"])"
+  },
   cart_subtotal_selectors = {
     "#sc-subtotal-amount-activecart",
     "#sc-subtotal-label-activecart"

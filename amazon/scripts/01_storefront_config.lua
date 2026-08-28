@@ -119,11 +119,19 @@ local CONFIG = {
   --
   -- Every one of them is scoped to `#sc-active-cart` for the reason above: the same control exists in the
   -- saved list, and a press that lands there mutates a list the user never named.
+  -- The remove control, named the way the STORE names it: an `input[type="submit"]` inside
+  -- `[data-action="delete-active"]` (`.sc-action-delete-active`). Measured on the same cart in two locales
+  -- 2026-08-27 — its `value` is the LOCALE's word ("Delete" in en-US, "삭제" in ko, the same profile
+  -- switching after one `/-/ko/` navigation), so a value selector is one that works until the user's
+  -- language changes. `data-action` is identical in both.
+  --
+  -- `[data-action="delete"]` is NOT this control: it is the HIDDEN success panel
+  -- (`.sc-list-item-removed-msg-delete`, `data-feature-id="delete-success-message"`, `display:none`), and
+  -- it matches first in document order. The packaged run pressed it and reported `remove_unconfirmed` for
+  -- a click that landed on an invisible div.
   cart_remove_selectors = {
-    '#sc-active-cart .sc-list-item[data-asin="{id}"] input[value="Delete"]',
-    '#sc-active-cart [data-asin="{id}"] input[value="Delete"]',
-    '#sc-active-cart [data-asin="{id}"] [data-feature-id="item-delete-button"] input',
-    '#sc-active-cart [data-asin="{id}"] [data-action="delete"] input',
+    '#sc-active-cart [data-asin="{id}"] [data-action="delete-active"] input',
+    '#sc-active-cart [data-asin="{id}"] [data-action="delete-active"]',
   },
   -- Checkout REVIEW only. `place_order_selectors` is read to tell the user whether the button is there;
   -- nothing clicks it. The cart-page keys are here too because reaching the review starts from the cart.
@@ -143,7 +151,12 @@ local CONFIG = {
   -- `remove_unconfirmed`. Pointing the other way, an ADD could be confirmed against the Undo panel of a
   -- line that had just been removed. A line that is IN the cart carries its own remove control; the panel
   -- does not. The word "Removed" is not usable: `dom` resolves standard CSS only, and it is locale-bound.
-  cart_active_line_filter = ':has(input[value="Delete"])',
+  -- Named structurally so it holds in every locale, and a LIST because a second measured variant would be
+  -- another entry here rather than a comma inside one `:has()` — a single selector carrying a comma is the
+  -- shape a top-level split cannot read.
+  cart_active_line_filters = {
+    ':has([data-action="delete-active"])',
+  },
   cart_subtotal_selectors = { "#sc-subtotal-amount-activecart", "#sc-subtotal-label-activecart" },
   checkout_button_selectors = {
     'input[name="proceedToRetailCheckout"]',

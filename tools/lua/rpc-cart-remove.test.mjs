@@ -25,28 +25,34 @@ const cartPage = ({ removes = true, dom = {} } = {}) => {
   const page = makePage({
     href: CART,
     dom: {
-      '#sc-active-cart': 'cart',
-      // The real row: measured live, amazon's cart lines ARE `.sc-list-item[data-asin]` and each carries
-      // one `input[value="Delete"]`. A fixture that omits the scope would pass against a reader that
-      // does not use it — the trap §13 records as "a fixture more permissive than the capability".
+      // Rows, not bare strings: the stub answers `row.text`, so a string value EXISTS but reads as no
+      // text at all — the count was silently unreadable and every count assertion passed vacuously.
+      '#sc-active-cart': [{ text: 'cart' }],
+      // The real row: measured live, amazon's cart lines ARE `.sc-list-item[data-asin]`, each carrying its
+      // own remove control inside `[data-action="delete-active"]`. A fixture that omits the scope would
+      // pass against a reader that does not use it — the trap §13 records as "a fixture more permissive
+      // than the capability".
       //
       // Scoped to the cart's own container, because the same markup exists in "Saved for later" one screen
       // down (measured live) and the probe must not reach it.
-      '#sc-active-cart .sc-list-item:has(input[value="Delete"])[data-asin="B0TEST"]': 'Logitech M185',
-      '#sc-active-cart .sc-list-item[data-asin="B0TEST"]': 'Logitech M185',
-      '#sc-active-cart .sc-list-item[data-asin="B0TEST"] input[value="Delete"]': 'Delete',
-      'span.nav-cart-count': '2',
+      '#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0TEST"]': [{ text: 'Logitech M185' }],
+      '#sc-active-cart .sc-list-item[data-asin="B0TEST"]': [{ text: 'Logitech M185' }],
+      '#sc-active-cart [data-asin="B0TEST"] [data-action="delete-active"] input': [{ text: '삭제' }],
+      // The store's own count, under the selector the config names — `span.nav-cart-count` is not it, and
+      // a fixture keyed on a selector nobody asks for measures nothing.
+      '#nav-cart-count': [{ text: '2' }],
       ...dom,
     },
     // The site decides what a press does, never the op: a stub whose click changes nothing can only ever
-    // prove the unconfirmed branch, which is why both directions are tested.
+    // prove the unconfirmed branch, which is why both directions are tested. Matched on the store's own
+    // action name, not on the button's word: the word is the LOCALE's ("Delete" / "삭제").
     onClick: (selector, live) => {
       if (!removes) return true;
-      if (!String(selector).includes('Delete')) return true;
-      delete live.dom['#sc-active-cart .sc-list-item:has(input[value="Delete"])[data-asin="B0TEST"]'];
+      if (!String(selector).includes('delete-active')) return true;
+      delete live.dom['#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0TEST"]'];
       delete live.dom['#sc-active-cart .sc-list-item[data-asin="B0TEST"]'];
-      delete live.dom['#sc-active-cart .sc-list-item[data-asin="B0TEST"] input[value="Delete"]'];
-      live.dom['span.nav-cart-count'] = '1';
+      delete live.dom['#sc-active-cart [data-asin="B0TEST"] [data-action="delete-active"] input'];
+      live.dom['#nav-cart-count'] = [{ text: '1' }];
       return true;
     },
   });
@@ -154,7 +160,7 @@ test('the press cannot reach a row outside the ACTIVE cart', () => {
       // including the active-line one, because a saved row carries its own Delete control too. That is what
       // made this pressable: the scope, not the control, is what separates the two lists.
       '.sc-list-item[data-asin="B0SAVED"]': [{ text: 'Logitech M185 Save for later' }],
-      '.sc-list-item[data-asin="B0SAVED"] input[value="Delete"]': [{ text: 'Delete' }],
+      '.sc-list-item[data-asin="B0SAVED"] [data-action="delete-active"] input': [{ text: 'Delete' }],
     },
   });
 
@@ -173,7 +179,7 @@ test('the listing shows the cart, not another list on the same page', () => {
     dom: {
       '#sc-active-cart': [{ text: 'cart' }],
       '#nav-cart-count': [{ text: '1' }],
-      '#sc-active-cart .sc-list-item[data-asin]:has(input[value="Delete"])': [
+      '#sc-active-cart .sc-list-item[data-asin]:has([data-action="delete-active"])': [
         { text: 'Anker 충전기 Delete', 'data-asin': 'B0CART' },
       ],
       // The saved list, same markup, one page down. Measured live: three such rows while the cart was EMPTY.
@@ -191,22 +197,23 @@ test('the listing shows the cart, not another list on the same page', () => {
 
 test('the undo panel amazon leaves behind is not the line still being there', () => {
   // Measured live 2026-08-27, inside `#sc-active-cart` right after a removal that worked: the id is still
-  // present, `input[value="Delete"]` is 0, and one `Undo` has appeared. Reading the id alone reported
-  // `remove_unconfirmed` for three removals out of three.
+  // present, the row's own remove control is gone, and one `Undo` has appeared. Reading the id alone
+  // reported `remove_unconfirmed` for three removals out of three.
   const page = makePage({
     href: CART,
     dom: {
       '#sc-active-cart': [{ text: 'cart' }],
       '#nav-cart-count': [{ text: '1' }],
-      '#sc-active-cart .sc-list-item:has(input[value="Delete"])[data-asin="B0TEST"]': [{ text: 'Logitech M185' }],
+      '#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0TEST"]': [{ text: 'Logitech M185' }],
       '#sc-active-cart .sc-list-item[data-asin="B0TEST"]': [{ text: 'Logitech M185' }],
-      '#sc-active-cart .sc-list-item[data-asin="B0TEST"] input[value="Delete"]': [{ text: 'Delete' }],
+      '#sc-active-cart [data-asin="B0TEST"] [data-action="delete-active"] input': [{ text: '삭제' }],
     },
+    // Matched on the action name, never the button's word: the word is the locale's.
     onClick: (selector, live) => {
-      if (!String(selector).includes('Delete')) return true;
+      if (!String(selector).includes('delete-active')) return true;
       // The panel: the row and its id stay, the control goes, Undo appears.
-      delete live.dom['#sc-active-cart .sc-list-item:has(input[value="Delete"])[data-asin="B0TEST"]'];
-      delete live.dom['#sc-active-cart .sc-list-item[data-asin="B0TEST"] input[value="Delete"]'];
+      delete live.dom['#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0TEST"]'];
+      delete live.dom['#sc-active-cart [data-asin="B0TEST"] [data-action="delete-active"] input'];
       live.dom['#sc-active-cart .sc-list-item[data-asin="B0TEST"]'] = [{ text: 'Logitech M185 Undo' }];
       live.dom['#nav-cart-count'] = [{ text: '0' }];
       return true;
@@ -221,4 +228,77 @@ test('the undo panel amazon leaves behind is not the line still being there', ()
   assert.equal(answer.error, undefined);
   assert.equal(answer.previous_cart_count, 1);
   assert.equal(answer.cart_count, 0);
+});
+
+test('the press finds the newer variant\'s control', () => {
+  // Same two measurements. The classic control is an `input[value="Delete"]`; the newer one is
+  // `[data-action="delete"]` with no such input on the page at all.
+  const page = makePage({
+    href: CART,
+    dom: {
+      '#sc-active-cart': [{ text: 'cart' }],
+      '#nav-cart-count': [{ text: '1' }],
+      // ONLY the newer variant's key — no `value="Delete"` anywhere, as measured on the fresh profile.
+      '#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0NEW"]': [{ text: 'Logitech M185' }],
+      '#sc-active-cart .sc-list-item[data-asin="B0NEW"]': [{ text: 'Logitech M185' }],
+      '#sc-active-cart [data-asin="B0NEW"] [data-action="delete-active"] input': [{ text: 'Delete' }],
+    },
+    onClick: (selector, live) => {
+      if (!String(selector).includes('delete') && !String(selector).includes('Delete')) return true;
+      delete live.dom['#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0NEW"]'];
+      delete live.dom['#sc-active-cart [data-asin="B0NEW"] [data-action="delete-active"] input'];
+      live.dom['#nav-cart-count'] = [{ text: '0' }];
+      return true;
+    },
+  });
+
+  const answer = remove(page, {
+    site: 'amazon', product_id: 'B0NEW', cart_approval: 'user_confirmed_removal',
+  });
+  assert.equal(answer.next, 'done');
+  assert.equal(answer.removed, true);
+  assert.equal(answer.cart_count, 0);
+});
+
+test('the store\'s own count is evidence when the row will not go away', () => {
+  // Measured live on the packaged artifact, ko locale: after a press that WORKED the header count went
+  // 1 → 0 while the row and a `[data-action="delete-active"]` element were still matchable — so the id
+  // probe alone answered `remove_unconfirmed` for a cart the store had already emptied. Two facts, and the
+  // store's own number is the one that does not depend on which markup survived.
+  const page = makePage({
+    href: CART,
+    dom: {
+      '#sc-active-cart': [{ text: 'cart' }],
+      '#nav-cart-count': [{ text: '1' }],
+      '#sc-active-cart .sc-list-item:has([data-action="delete-active"])[data-asin="B0STAY"]': [{ text: 'M185' }],
+      '#sc-active-cart .sc-list-item[data-asin="B0STAY"]': [{ text: 'M185' }],
+      '#sc-active-cart [data-asin="B0STAY"] [data-action="delete-active"] input': [{ text: '삭제' }],
+    },
+    onClick: (selector, live) => {
+      if (!String(selector).includes('delete-active')) return true;
+      // The row stays exactly as it was — only the store's number moves.
+      live.dom['#nav-cart-count'] = [{ text: '0' }];
+      return true;
+    },
+  });
+
+  const answer = remove(page, {
+    site: 'amazon', product_id: 'B0STAY', cart_approval: 'user_confirmed_removal',
+  });
+  assert.equal(answer.next, 'done');
+  assert.equal(answer.removed, true);
+  assert.equal(answer.previous_cart_count, 1);
+  assert.equal(answer.cart_count, 0);
+});
+
+test('a press that changed nothing at all is still unconfirmed', () => {
+  // The other half, and the reason the count cannot be the only signal: nothing moved, so nothing is
+  // claimed. §13 — reading our own click back is what once reported `added = true` on an untouched cart.
+  const page = cartPage({ removes: false });
+  const answer = remove(page, {
+    site: 'amazon', product_id: 'B0TEST', cart_approval: 'user_confirmed_removal',
+  });
+  assert.equal(answer.next, 'error');
+  assert.equal(answer.removed, false);
+  assert.equal(answer.error, 'remove_unconfirmed');
 });

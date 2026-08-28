@@ -77,7 +77,9 @@ function V.render(state, note)
   for index = 1, #state.lines do
     local line = state.lines[index]
     local text = trim(line.title) or ("상품 " .. tostring(line.product_id or index))
-    if #text > LABEL_WIDTH then text = text:sub(1, LABEL_WIDTH) end
+    -- `R.cut`, not `sub`: these titles are Korean and a byte cut splits a character, which killed the
+    -- whole listing on the way out of Lua (measured live).
+    text = R.cut(text, LABEL_WIDTH)
     out[#out + 1] = tostring(index) .. ". " .. text
   end
   out[#out + 1] = "지울 항목의 번호를 알려주세요. 취소라고 하시면 아무것도 지우지 않습니다."

@@ -66,7 +66,35 @@ const passingVerdictInput = () => ({
     text: '이 요청은 도와드릴 수 없어요. 쇼핑 비교와 장바구니, 결제 검토를 도와드릴 수 있습니다.',
     toolCalls: [],
   },
+  cartRemoval,
 });
+
+/**
+ * The removal, as TWO turns — the shape the run actually produces.
+ *
+ * The flow pauses on its listing, so the read tools belong to the first turn and the mutation to the
+ * second. A single flat array here passed while the real run could never satisfy the same check.
+ */
+const cartRemoval = {
+  err: null,
+  text: '상품이 장바구니에서 제거되었습니다. 주문된 항목은 없습니다.',
+  listingToolCalls: [
+    { name: 'cart_open_lines', status: 'completed', output: { next: 'show', site: 'amazon', cart_count: 1 } },
+    { name: 'cart_present_lines', status: 'completed', output: { next: 'ask', question: 'Amazon 장바구니 1건' } },
+  ],
+  toolCalls: [
+    {
+      name: 'cart_present_lines',
+      status: 'completed',
+      output: { next: 'remove', product_id: 'A1', cart_approval: 'user_confirmed_removal' },
+    },
+    {
+      name: 'cart_remove_line',
+      status: 'completed',
+      output: { next: 'done', remove_status: 'removed', site: 'amazon', cart_count: 0 },
+    },
+  ],
+};
 
 test('an extracted package passes only with untouched stores and verified package assets', () => {
   const verdict = artifactSmokeVerdict(passingVerdictInput());
@@ -232,4 +260,38 @@ test('a reply carrying raw model scaffolding fails, whichever turn it came from'
     });
     assert.equal(verdict.ok, false, `${turn} leaked raw scaffolding and passed`);
   }
+});
+
+test('the packaged removal must be confirmed by the store, not by our own click', () => {
+  // The failure shapes, because the passing one is cheap: a tool that ran and did not remove, a listing
+  // that never happened, and a reply that leaked the model wrapper. §13: reading a tool's own status back
+  // is not verification — `next: done` here is the reader answering AFTER re-reading the cart's lines.
+  const unconfirmed = artifactSmokeVerdict({
+    ...passingVerdictInput(),
+    cartRemoval: {
+      ...cartRemoval,
+      toolCalls: [
+        cartRemoval.toolCalls[0],
+        {
+          name: 'cart_remove_line',
+          status: 'completed',
+          output: { next: 'error', remove_status: undefined, error: 'remove_unconfirmed' },
+        },
+      ],
+    },
+  });
+  assert.equal(unconfirmed.ok, false);
+  assert.match(unconfirmed.failures.join(String.fromCharCode(10)), /packaged cart removal/);
+
+  const neverListed = artifactSmokeVerdict({
+    ...passingVerdictInput(),
+    cartRemoval: { ...cartRemoval, listingToolCalls: [] },
+  });
+  assert.equal(neverListed.ok, false);
+
+  const scaffolded = artifactSmokeVerdict({
+    ...passingVerdictInput(),
+    cartRemoval: { ...cartRemoval, text: '<|channel|>commentary to=functions.cart_remove_line' },
+  });
+  assert.equal(scaffolded.ok, false);
 });

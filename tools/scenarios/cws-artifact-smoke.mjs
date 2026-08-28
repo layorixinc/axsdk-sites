@@ -53,7 +53,7 @@ const OUTSIDE_PURPOSE_TOOLS = new Set([
 
 export function artifactSmokeVerdict({
   workspaceStores, scriptIds, toolCalls, text, cancelToolCalls, cancelText, refinedComparison,
-  guardedSelection, checkoutStep, outsideSurface, expectedSites = ['amazon', 'walmart'],
+  guardedSelection, checkoutStep, outsideSurface, cartRemoval, expectedSites = ['amazon', 'walmart'],
 }) {
   const failures = [];
   if (workspaceStores !== 'unchanged') failures.push('harness wrote workspace stores');
@@ -91,6 +91,30 @@ export function artifactSmokeVerdict({
     failures.push('guarded cart add lacks site confirmation');
   }
   if (!checkoutRunsNoOrder(checkoutStep ?? {})) failures.push('checkout did not prove that no order was placed');
+  // The removal, on the packaged path, undoing the line this run added. `removed` is the STORE's answer
+  // read back through the tool: the reader re-reads the cart's own lines after the press, so a click that
+  // changed nothing cannot reach `done` (§13 — reading our own click back is what once reported
+  // `added = true` on a cart that never received the item).
+  if (cartRemoval) {
+    // TWO turns, kept apart: the flow PAUSES on its listing, so `cart_open_lines` belongs to the turn that
+    // asked and `cart_remove_line` to the turn that answered. Looking for both in one array made the check
+    // impossible to satisfy from a real run while the unit fixture — which put all three in one list —
+    // passed. A fixture shaped unlike the run is the trap this repo keeps re-learning.
+    const listingCalls = cartRemoval.listingToolCalls ?? [];
+    const removalCalls = cartRemoval.toolCalls ?? [];
+    const listing = lastToolOutput(listingCalls, 'cart_present_lines');
+    const removal = lastToolOutput(removalCalls, 'cart_remove_line');
+    if (cartRemoval.err
+      || !findToolCall(listingCalls, 'cart_open_lines')
+      || listing?.next !== 'ask'
+      || removal?.next !== 'done'
+      || removal?.remove_status !== 'removed') {
+      failures.push('the packaged cart removal did not confirm on the store');
+    }
+    if (typeof cartRemoval.text === 'string' && detectRawScaffolding(cartRemoval.text)) {
+      failures.push('the removal reply carries raw model scaffolding');
+    }
+  }
   const refinedCalls = refinedComparison?.toolCalls ?? [];
   const refineOutput = refinedCalls
     .map((call) => ({ call, output: decode(call?.output) }))
@@ -249,6 +273,35 @@ export async function runArtifactSmoke() {
     const guardedSelection = { err: null, text: selectedTurn.text, toolCalls: selectedTurn.toolCalls };
     const checkoutTurn = await stage('review checkout without ordering', () => session.send('체크아웃 해줘', { timeoutMs: 300_000 }));
     const checkoutStep = { err: null, text: checkoutTurn.text, toolCalls: checkoutTurn.toolCalls };
+    // The line this run added is taken back out through the shipped removal flow — the packaged path for
+    // `cart_remove_item`, and the only step that leaves the fresh profile's cart as it found it. A clean
+    // conversation first: a paused window reads a bare number as a selection.
+    await stage('start a conversation for the removal', () => session.reset());
+    const listingTurn = await stage('list the cart to remove from',
+      () => session.send('장바구니에서 하나 지워줘', { timeoutMs: 180_000 }));
+    // Both turns are printed, always. The pick can only resume a node the LISTING left paused, so a pick
+    // that reached no tool is usually the listing having ended the flow — and the verdict cannot say that.
+    console.log(`  listing tools: ${(listingTurn.toolCalls ?? []).map((call) => `${toolName(call)}(${call.status})`).join(' -> ') || '(none)'}`);
+    console.log(`  listing reply: ${String(listingTurn.text ?? '').replace(/\s+/g, ' ').slice(0, 200)}`);
+    for (const call of listingTurn.toolCalls ?? []) {
+      if (!/^cart_/.test(toolName(call))) continue;
+      console.log(`    ${toolName(call)} -> ${JSON.stringify(decode(call?.output) ?? call?.output).slice(0, 200)}`);
+    }
+    const removalTurn = await stage('remove the line this run added', () => session.send('1번', { timeoutMs: 300_000 }));
+    const cartRemoval = {
+      err: null,
+      text: removalTurn.text,
+      toolCalls: removalTurn.toolCalls,
+      listingToolCalls: listingTurn.toolCalls,
+    };
+    // Printed on every run, pass or fail: a step that answers in 2.5s either pressed nothing or answered
+    // something else, and the verdict alone cannot say which.
+    console.log(`  removal tools: ${(removalTurn.toolCalls ?? []).map((call) => `${toolName(call)}(${call.status})`).join(' -> ') || '(none)'}`);
+    console.log(`  removal reply: ${String(removalTurn.text ?? '').replace(/\s+/g, ' ').slice(0, 200)}`);
+    for (const call of removalTurn.toolCalls ?? []) {
+      if (!/^cart_/.test(toolName(call))) continue;
+      console.log(`    ${toolName(call)} -> ${JSON.stringify(decode(call?.output) ?? call?.output).slice(0, 220)}`);
+    }
     const status = await stage('read the scripts once more', () => session.status());
     // The store profile is a claim about what SHIPS, so the artifact is asked directly. A fresh
     // conversation first: a paused window would read the next message as a selection.
@@ -268,6 +321,7 @@ export async function runArtifactSmoke() {
       expectedSites: ['amazon', 'ebay'],
       checkoutStep,
       outsideSurface,
+      cartRemoval,
     });
     if (!verdict.ok) {
       throw new Error(
@@ -280,6 +334,7 @@ export async function runArtifactSmoke() {
           selection: turnEvidence(selectedTurn),
           packageStatus,
           checkout: turnEvidence(checkoutTurn),
+          removal: turnEvidence(removalTurn),
         }),
       );
     }
@@ -300,6 +355,7 @@ export async function runArtifactSmoke() {
       refineElapsedMs: refinedTurn.elapsedMs,
       guardedElapsedMs: selectedTurn.elapsedMs,
       checkoutElapsedMs: checkoutTurn.elapsedMs,
+      removalElapsedMs: removalTurn.elapsedMs,
     };
   } finally {
     if (session) {
@@ -337,6 +393,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
     console.log(`  outcomes ${Object.entries(result.outcomes).map(([site, status]) => `${site}:${status}`).join(', ')}`);
     console.log(`  compare ${(result.elapsedMs / 1000).toFixed(1)}s · refine ${(result.refineElapsedMs / 1000).toFixed(1)}s · cancel ${(result.cancelElapsedMs / 1000).toFixed(1)}s · no mutation`);
     console.log(`  cart ${(result.guardedElapsedMs / 1000).toFixed(1)}s · checkout ${(result.checkoutElapsedMs / 1000).toFixed(1)}s · no order`);
+  console.log(`  removal ${(result.removalElapsedMs / 1000).toFixed(1)}s · cart line taken back out`);
   // What the shipped package answers when asked for a surface the single purpose does not carry: the
   // §1 claim is only as good as this sentence, so every run records it.
   console.log(`  refused "${result.refusal}"`);

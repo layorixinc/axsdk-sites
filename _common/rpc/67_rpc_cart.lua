@@ -16,6 +16,19 @@
 AX_RPC_CART = AX_RPC_CART or {}
 local R = AX_RPC_CART
 
+--- The store's own statements of "this row is IN the cart", one per measured variant.
+---
+--- A row that is still in the cart carries its own remove control; the panel a store leaves in its place
+--- after a delete does not (measured live on amazon: id present, control gone, one `Undo` appeared). Two
+--- variants of that control were measured on the same store, so both are declared and the reader builds a
+--- selector LIST — one `:has(a, b)` would put a comma inside a single selector, which is exactly the shape
+--- a top-level split cannot read.
+local function active_filters(config)
+  local list = type(config) == "table" and config.cart_active_line_filters or nil
+  if type(list) == "table" and #list > 0 then return list end
+  return { "" }
+end
+
 local function trim(value)
   if type(value) ~= "string" then return nil end
   local text = value:gsub("%s+", " "):gsub("^%s+", ""):gsub("%s+$", "")
@@ -165,19 +178,20 @@ function R.cart_contains(config, product_id)
       -- product or as its own attribute, and which one is the site's business.
       local parts = {}
       for index = 1, #scopes do
-        local scope = tostring(scopes[index] or "")
-        if scope ~= "" then
-          -- ...and only rows that are still IN it. A store may leave the removed line in place as an undo
-          -- panel keeping its id (amazon does, measured); the store declares what a live row has that the
-          -- panel does not.
-          scope = scope .. tostring(config.cart_active_line_filter or "")
-          parts[#parts + 1] = scope .. ' a[href*="' .. id .. '"]'
-          parts[#parts + 1] = scope .. ' [data-product-id="' .. id .. '"]'
-          parts[#parts + 1] = scope .. ' [data-item-id="' .. id .. '"]'
-          parts[#parts + 1] = scope .. ' [data-asin="' .. id .. '"]'
-          -- The line itself may BE the element that names the id (amazon's `.sc-list-item[data-asin]`).
-          parts[#parts + 1] = scope .. '[data-asin="' .. id .. '"]'
-          parts[#parts + 1] = scope .. '[data-item-id="' .. id .. '"]'
+        local base = tostring(scopes[index] or "")
+        if base ~= "" then
+          -- ...and only rows that are still IN it: one alternative per measured control variant.
+          local filters = active_filters(config)
+          for filter_index = 1, #filters do
+            local scope = base .. tostring(filters[filter_index] or "")
+            parts[#parts + 1] = scope .. ' a[href*="' .. id .. '"]'
+            parts[#parts + 1] = scope .. ' [data-product-id="' .. id .. '"]'
+            parts[#parts + 1] = scope .. ' [data-item-id="' .. id .. '"]'
+            parts[#parts + 1] = scope .. ' [data-asin="' .. id .. '"]'
+            -- The line itself may BE the element that names the id (amazon's `.sc-list-item[data-asin]`).
+            parts[#parts + 1] = scope .. '[data-asin="' .. id .. '"]'
+            parts[#parts + 1] = scope .. '[data-item-id="' .. id .. '"]'
+          end
         end
       end
       if #parts > 0 and exists(table.concat(parts, ", ")) then return true end
@@ -473,11 +487,28 @@ end
 --- No store declares a title selector for a cart LINE, and inventing one would be a selector nobody
 --- measured (§10). The row text rides in the same batched `query_all` that fetches the id, so the label
 --- costs nothing extra and cannot drift from the row it names.
-function R.line_label(text)
+function R.line_label(text, limit)
   local label = trim(text)
   if not label then return nil end
-  if #label <= 90 then return label end
-  return label:sub(1, 90)
+  return R.cut(label, limit or 90)
+end
+
+--- Cuts a string to at most `limit` BYTES without splitting a character.
+---
+--- Lua strings are bytes and these titles are Korean: a 90-byte cut split a 3-byte character and the whole
+--- listing died crossing into the flow — measured live on the packaged artifact as "cannot convert invalid
+--- utf8 to javascript string", with the user reading a generic failure. A UTF-8 continuation byte is
+--- `10xxxxxx`, so stepping back off them lands on a boundary.
+function R.cut(text, limit)
+  local value = tostring(text or "")
+  if #value <= limit then return value end
+  local cut = limit
+  while cut > 0 do
+    local following = value:byte(cut + 1)
+    if not following or following < 0x80 or following >= 0xC0 then break end
+    cut = cut - 1
+  end
+  return value:sub(1, cut)
 end
 
 --- The cart's own lines, in the order the page renders them.
@@ -489,8 +520,12 @@ function R.cart_lines(config, limit)
   local attr = trim(config.cart_item_id_attr)
   if not selector or not attr then return nil end
   -- Only rows still in the cart: an undo panel keeps the id and loses the remove control, and listing it
-  -- would offer the user a number for a product they have already taken out.
-  selector = selector .. tostring(config.cart_active_line_filter or "")
+  -- would offer the user a number for a product they have already taken out. One alternative per measured
+  -- variant, as a selector list.
+  local filters = active_filters(config)
+  local wanted = {}
+  for index = 1, #filters do wanted[index] = selector .. tostring(filters[index] or "") end
+  selector = table.concat(wanted, ", ")
   local rows = probe(function()
     return dom.query_all(selector, { text = true, root_id = { attr = attr } }, limit or 12)
   end)
@@ -549,7 +584,11 @@ local function reach_cart(config)
     probe(function()
       return nav.wait_for_navigation({ url = cart_url, timeout = 15000, interval = 250 })
     end)
-    wait_for("body", config.cart_timeout or 10000)
+    -- The CART, not the document. Amazon's cart body is rendered client-side and its first document is a
+    -- shell that already has a `body` and already carries the header count — measured live: 128 KiB with
+    -- `nav-cart-count: 5`, zero rows. Waiting for `body` there is waiting for nothing, and the reader then
+    -- reported an empty cart for a cart holding lines.
+    wait_for(config.cart_ready_selector or "body", config.cart_timeout or 10000)
   end
 
   local kind, reason = R.access_error(config, here())
@@ -585,7 +624,26 @@ function R.read_cart(args)
     return { next = "error", site = config.site, error = "cart_read_not_configured" }
   end
   if #lines == 0 then
-    return { next = "empty", site = config.site, cart_count = R.cart_count(config) }
+    local count = R.cart_count(config)
+    -- The store's own count is the second opinion, and it is in the SHELL — so it answers before the rows
+    -- do. A count above zero with no rows is a page mid-render, never an empty cart: live on the packaged
+    -- artifact this answered `{"next":"empty","cart_count":1}` and told the user their cart was empty.
+    if type(count) == "number" and count > 0 then
+      for _ = 1, 8 do
+        if not rpc or type(rpc.sleep) ~= "function" then break end
+        rpc.sleep(400)
+        lines = R.cart_lines(config) or {}
+        if #lines > 0 then break end
+      end
+    end
+    if #lines == 0 then
+      if type(count) == "number" and count > 0 then
+        -- Two facts that cannot both be true. Saying which one we could not establish is the only honest
+        -- answer: "empty" would be a claim about the cart, and a wrong one.
+        return { next = "error", site = config.site, error = "cart_lines_unreadable", cart_count = count }
+      end
+      return { next = "empty", site = config.site, cart_count = count }
+    end
   end
   return { next = "ok", site = config.site, lines = lines, cart_count = R.cart_count(config) }
 end
@@ -647,16 +705,37 @@ function R.remove_from_cart(args)
   -- named one; and the line is re-read afterwards rather than assumed gone.
   local confirm = first_existing(config.cart_remove_confirm_selectors or {})
   if confirm then click(confirm) end
-  wait_for("body", config.cart_timeout or 10000)
+  wait_for(config.cart_ready_selector or "body", config.cart_timeout or 10000)
 
-  local still_there = R.cart_contains(config, product_id)
+  -- TWO facts, and neither is our own click. The line may stay matchable after a removal that worked —
+  -- measured live in the ko locale: the header count went 1 → 0 while the row and a
+  -- `[data-action="delete-active"]` element were still there, so the id probe alone reported
+  -- `remove_unconfirmed` for a cart the store had already emptied. The count is the store's own number and
+  -- does not depend on which markup survived; the id probe is the precise one. Either is enough, and a
+  -- press that moved NEITHER is claimed as nothing.
+  local gone = not R.cart_contains(config, product_id)
+  local after_count = R.cart_count(config)
+  if not gone and type(before_count) == "number" and type(after_count) == "number"
+    and after_count >= before_count then
+    -- Give the store a bounded moment to state it: some carts update in place after the press.
+    for _ = 1, 6 do
+      if not rpc or type(rpc.sleep) ~= "function" then break end
+      rpc.sleep(400)
+      gone = not R.cart_contains(config, product_id)
+      after_count = R.cart_count(config)
+      if gone or (type(after_count) == "number" and after_count < before_count) then break end
+    end
+  end
+  local dropped = type(before_count) == "number" and type(after_count) == "number"
+    and after_count < before_count
+  local removed = gone or dropped
   return {
-    next = still_there and "error" or "done",
+    next = removed and "done" or "error",
     site = config.site,
     product_id = product_id,
-    removed = not still_there,
-    error = still_there and "remove_unconfirmed" or nil,
+    removed = removed,
+    error = (not removed) and "remove_unconfirmed" or nil,
     previous_cart_count = before_count,
-    cart_count = R.cart_count(config),
+    cart_count = after_count,
   }
 end

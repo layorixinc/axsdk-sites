@@ -44,8 +44,15 @@ const SCENES = {
     },
     {
       file: '3-choices.png',
-      site: 'https://www.coupang.com/',
-      text: '이 사이트에서 로지텍 M185 마우스 찾아줘',
+      // amazon in KOREAN (`/-/ko/`), decided 2026-08-27. Measured that day: coupang answers its own 403
+      // page for this profile (`<div id="error403">`, 3,531 bytes) and 11st was in a maintenance window,
+      // while amazon searches, adds and removes reliably AND renders Korean for this profile — so the
+      // capture stays in the listing's language without waiting on another store to let us back in.
+      site: 'https://www.amazon.com/-/ko/',
+      // Measured 2026-08-27 on amazon-ko, one turn each: this wording answers a numbered list of 3 real
+      // products AND its first row adds (`add_stage: "confirmed"`), while every mouse wording tried stops
+      // at `add_stage: "clicked"` (TODO 19) — a scene 4 that cannot add has nothing to photograph.
+      text: '이 사이트에서 운동화 찾아줘',
       what: 'numbered products on one store, waiting for the user to choose',
     },
     {

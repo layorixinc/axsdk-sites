@@ -15,8 +15,16 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
-/** The two routable intents outside the sentence. Their flows, tools and modules follow from them. */
-export const STORE_EXCLUDED_INTENTS = ['request_service_quote', 'memory'];
+/** The routable intents outside the sentence. Their flows, tools and modules follow from them. */
+export const STORE_EXCLUDED_INTENTS = [
+  'request_service_quote',
+  'memory',
+  // Decided 2026-08-27: the store package routed `community_script` while the single-purpose sentence
+  // does not mention it, and a reviewer finding a surface outside the sentence is the failure mode P0-3
+  // exists to prevent. Widening the sentence instead would risk the "narrow single purpose" judgement,
+  // so the capability stays in the development build only.
+  'community_script',
+];
 
 /**
  * Hook flows that must stop RECORDING without ceasing to EXIST.

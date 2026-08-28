@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-export const COMMUNITY_PRODUCT_CHARTER = 'AXSDK installs, manages, and runs user-selected community web-automation scripts on websites explicitly authorized by the user.';
+export const COMMUNITY_PRODUCT_CHARTER = 'AXSDK installs, manages, and runs user-selected community web-automation scripts on websites explicitly authorized by the user. This policy describes the REVIEWED Chrome Web Store artifact, whose install path is the signed registry: the unsigned install-from-a-URL surface exists in the development build only and is removed at build time, which `assertNoUrlInstallSurface` proves on every packaged build.';
 
 const EXPECTED = Object.freeze({
   topLevel: [

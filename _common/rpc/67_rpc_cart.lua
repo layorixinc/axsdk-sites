@@ -57,6 +57,7 @@ local function click(selector) return probe(function() return dom.click(selector
 local function set_value(selector, value)
   return probe(function() return dom.set_value(selector, value) end) == true
 end
+
 local function wait_for(selector, timeout)
   return probe(function()
     return dom.wait_for_selector(selector, { timeout = timeout or 8000, interval = 200 })

@@ -134,7 +134,7 @@ stores. One probe first — confirm `contains` reflects the narrowing the way `g
 
 ## 10. The community charter contradicts the shipped community channel
 
-**Status: open, one decision away; belongs to the R2 track.**
+**Status: closed 2026-08-27 — the contradiction was with the DEVELOPMENT build, and the charter now says so.**
 
 `community/release-policy.json` is validated by `build:cws` on every run and declares
 `trust.registrySigned: true`, `trust.unsignedScripts: false`, `trust.arbitraryUrlImport: false`. The
@@ -146,9 +146,14 @@ and every other userscript manager works" (`from-url.ts:1-21`) — and the optio
 So a gate is enforcing a statement the product no longer makes. Neither side is wrong on its own: the
 unsigned from-URL model was a deliberate later decision, and the JSON was written before it.
 
-**Next**: when the R2 charter is written (D1 scoping), rewrite the trust block to the model that ships —
-unsigned user-chosen URLs with declared-digest verification, signed only for a reviewed registry if one
-ever exists — and keep the gate. Do not weaken the gate to accept both.
+Resolved by measurement rather than by choosing a side. The CWS build STRIPS the from-URL surface
+(`stripCwsSurfaces`) and `assertNoUrlInstallSurface` fails the build if it survives — so for the reviewed
+artifact `arbitraryUrlImport: false` and `registrySigned: true` are simply true, and the unsigned path
+exists in the development build only. The gate is unchanged and `productCharter` now states that scope, so
+the next reader is not left comparing a policy against a build it does not describe.
+
+Decided with it (2026-08-27): `community_script` is excluded from the store profile
+(`STORE_EXCLUDED_INTENTS`), so the reviewed package does not route the community surface at all.
 
 ## 11. The rendered comparison window is Korean by construction
 
@@ -314,8 +319,25 @@ means, so it is not a rung. Six offline cases and four mutations pin it, and the
 because it could not express an element that EXISTS and refuses a click (the half `rejectSetValue`
 already covered for values).
 
-With it in place the same live pair answers `add_stage: "confirmed"`, `add_status: "added"` with the
-store's own words ("장바구니에 추가"). So the failure does not reproduce, and the two candidates left are
-the cart scope fix (the confirmation used to be able to read a Saved-for-later row or an undo panel) or
-amazon having declined that stretch of automated adds. **No claim either way** — the next occurrence will
-name its own stage, which is the whole point of the instrument.
+With it in place the failure became reproducible ON DEMAND and PRODUCT-SPECIFIC, measured the same
+minute on amazon-ko:
+
+| wording | rows | add |
+|---|---|---|
+| `이 사이트에서 운동화 찾아줘` | 3 | `add_stage: "confirmed"`, `add_status: "added"` |
+| `이 사이트에서 로지텍 마우스 찾아줘` | 16 | `add_stage: "clicked"`, cart count still 0 |
+
+So the click lands and the store does nothing for SOME products, while a page-context
+`document.querySelector('#add-to-cart-button').click()` on the very same product added it 3/3 —
+immediately and after a 3s settle, so neither hydration nor the selector explains it (both
+`#add-to-cart-button` and `input[name="submit.add-to-cart"]` exist and are visible).
+
+**Tried and REFUTED**: submitting the form instead (`dom.submit_form` → `requestSubmit()`, the fix §13
+records for the quote wizard's ignored submit clicks). Live it reached `add_stage: "form_submitted"` and
+the store still did nothing, so the fallback, its config key, its grant and its tests were reverted
+rather than left as machinery with no evidence behind it. Do not re-try that path without a new measurement.
+
+**Next**: the remaining difference is the WORLD the click is dispatched from — the extension's op runs in
+an isolated world, the working probe ran in the page's. That is a runtime capability question
+(`RPC_LUA_RUNTIME_REQUESTS_*`), not site data. The listing capture no longer waits on it: scene 3·4 use a
+wording whose add is measured to confirm.

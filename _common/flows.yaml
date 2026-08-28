@@ -5963,8 +5963,7 @@ flowTools:
             dom.click,
             dom.click_text,
             dom.read_many,
-            dom.set_value,
-            dom.submit_form
+            dom.set_value
           ]
         opTimeoutMs: 2000
         # A step costs ~15 round trips at roughly a second each — measured, and the platform says the second

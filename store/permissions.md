@@ -10,6 +10,11 @@
 ## English
 
 Paste each paragraph into the matching field. Every claim is measured and reproducible by the reviewer.
+
+Each justification field caps at **1,000 characters** (measured in the dashboard 2026-08-27), so every
+paragraph here is written to fit one — the `debugger` one was 1,108 and was tightened without dropping a
+claim.
+
 Single purpose: `store/single-purpose.md`.
 
 ### `debugger`
@@ -19,16 +24,15 @@ script into the page world; it uses the DevTools protocol `DOM`, `Runtime` and `
 values it needs. The evaluated expressions are code shipped inside the extension, never text fetched at
 runtime.
 
-Two bounds apply. First, only tabs in the **agent tab group the user created** are addressed — a normal
-browser group is never adopted wholesale; the starting tab is moved into a dedicated group and other tabs
-join only when the user visibly drags them in. Second, before an irreversible action (adding to a cart,
-submitting a form) the extension reads the button's actual label and asks for confirmation.
+Two bounds apply. Only tabs in the agent tab group the user created are addressed: the starting tab is
+moved into a dedicated group and other tabs join only when the user visibly drags them in. And before an
+irreversible action (adding to a cart, submitting a form) the extension reads the button's actual label
+and asks for confirmation.
 
-Chrome discloses this permission at install as *"Read and change all your data on all websites"* and
-keeps its own debugging banner visible for the whole session, from which the user can stop it instantly.
-
-`chrome.scripting` cannot express this product: one task crosses several stores, each with tab
-navigations and reloads, and the state has to survive them as one session.
+Chrome discloses this permission at install and keeps its own debugging banner visible for the whole
+session, from which the user can stop it instantly. `chrome.scripting` cannot express this product: one
+task crosses several stores, each with tab navigations and reloads, and the state has to survive them as
+one session.
 
 ### `host_permissions` (`http://*/*`, `https://*/*`)
 

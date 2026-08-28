@@ -844,6 +844,20 @@ local function without_empty_candidates(result)
   return result
 end
 
+--- At most three other spellings, because each one costs a page load (§13, the multi-store bound).
+S.MAX_QUERY_VARIANTS = 3
+
+--- The variants as a list. They travel as one "|"-separated scalar: an empty Lua table encodes as `{}` and
+--- a schema expecting an array rejects it, which is the boundary §13 records four times over.
+function S.query_variants(value)
+  local out = {}
+  for part in tostring(value or ""):gmatch("[^|]+") do
+    local trimmed = non_empty(part)
+    if trimmed then out[#out + 1] = trimmed end
+  end
+  return out
+end
+
 function S.run_store_search(args)
   args = type(args) == "table" and args or {}
   local item = type(args.item) == "table" and args.item or {}
@@ -882,6 +896,28 @@ function S.run_store_search(args)
   end
 
   local result = S.search(config, { query = query, page = args.page })
+  -- A store searched in the WRONG LANGUAGE finds nothing. Measured live: a Korean request on coupang went
+  -- out as `q=Logitech+M185+mouse` (the collector's prompt asks for an English term — written when this
+  -- flow was amazon-only) and answered `no_results` on a page carrying 60 product units for the Korean
+  -- wording. So the caller may hand over other spellings, and they are tried ONLY when the store found
+  -- nothing: each costs a navigation, and no wall opens for a synonym, so an access refusal stops here.
+  if result.next ~= "ok" and (result.error == "no_results" or result.next == "no_results") then
+    local tried = 0
+    for _, variant in ipairs(S.query_variants(args.query_variants)) do
+      if tried >= S.MAX_QUERY_VARIANTS then break end
+      if variant ~= query then
+        tried = tried + 1
+        local retry = S.search(config, { query = variant, page = args.page })
+        -- The LATEST outcome is what gets reported, whatever it is: a wall met on the second wording is
+        -- a wall, and reporting the first "nothing found" instead would hide a refusal the user can act
+        -- on (§13: store outcomes are part of the answer).
+        result = retry
+        if retry.next == "ok" then break end
+        -- A wall, a login or a dead channel is not "this wording found nothing" — stop asking.
+        if retry.error ~= "no_results" and retry.next ~= "no_results" then break end
+      end
+    end
+  end
   local branch = result.next
   local status = (branch == "ok") and "candidates" or (result.error or branch)
 
@@ -945,7 +981,8 @@ function S.run_open_site_search(args)
     return { next = "unsupported_site", site = site, error = "site_not_ported",
              store_result = { status = "site_not_ported", error = "site_not_ported", candidates = array({}) } }
   end
-  local result = S.run_store_search({ site = site, query = args.query, page = args.page })
+  local result = S.run_store_search({ site = site, query = args.query, page = args.page,
+                                      query_variants = args.query_variants })
   -- The single-site flow predates the worker's envelope and maps `result.candidates` directly, so the
   -- list is exposed at the top level too rather than reshaping a flow to match a reader.
   local store = result.store_result or {}

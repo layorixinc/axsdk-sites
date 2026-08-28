@@ -44,12 +44,19 @@ local CONFIG = {
   login_urls = { "/login", "login.coupang.com" },
   login_selector = 'form[action*="login"] input[type="password"]',
   blocked_selectors = {
-    { selector = 'iframe[src*="captcha"], form[action*="captcha"], .captcha', error = "captcha_required" }
+    { selector = 'iframe[src*="captcha"], form[action*="captcha"], .captcha', error = "captcha_required" },
+    -- Coupang's own 403 page, measured live 2026-08-27 on the search URL: 3,531 bytes, `<div id="error403">`,
+    -- visible text "요청하신 페이지의 사용권한이 없습니다." None of the `blocked_text` phrases below appear on
+    -- it, so the reader answered `no_results` — a claim about listings nobody was shown, and the flow told
+    -- the user their product does not exist there. The element is the marker because it is locale-free.
+    { selector = "#error403", error = "access_denied" }
   },
   blocked_text = {
     { text = "access denied", error = "access_denied" },
     { text = "비정상적인 접근", error = "access_denied" },
-    { text = "자동화된 접근", error = "access_denied" }
+    { text = "자동화된 접근", error = "access_denied" },
+    -- The 403 page's own sentence, for a rendering that drops the id.
+    { text = "사용권한이 없습니다", error = "access_denied" }
   }
 }
 

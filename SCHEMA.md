@@ -1256,6 +1256,12 @@
             "string",
             "null"
           ]
+        },
+        "search_status": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }
@@ -3393,6 +3399,12 @@
       "properties": {
         "query": {
           "type": "string"
+        },
+        "query_variants": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

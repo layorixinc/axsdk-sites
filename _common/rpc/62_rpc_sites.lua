@@ -372,6 +372,10 @@ RPC_SITES["coupang"] = {
     {
       selector = "iframe[src*=\"captcha\"], form[action*=\"captcha\"], .captcha",
       error = "captcha_required"
+    },
+    {
+      selector = "#error403",
+      error = "access_denied"
     }
   },
   blocked_text = {
@@ -385,6 +389,10 @@ RPC_SITES["coupang"] = {
     },
     {
       text = "자동화된 접근",
+      error = "access_denied"
+    },
+    {
+      text = "사용권한이 없습니다",
       error = "access_denied"
     }
   }

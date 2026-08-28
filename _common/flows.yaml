@@ -1121,6 +1121,9 @@ flows:
       shop_plan: null
       shop_index: null
       query: null
+      # Other spellings of the SAME product, "|"-separated. A store searched in the wrong language finds
+      # nothing (measured on coupang), and the reader tries these only then.
+      query_variants: null
       quantity: null
       candidates: null
       screened_out: null
@@ -1152,7 +1155,8 @@ flows:
           Build the shopping list, then finish. The current value is the projected shop_plan; ALSO extract products from the latest user message (requestText).
 
           SPLIT a multi-item request into SEPARATE items — "아이폰이랑 계란 사줘" / "buy an iPhone and eggs" becomes TWO items [iPhone, eggs], NEVER one combined query. Each item is an object { query, quantity }:
-          - query: a SHORT English product search term for an online store. Translate to English ("아이폰" -> "iPhone", "계란" -> "eggs", "건전지" -> "batteries", "운동화" -> "running shoes"). Keep it broad enough to return results; do NOT demand brand/size/color unless the user already gave one.
+          - query: a SHORT product search term in the language the STORE searches in — English for amazon, ebay, walmart, aliexpress and etsy; KOREAN for coupang, 11st, gmarket, ssg and naver-shopping. Measured: a Korean request searched on coupang as "Logitech M185 mouse" returned NOTHING while the Korean wording returned 60 products. Keep it broad enough to return results; do NOT demand brand/size/color unless the user already gave one.
+          - query_variants: other spellings of the SAME product, "|"-separated, at most 3 — the other language's wording first ("로지텍 M185 마우스" for "Logitech M185 mouse"). They are tried only if the store finds nothing, so they cost nothing when the first term works.
           - quantity: an integer; DEFAULT to 1 whenever the user did not state a number. Never ask just to learn a quantity.
 
           One tool — collect_shopping:
@@ -1190,6 +1194,9 @@ flows:
           - product_name
           - add_status
           - add_error
+          # A store REFUSAL has to reach the item's outcome; undeclared, it arrives as nil and the item is
+          # recorded as "no product found" — a claim about listings nobody was shown.
+          - search_status
         id: next_product
         description: Record the item just processed and pick the next item from
           shop_plan (sets query/quantity, advances shop_index). No LLM, no
@@ -1201,7 +1208,7 @@ flows:
 
       search_item:
         kind: action_contract
-        inputSelector: [ query ]
+        inputSelector: [ query, query_variants ]
         id: shopping_search_product
         description: Search the store that is open, in the runtime, and read its candidates.
         next:
@@ -1285,11 +1292,11 @@ flows:
           - checkout_stage
         allowedTools: [ checkout_decision ]
         prompt: |-
-          The shopping items have been added to the cart. `shop_results` is the per-item cart outcome (one line per item); `shop_count` is how many were processed; `requestText` is the latest user message; `checkout_stage` tracks this gate. NO order is ever placed here — checkout only navigates to the checkout page for the user to review.
+          Report what happened to each item, then ask about checkout. `shop_results` is the per-item cart outcome (one line per item) and NOT every line is an add: `store refused (access_denied)` means the store refused to be searched — say so, in the user's language, instead of "not found", because a refusal is something they can act on. `shop_count` is how many were processed; `requestText` is the latest user message; `checkout_stage` tracks this gate. NO order is ever placed here — checkout only navigates to the checkout page for the user to review.
 
           Call checkout_decision EXACTLY ONCE — the FIRST rule that applies:
           0. requestText REFUSES or withdraws (아니요 / 취소 / 그만 / 됐어요 / no, never mind): next="cancel". No order is placed.
-          1. `checkout_stage` is empty/absent (approval NOT asked yet): next="ask", checkout_stage="asked", question=<in the user's language: give a SHORT cart summary from shop_results (item + added/not), then ask clearly whether to proceed to checkout, e.g. "장바구니에 담았습니다. 결제(체크아웃) 페이지로 진행할까요? 주문은 진행되지 않습니다. 진행하려면 '예'라고 답해 주세요.">. IGNORE requestText here — always ask first.
+          1. `checkout_stage` is empty/absent (approval NOT asked yet): next="ask", checkout_stage="asked", question=<in the user's language: state EACH item's outcome from shop_results as it is — never write "담았습니다" for a line that is not an `added` line — then ask clearly whether to proceed to checkout. Shape: "<item>: <outcome>. 결제(체크아웃) 페이지로 진행할까요? 주문은 진행되지 않습니다. 진행하려면 '예'라고 답해 주세요.">. IGNORE requestText here — always ask first.
           2. `checkout_stage`="asked" (the user is answering the approval question):
              - requestText APPROVES (yes / 예 / 응 / 진행 / 결제 / 체크아웃 / go ahead): next="checkout", checkout_stage="".
              - requestText DECLINES (no / 아니 / 괜찮아 / 나중에 / 그만 둬): next="done", checkout_stage="".
@@ -4889,6 +4896,12 @@ flowTools:
             outcome = "add pending (x" .. tostring(qty) .. ")"
           elseif nz(args.add_error) then
             outcome = "NOT added (" .. tostring(args.add_error) .. ")"
+          elseif nz(args.search_status) and args.search_status ~= "ok"
+            and args.search_status ~= "no_results" then
+            -- The store REFUSED to be searched (bot wall, login, dead channel). Live, coupang's 403 page
+            -- reached the user as "찾지 못했다" — a claim about listings nobody was shown, one level up from
+            -- the reader that had the same bug. A refusal the user can act on has to survive to the reply.
+            outcome = "store refused (" .. tostring(args.search_status) .. ")"
           elseif not nz(args.product_id) then
             outcome = "no product found"
           else
@@ -4901,6 +4914,9 @@ flowTools:
           return {
             next = "shop",
             query = item.query,
+            -- The other spellings ride with the item: a store searched in the wrong language finds
+            -- nothing (measured on coupang), and the reader retries only then.
+            query_variants = item.query_variants or "",
             quantity = item.quantity or 1,
             shop_index = idx + 1,
             shop_results = results,
@@ -4924,6 +4940,9 @@ flowTools:
         product_name: { type: [ string, "null" ] }
         add_status: { type: [ string, "null" ] }
         add_error: { type: [ string, "null" ] }
+        # Undeclared is DROPPED before the script sees it, so a refusal the reader classified would
+        # arrive as nil and the item would be recorded as "no product found".
+        search_status: { type: [ string, "null" ] }
 
   shopping_search_product:
     description: Search the shopping site for the current item's query; returns
@@ -4961,6 +4980,10 @@ flowTools:
       required: [ query ]
       properties:
         query: { type: string }
+        # Other spellings of the SAME product, "|"-separated, at most three. Tried only when the store
+        # found nothing, so they cost no page load when the first term works — and a store that refused
+        # (wall, login) is never asked again, because no wall opens for a synonym.
+        query_variants: { type: [ string, "null" ] }
 
   pick_product:
     description: Pick the first usable search candidate to add to the cart. No LLM,

@@ -305,8 +305,17 @@ Candidates, none confirmed: the add fires before the buy box is interactive (the
 document is a shell — `AGENTS.md` §13, the same read that made a full cart look empty), a refusal in the
 identity/price/variation pre-checks reported as `pending`, or amazon declining repeated automated adds.
 
-**Next**: instrument `AX_RPC_CART.add_to_cart` to publish WHICH step it stopped at (control found /
-click returned / count moved / confirmation read) instead of one `add_to_cart_pending` for four facts —
-§13's "`add_to_cart_pending` used to answer for three different facts" rule, applied one level deeper.
-The removal is unaffected and live-verified 3/3; `cart-remove.mjs` reports which path seeded its cart so
-a green removal can never be read as a green add.
+**Instrumented and NOT REPRODUCING (2026-08-27, after the cart scope fix).**
+
+`AX_RPC_CART.add_to_cart` now publishes `stage` — the furthest milestone it reached — and both add tools
+carry it (`add_stage` / `cart_stage`). The ladder is EVIDENCE, not steps we took: `not_approved`,
+`control_missing`, `click_refused`, `clicked`, `count_moved`, `confirmed`; reaching the cart page is a
+means, so it is not a rung. Six offline cases and four mutations pin it, and the stub grew `rejectClick`
+because it could not express an element that EXISTS and refuses a click (the half `rejectSetValue`
+already covered for values).
+
+With it in place the same live pair answers `add_stage: "confirmed"`, `add_status: "added"` with the
+store's own words ("장바구니에 추가"). So the failure does not reproduce, and the two candidates left are
+the cart scope fix (the confirmation used to be able to read a Saved-for-later row or an undo panel) or
+amazon having declined that stretch of automated adds. **No claim either way** — the next occurrence will
+name its own stage, which is the whole point of the instrument.

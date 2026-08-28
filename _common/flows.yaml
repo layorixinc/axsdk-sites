@@ -1129,6 +1129,7 @@ flows:
       product_name: null
       add_status: null
       add_error: null
+      add_stage: null
       shop_results: ""
       shop_count: null
       shop_refine_stage: null
@@ -1564,6 +1565,7 @@ flows:
       cart_approval: null
       cart_status: null
       cart_error: null
+      cart_stage: null
       cart_confirmation: null
     nodes:
       prefill_request:
@@ -3928,6 +3930,9 @@ flowTools:
         }
       cart_confirmation: result.confirmation
       cart_url: result.cart_url
+      # WHERE it stopped, for the same reason the single-site add publishes it: one word for four facts
+      # is what left `TODO.md` §19 unattributable on a live trace.
+      cart_stage: result.stage
     effect: mutation
     consent: required
     idempotent: true
@@ -5154,6 +5159,11 @@ flowTools:
       add_status: { if: [ { var: result.added }, "added", "failed" ] }
       add_error: result.error
       add_confirmation: result.confirmation
+      # WHERE it stopped. `add_to_cart_pending` answers for four facts (control never found, click refused,
+      # click landed and the store's counter never moved, counter moved and the cart never named the line),
+      # and live that was all a failing add could say about a store where a plain click on the same button
+      # lands the item every time (`TODO.md` §19).
+      add_stage: result.stage
     effect: mutation
     consent: required
     idempotent: true

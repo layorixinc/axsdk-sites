@@ -61,6 +61,8 @@ export function makePage(spec) {
     refuseOps: spec.refuseOps ?? [],
     // Selectors that EXIST but refuse a value — a `<select>` without the requested option.
     rejectSetValue: spec.rejectSetValue ?? [],
+    // Selectors that EXIST and refuse a CLICK. `dom.click` answers false for them.
+    rejectClick: spec.rejectClick ?? [],
     // Ops the client never REGISTERED. The platform can ship an op before the extension implements it, and
     // `executeRpcOp` answers `command_unresolved` for one it has no handler for. That is a different string
     // from `op_not_permitted`, and a script that only knows the latter retries the op forever.
@@ -234,6 +236,10 @@ export function installRpcStub(lua, page, { allow } = {}) {
     'dom.click': (selector) => {
       page.tick();
       if (rowsFor(selector).length === 0) return false;
+      // An element can EXIST and still refuse the click — the same half `rejectSetValue` exists for. The
+      // module reads that false as `click_failed`, a different fact from "no such element", and without
+      // this the stub could only ever express the second one.
+      if (page.rejectClick.includes(selector)) return false;
       if (page.onClick) page.onClick(selector, page);
       return true;
     },

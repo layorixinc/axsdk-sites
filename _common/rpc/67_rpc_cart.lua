@@ -335,12 +335,12 @@ function R.add_to_cart(args)
   -- would leave the guard off for half the callers.
   local approval = args.cart_approval
   if approval ~= "user_selected_compared_offer" and approval ~= "user_picked_searched_product" then
-    return { next = "error", added = false, error = "approval_required" }
+    return { next = "error", added = false, error = "approval_required", stage = "not_approved" }
   end
   if approval == "user_selected_compared_offer"
     and (not trim(args.identity_id) or args.identity_approval ~= "locked_product_identity"
       or not trim(args.comparison_id) or args.comparison_approval ~= "current_comparison") then
-    return { next = "error", added = false, error = "identity_approval_required" }
+    return { next = "error", added = false, error = "identity_approval_required", stage = "not_approved" }
   end
   if not config then
     return { next = "error", added = false, error = trim(args.site) and "site_not_ported" or "missing_site" }
@@ -354,10 +354,17 @@ function R.add_to_cart(args)
     return { next = "error", site = config.site, added = false, error = "missing_product_id" }
   end
 
+  -- WHERE it stopped, as one word. `add_to_cart_pending` answers for four different facts — control never
+  -- found, click refused, click landed and the store's counter never moved, counter moved and the cart
+  -- never named the line — and live that was all the flow could say about a store where a plain click on
+  -- the same button lands the item (`TODO.md` §19). Every milestone below is a fact the script already
+  -- established, so the field costs no round trip.
+  local stage = "resolved"
   local function refuse(result)
     result.next = "error"
     result.site = config.site
     result.added = false
+    result.stage = result.stage or stage
     return result
   end
 
@@ -408,13 +415,17 @@ function R.add_to_cart(args)
     end
 
     local before = R.cart_count(config)
+    stage = "on_product_page"
     local add_selector = first_existing(config.add_selectors or {})
     if not add_selector then
-      return refuse({ product_id = product_id, error = "add_to_cart_unavailable" })
+      return refuse({ product_id = product_id, error = "add_to_cart_unavailable",
+                      stage = "control_missing" })
     end
+    stage = "control_found"
     if not click(add_selector) then
-      return refuse({ product_id = product_id, error = "click_failed" })
+      return refuse({ product_id = product_id, error = "click_failed", stage = "click_refused" })
     end
+    stage = "clicked"
     if config.add_ready_selector then wait_for(config.add_ready_selector, config.product_timeout or 8000) end
 
     -- eBay's add is an in-page XHR: the URL stays on `/itm/<id>` and the only thing that moves is the
@@ -429,7 +440,7 @@ function R.add_to_cart(args)
       local deadline = 8
       for _ = 1, deadline do
         local now = R.cart_count(config)
-        if now ~= nil and now > before then break end
+        if now ~= nil and now > before then stage = "count_moved" break end
         if not rpc or type(rpc.sleep) ~= "function" then break end
         rpc.sleep(250)
       end
@@ -443,6 +454,8 @@ function R.add_to_cart(args)
     end
 
     if not R.cart_contains(config, product_id) and config.cart_url then
+      -- Reaching the cart is a MEANS, not evidence, so it is not a milestone: the ladder answers what the
+      -- store did with the press, and navigating there is what we did.
       probe(function() return nav.navigate(config.cart_url) end)
       probe(function()
         return nav.wait_for_navigation({ url = config.cart_url, timeout = 15000, interval = 250 })
@@ -460,6 +473,7 @@ function R.add_to_cart(args)
   end
 
   local confirmed = R.cart_contains(config, product_id)
+  if confirmed then stage = "confirmed" end
   -- One read of the page's own words, and only when there is something to explain.
   local unconfirmed = nil
   if not confirmed then
@@ -471,6 +485,8 @@ function R.add_to_cart(args)
     -- reporting it would tell the user a cart line exists that does not.
     next = confirmed and "done" or "error",
     site = config.site,
+    -- Published so a live trace names the step, not just the outcome.
+    stage = stage,
     product_id = product_id,
     added = confirmed,
     error = unconfirmed,

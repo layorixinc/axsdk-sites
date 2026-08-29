@@ -46,7 +46,23 @@ test('a marketplace catalogue names the rejected metadata source', async () => {
   }
   assert.throws(
     () => assertNoMarketplaceKeywordSpam(root),
-    /store\/listing\.md:1 enumerates 4 marketplace names/,
+    /store\/listing\.md enumerates 4 marketplace names/,
+  );
+});
+
+test('wrapping a marketplace catalogue across lines does not evade the gate', async () => {
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(join(tmpdir(), 'axsdk-listing-keywords-wrapped-'));
+  for (const file of LISTING_METADATA_FILES) {
+    await mkdir(join(root, ...file.split('/').slice(0, -1)), { recursive: true });
+    await writeFile(join(root, file), file.endsWith('listing.md')
+      ? 'Supported stores:\nAmazon\nWalmart\neBay\nEtsy\n'
+      : 'Paste-ready description without a catalogue.');
+  }
+  assert.throws(
+    () => assertNoMarketplaceKeywordSpam(root),
+    /store\/listing\.md enumerates 4 marketplace names/,
   );
 });
 

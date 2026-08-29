@@ -29,18 +29,17 @@ const MARKETPLACE_KEYWORDS = [
 
 /**
  * CWS treats a catalogue of third-party marketplace names as metadata keyword spam. Product capability
- * belongs in the description, but enumerating every brand does not. Four names on one line is already a
- * catalogue; ordinary prose can still name a store when that fact genuinely needs one.
+ * belongs in the description, but enumerating every brand does not. Four distinct names anywhere in
+ * one metadata source is already a catalogue; scanning the whole source means wrapping the same list
+ * across lines cannot turn it back into prose.
  */
 export function assertNoMarketplaceKeywordSpam(root) {
   for (const file of LISTING_METADATA_FILES) {
-    const lines = readFileSync(join(root, file), 'utf8').split(/\r?\n/);
-    lines.forEach((line, index) => {
-      const named = MARKETPLACE_KEYWORDS.filter((pattern) => pattern.test(line)).length;
-      if (named >= 4) {
-        throw new Error(`${file}:${index + 1} enumerates ${named} marketplace names as listing metadata`);
-      }
-    });
+    const text = readFileSync(join(root, file), 'utf8');
+    const named = MARKETPLACE_KEYWORDS.filter((pattern) => pattern.test(text)).length;
+    if (named >= 4) {
+      throw new Error(`${file} enumerates ${named} marketplace names as listing metadata`);
+    }
   }
 }
 

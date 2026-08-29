@@ -2,6 +2,11 @@
 
 대시보드에 붙이는 문안. 단일 목적은 `store/single-purpose.md`, 권한 소명은 `store/permissions.md`.
 
+> **2026-08-29 review correction:** the detailed descriptions deliberately do not enumerate third-party
+> marketplaces. CWS treated those catalogues as unnecessary keyword metadata. Describe the capability;
+> do not re-add a supported-store brand list.
+
+
 ---
 
 ## English
@@ -30,7 +35,8 @@ What it does
   and shown when you ask for them
 · Re-sorts or filters the same list when you say what you want ("cheapest first", "under 30,000", "free
   shipping only")
-· Adds the product you picked to that store's cart, then re-reads the cart page to confirm it is there
+· When the selected store supports a cart, adds the product you picked, then re-reads the cart page to
+  confirm it is there
 · Takes you to the checkout review page and stops
 
 What it does not do
@@ -43,9 +49,6 @@ How it works
 It reads the pages your browser already opens. The agent only operates inside a dedicated tab group you
 create, and Chrome itself shows a banner across the top for as long as it is attached, which you can stop
 at any time. Before anything irreversible it reads the actual label on the button and asks.
-
-Supported stores
-Amazon, eBay, Walmart, AliExpress, Etsy, Coupang, 11st, Gmarket, SSG, Naver Shopping (read-only)
 
 This release is an unlisted distribution for users who already have an AXSDK account (API key).
 Consumer sign-in is coming; until then the extension asks for a key in its options page.
@@ -90,7 +93,7 @@ Compares total cost with shipping across stores, then adds the product you chose
 · 같은 제조사 모델인지 확인한 뒤 비교합니다 — 액세서리나 다른 모델이 섞이지 않습니다
 · 배송비를 알 수 없는 행은 0원으로 가정하지 않고 "미확인"으로 접어 두고, 몇 건이 접혔는지 알려줍니다
 · 조건을 말하면(예: "3만원 이하만", "평점 높은 순") 그 자리에서 다시 정리합니다
-· 고른 상품을 그 스토어 장바구니에 담고, 장바구니 페이지에서 상품이 맞는지 다시 확인합니다
+· 장바구니를 지원하는 스토어에서는 고른 상품을 담고, 장바구니 페이지에서 상품이 맞는지 다시 확인합니다
 · 결제 화면까지 안내하고 멈춥니다
 
 무엇을 하지 않나요
@@ -103,9 +106,6 @@ Compares total cost with shipping across stores, then adds the product you chose
 브라우저가 이미 여는 페이지를 읽습니다. 에이전트는 사용자가 만든 전용 탭 그룹 안에서만 동작하고,
 동작 중에는 Chrome이 직접 상단에 알림 배너를 띄웁니다. 되돌릴 수 없는 동작 앞에서는 버튼의 실제 문구를
 읽어 확인을 받습니다.
-
-지원 스토어
-Amazon, eBay, Walmart, AliExpress, Etsy, 쿠팡, 11번가, G마켓, SSG, 네이버쇼핑(읽기 전용)
 
 이 릴리스는 AXSDK 계정(API 키)이 있는 사용자를 위한 비공개 배포입니다. 소비자 로그인은 준비 중이며,
 그때까지는 옵션 화면에서 키를 입력합니다.
@@ -131,13 +131,11 @@ product name, price and shipping fee from the results, converts them to one curr
 numbered comparison of the total cost — item price plus shipping, not just the sticker price. Rows whose
 shipping is unknown are folded away and counted, so a missing fee never looks like a free one.
 
-You choose by number. Only then does it add that one offer to that store’s cart, after re-reading the
-product page to confirm the model and price still match what you compared. It can then open the store’s
-checkout page so you can review the order.
+You choose by number. When the selected store supports a cart, only then does it add that one offer,
+after re-reading the product page to confirm the model and price still match what you compared. It can
+then open the store’s checkout page so you can review the order.
 
 It never places an order and never pays. Payment and order placement are always yours.
-
-Supported stores: Amazon, Walmart, eBay, AliExpress, Etsy, Coupang, Naver Shopping, Gmarket, 11st, SSG.
 
 The assistant reads only the page you are on, and only while you are using it. It stores no contact
 details: this release has no memory feature.

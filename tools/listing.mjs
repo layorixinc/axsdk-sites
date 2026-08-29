@@ -16,6 +16,35 @@ export const LISTING_FILES = [
   'docs/support.md',
 ];
 
+/**
+ * The description source and the paste-ready sheet used for the dashboard. Both must move together:
+ * fixing only the source leaves rejected copy ready for the next submission.
+ */
+export const LISTING_METADATA_FILES = ['store/listing.md', 'CWS_DASHBOARD_ENTRY.md'];
+
+const MARKETPLACE_KEYWORDS = [
+  /amazon/i, /ebay/i, /walmart/i, /aliexpress/i, /etsy/i,
+  /coupang|쿠팡/i, /11st|11번가/i, /gmarket|g마켓/i, /ssg/i, /naver shopping|네이버쇼핑/i,
+];
+
+/**
+ * CWS treats a catalogue of third-party marketplace names as metadata keyword spam. Product capability
+ * belongs in the description, but enumerating every brand does not. Four names on one line is already a
+ * catalogue; ordinary prose can still name a store when that fact genuinely needs one.
+ */
+export function assertNoMarketplaceKeywordSpam(root) {
+  for (const file of LISTING_METADATA_FILES) {
+    const lines = readFileSync(join(root, file), 'utf8').split(/\r?\n/);
+    lines.forEach((line, index) => {
+      const named = MARKETPLACE_KEYWORDS.filter((pattern) => pattern.test(line)).length;
+      if (named >= 4) {
+        throw new Error(`${file}:${index + 1} enumerates ${named} marketplace names as listing metadata`);
+      }
+    });
+  }
+}
+
+
 
 /**
  * The graphic assets the dashboard requires, per locale, and the size it requires them at.
@@ -159,6 +188,7 @@ if (process.argv[1] && (await import('node:url')).fileURLToPath(import.meta.url)
   assertListingStructure(root);
   assertListingAssets(root);
   assertBilingualCopy(root);
+  assertNoMarketplaceKeywordSpam(root);
   const outstanding = outstandingConfirmations(root);
   console.log(`LISTING OK ${LISTING_FILES.length} surfaces`);
   // Reported, never fatal: a page waiting on a retention answer is honest, and a permanently red gate

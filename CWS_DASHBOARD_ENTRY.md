@@ -1,10 +1,11 @@
 # CWS 제출 — 대시보드 입력 내용과 입력 결과
 
-> **상태 (2026-08-27): 전부 입력 완료 · 차단 0건 · 남은 것은 `제출하여 검토받기` 한 번(사용자).**
-> 아래 문구를 대시보드에 실제로 넣고, 넣은 값을 다시 읽어 확인했습니다. 재입력이 필요할 때(문구 수정,
-> 새 항목, 다른 계정) 이 파일이 그대로 원본입니다.
+> **상태 (2026-08-29): 키워드 스팸 사유로 1차 심사 거부 · 설명 문구 수정 완료 · 대시보드 재입력/재제출 대기.**
+> 영문·국문 상세 설명에서 제3자 마켓플레이스 이름 목록을 삭제했고, 장바구니를 지원하지 않는 스토어도
+> 브랜드 이름 없이 정확히 설명하도록 한 문장을 다듬었습니다. 기능, 권한, ZIP은 바뀌지 않았으므로 이번
+> 정정에는 패키지 재업로드가 필요 없습니다. 아래 설명 두 개를 다시 붙여 넣고 저장한 뒤 재검토를 요청합니다.
 
-| 탭 | 넣은 것 | 다시 읽어 확인한 값 |
+| 탭 | 넣은 것 | 1차 제출 때 다시 읽어 확인한 값 |
 |---|---|---|
 | 패키지 | 릴리스 ZIP | 제목이 `AXSDK Assistant (CDP)` → **`AXSDK 쇼핑 어시스턴트`**로 바뀜(요약도 매니페스트 `_locales`에서 옴) |
 | 등록정보 en | 설명·카테고리·URL 2개·아이콘·스크린샷 | 설명 **1,762자** · 쇼핑 · 아이콘 128×128 · 현지화 4장 · 공통 4장 · 타일 1 |
@@ -18,7 +19,7 @@
 공개 URL도 실제 응답을 확인했습니다: `/` 200 (5,612 B) · `/support.html` 200 (8,065 B) ·
 `/privacy.html` 200 (15,113 B).
 
-입력 중 알게 된 두 가지, 다음 사람을 위해:
+입력 중 알게 된 세 가지, 다음 사람을 위해:
 
 1. **제목과 짧은 설명은 대시보드 입력칸이 아니다.** 매니페스트의 `name`/`description`(여기서는
    `__MSG_extName__` / `__MSG_extDescription__` + `_locales/en|ko`)에서 오고, 대시보드는 그것을 읽기
@@ -26,18 +27,27 @@
 2. **권한 사유 칸은 1,000자 제한**이다(`store/permissions.md` 참조). `debugger` 문단이 1,108자여서
    붙여넣을 수 없었고, 987자로 줄였다.
 
+3. **마켓플레이스 이름을 카탈로그처럼 나열하면 키워드 스팸으로 판단됩니다.** 2026-08-29 실제 심사에서
+   영문·국문 설명의 지원 스토어 목록이 그대로 지목됐습니다. 기능은 “사용자가 고른 지원 스토어를
+   비교한다”는 본문으로 이미 설명되므로, 브랜드 목록은 삭제하고 다른 표현으로 우회해 다시 넣지 않습니다.
+
+
 ---
 
 ## 원본 문구 (재입력용)
 
-작성 2026-08-27 · 모든 문구는 이 저장소의 확정 문서에서 그대로 가져왔습니다(새로 만든 값 없음).
-검증: `npm run check:listing` **미결 0건**, 짧은 설명 EN 116자 / KO 64자 (제한 132).
+작성 2026-08-27 · 상세 설명 정정 2026-08-29. 모든 문구는 이 저장소의 확정 문서에서 그대로
+가져왔습니다(새로 만든 값 없음). 검증: `npm run check:listing` **미결 0건**, 짧은 설명 EN 116자 /
+KO 64자(제한 132), 정정 상세 설명 EN 1,669자 / KO 862자.
 
-업로드할 파일: `dist/axsdk-extension-cdp-cws.zip` (8.22 MiB)
+1차 제출 ZIP: `dist/axsdk-extension-cdp-cws.zip` (8.22 MiB). 이번 설명 정정에는 재업로드하지 않습니다.
 
 ---
 
 ## 0. 순서
+
+아래는 초기 제출 순서입니다. **이번 정정은 2번의 영문·국문 상세 설명만 교체하고 저장한 뒤 5번을
+실행합니다.** 패키지, 개인정보, 배포, 그래픽은 건드리지 않습니다.
 
 1. **Package** 탭 — ZIP 업로드
 2. **Store listing** 탭 — 이름 · 짧은 설명 · 상세 설명 · 카테고리 · 언어 · 스크린샷 4장 · 프로모 타일 · URL 3개
@@ -82,7 +92,7 @@ Compares total cost with shipping across stores, then adds the product you chose
 · 같은 제조사 모델인지 확인한 뒤 비교합니다 — 액세서리나 다른 모델이 섞이지 않습니다
 · 배송비를 알 수 없는 행은 0원으로 가정하지 않고 "미확인"으로 접어 두고, 몇 건이 접혔는지 알려줍니다
 · 조건을 말하면(예: "3만원 이하만", "평점 높은 순") 그 자리에서 다시 정리합니다
-· 고른 상품을 그 스토어 장바구니에 담고, 장바구니 페이지에서 상품이 맞는지 다시 확인합니다
+· 장바구니를 지원하는 스토어에서는 고른 상품을 담고, 장바구니 페이지에서 상품이 맞는지 다시 확인합니다
 · 결제 화면까지 안내하고 멈춥니다
 
 무엇을 하지 않나요
@@ -95,9 +105,6 @@ Compares total cost with shipping across stores, then adds the product you chose
 브라우저가 이미 여는 페이지를 읽습니다. 에이전트는 사용자가 만든 전용 탭 그룹 안에서만 동작하고,
 동작 중에는 Chrome이 직접 상단에 알림 배너를 띄웁니다. 되돌릴 수 없는 동작 앞에서는 버튼의 실제 문구를
 읽어 확인을 받습니다.
-
-지원 스토어
-Amazon, eBay, Walmart, AliExpress, Etsy, 쿠팡, 11번가, G마켓, SSG, 네이버쇼핑(읽기 전용)
 
 이 릴리스는 AXSDK 계정(API 키)이 있는 사용자를 위한 비공개 배포입니다. 소비자 로그인은 준비 중이며,
 그때까지는 옵션 화면에서 키를 입력합니다.
@@ -118,7 +125,8 @@ What it does
   and shown when you ask for them
 · Re-sorts or filters the same list when you say what you want ("cheapest first", "under 30,000", "free
   shipping only")
-· Adds the product you picked to that store's cart, then re-reads the cart page to confirm it is there
+· When the selected store supports a cart, adds the product you picked, then re-reads the cart page to
+  confirm it is there
 · Takes you to the checkout review page and stops
 
 What it does not do
@@ -131,9 +139,6 @@ How it works
 It reads the pages your browser already opens. The agent only operates inside a dedicated tab group you
 create, and Chrome itself shows a banner across the top for as long as it is attached, which you can stop
 at any time. Before anything irreversible it reads the actual label on the button and asks.
-
-Supported stores
-Amazon, eBay, Walmart, AliExpress, Etsy, Coupang, 11st, Gmarket, SSG, Naver Shopping (read-only)
 
 This release is an unlisted distribution for users who already have an AXSDK account (API key).
 Consumer sign-in is coming; until then the extension asks for a key in its options page.

@@ -5,8 +5,9 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import {
-  assertListingAssets, assertListingStructure, assertBilingualCopy, outstandingConfirmations,
-  LISTING_ASSETS, LISTING_ASSET_LOCALES, LISTING_FILES, LISTING_TILE,
+  assertListingAssets, assertListingStructure, assertBilingualCopy, assertNoMarketplaceKeywordSpam,
+  outstandingConfirmations, LISTING_ASSETS, LISTING_ASSET_LOCALES, LISTING_FILES,
+  LISTING_METADATA_FILES, LISTING_TILE,
 } from './listing.mjs';
 
 const repoRoot = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -21,6 +22,32 @@ test('every listing surface the dashboard asks for exists in the repo', () => {
 
 test('a missing file names itself rather than failing generically', () => {
   assert.throws(() => assertListingStructure(join(repoRoot, 'tools')), /store\/single-purpose\.md/);
+});
+
+/**
+ * CWS rejected the submitted descriptions on 2026-08-29 because a line naming every supported
+ * marketplace was metadata keyword spam. Capability belongs in prose; a catalogue of third-party
+ * brands does not. Scan both the source and the paste-ready dashboard sheet so correcting one cannot
+ * leave the rejected copy ready to paste from the other.
+ */
+test('listing descriptions do not enumerate marketplaces as keyword metadata', () => {
+  assertNoMarketplaceKeywordSpam(repoRoot);
+});
+
+test('a marketplace catalogue names the rejected metadata source', async () => {
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const root = await mkdtemp(join(tmpdir(), 'axsdk-listing-keywords-'));
+  for (const file of LISTING_METADATA_FILES) {
+    await mkdir(join(root, ...file.split('/').slice(0, -1)), { recursive: true });
+    await writeFile(join(root, file), file.endsWith('listing.md')
+      ? 'Supported stores: Amazon, Walmart, eBay, Etsy.'
+      : 'Paste-ready description without a catalogue.');
+  }
+  assert.throws(
+    () => assertNoMarketplaceKeywordSpam(root),
+    /store\/listing\.md:1 enumerates 4 marketplace names/,
+  );
 });
 
 test('the single purpose is one sentence, because that is what the field takes', () => {

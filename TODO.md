@@ -341,3 +341,48 @@ rather than left as machinery with no evidence behind it. Do not re-try that pat
 an isolated world, the working probe ran in the page's. That is a runtime capability question
 (`RPC_LUA_RUNTIME_REQUESTS_*`), not site data. The listing capture no longer waits on it: scene 3·4 use a
 wording whose add is measured to confirm.
+
+
+## 20. External Pack task — publish, install, route, and live-prove
+
+**Status: open, deliberately parked 2026-08-29. X0 measured and X1 shipped; X2–X6 remain.**
+
+The design and complete evidence live in `EXTERNAL_PACK_TASK_PLAN.md`. The SDK bridge is already on
+`axsdk-sdk-js/main`: `6a74428` forwards `pack.catalog` / `pack.invoke` without moving authority, and
+`f2dac2b` opens `PACK_REGISTRIES` / `PACK_TASK_EXECUTOR` only behind a reviewed external-build define.
+An ordinary build remains closed: 1,359 tests and typecheck passed, the real dist tree carried zero
+external markers, and fifteen mutations across the two commits were caught. SITES recorded that result
+in `952fc41`.
+
+Remaining work, in dependency order:
+
+1. **X2 — signed registry.** Add `tools/pack-registry.mjs` plus `check:pack-registry`; build, sign,
+   verify back with the SDK verifier, and publish `index.json`, `revocations.json`,
+   `releases/<sha256>.json`, and `assets/<sha256>` under `docs/packs/registry/`. The private Ed25519 key
+   stays outside the repo and logs; only the public trust root is committed. Require byte-identical
+   consecutive builds and refuse stale committed output. Live acceptance is
+   `fetchVerifiedPackRelease` against GitHub Pages plus a same-length tamper returning
+   `asset_hash_mismatch`.
+2. **X3 — executor document.** Publish inert `docs/pack-executor.html` at the exact, non-redirecting URL
+   in the plan. It carries no scripts or third-party resources. Live acceptance is one authenticated,
+   signed read command through `chrome.userScripts.execute`, with `chrome.userScripts.getScripts()`
+   still empty.
+3. **X4 — comparative-service-quote Pack.** Add its own producer, signed manifest, flow fragment,
+   read-only task script, and provider readers. Keep the embedded first-party Pack set frozen. Every
+   observed price/rate field is selector-first and absent when the site does not publish it; never turn
+   a service-wide band, a review quote, a login wall, or a bot wall into a provider price. Acceptance is
+   the existing Pack test standard plus registry signing/verification and zero forbidden effects.
+4. **X5 — authored routing bridge.** Add `_common/rpc/76_rpc_pack.lua`, the `pack_task` flow, the two
+   RPC grants, and store-profile exclusion. The deterministic catalog is the sole writer of Pack
+   identity/version/effect; the model supplies only command name and JSON arguments. Preserve every
+   existing stall, message-policy, cancellation, module-closure, and derivable-output gate. Update TODO
+   item 13 when `pack_task` joins the backend app document. Live acceptance is one trace through
+   `pack.catalog → classify → pack.invoke`, plus an honest no-Pack-installed result.
+5. **X6 — exact live gate and closeout.** Add `test:packs:external:live`: install the published release
+   through production Options handlers, acquire the executor, run one real flow turn, assert by branch
+   and fields, then disable/remove and prove the profile is empty again. Record the measurements in
+   `AGENTS.md` §13 and close the related SDK Phase 3 gate if exercised.
+
+**Smallest next step:** X2 RED tests for deterministic registry production, SDK-verifier round-trip,
+stale committed output, and signing-key non-disclosure. Do not begin X3–X6 before the published registry
+passes that gate: without a verified release there is nothing real to install, route, or live-test.

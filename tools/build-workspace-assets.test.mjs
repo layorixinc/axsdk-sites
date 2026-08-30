@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
+import { parse as parseYaml } from 'yaml';
 
 import { buildPackage, repoRoot } from './build-workspace-assets.mjs';
 
@@ -171,7 +172,7 @@ test('an unresolvable declared module fails before any manifest is written', asy
 test('the store profile narrows the package to the single purpose', async () => {
   // The package is what a reviewer installs, so the single purpose has to be true of THIS graph, not of
   // a variant somebody remembers to build. Everything the narrowing decides — flows, tools, modules — is
-  // a closure over the two excluded intents (`tools/build-store-flows.mjs`).
+  // a closure over the three excluded intents (`tools/build-store-flows.mjs`).
   const dev = await buildPackage({ root: repoRoot });
   const store = await buildPackage({ root: repoRoot, profile: 'store' });
 
@@ -195,7 +196,11 @@ test('the store profile narrows the package to the single purpose', async () => 
   // Two profiles are two packages: the digest is what the installer keys on.
   assert.notEqual(store.manifest.digest, dev.manifest.digest);
   const storeFlow = store.sourceByRef.get(store.manifest.workspace.flows[":"]);
-  assert.ok(!storeFlow.includes('request_service_quote'), 'the packaged document still routes the quote flow');
+  const storeDocument = parseYaml(storeFlow);
+  assert.ok(!(storeDocument.router?.routes ?? []).some((route) => route.intent === 'request_service_quote'),
+    'the packaged router must not route the quote intent');
+  assert.deepEqual(Object.keys(storeDocument.flows?.request_service_quote?.nodes ?? {}), ['entry_guard'],
+    'the quote flow name survives only to shadow the app layer at its original entry');
   // `record_memory` SURVIVES as a no-op: the app document declares the hook and an overlay cannot delete a
   // key the app declares, so a package without it lets the app's model-driven version answer the user
   // (measured: raw channel scaffolding reached the reply). What must be gone is the work it used to do.
@@ -238,6 +243,7 @@ test('the store profile refuses a document it would have to break', async () => 
     '',
   ].join('\n'));
 
-  await assert.rejects(buildPackage({ root, profile: 'store' }), /memory\.start/);
+  await assert.rejects(buildPackage({ root, profile: 'store' }),
+    /flows\.shopping_single_site\.nodes\.start\.next\.ok still says "memory"/);
   await rm(root, { recursive: true, force: true });
 });

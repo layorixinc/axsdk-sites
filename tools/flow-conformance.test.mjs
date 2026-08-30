@@ -752,8 +752,10 @@ test('browsing a live comparison resumes it instead of starting a new search', (
   assert.match(prompt, /continue_current/);
   assert.match(prompt, /무료배송만|3만원 이하|평점 높은 순/, 'the planner must recognise refinement phrasing');
   assert.match(prompt, /다음|이전/, 'the planner must recognise paging phrasing');
-  assert.ok(common.planner.inputSelector.includes('active.activeNode'));
-  assert.ok(common.planner.inputSelector.includes('active.intent'));
+  assert.ok(common.planner.inputSelector.includes('activeNode'));
+  assert.ok(common.planner.inputSelector.includes('activeFlow'));
+  assert.ok(!common.planner.inputSelector.some((selector) => /^active\.(?:intent|activeNode)$/.test(selector)),
+    'the live compiler requires the canonical activeFlow/activeNode scalar selectors');
 });
 
 test('every RPC tool is granted exactly the ops its code calls', () => {

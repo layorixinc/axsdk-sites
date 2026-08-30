@@ -37,8 +37,8 @@ planner:
         reasoning: { effort: low }
   inputSelector:
     - active.status
-    - active.intent
-    - active.activeNode
+    - activeFlow
+    - activeNode
     - queue
     - conversationSummary
     - latestMessageInterpretation

@@ -84,12 +84,14 @@ const STORE_PROMPT_OVERRIDES = [
  * package does not carry, in the one sentence a reviewer is most likely to read. `verify` walks every
  * string in the emitted document, so the next unlisted one fails the build instead of shipping.
  */
+const STORE_PURPOSE_RESPOND = [
+  "Reply briefly in the user's language. This request is unsupported. State that you can help compare one",
+  "product's total cost including shipping across supported stores, add the product the user picked to that",
+  'store’s cart, and open its checkout page for review. Never claim an order was placed.',
+].join('\n');
+
 const STORE_RESPOND_OVERRIDES = {
-  'unsupported_request.reply': [
-    "Reply briefly in the user's language. This request is unsupported. State that you can help compare one",
-    "product's total cost including shipping across supported stores, add the product the user picked to that",
-    'store’s cart, and open its checkout page for review. Never claim an order was placed.',
-  ].join('\n'),
+  'unsupported_request.reply': STORE_PURPOSE_RESPOND,
 };
 
 const identifiersOf = (value, into = new Set()) => {
@@ -231,9 +233,22 @@ export function buildStoreFlows(source) {
 
   const entryFlowOf = (intent) => String(routes.find((route) => route.intent === intent)?.entry ?? '')
     .split('.')[0];
+  const excludedRoutes = routes
+    .filter((route) => STORE_EXCLUDED_INTENTS.includes(route.intent))
+    .map((route) => {
+      const [flowName, nodeName] = String(route.entry).split('.');
+      if (!flowName || !nodeName) throw new Error(`the store profile cannot shadow malformed entry ${route.entry}`);
+      return { intent: route.intent, flowName, nodeName };
+    });
+  const routeShadows = {};
+  for (const { flowName, nodeName } of excludedRoutes) {
+    const shadow = routeShadows[flowName] ?? { nodes: {} };
+    shadow.nodes[nodeName] = { kind: 'terminal', respond: STORE_PURPOSE_RESPOND };
+    routeShadows[flowName] = shadow;
+  }
   const neutralised = Object.keys(NEUTRALISED_HOOK_FLOWS).filter((name) => Object.hasOwn(flows, name));
   const removedFlows = new Set([
-    ...STORE_EXCLUDED_INTENTS.map(entryFlowOf).filter(Boolean),
+    ...excludedRoutes.map(({ flowName }) => flowName),
     ...neutralised,
   ]);
   const keptFlowNames = Object.keys(flows).filter((name) => !removedFlows.has(name));
@@ -273,6 +288,7 @@ export function buildStoreFlows(source) {
     flows: Object.fromEntries([
       ...keptFlowNames.map((name) => [name, withRespondOverrides(name, flows[name])]),
       ...neutralised.map((name) => [name, NEUTRALISED_HOOK_FLOWS[name]]),
+      ...Object.entries(routeShadows),
     ]),
     flowTools: narrowEnums(
       Object.fromEntries([...toolsKept].filter((name) => Object.hasOwn(tools, name)).map((name) => [name, tools[name]])),
@@ -290,8 +306,9 @@ export function buildStoreFlows(source) {
       intents: { dropped: [...STORE_EXCLUDED_INTENTS], defaultIntent: shoppingDefault },
       flows: {
         dropped: [...removedFlows].filter((name) => !neutralised.includes(name)).sort(),
+        shadowed: Object.keys(routeShadows).sort(),
         neutralised: [...neutralised].sort(),
-        kept: keptFlowNames.length + neutralised.length,
+        kept: keptFlowNames.length + Object.keys(routeShadows).length + neutralised.length,
       },
       tools: { dropped: toolsRemoved.length, kept: toolsKept.size },
       modules: { dropped: modulesDropped.sort(), kept: [...modulesKept].sort() },
@@ -357,6 +374,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1
   console.log(`store profile: ${built.report.flows.kept} flows, ${built.report.tools.kept} tools`);
   console.log(`  dropped flows   ${built.report.flows.dropped.join(', ')}`);
   console.log(`  neutralised     ${built.report.flows.neutralised.join(', ')} (hook kept as a no-op)`);
+  console.log(`  shadowed flows  ${built.report.flows.shadowed.join(', ')} (app copies replaced by terminals)`);
   console.log(`  dropped modules ${built.report.modules.dropped.join(', ')}`);
   console.log(`  default intent  ${built.report.intents.defaultIntent}`);
   console.log(`  document        ${(bytes / 1024).toFixed(1)} KiB${out ? ` → ${out}` : ''}`);

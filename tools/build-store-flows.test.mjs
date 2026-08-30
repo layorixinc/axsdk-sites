@@ -28,14 +28,13 @@ const toolNamesOf = (document) => Object.keys(document.flowTools ?? {});
 const modulesOf = (document) => new Set(Object.values(document.flowTools ?? {})
   .flatMap((tool) => tool?.execute?.modules ?? []));
 
-test('the excluded intents are unroutable, and their flows are not in the document', () => {
+test('the excluded intents are unroutable, and their feature implementations are removed', () => {
   // Decided 2026-08-27: `community_script` joins them. The store package ROUTED it while the single-purpose
   // sentence does not mention it, and a reviewer finding a surface outside the sentence is the failure P0-3
   // exists to prevent; widening the sentence would risk the "narrow single purpose" judgement instead.
   assert.deepEqual(STORE_EXCLUDED_INTENTS, ['request_service_quote', 'memory', 'community_script']);
   for (const intent of STORE_EXCLUDED_INTENTS) {
     assert.ok(!routableIntents(store).includes(intent), `${intent} must not be routable`);
-    assert.ok(!Object.hasOwn(store.flows ?? {}, intent), `the ${intent} flow must be gone`);
   }
   // The shopping surface the sentence promises is all still there.
   for (const kept of ['shopping_single_site', 'shopping_multi_store_total_cost', 'shopping_search_one_store',
@@ -62,8 +61,8 @@ test('the capture hook is NEUTRALISED, because deleting it hands the turn to the
   assert.ok(!Object.hasOwn(only, 'allowedTools') && only.run === undefined && only.id === undefined,
     'and must reach no tool');
 
-  // the memory FLOW and its tools are still gone: this is a no-op, not a feature
-  assert.ok(!Object.hasOwn(store.flows ?? {}, 'memory'));
+  // The memory feature implementation is gone; its original entry survives only as an app-layer shadow.
+  assert.deepEqual(Object.keys(store.flows?.memory?.nodes ?? {}), ['handle']);
   for (const tool of ['capture_memory_clause', 'write_captured_memory', 'set_memory']) {
     assert.ok(!Object.hasOwn(store.flowTools ?? {}, tool), `${tool} must be gone`);
   }
@@ -80,6 +79,27 @@ test('an unmatched utterance lands on a shopping flow, never on the removed quot
   assert.match(String(entryFlowOf(store, fallthrough)), /^shopping/);
   assert.equal(store.router?.fallbackIntent, 'unsupported_request');
   assert.ok(Object.hasOwn(store.flows ?? {}, 'unsupported_request'));
+});
+
+test('removed routes are shadowed at their original entries so the app layer cannot revive them', () => {
+  // The client document extends the backend app. Omitting an excluded flow from the overlay does not delete
+  // the app's copy: a live store-artifact quote request reached `recall_saved_contact` even though the
+  // packaged router and `decide` enum no longer named the quote intent. Each removed route therefore needs a
+  // same-name, same-entry terminal that can answer without reaching a tool.
+  for (const intent of STORE_EXCLUDED_INTENTS) {
+    const route = (dev.router?.routes ?? []).find((candidate) => candidate.intent === intent);
+    assert.ok(route, `${intent} has an authored route`);
+    const [flowName, nodeName] = String(route.entry).split('.');
+    const shadow = store.flows?.[flowName];
+    assert.ok(shadow, `${flowName} must shadow the app flow`);
+    assert.deepEqual(Object.keys(shadow.nodes ?? {}), [nodeName], `${flowName} must expose only its entry`);
+    const node = shadow.nodes[nodeName];
+    assert.equal(node.kind, 'terminal');
+    assert.ok(typeof node.respond === 'string' && node.respond.includes('total cost'),
+      `${flowName}.${nodeName} must answer with the narrowed product purpose`);
+    assert.ok(node.run === undefined && node.id === undefined && (node.allowedTools ?? []).length === 0,
+      `${flowName}.${nodeName} must reach no tool`);
+  }
 });
 
 test('the tools and modules only those flows used are gone; the shared ones stay', () => {

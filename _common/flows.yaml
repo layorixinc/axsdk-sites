@@ -1212,20 +1212,10 @@ flows:
         id: shopping_search_product
         description: Search the store that is open, in the runtime, and read its candidates.
         next:
-          done: screen_item
+          done: refine_item
           error: next_product
         fallback: { invalidNext: error, exhaustedNext: error }
 
-      screen_item:
-        kind: action_contract
-        id: shopping_screen_site_candidates
-        description: Drop rows that are a different product from the one asked for. The comparison path
-          has always screened; this list had nothing, so row one was whatever the grid rendered — on eBay
-          that is its own promo tile, which has no product page to add from.
-        inputSelector: [ query, candidates ]
-        next:
-          done: refine_item
-        fallback: { invalidNext: done, exhaustedNext: done }
 
       refine_item:
         kind: action_unit
@@ -1239,25 +1229,38 @@ flows:
           - query
           - quantity
           - candidates
-          - screened_out
           - shop_refine_stage
         allowedTools: [ refine_products ]
         prompt: |-
-          You help the user choose WHICH product to add to the cart for the current item, BEFORE it is added. The searched products are in `candidates` (each has: id, name, price_text, rating, badge, summary, url). `query` is the current item's search term; `quantity` is how many; `requestText` is the latest user message; `shop_refine_stage` tracks the dialog.
+          You help the user choose WHICH product to add to the cart for the current item, BEFORE it is added.
+          The bounded live search rows are in `candidates` (each has: id, name, price_text, rating, badge,
+          summary, url). `query` is the requested product; `quantity` is how many; `requestText` is the latest
+          user message; `shop_refine_stage` tracks the dialog.
+
+          You are the only relevance judge on this path. Before applying any user criterion, identify which
+          candidate rows are the SAME PRODUCT as `query`. Ignore store promo tiles, accessories, parts,
+          different models/brands/categories, and bundles whose main item is something else. Allow language,
+          spelling, colour, packaging, seller wording, and title-length differences that do not change identity.
 
           Call refine_products EXACTLY ONCE — the FIRST rule that applies:
-          0. requestText REFUSES or withdraws (아니요 / 취소 / 그만 / 됐어요 / no, never mind): next="cancel". Nothing more is added.
-
-          1. `candidates` is empty/absent: next="skip" (nothing to choose).
+          0. requestText REFUSES or withdraws (아니요 / 취소 / 그만 / 됐어요 / no, never mind): next="cancel".
+          1. No candidate is the same product as `query`: next="skip" (nothing to choose).
           2. `shop_refine_stage` is empty/absent (results just arrived, no criterion asked yet):
-             next="ask", shop_refine_stage="criteria", question=<in the user's language: state how many products were found for `query`, and when `screened_out` is a number above 0 add that this many unrelated rows were left out; list the top few by name with price_text/rating, then offer concrete ways to choose — e.g. 저렴한 순(price), 평점 높은 순(rating), 특정 브랜드/키워드, 또는 "첫 번째"/"아무거나". Ask which they want.>. Do NOT set product_id.
+             next="ask", shop_refine_stage="criteria", question=<in the user's language: state how many matching
+             products were found, list the top few matching rows by name with price_text/rating, then offer
+             concrete ways to choose — lowest price, highest rating, brand/keyword, first/any. Ask which they
+             want. Never mention or count irrelevant rows.>. Do NOT set product_id.
           3. `shop_refine_stage`="criteria" (requestText is the user's choice/criterion):
-             Rank/filter `candidates` by that criterion (lowest price, highest rating, a brand/keyword in name, "first"/"아무거나"/"any" -> the first candidate, …).
-             - If one matches: next="pick", product_id=<the chosen candidate's id>, product_name=<its name>, cart_approval="user_picked_searched_product". Copy id/name VERBATIM from candidates.
+             Apply the criterion ONLY to same-product rows. "first"/"아무거나"/"any" means the first relevant row.
+             - If one matches: next="pick", product_id=<its id>, product_name=<its name>,
+               cart_approval="user_picked_searched_product". Copy id/name VERBATIM from candidates.
              - If the user declines / says skip / none: next="skip".
-             - If NONE match: next="ask", shop_refine_stage="criteria", question=<in the user's language: say nothing matched, restate the options, ask for a different criterion>. Do NOT set product_id.
+             - If NONE match the criterion: next="ask", shop_refine_stage="criteria",
+               question=<in the user's language: say nothing matched, restate the relevant options, ask for a
+               different criterion>. Do NOT set product_id.
 
-          Write `question` in the user's language whenever next="ask". When next="pick", product_id MUST be a non-empty id copied from candidates.
+          Write `question` in the user's language whenever next="ask". When next="pick", product_id MUST be a
+          non-empty id copied from a same-product candidate.
         next:
           ask: refine_item
           pick: add_item
@@ -1536,10 +1539,9 @@ flows:
       screening_count: null
       screening_keep: null
       screened_out: null
-      screening_skipped: null
       verified_offers: null
-      ambiguous_offers: null
-      excluded_offers: null
+      store_outcomes: null
+      store_outcome_response: null
       offers: null
       failures: null
       comparison_id: null
@@ -1917,9 +1919,9 @@ flows:
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
-      # Relevance in two stages. The deterministic pass decides RECALL — six rows per store that could be
-      # the product — because token rules cannot tell "M185 마우스" from "M185 마우스용 스킨". One model call
-      # then says which of those rows ARE the product, and only the survivors are capped, verified, ranked.
+      # Search order decides bounded recall, never semantic relevance: up to six structurally readable rows
+      # per store reach one numbered prompt. `judge_relevance` is the only product-match decision; only its
+      # survivors are capped, identity-bound, and ranked.
       screen_offers:
         kind: action_contract
         id: shopping_build_offer_screening
@@ -2009,6 +2011,7 @@ flows:
         description: Publish one compact classified outcome per searched store after relevance screening.
         inputSelector:
           - store_results
+          - screened_out
         next:
           done: verify_offers
           error: error
@@ -2020,6 +2023,7 @@ flows:
         description: Publish compact classified outcomes before reporting that screening removed every offer.
         inputSelector:
           - store_results
+          - screened_out
         next:
           done: no_results
           error: error
@@ -2029,16 +2033,11 @@ flows:
       verify_offers:
         kind: action_contract
         id: shopping_verify_product_offers
-        description: Deterministically exclude model and hard-variant mismatches and
-          preserve ambiguous evidence separately.
+        description: Attach the locked identity to the listings kept by the LLM relevance gate.
+          This node never judges model, brand, category, or variant semantics again.
         inputSelector:
           - store_results
           - identity_id
-          - identity_kind
-          - identity_brand
-          - identity_model
-          - product_category
-          - locked_hard_constraints
         next:
           done: normalize_rank
           partial: normalize_rank
@@ -2049,8 +2048,8 @@ flows:
       normalize_rank:
         kind: action_contract
         id: shopping_rank_store_offers
-        description: Rank only identity-verified offers by complete landed cost with
-          stable tie-breaks and issue a comparison snapshot.
+        description: Rank only model-screened offers by complete landed cost with stable
+          tie-breaks and issue a comparison snapshot.
         inputSelector:
           - verified_offers
           - failures
@@ -2208,22 +2207,15 @@ flows:
 
       no_results:
         kind: terminal
-        inputSelector: [ failures, ambiguous_offers, excluded_offers, store_status, screened_out ]
-        respond: |-
-          Reply in the user's language using only Flow state. No live offer was verified as the same locked
-          product identity. Summarize failures, ambiguous_offers, and excluded_offers without inventing facts.
-          When screened_out is above zero, say that listings were found but none of them was the requested
-          product itself (they were accessories or other models), and give that count.
-          When a failure names security_verification_required, captcha_required, or login_required, say that the
-          site asked the user to verify or sign in, and that the user must complete it in the browser before that
-          store can be searched again; list the stores that did return offers separately.
-          Ask for a more exact manufacturer model or hard variant. Nothing was added to a cart.
+        inputSelector: [ store_outcome_response ]
+        respond:
+          from: store_outcome_response
+          fallback: 검색 결과를 비교하지 못했습니다. 장바구니와 주문은 변경하지 않았습니다.
 
       error:
         kind: terminal
         inputSelector: []
-        respond: 다중 쇼핑몰 상품 식별 또는 총비용 비교를 완료하지 못했습니다. 상품 종류와 제조사 모델을 더 정확히 알려주세요. 장바구니와
-          주문은 변경하지 않았습니다.
+        respond: 상품 관련성 판단 또는 다중 쇼핑몰 총비용 비교를 완료하지 못했습니다. 잠시 후 다시 시도해 주세요. 장바구니와 주문은 변경하지 않았습니다.
 
   shopping_search_one_store:
     goal: Search one real commerce adapter, read up to its page budget of result
@@ -2533,6 +2525,7 @@ flowTools:
         requested_model: { type: [ string, "null" ] }
         query_variants: { type: string }
         brand_aliases: { type: string }
+        question: { type: [ string, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
         soft_preferences: { type: [ object, "null" ], additionalProperties: true }
         quantity: { type: [ integer, number ] }
@@ -2574,12 +2567,21 @@ flowTools:
       type: object
       additionalProperties: true
       required: [ next ]
+      anyOf:
+        - required: [ next, question ]
+          properties:
+            next: { const: ask }
+            question: { type: string, minLength: 1 }
+        - required: [ next ]
+          properties:
+            next: { type: string, enum: [ done, cancel ] }
+            question: { type: [ string, "null" ] }
       properties:
         # `cancel` because this node HOLDS the user: without it a refusal could only be answered `ask`
         # (re-question) or `done` (start comparing), so the user's no did nothing while the planner prompt
         # promised "the flow owns its own cancel path". Same enum as the single-site collector.
         next: { type: string, enum: [ ask, done, cancel ] }
-        question: { type: string }
+        question: { type: [ string, "null" ] }
         query: { type: string }
         product_category: { type: string }
         requested_brand: { type: [ string, "null" ] }
@@ -3532,7 +3534,6 @@ flowTools:
       next: result.next
       store_results: result.store_results
       screened_out: result.screened_out
-      screening_skipped: result.screening_skipped
     parameters:
       type: object
       additionalProperties: false
@@ -3570,16 +3571,18 @@ flowTools:
     output:
       next: result.next
       store_outcomes: result.store_outcomes
+      store_outcome_response: result.store_outcome_response
     parameters:
       type: object
       additionalProperties: false
       required: [ store_results ]
       properties:
         store_results: { type: array, items: { type: object, additionalProperties: true } }
+        screened_out: { type: [ integer, number, "null" ] }
 
   shopping_verify_product_offers:
-    description: Classify live offers against the locked model and hard variants
-      before ranking.
+    description: Attach the locked identity to offers already selected by the LLM relevance gate;
+      never make a second semantic match decision in code.
     execute:
       kind: runtime
       implementation: lua
@@ -3607,25 +3610,18 @@ flowTools:
     output:
       next: result.next
       verified_offers: result.verified_offers
-      ambiguous_offers: result.ambiguous_offers
-      excluded_offers: result.excluded_offers
       failures: result.failures
     parameters:
       type: object
       additionalProperties: false
-      required: [ store_results, identity_id, identity_kind ]
+      required: [ store_results, identity_id ]
       properties:
         store_results: { type: array, items: { type: object, additionalProperties: true } }
         identity_id: { type: string, minLength: 1 }
-        identity_kind: { type: string, enum: [ standardized_model, spec_equivalent, unique_listing ] }
-        identity_brand: { type: [ string, "null" ] }
-        identity_model: { type: [ string, "null" ] }
-        product_category: { type: [ string, "null" ] }
-        locked_hard_constraints: { type: [ object, "null" ], additionalProperties: true }
 
   shopping_rank_store_offers:
-    description: Rank only identity-verified candidates while preserving failures
-      and cost coverage.
+    description: Rank model-screened, identity-bound candidates while preserving
+      failures and cost coverage.
     execute:
       kind: runtime
       implementation: lua
@@ -4657,44 +4653,6 @@ flowTools:
 
 
 
-  shopping_screen_site_candidates:
-    description: Keep the searched rows that carry every word of the request, for the single-site list.
-    execute:
-      kind: runtime
-      implementation: lua
-      # No rpc and no net block: this reads the rows the search already returned and touches nothing.
-      modules:
-        [
-          "_common.00_base",
-          "_common.44_pagination",
-          "_common.45_offer_view",
-          "_common.46_candidate_browser",
-          "_common.50_commerce_core",
-          "_common.51_relevance",
-          "_common.52_identity",
-          "_common.53_verify",
-          "_common.54_comparison",
-          "_common.55_offers",
-          "_common.56_store_io",
-          "_common.63_pure_entries"
-        ]
-      entry: run
-      lua: |
-        function run(args)
-          return AX_RPC_PURE.screen_site_candidates(args)
-        end
-    output:
-      next: result.next
-      candidates: result.candidates
-      screened_out: result.screened_out
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        query: { type: [ string, "null" ] }
-        # Nullable and NOT required: a store that found nothing sends null, and `null` against
-        # `{type: array}` is refused before the script runs.
-        candidates: { type: [ array, "null" ], items: { type: object, additionalProperties: true } }
 
 
   community_classify:

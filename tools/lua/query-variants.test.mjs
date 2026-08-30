@@ -100,40 +100,41 @@ test('11st is a store name, never a quantity', () => {
   assert.deepEqual(result.stores, [{ site: '11st' }, { site: 'ssg' }]);
 });
 
-// ── brand equivalence for matching, also from the model ──────────────────────
-// A Korean listing writes "로지텍" where the query says "Logitech". Matching needs that equivalence too,
-// and it now comes from the same model-supplied field rather than a table in this file.
+// ── brand equivalence for broad discovery recall, also from the model ────────
+// Comparison relevance is judged by the LLM. Discovery still needs a bounded, grounded model-choice
+// surface, so its broad recall guard can use the model-supplied spelling of the requested brand.
 
-test('a listing in the other script matches when the model supplied the brand alias', () => {
-  const candidates = [{ product_id: 'k1', name: '로지텍 M185 무선마우스', price: 19400, currency: 'USD', shipping_cost: 0 }];
+test('a discovery row in the other script survives with the supplied brand alias', () => {
+  const candidates = [{
+    product_id: 'k1', name: '로지텍 M185 무선마우스', price: 19400, currency: 'USD', shipping_cost: 0,
+  }];
   const withAlias = lua.call('AX_COMMERCE.normalize_candidates', 'ssg', candidates, 1, 'Logitech M185', {
-    purpose: 'comparison', identity_brand: 'Logitech', identity_model: 'M185', brand_aliases: 'Logitech|로지텍',
+    purpose: 'discovery', requested_brand: 'Logitech', brand_aliases: 'Logitech|로지텍',
   });
   assert.equal(withAlias.length, 1);
-  assert.equal(withAlias[0].match_level, 'exact');
 });
 
-test('without the alias the same listing is not claimed to match', () => {
-  const candidates = [{ product_id: 'k1', name: '로지텍 M185 무선마우스', price: 19400, currency: 'USD', shipping_cost: 0 }];
-  const kept = lua.call('AX_COMMERCE.normalize_candidates', 'ssg', candidates, 1, 'Logitech M185', {
-    purpose: 'comparison', identity_brand: 'Logitech', identity_model: 'M185',
+test('discovery does not invent a brand equivalence the model omitted', () => {
+  const candidates = [{
+    product_id: 'k1', name: '로지텍 M185 무선마우스', price: 19400, currency: 'USD', shipping_cost: 0,
+  }];
+  const withoutAlias = lua.call('AX_COMMERCE.normalize_candidates', 'ssg', candidates, 1, 'Logitech M185', {
+    purpose: 'discovery', requested_brand: 'Logitech',
   });
-  assert.equal(Array.isArray(kept) ? kept.length : 0, 0);
+  assert.equal(Array.isArray(withoutAlias) ? withoutAlias.length : 0, 0);
 });
 
-test('a brand alias never lets a different model through', () => {
-  const candidates = [{ product_id: 'other', name: '로지텍 M750 무선마우스', price: 30000, currency: 'USD', shipping_cost: 0 }];
-  const kept = lua.call('AX_COMMERCE.normalize_candidates', 'ssg', candidates, 1, 'Logitech M185', {
-    purpose: 'comparison', identity_brand: 'Logitech', identity_model: 'M185', brand_aliases: 'Logitech|로지텍',
+test('a short discovery brand must match a word, never a substring in another brand', () => {
+  const candidates = [{
+    product_id: 's1',
+    name: 'Samsung 25 cu ft Storage Refrigerator RF29',
+    manufacturer_model: 'RF29',
+    price: 1000,
+    currency: 'USD',
+    shipping_cost: 0,
+  }];
+  const result = lua.call('AX_COMMERCE.normalize_candidates', 'amazon', candidates, 1, 'GE refrigerator', {
+    purpose: 'discovery', requested_brand: 'GE', brand_aliases: 'GE',
   });
-  assert.equal(Array.isArray(kept) ? kept.length : 0, 0);
-});
-
-test('an alias vouches only for the name it spells', () => {
-  // "Logitech|로지텍" says nothing about the word "ergonomic". Letting the alias set answer for every token
-  // made a Korean listing that never mentions it an exact match for an English descriptor.
-  const listing = { name: '로지텍 M185 무선마우스' };
-  const options = { identity_brand: 'Logitech', brand_aliases: 'Logitech|로지텍' };
-  assert.equal(lua.call('AX_COMMERCE.relevance_match', listing, 'Logitech M185 ergonomic', options).level, 'partial');
-  assert.equal(lua.call('AX_COMMERCE.relevance_match', listing, 'Logitech M185', options).level, 'exact');
+  assert.equal(Array.isArray(result) ? result.length : 0, 0);
 });

@@ -11,11 +11,9 @@ const lua = loadLuaModules([
 ]);
 after(() => lua.close());
 
-// Token rules cannot tell a mouse from a mouse pad: "로지텍 M185 마우스용 스킨" contains every word of the
-// query and passes every anchor. So the deterministic pass now decides only RECALL — what could plausibly
-// be the product, up to six per store — and one model call decides which of those rows actually ARE the
-// product. The mechanics here never judge relevance; they number the rows, apply the verdict, and make
-// what was removed visible.
+// Code cannot tell a mouse from a mouse pad, or a word-only model such as "DGX Spark" from a missing model
+// field. Every structurally readable row reaches this bounded surface; one model call decides which rows
+// ARE the product. The mechanics here only number rows, apply that verdict, and report removals.
 
 function worker(site, candidates, extra = {}) {
   return { key: site, status: 'completed', value: { store_result: { site, candidates, ...extra } } };
@@ -24,7 +22,7 @@ function worker(site, candidates, extra = {}) {
 function row(id, name, price = 10000) {
   return {
     product_id: id, id, name, price, currency: 'KRW', shipping_cost: 0,
-    match_level: 'exact', url: `https://shop.test/products/${id}`,
+    url: `https://shop.test/products/${id}`,
   };
 }
 
@@ -166,6 +164,20 @@ test('the list is bounded, because it is the only thing that enters a prompt', (
   assert.equal(built.screening_ids.split('|').length, built.screening_count);
 });
 
+test('retired code-match metadata cannot label the LLM relevance surfaces', () => {
+  const candidate = { ...row('stale', 'NVIDIA DGX Spark'), match_level: 'partial' };
+  const built = lua.call('AX_build_offer_screening', {
+    store_results: [worker('ebay', [candidate])],
+  });
+  assert.doesNotMatch(built.screening_text, /유사|partial/i);
+
+  const ranked = lua.call('AX_rank_store_offers', {
+    verified_offers: [{ ...candidate, identity_id: 'dgx-spark' }],
+    identity_id: 'dgx-spark',
+  });
+  assert.doesNotMatch(ranked.comparison_text, /유사|partial/i);
+});
+
 test('nothing to judge is not a question for the model', () => {
   const built = lua.call('AX_build_offer_screening', {
     store_results: [{ key: 'ssg', status: 'failed', error: 'security_verification_required' }],
@@ -223,13 +235,16 @@ test('judging everything irrelevant is an answer, not a crash', () => {
   assert.equal(applied.screened_out, 5);
 });
 
-test('a model that never answered must not empty the comparison', () => {
-  // The screening node can stall or error. Losing the verdict costs precision; losing the offers costs
-  // the whole turn, so an absent verdict keeps everything and says so.
-  const applied = lua.call('AX_apply_offer_screening', { store_results: RESULTS, screening_ids: build().screening_ids });
-  assert.equal(applied.next, 'done');
-  assert.equal(applied.screening_skipped, true);
-  assert.equal(keptOf(applied).length, 5);
+test('a model that never answered cannot authorize relevance', () => {
+  // The LLM is the only semantic relevance judge. An absent verdict is not "keep everything": that would
+  // silently replace the requested judgement with a code-path default and could rank accessories.
+  const applied = lua.call('AX_apply_offer_screening', {
+    store_results: RESULTS,
+    screening_ids: build().screening_ids,
+  });
+  assert.equal(applied.next, 'error');
+  assert.equal(applied.error, 'relevance_judgement_unavailable');
+  assert.equal(applied.store_results, undefined);
 });
 
 test('a store that failed stays a failure, not a rejection', () => {
@@ -255,6 +270,23 @@ test('post-screening outcomes stay compact and attribute every searched store', 
   assert.equal(summary.store_outcomes[1].sample, undefined);
 });
 
+test('no-results text is rendered deterministically from structured store outcomes', () => {
+  const results = [
+    { key: 'naver-shopping', status: 'failed', error: 'access_denied' },
+    worker('gmarket', [], { status: 'no_relevant_offers', error: 'no_relevant_offers' }),
+  ];
+  const summary = lua.call('AX_summarize_store_outcomes', {
+    store_results: results,
+    screened_out: 6,
+  });
+
+  assert.match(summary.store_outcome_response, /Naver Shopping.*접근이 제한/);
+  assert.match(summary.store_outcome_response, /Gmarket.*요청한 상품과 일치하는 결과 없음/);
+  assert.match(summary.store_outcome_response, /관련 없는 6건/);
+  assert.match(summary.store_outcome_response, /장바구니와 주문은 변경하지 않았습니다/);
+  assert.doesNotMatch(summary.store_outcome_response, /access_denied|no_relevant_offers|정확한 제조사 모델/);
+});
+
 // ── the user is told what was removed ────────────────────────────────────────
 
 test('rows the model removed are counted in the window', () => {
@@ -265,7 +297,7 @@ test('rows the model removed are counted in the window', () => {
     verified_offers: [{
       site: 'ssg', product_id: 's1', name: '로지텍 M185 무선마우스', price: 19400, currency: 'KRW',
       shipping_cost: 0, base_currency: 'USD', total_base: 13.2, total_for_quantity: 19400, cost_complete: true,
-      identity_id: 'id-1', match_level: 'exact',
+      identity_id: 'id-1',
     }],
   });
   assert.match(ranked.comparison_text, /관련 없는 2건/);

@@ -258,7 +258,7 @@ const ebayCardRows = () => ({
 });
 
 // The production pipeline: the RPC reader searches the store, then the pure normalizer prices and
-// screens what it read. Already on the result page for this query, so no navigation fires.
+// bounds what it read for the LLM relevance gate. Already on the result page, so no navigation fires.
 function ebaySearch(rows, fxResponse) {
   const fx = exposeNet(fxResponse);
   const page = makePage({ href: 'https://www.ebay.com/sch/i.html?_nkw=Logitech+M185', dom: rows });
@@ -267,14 +267,18 @@ function ebaySearch(rows, fxResponse) {
   return { page, fx, searched };
 }
 
-tests.push(['eBay parser excludes placeholders and normalizes paid shipping', () => {
+tests.push(['eBay normalization preserves live rows for the LLM and prices paid shipping', () => {
   const { page, fx, searched } = ebaySearch(ebayCardRows());
-  const value = lua.call('AX_normalize_store_product_result', { site: 'ebay', query: 'Logitech M185', quantity: 1, result: searched.store_result });
+  const value = lua.call('AX_normalize_store_product_result', {
+    site: 'ebay', query: 'Logitech M185', quantity: 1, result: searched.store_result,
+  });
   assert(page.ops.some((entry) => entry.op === 'dom.query_all' && entry.params.selector === ebayResultSelector),
     'the reader must query the generated ebay card selector verbatim', navigationsOf(page));
-  assert(value.candidates.length === 1, 'placeholder and duplicate excluded', value);
-  const candidate = value.candidates[0];
-  assert(candidate.product_id === '327230547159', 'item id parsed', candidate);
+  assert(value.candidates.length === 3, 'only duplicate ids are removed before LLM screening', value);
+  assert(value.candidates.some((row) => row.name === 'Shop on eBay'),
+    'semantic junk stays visible to the LLM relevance judge', value);
+  const candidate = value.candidates.find((row) => row.product_id === '327230547159');
+  assert(candidate, 'the requested product row survives normalization', value);
   assert(candidate.shipping_cost === 1000 && candidate.shipping_currency === 'KRW', 'paid shipping parsed', candidate);
   assert(candidate.total_base === 11 && candidate.cost_complete === true, 'FX landed cost normalized', candidate);
   assert(fx.fxCalls === 1, 'one frozen FX lookup for the result set', fx);
@@ -283,11 +287,9 @@ tests.push(['eBay parser excludes placeholders and normalizes paid shipping', ()
 tests.push(['eBay return evidence retained', () => {
   const { searched } = ebaySearch(ebayCardRows());
   const value = lua.call('AX_normalize_store_product_result', { site: 'ebay', query: 'Logitech M185', quantity: 1, result: searched.store_result });
-  const candidate = value.candidates[0] || {};
-  // KNOWN RPC GAP — LEFT FAILING ON PURPOSE. The durable eBay parser mined 'Free returns' out of the
-  // card's attribute row into `return_terms`. The RPC reader only fills `return_terms` from a
-  // `result_return_selector`, and ebay's generated config declares none — so return evidence is lost on
-  // the RPC path. The fixture row still carries the phrase; the reader never asks for the field.
+  const candidate = value.candidates.find((row) => row.product_id === '327230547159') || {};
+  // The shared RPC reader derives return evidence from the measured card text because eBay exposes no
+  // stable return selector. The normalized candidate must retain that evidence after LLM-surface changes.
   assert(candidate.return_terms && /return/i.test(candidate.return_terms), 'return evidence retained', candidate);
 }]);
 
@@ -619,29 +621,30 @@ tests.push(['product option resolver rejects stale snapshots and locks only curr
   assert(current.identity_id && current.identity_fingerprint, 'locked option should emit stable identity evidence', current);
 }]);
 
-tests.push(['offer identity verification excludes mismatches and preserves ambiguity', () => {
+tests.push(['offer identity attachment trusts the preceding LLM screening verdict', () => {
   withoutNet();
   const value = lua.call('AX_verify_product_offers', {
     identity_id: 'identity-m185',
-    identity_kind: 'standardized_model',
-    identity_brand: 'Logitech',
-    identity_model: 'M185',
     results: [{
       key: 'walmart',
       status: 'completed',
       value: {
         site: 'walmart',
+        // This input is already the output of AX_apply_offer_screening. Semantic matching here would
+        // overrule the LLM with a second, incompatible code matcher.
         candidates: [
-          { product_id: 'W185', name: 'Logitech M185 Wireless Mouse', price: 13, currency: 'USD', brand: 'Logitech', manufacturer_model: 'M185' },
-          { product_id: 'W650', name: 'Logitech M650 Silent Mouse', price: 30, currency: 'USD', brand: 'Logitech', manufacturer_model: 'M650' },
-          { product_id: 'WU', name: 'Logitech Wireless Mouse', price: 9, currency: 'USD', brand: 'Logitech' },
+          { product_id: 'W185', name: 'Logitech M185 Wireless Mouse', price: 13, currency: 'USD' },
+          { product_id: 'W650', name: 'Logitech M650 Silent Mouse', price: 30, currency: 'USD' },
+          { product_id: 'WU', name: 'Logitech Wireless Mouse', price: 9, currency: 'USD' },
         ],
       },
     }],
   });
-  assert(value.verified_offers.length === 1 && value.verified_offers[0].product_id === 'W185', 'only exact model should be rankable', value);
-  assert(value.excluded_offers.length === 1 && value.excluded_offers[0].reason === 'model_mismatch', 'different model should be excluded with evidence', value);
-  assert(value.ambiguous_offers.length === 1 && value.ambiguous_offers[0].reason === 'manufacturer_model_missing', 'missing model should remain visible but unranked', value);
+  assert(value.verified_offers.length === 3, 'every LLM-kept structurally valid offer should be rankable', value);
+  assert(value.verified_offers.every((offer) => offer.identity_id === 'identity-m185'),
+    'the locked identity is attached without inventing a second semantic verdict', value);
+  assert(value.excluded_offers === undefined && value.ambiguous_offers === undefined,
+    'the retired code matcher publishes no shadow verdict', value);
 }]);
 
 tests.push(['locked model relevance survives localized category labels', () => {
@@ -683,7 +686,7 @@ tests.push(['comparison versions and identity approval bind cart mutations to cu
   installRpcStub(lua, page);
   const ranked = lua.call('AX_rank_store_offers', {
     identity_id: 'identity-m185',
-    verified_offers: [{ site: 'ebay', product_id: '327230547159', name: 'Logitech M185', price: 20, currency: 'USD', total_base: 20, cost_complete: true, identity_id: 'identity-m185', identity_match: 'exact' }],
+    verified_offers: [{ site: 'ebay', product_id: '327230547159', name: 'Logitech M185', price: 20, currency: 'USD', total_base: 20, cost_complete: true, identity_id: 'identity-m185' }],
   });
   assert(ranked.comparison_id && ranked.offers[0].comparison_id === ranked.comparison_id, 'ranked snapshot should carry one comparison version', ranked);
 

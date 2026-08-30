@@ -579,6 +579,12 @@
         "brand_aliases": {
           "type": "string"
         },
+        "question": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "hard_constraints": {
           "type": [
             "object",
@@ -705,6 +711,43 @@
       "required": [
         "next"
       ],
+      "anyOf": [
+        {
+          "required": [
+            "next",
+            "question"
+          ],
+          "properties": {
+            "next": {
+              "const": "ask"
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "next"
+          ],
+          "properties": {
+            "next": {
+              "type": "string",
+              "enum": [
+                "done",
+                "cancel"
+              ]
+            },
+            "question": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ],
       "properties": {
         "next": {
           "type": "string",
@@ -715,7 +758,10 @@
           ]
         },
         "question": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "query": {
           "type": "string"
@@ -3051,7 +3097,7 @@
   },
   {
     "name": "shopping_rank_store_offers",
-    "description": "Rank only identity-verified candidates while preserving failures and cost coverage.",
+    "description": "Rank model-screened, identity-bound candidates while preserving failures and cost coverage.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -3283,32 +3329,6 @@
             "integer",
             "number"
           ]
-        }
-      }
-    }
-  },
-  {
-    "name": "shopping_screen_site_candidates",
-    "description": "Keep the searched rows that carry every word of the request, for the single-site list.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": false,
-      "properties": {
-        "query": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "candidates": {
-          "type": [
-            "array",
-            "null"
-          ],
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
         }
       }
     }
@@ -3575,20 +3595,26 @@
             "type": "object",
             "additionalProperties": true
           }
+        },
+        "screened_out": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
         }
       }
     }
   },
   {
     "name": "shopping_verify_product_offers",
-    "description": "Classify live offers against the locked model and hard variants before ranking.",
+    "description": "Attach the locked identity to offers already selected by the LLM relevance gate; never make a second semantic match decision in code.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "store_results",
-        "identity_id",
-        "identity_kind"
+        "identity_id"
       ],
       "properties": {
         "store_results": {
@@ -3601,39 +3627,6 @@
         "identity_id": {
           "type": "string",
           "minLength": 1
-        },
-        "identity_kind": {
-          "type": "string",
-          "enum": [
-            "standardized_model",
-            "spec_equivalent",
-            "unique_listing"
-          ]
-        },
-        "identity_brand": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "identity_model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "product_category": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "locked_hard_constraints": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
         }
       }
     }

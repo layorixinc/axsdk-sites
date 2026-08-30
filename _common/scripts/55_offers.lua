@@ -21,10 +21,8 @@ function AX_rank_store_offers(args)
     candidate.product_id = non_empty(candidate.product_id or candidate.id)
     candidate.id = candidate.product_id
     candidate.name = non_empty(candidate.name or candidate.title)
-    local identity_matches = not required_identity
-      or candidate.identity_id == required_identity
-      or candidate.identity_match == "exact"
-    if identity_matches and candidate.product_id and candidate.name and tonumber(candidate.price) then
+    local identity_bound = not required_identity or candidate.identity_id == required_identity
+    if identity_bound and candidate.product_id and candidate.name and tonumber(candidate.price) then
       candidate.identity_id = required_identity or candidate.identity_id
       offers[#offers + 1] = candidate
     end

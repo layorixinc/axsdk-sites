@@ -131,9 +131,9 @@ Design rules:
 | `45_offer_view.lua` | `AX_OFFER_VIEW` (no command) | pure view layer: refine-sentence parser (offers + service pros), filter/sort, page bounds, windowed rendering with a character budget, snapshot signature |
 | `46_candidate_browser.lua` | `AX_browse_service_candidates` | deterministic ranking/window/selection over searched service pros (Thumbtack) — the model relays words and numbers, never the list |
 | `50_commerce_core.lua` | `AX_COMMERCE` (no command) | adapter registry, `ensure_adapter`, FX fetch/convert, and the helpers the other six take in their headers. The **commerce layer** below is seven files building one `AX_COMMERCE` in filename order — each exports what the later ones alias, so a file loaded out of order raises instead of silently missing a function |
-| `51_relevance.lua` | — | query variants, relevance anchors (model code + brand), `normalize_candidates` |
+| `51_relevance.lua` | — | query variants, discovery-only brand recall, and structural/cost normalization; comparison relevance is never decided here |
 | `52_identity.lua` | `AX_prepare_product_identity`, `AX_lock_product_identity`, `AX_build_product_options`, `AX_resolve_product_option` | cross-site product identity and versioned option snapshots |
-| `53_verify.lua` | `AX_verify_product_offers` | re-reads identity and price on the product page before anything is clicked |
+| `53_verify.lua` | `AX_verify_product_offers` | attaches the locked identity to structurally valid offers already kept by the LLM relevance gate; never performs a second semantic match |
 | `54_comparison.lua` | `AX_build_offer_screening`, `AX_apply_offer_screening` | comparison window (page/budget/persistence), store-outcome lines, LLM relevance screening |
 | `55_offers.lua` | `AX_rank_store_offers`, `AX_present_store_offers`, `AX_refine_store_offers`, `AX_resolve_store_offer` | deterministic ranking and the numbered surface the user chooses from |
 | `56_store_io.lua` | `AX_search_store_product`, `AX_collect_store_page`, `AX_normalize_store_product_result`, `AX_add_store_product_to_cart` | per-store page collection and the guarded cart add |
@@ -177,14 +177,13 @@ results. These are the ten representative commerce sites accepted by the multi-s
 
 Broad multi-store requests discover live listings on a deterministic frontier of at most three
 user-selected stores, group only grounded manufacturer models, and pause for an explicit model choice.
-Exact model requests skip discovery. Final comparison ranks only identity-verified candidates; ambiguous
-and mismatched listings stay visible but unranked. Product-option and comparison snapshots are versioned.
-Relevance is decided in two stages: the deterministic pass keeps up to six rows per store that COULD be
-the product, then one model call names the rows that ARE it (`AX_build_offer_screening` →
-`screen_store_offers` → `AX_apply_offer_screening`), and the three-per-store comparison cap is applied to
-the survivors. Removed rows are counted in the window.
-Cart mutation requires a separate offer-approval turn plus matching identity/comparison approval markers,
-and the storefront re-reads both model identity and price before clicking.
+Exact model requests skip discovery. Product-option and comparison snapshots are versioned. For comparison,
+every structurally readable search row may enter a bounded surface (up to six per store / 30 total);
+`judge_relevance` is the only product-match decision (`AX_build_offer_screening` →
+`screen_store_offers` → `AX_apply_offer_screening`). The three-per-store cap is applied to the LLM's
+survivors, and removed rows are counted in the window. No Lua token/model/brand matcher may overrule that
+verdict. Cart mutation still requires a separate offer-approval turn plus matching identity/comparison
+approval markers, and the storefront re-reads both model identity and price before clicking.
 
 ### `bluemoonsoft/` — **gone entirely** (2026-08-26)
 Its `form.lua` went first (it overrode the default form tools for a flow that never filled a form), and
@@ -1121,44 +1120,45 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **Refinement is parsed deterministically, never by the model.** The model copies the user's sentence
   verbatim into `refine_request`; `AX_OFFER_VIEW.parse_refine` grounds it or reports `unparsed`, and a
   re-search intent ("M240으로 다시 찾아줘") routes back to `collect_request` instead of being guessed at.
-- **Relevance anchors on the model code, descriptors only score.** A storefront titles the same product
-  without the English brand or the category word, and a search for one model returns its neighbours. So
-  `C.relevance_match` REQUIRES the model code (token-boundary aware: `M185` matches `M-185`, never
-  `M185R`) plus a boundary-matched brand token. Script transitions are boundaries, so Korean
-  `로지텍m185` remains valid while `ge` inside `Range`/`Storage` does not. Remaining words are the
-  exact/partial signal; partial rows are labelled `(유사)` in the window. Measured before the change:
-  `Logitech M185 mouse` matched 0 of 3 real SSG listings, `Logitech M185` matched 3.
-- **Equivalent words come from the MODEL, never from a table in the Lua.** `collect_request` emits two
-  `"|"`-separated strings with the request: `query_variants` (other phrasings of the SAME product, tried
-  by `AX_collect_store_page` only when a store found NOTHING, capped at 3 because each costs a
-  navigation) and `brand_aliases` (every spelling of the one requested brand, used by `token_matches`).
-  A curated table was built first and rejected: it can only ever cover the brands someone thought of,
-  while the model already knows the language. Two rules the mechanics enforce regardless: an alias
-  substitutes ONLY for the token it spells — letting the brand alias answer for every token reported a
-  listing that never says "ergonomic" as an exact match for it — and a blocked store is never retried,
-  since no wall opens for a synonym. Measured live on a `Logitech M185` search: 11st kept **3 of 9** rows
-  with the model's spellings and **0** without; coupang **3 vs 1**; SSG **3 either way** (its payload
-  carries the English brand, so the aliases are a safety net there, not the load-bearing part).
-- **Token rules decide RECALL, the model decides RELEVANCE.** No selector or token rule can tell
-  "로지텍 M185 마우스" from "로지텍 M185 마우스용 스킨" or "M185 + K270 세트": the accessory and the bundle
-  contain every query word and pass every anchor. So the deterministic pass now keeps up to
-  `C.SCREEN_LIMIT_PER_SITE` (6) plausible rows per store, `AX_build_offer_screening` renders them as ONE
-  numbered, id-backed list (round-robin across stores so a long store cannot starve the others, capped at
-  `C.SCREEN_MAX_ROWS` 30), `judge_relevance` answers with the numbers to keep, and
-  `AX_apply_offer_screening` applies `MAX_OFFERS_PER_SITE` (3) to the survivors. Three rules the mechanics
-  own, not the model: only the rendered list enters the prompt (never the offer payload); a number that
-  names no row is ignored rather than shifting the verdict; and an ABSENT verdict keeps every row —
-  precision is worth one model call, never the whole turn, so stall/invalid/error all route to
-  `apply_screening`. The paging goal stays at 3, so carrying six rows costs no extra navigation. Live:
-  12 rows on coupang+11st for "로지텍 M185 마우스" → the two K270 keyboard bundles dropped; an 에어팟 프로 2
-  search → the "오른쪽 낱개" single earbud dropped. Cost is one model call (~10-15s of a ~65s turn).
-- **A verdict that never lands looks exactly like a verdict of "keep everything".** The screening tool
-  first wrote `keep` while the apply step read `screening_keep`; the fail-open path then kept all 12 rows
-  and reported `screened_out: 0` — a clean-looking turn in which the model's correct rejections were
-  silently discarded. A second instance: `screened_out` was selected by the rank node but missing from
-  that tool's `properties` (`additionalProperties: false`), so the "관련 없는 N건" line vanished. Both are
-  now conformance-asserted. Neither is visible to a unit test: verify a flow change by reading the live
-  tool trace and the state each node actually received.
+- **Search-result relevance belongs to the LLM, not Lua.** The old comparison path made the decision twice:
+  `C.relevance_match` filtered normalized rows, then `AX_verify_product_offers` independently classified
+  model/brand/variant fields after `judge_relevance`. A real eBay `NVIDIA DGX Spark` offer carries the
+  two-word model in its title but no dedicated manufacturer-model field, so the second code matcher called it
+  `manufacturer_model_missing` after the LLM had already kept it and the user was falsely told to provide an
+  exact model. Both semantic code paths are gone. Comparison normalization keeps structurally readable rows
+  in store order; `AX_verify_product_offers` now only binds the locked identity to the LLM survivors.
+  Retired `match_level` metadata is stripped during normalization and ignored by both the screening prompt
+  and the user-visible comparison window, so it cannot reintroduce a shadow verdict through presentation.
+- **The LLM relevance surface is bounded and id-backed.** Up to
+  `C.SCREEN_LIMIT_PER_SITE` (6) readable rows per store reach `AX_build_offer_screening`, which renders one
+  round-robin numbered list capped at `C.SCREEN_MAX_ROWS` (30). `judge_relevance` names the numbers to keep;
+  `AX_apply_offer_screening` ignores unknown numbers and applies `MAX_OFFERS_PER_SITE` (3) only to survivors.
+  The model sees the rendered rows, never the offer payload. An ABSENT verdict is
+  `relevance_judgement_unavailable` and routes to error — it never defaults to "keep everything".
+- **Equivalent search wordings still come from the MODEL, never a Lua table.** `collect_request` emits
+  `query_variants` (up to three alternative phrasings of the SAME product) and `brand_aliases`. Variants are
+  tried only when a store found nothing; a blocked store is never retried. `brand_aliases` may ground
+  token-boundary-aware brand provenance and broad discovery recall (`GE` never matches `Storage`), but
+  comparison inclusion is the relevance model's decision.
+- **Shipping-CDP live proof, 2026-08-29:** the exact three-store request for `NVIDIA DGX Spark` completed in
+  29.01 s. eBay retained a real DGX Spark workstation offer, ranked one complete-total row and folded two
+  unknown-shipping rows; Naver Shopping reported access restricted; Gmarket reported no relevant result; the
+  LLM counted seven rejected rows. The reply did not ask for an "exact manufacturer model".
+- **A completed collection call does not owe a question.** `collect_ready_total_cost_request` declares
+  `question` optional/nullable because providers may emit `question:null` on `next:"done"`.
+  `collect_total_cost_request` requires a non-empty question only in its `ask` schema branch; `done` and
+  `cancel` accept omission or null. The same live DGX request crossed this provider boundary without a tool
+  argument error.
+- **No-results is an outcome report, not an identity accusation.** `AX_summarize_store_outcomes` converts
+  each compact structured store result into one deterministic `store_outcome_response`; the terminal emits
+  that scalar verbatim. It names each store and its classified result, reports the LLM removal count, and
+  never asks a response model to paraphrase wire codes. Neither a processing failure nor an empty comparison
+  may fall back to demanding a "more exact manufacturer model" when the flow has no evidence that the user's
+  identity was incomplete.
+- **A verdict key mismatch used to look like "keep everything".** The screening tool first wrote `keep`
+  while the apply step read `screening_keep`; twelve rows survived and `screened_out: 0` looked clean. A
+  second mapping omitted `screened_out` from a closed tool schema, so the removal count vanished. Conformance
+  pins both mappings, and the absent-verdict path now fails closed rather than authorizing relevance.
 - **A storefront can keep its result cards and still hide the product id.** 11st routes every search card
   through its ad server (`action.adoffice.11st.co.kr/act/click/…?clickData=…`), so no card has a
   `/products/<id>` href any more; the id survives only in the anchor's `data-log-body`
@@ -2143,22 +2143,15 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   listing; `#listing-page-cart` scopes it to exactly 1. All are word-based design-system names, so §10
   allows them. Note what is NOT the add: gmarket's `.btn_round.btn_blue` ("장바구니로") is the confirmation
   popup's link to the cart, and clicking it would leave the product behind.
-- **The single-site list was never screened, so row one was whatever the grid rendered — CLOSED
-  2026-08-26.** "첫 번째로 해줘" on an eBay search selected `2500219655424533`, the "Shop on eBay" promo
-  tile, and `shopping_add_to_cart` answered `product_navigation_failed` because that id has no product
-  page. The multi-store path had screened for relevance all along; the single-site path had nothing
-  between the reader and the user's pick. No structural signature separates the tile from a listing (§13
-  records the rule that was written, tested and REJECTED for exactly this) — what removes it is that it
-  carries none of the query's words. `AX_RPC_PURE.screen_site_candidates` + the `screen_item` contract
-  node now sit between `search_item` and `refine_item`. Three rules the mechanics own:
-  `C.matches_query`, **not** `C.relevance_match` — the comparison rule ANCHORS on a model code and a
-  brand, and a single-site request usually has neither ("USB C cable", "신발"), so applying it verbatim
-  would empty every ordinary list; screening everything away keeps the original rows (an empty list
-  leaves nothing to choose) and reports `screen_fallback` rather than a count, because the count is what
-  the user is TOLD and "N개 제외" beside those same N rows is a false statement; and the empty list
-  crosses as ABSENT. Live: eBay 30 rows → 2 screened out, the pick lands on a real M185 listing
-  (`158215016462`), and the guarded add reaches the cart page and confirms by id. Mutation-checked
-  (filter removed → 3 red).
+- **The single-site relevance decision is also model-owned — corrected 2026-08-29.** The original symptom
+  remains useful: "첫 번째로 해줘" on an eBay search selected the "Shop on eBay" promo tile and the cart
+  correctly refused a non-product page. The first fix inserted `AX_RPC_PURE.screen_site_candidates`, a
+  deterministic every-query-token filter, between search and the model. That contradicted the comparison
+  contract and silently excluded rows before language reasoning could inspect them. The filter, tool, and
+  `screen_item` node are deleted. `search_item` now routes directly to `refine_item`; that action-unit is
+  explicitly the sole relevance judge, ignores promo/accessory/different-product rows, and applies the user's
+  criterion only to same-product candidates. Conformance refuses the retired node/tool and requires the
+  relevance rule in the model prompt.
 - **A PLANNER EXAMPLE that names the same product as the live request pulls the follow-up into the
   example's intent — measured, fixed, and it destroys the user's list when it fires.** The gate misroute
   §13 had carried as "observed, not attributed" now has a cause. On eBay with "Logitech M185 mouse",

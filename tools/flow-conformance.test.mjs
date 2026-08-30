@@ -541,13 +541,53 @@ test('store outcomes reach the user, not just the log', () => {
   assert.equal(common.flowTools.shopping_rank_store_offers.output.store_status, 'result.store_status');
   // `all_offers` used to ride here as a second copy of the listing; the snapshot carries it now.
   assert.equal(common.flowTools.shopping_rank_store_offers.output.comparison_state, 'result.comparison_state');
-  // The window itself names the failing stores now — the snapshot carries the notes, so every page after
-  // the first says the same thing the first one did. No prompt needs the offers to say it.
+  // The comparison window and cart report carry `store_status`. Empty comparisons use the separately
+  // rendered structured-outcome scalar because ranking never ran and therefore produced no window status.
   assert.ok(!flow.nodes.present_offers.inputSelector.includes('offers'));
-  for (const terminalName of ['no_results', 'report_cart']) {
-    assert.ok(flow.nodes[terminalName].inputSelector.includes('store_status'),
-      `${terminalName} must be able to report which stores failed`);
-  }
+  assert.ok(flow.nodes.report_cart.inputSelector.includes('store_status'),
+    'the cart report must preserve which stores failed');
+  assert.deepEqual(flow.nodes.no_results.inputSelector, ['store_outcome_response'],
+    'an empty comparison must emit the deterministic per-store outcome rendering');
+});
+
+test('multi-store collection requires a question only on the ask branch', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const ready = common.flowTools.collect_ready_total_cost_request.parameters;
+  const schema = common.flowTools.collect_total_cost_request.parameters;
+  const accepts = (value) => schema.anyOf.some((branch) => {
+    if ((branch.required ?? []).some((key) => !Object.hasOwn(value, key))) return false;
+    const next = branch.properties?.next;
+    if (next?.const !== undefined && value.next !== next.const) return false;
+    if (next?.enum && !next.enum.includes(value.next)) return false;
+    const question = branch.properties?.question;
+    if (typeof value.question === 'string' && question?.minLength
+      && value.question.length < question.minLength) return false;
+    if (value.question === null && !question?.type?.includes?.('null')) return false;
+    return true;
+  });
+
+  assert.ok(!ready.required.includes('question'), 'a prefilled complete request never owes a question');
+  assert.deepEqual(ready.properties.question.type, ['string', 'null'],
+    'the provider may still emit question:null for a completed request');
+  assert.deepEqual(schema.required, ['next'], 'question is not globally required');
+  assert.equal(accepts({ next: 'ask' }), false, 'ask still owes the user a non-empty question');
+  assert.equal(accepts({ next: 'ask', question: '' }), false);
+  assert.equal(accepts({ next: 'ask', question: '어떤 제품을 비교할까요?' }), true);
+  assert.equal(accepts({ next: 'done' }), true, 'a complete request may omit question');
+  assert.equal(accepts({ next: 'done', question: null }), true, 'provider null is accepted off the ask branch');
+});
+
+test('the no-results terminal emits the deterministic structured-outcome rendering', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const terminal = common.flows.shopping_multi_store_total_cost.nodes.no_results;
+  const summarize = common.flowTools.shopping_summarize_store_outcomes;
+  assert.deepEqual(terminal.inputSelector, ['store_outcome_response']);
+  assert.equal(terminal.respond.from, 'store_outcome_response');
+  assert.ok(summarize.output.store_outcome_response);
+  assert.ok(summarize.parameters.properties.screened_out);
+  assert.doesNotMatch(common.flows.shopping_multi_store_total_cost.nodes.error.respond,
+    /정확.*(?:제조사|모델)|exact manufacturer model/i,
+    'a processing failure must not falsely blame a complete product request');
 });
 
 test('the user is told a multi-store search takes time before it starts', () => {
@@ -779,6 +819,13 @@ test('single-site shopping reads every store in the runtime', () => {
   assert.ok(!nodes.search_item_bespoke);
   assert.ok(!common.flowTools.shopping_search_product_durable);
   assert.equal(common.flowTools.shopping_search_product.execute.implementation, 'lua');
+  assert.equal(nodes.search_item.next.done, 'refine_item',
+    'search rows go directly to the model that judges relevance');
+  assert.ok(!nodes.screen_item, 'no deterministic node may decide which search row matches');
+  assert.ok(!common.flowTools.shopping_screen_site_candidates,
+    'the retired code matcher must not remain callable');
+  assert.match(nodes.refine_item.prompt, /relevance|일치|same product/i,
+    'the model prompt must own the relevance judgement explicitly');
 });
 
 test('the service search reads in the runtime and stops re-invoking itself', () => {

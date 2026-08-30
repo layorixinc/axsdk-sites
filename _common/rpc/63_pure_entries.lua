@@ -20,7 +20,7 @@ local function purpose_of(context)
   return context.discovery_query and "discovery" or "comparison"
 end
 
---- Relevance, provenance, FX and landed-cost normalization for one store's page.
+--- Discovery recall, provenance, FX and landed-cost normalization for one store's page.
 function P.normalize_store_result(args)
   args = table_of(args)
   local item = table_of(args.item)
@@ -52,45 +52,6 @@ function P.normalize_store_result(args)
   return { next = "done", store_result = result }
 end
 
---- Drops rows that are a different product from the one the user asked for, for the SINGLE-SITE list.
----
---- The comparison path has screened for relevance all along; this list had nothing, so row one was
---- whatever the grid rendered. Measured live on eBay: "첫 번째로 해줘" picked eBay's own "Shop on eBay"
---- promo tile and the cart refused with `product_navigation_failed`, because that id has no product page.
---- §13 records that no structural signature separates that tile from a listing — what removes it is that
---- it carries none of the query's words.
----
---- `matches_query` and not `relevance_match`: the comparison rule ANCHORS on a model code and brand, and
---- a single-site request usually has neither ("USB C cable", "신발"), so that rule would empty every
---- ordinary list. Every query token must appear, nothing more.
----
---- Screening everything away would leave the user nothing to pick from, so that case keeps the original
---- rows and reports the fallback instead of a count — the count is what the user is told, and telling
---- them "N개 제외" while showing them those same N rows would be a false statement.
-function P.screen_site_candidates(args)
-  args = table_of(args)
-  local query = args.query
-  local candidates = type(args.candidates) == "table" and args.candidates or {}
-  local total = #candidates
-  if total == 0 then
-    return { next = "done", screened_out = 0 }
-  end
-  if type(query) ~= "string" or query:gsub("%s", "") == "" then
-    return { next = "done", candidates = candidates, screened_out = 0 }
-  end
-
-  local kept = AX_COMMERCE.array()
-  for index = 1, total do
-    local candidate = candidates[index]
-    if type(candidate) == "table" and AX_COMMERCE.matches_query(candidate, query, args) then
-      kept[#kept + 1] = candidate
-    end
-  end
-  if #kept == 0 then
-    return { next = "done", candidates = candidates, screened_out = 0, screen_fallback = true }
-  end
-  return { next = "done", candidates = kept, screened_out = total - #kept }
-end
 
 --- Merges one read page into the store's accumulated candidates and decides whether another page — or
 --- another wording — is worth a navigation.
@@ -178,7 +139,7 @@ local ARGUMENT_MAPS = {
     store_results = "store_results", screening_ids = "screening_ids", keep = "screening_keep",
   },
   AX_summarize_store_outcomes = {
-    store_results = "store_results",
+    store_results = "store_results", screened_out = "screened_out",
   },
   AX_resolve_store_offer = {
     offers = "offers", choice_index = "choice_index", choice_comparison_id = "choice_comparison_id",

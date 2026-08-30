@@ -15,6 +15,7 @@ const lua = loadLuaModules([
   '_common/scripts/50_commerce_core.lua',
   '_common/scripts/51_relevance.lua',
   '_common/scripts/52_identity.lua',
+  '_common/scripts/53_verify.lua',
 ]);
 after(() => lua.close());
 
@@ -108,6 +109,41 @@ test('a listing that carries its own model is trusted over the title', () => {
   });
 
   assert.equal(modelOf(options), 'M240');
+});
+
+test('an offer kept by the LLM is not rejected by a second code matcher', () => {
+  // Measured live on eBay 2026-08-29. The card has no dedicated manufacturer-model field; the identity
+  // is in its title. `judge_relevance` sees that title and decides whether to keep it. This downstream
+  // step must attach the locked identity, not independently classify the model as missing.
+  const accepted = lua.call('AX_verify_product_offers', {
+    identity_id: 'dgx-spark',
+    identity_kind: 'standardized_model',
+    identity_brand: 'NVIDIA',
+    identity_model: 'DGX Spark',
+    product_category: 'server',
+    store_results: [{
+      key: 'ebay',
+      status: 'completed',
+      value: {
+        store_result: {
+          site: 'ebay',
+          candidates: [{
+            site: 'ebay',
+            product_id: '206504093493',
+            name: 'Nvidia DGX Spark AI Server Enterprise GPU Computing Platform 4TB nvme DeepSeek',
+            price: 762085.24,
+            currency: 'KRW',
+            url: 'https://www.ebay.com/itm/206504093493',
+          }],
+        },
+      },
+    }],
+  });
+
+  assert.equal(accepted.next, 'done');
+  assert.deepEqual(accepted.verified_offers.map((entry) => entry.product_id), ['206504093493']);
+  assert.equal(accepted.ambiguous_offers, undefined);
+  assert.equal(accepted.excluded_offers, undefined);
 });
 
 test('every numbered discovery option is immediately lockable', () => {

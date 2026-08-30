@@ -267,7 +267,8 @@ test('the store that failed is still named after the user pages or filters', () 
   later.close();
 
   assert.equal(paged.error, undefined, `paging failed: ${paged.error}`);
-  assert.match(paged.question ?? '', /네이버쇼핑/, 'the failing store must still be named in the window');
+  assert.match(paged.question ?? '', /Naver Shopping|naver-shopping/,
+    'the failing store must still be named in the window');
 });
 
 test('rows a FILTER hid are not reported as rows folded for unknown shipping', () => {

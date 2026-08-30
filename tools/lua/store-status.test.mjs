@@ -40,7 +40,7 @@ function rank(offers, failures = []) {
 test('every failure code maps to an action the user can take', () => {
   const cases = [
     ['security_verification_required', /보안 확인/],
-    ['captcha_required', /보안 확인|캡차/],
+    ['captcha_required', /CAPTCHA 확인/],
     ['login_required', /로그인/],
     ['access_denied', /차단|접근/],
     ['no_results', /결과 없음|없음/],
@@ -49,7 +49,7 @@ test('every failure code maps to an action the user can take', () => {
   for (const [code, expected] of cases) {
     const status = lua.call('AX_COMMERCE.store_status', [{ site: 'naver-shopping', error: code }], []);
     assert.match(status.text, expected, `${code} -> ${status.text}`);
-    assert.match(status.text, /naver-shopping|네이버/);
+    assert.match(status.text, /naver-shopping|Naver Shopping/);
   }
 });
 
@@ -96,6 +96,41 @@ test('the comparison window carries the store status', () => {
   assert.match(ranked.comparison_text, /보안 확인/);
   assert.match(ranked.store_status, /보안 확인/);
   assert.equal(ranked.next, 'partial');
+});
+
+test('a partial DGX Spark result names the successful offer and each blocked store separately', () => {
+  const ranked = rank([
+    offer({
+      site: 'ebay',
+      product_id: 'expensive',
+      name: 'NVIDIA DGX Spark 4 TB NVMe 128 GB DDR5x',
+      price: 7868535.78,
+      currency: 'KRW',
+      shipping_cost: 0,
+      total_base: 7868535.78,
+      total_for_quantity: 7868535.78,
+    }),
+    offer({
+      site: 'ebay',
+      product_id: '206504093493',
+      name: 'Nvidia DGX Spark AI Server Enterprise GPU Computing Platform 4TB nvme DeepSeek',
+      price: 762085.24,
+      currency: 'KRW',
+      shipping_cost: 0,
+      total_base: 762085.24,
+      total_for_quantity: 762085.24,
+    }),
+  ], [
+    { site: 'naver-shopping', error: 'access_denied' },
+    { site: 'gmarket', error: 'captcha_required' },
+  ]);
+
+  assert.equal(ranked.next, 'partial');
+  assert.equal(ranked.offers[0].product_id, '206504093493', 'valid offers stay sorted by total cost');
+  assert.match(ranked.comparison_text, /eBay.*DGX Spark.*찾았습니다/);
+  assert.match(ranked.comparison_text, /Naver Shopping.*접근이 제한/);
+  assert.match(ranked.comparison_text, /Gmarket.*CAPTCHA 확인/);
+  assert.doesNotMatch(ranked.comparison_text, /정확한 제조사 모델|exact manufacturer model/i);
 });
 
 // ── incomplete totals are folded out of the default view ─────────────────────
@@ -297,7 +332,7 @@ test('a structured failure never leaks a Lua table into the user text', () => {
   for (const failure of shapes) {
     const status = lua.call('AX_COMMERCE.store_status', [failure], []);
     assert.doesNotMatch(status.text, /table:/, `leaked a table for ${JSON.stringify(failure)}`);
-    assert.match(status.text, /네이버쇼핑/);
+    assert.match(status.text, /Naver Shopping/);
     assert.ok(status.text.split(':').slice(1).join(':').trim().length > 1, 'the line must name a cause');
   }
 

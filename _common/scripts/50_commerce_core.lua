@@ -12,10 +12,9 @@ C.adapters = C.adapters or {}
 C.BASE_CURRENCY = "USD"
 C.FX_URL = "https://api.frankfurter.dev/v1/latest"
 C.MAX_OFFERS_PER_SITE = 3
--- Relevance is decided in two stages. The deterministic pass keeps what COULD be the product, up to
--- SCREEN_LIMIT_PER_SITE per store, because token rules cannot tell a mouse from a mouse pad; one model
--- call then says which rows actually are it, and MAX_OFFERS_PER_SITE is applied to what survives. The
--- screening list is the only part of this that ever enters a prompt, so it is bounded too.
+-- Every readable row may reach the LLM relevance gate, up to SCREEN_LIMIT_PER_SITE per store. The LLM
+-- alone says which rows are the product; MAX_OFFERS_PER_SITE is applied to its survivors. The numbered
+-- screening list is the only candidate data that enters a prompt, so it is bounded globally too.
 C.SCREEN_LIMIT_PER_SITE = 6
 C.SCREEN_MAX_ROWS = 30
 C.SCREEN_TITLE_CHARS = 70

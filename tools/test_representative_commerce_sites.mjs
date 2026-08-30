@@ -298,7 +298,7 @@ run('live-access challenge classification', () => {
   assert((value.candidates ?? []).length === 0, 'a wall yields no candidates to rank', value);
 });
 
-run('irrelevant rows classify as no results', () => {
+run('semantic mismatches reach the LLM relevance gate', () => {
   const page = makePage({
     href: 'https://www.walmart.com/',
     afterNavigate: {
@@ -313,8 +313,10 @@ run('irrelevant rows classify as no results', () => {
     },
   });
   const { value } = searchStore(page, 'walmart');
-  assert(value.error === 'no_results', 'irrelevant storefront rows become an explicit no-results outcome', value);
-  assert((value.candidates ?? []).length === 0, 'irrelevant storefront rows cannot leak into ranked offers', value);
+  assert(value.status === 'candidates' && value.error == null,
+    'normalization must not pre-empt the LLM relevance judgement', value);
+  assert(value.candidates?.[0]?.product_id === '16207314',
+    'the readable live row reaches the bounded screening surface', value);
 });
 
 run('storefront search survives its own navigation in one call', () => {

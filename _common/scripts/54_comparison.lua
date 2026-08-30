@@ -52,18 +52,19 @@ end
 -- a silently missing store is indistinguishable from "this product is not sold there". Codes come from
 -- the adapters; anything unmapped is still reported verbatim rather than swallowed.
 local STORE_NAMES = {
-  ["naver-shopping"] = "네이버쇼핑",
+  ["naver-shopping"] = "Naver Shopping",
   ["11st"] = "11번가",
-  coupang = "쿠팡", ssg = "SSG", gmarket = "지마켓", amazon = "아마존",
-  walmart = "월마트", ebay = "이베이", aliexpress = "알리익스프레스", etsy = "엣시"
+  coupang = "쿠팡", ssg = "SSG", gmarket = "Gmarket", amazon = "아마존",
+  walmart = "월마트", ebay = "eBay", aliexpress = "알리익스프레스", etsy = "엣시"
 }
 
 local STORE_ERRORS = {
-  security_verification_required = "보안 확인 필요 (브라우저에서 확인 후 다시 시도)",
-  captcha_required = "보안 확인(캡차) 필요 (브라우저에서 직접 통과해야 함)",
-  login_required = "로그인 필요 (브라우저에서 로그인 후 다시 시도)",
-  access_denied = "접근 차단됨",
+  security_verification_required = "보안 확인이 필요합니다 (브라우저에서 확인 후 다시 시도)",
+  captcha_required = "CAPTCHA 확인이 필요합니다 (브라우저에서 직접 통과해야 함)",
+  login_required = "로그인이 필요합니다 (브라우저에서 로그인 후 다시 시도)",
+  access_denied = "접근이 제한되었습니다",
   no_results = "검색 결과 없음",
+  no_relevant_offers = "요청한 상품과 일치하는 결과 없음",
   price_unavailable = "상품은 있었지만 가격을 읽지 못했습니다 (사이트 표시 방식 변경)",
   store_search_failed = "검색 실패",
   search_unsupported = "이 사이트는 검색을 지원하지 않음",
@@ -104,16 +105,19 @@ end
 --- One line describing which stores answered and what the others need from the user.
 function C.store_status(failures, offers)
   local ok_sites = {}
+  local ok_order = array()
   local ok_count = 0
   for index = 1, #(offers or {}) do
-    local site = lower(offers[index].site)
+    local offer = offers[index] or {}
+    local site = lower(offer.site)
     if site ~= "" and not ok_sites[site] then
-      ok_sites[site] = true
+      ok_sites[site] = non_empty(offer.name or offer.title) or true
+      ok_order[#ok_order + 1] = site
       ok_count = ok_count + 1
     end
   end
 
-  local parts = array()
+  local failure_parts = array()
   local failed_count = 0
   local seen = {}
   for index = 1, #(failures or {}) do
@@ -124,13 +128,24 @@ function C.store_status(failures, offers)
     if not seen[key] then
       seen[key] = true
       failed_count = failed_count + 1
-      parts[#parts + 1] = C.store_label(failure.site) .. ": " .. text
+      failure_parts[#failure_parts + 1] = C.store_label(failure.site) .. ": " .. text
     end
   end
 
   if failed_count == 0 then
     return { text = "", ok_count = ok_count, failed_count = 0 }
   end
+
+  local parts = array()
+  for index = 1, #ok_order do
+    local site = ok_order[index]
+    local name = ok_sites[site]
+    local found = type(name) == "string" and (AX_OFFER_VIEW.clip(name, 80) .. " 상품을 찾았습니다")
+      or "상품을 찾았습니다"
+    parts[#parts + 1] = C.store_label(site) .. ": " .. found
+  end
+  for index = 1, #failure_parts do parts[#parts + 1] = failure_parts[index] end
+
   local total = ok_count + failed_count
   local header = string.format("사이트 %d곳 중 %d곳에서 결과를 받았습니다", total, ok_count)
   return {
@@ -449,6 +464,34 @@ local function summarize_store_outcomes(results)
   return outcomes, per_store
 end
 
+--- Deterministic user text for an empty comparison. The model used to paraphrase these structured rows and
+--- invented possible causes for `access_denied`; rendering here keeps every claim tied to one outcome code.
+local function render_store_outcomes(outcomes, screened_out)
+  local lines = array()
+  for index = 1, #(outcomes or {}) do
+    local outcome = outcomes[index] or {}
+    local label = C.store_label(outcome.site)
+    if outcome.status == "candidates" and outcome.candidate_count > 0 then
+      local sample = outcome.sample or {}
+      local name = non_empty(sample.name)
+      local found = name and (AX_OFFER_VIEW.clip(name, 100) .. " 상품을 찾았습니다")
+        or string.format("검색 결과 %d건을 찾았습니다", outcome.candidate_count)
+      lines[#lines + 1] = label .. ": " .. found
+    else
+      lines[#lines + 1] = label .. ": " .. failure_text({
+        error = outcome.error,
+        status = outcome.status
+      })
+    end
+  end
+  local removed = math.max(0, math.floor(tonumber(screened_out) or 0))
+  if removed > 0 then
+    lines[#lines + 1] = string.format("관련 없는 %d건은 제외했습니다", removed)
+  end
+  lines[#lines + 1] = "장바구니와 주문은 변경하지 않았습니다."
+  return table.concat(lines, "\n")
+end
+
 function AX_build_offer_screening(args)
   args = args or {}
   local store_outcomes, per_store = summarize_store_outcomes(args.store_results or args.results)
@@ -470,7 +513,6 @@ function AX_build_offer_screening(args)
           local price = money(candidate.price, candidate.currency)
           local line = string.format("%d. [%s] %s", #ids, store.site, title)
           if price ~= "" then line = line .. " · " .. price end
-          if candidate.match_level == "partial" then line = line .. " · (유사)" end
           lines[#lines + 1] = line
         end
       end
@@ -496,29 +538,29 @@ end
 function AX_summarize_store_outcomes(args)
   args = args or {}
   local store_outcomes = summarize_store_outcomes(args.store_results or args.results)
-  return { next = "done", store_outcomes = store_outcomes }
+  return {
+    next = "done",
+    store_outcomes = store_outcomes,
+    store_outcome_response = render_store_outcomes(store_outcomes, args.screened_out)
+  }
 end
 
---- Applies a screening verdict: keeps the numbered rows, caps each store at the comparison limit, and
---- reports what was removed. An ABSENT verdict (a stalled or failed screening node) keeps everything —
---- losing precision costs a wrong row in the window, losing the offers costs the whole turn.
+--- Applies the LLM's screening verdict, caps each store at the comparison limit, and reports removals.
+--- An absent verdict is an error: the LLM is the sole semantic relevance judge, so a code-path default
+--- must never authorize every row when that judgement did not happen.
 function AX_apply_offer_screening(args)
   args = args or {}
   local ids = split_list(args.screening_ids)
   local verdict = args.keep
-  local skipped = verdict == nil
+  if verdict == nil then
+    return { next = "error", error = "relevance_judgement_unavailable" }
+  end
 
   local keep = {}
-  local kept_total = 0
-  if not skipped then
-    for number in tostring(verdict):gmatch("%d+") do
-      local position = tonumber(number)
-      local id = position and ids[position]
-      if id and not keep[id] then
-        keep[id] = true
-        kept_total = kept_total + 1
-      end
-    end
+  for number in tostring(verdict):gmatch("%d+") do
+    local position = tonumber(number)
+    local id = position and ids[position]
+    if id then keep[id] = true end
   end
 
   local results = array()
@@ -535,7 +577,7 @@ function AX_apply_offer_screening(args)
     for index = 1, #candidates do
       local candidate = candidates[index]
       local product_id = non_empty(candidate.product_id or candidate.id)
-      local wanted = skipped or (product_id and keep[site .. ":" .. product_id]) or false
+      local wanted = product_id and keep[site .. ":" .. product_id] or false
       if not wanted then
         screened_out = screened_out + 1
       elseif #kept >= C.MAX_OFFERS_PER_SITE then
@@ -551,13 +593,14 @@ function AX_apply_offer_screening(args)
     store_result.candidates = #kept > 0 and kept or nil
     store_result.total_count = #kept
     if #kept == 0 then
-      -- And the status has to say what happened. It is copied from the reader, so a store whose every row
-      -- the model rejected kept `status = "candidates"` beside nothing — an outcome no caller can name,
-      -- which the sweep then reported as `unknown`, the label for a reader that could not say.
       store_result.error = non_empty(store_result.error) or "no_relevant_offers"
       store_result.status = store_result.error
     end
-    results[#results + 1] = { key = non_empty(record.key) or site, status = "completed", value = { store_result = store_result } }
+    results[#results + 1] = {
+      key = non_empty(record.key) or site,
+      status = "completed",
+      value = { store_result = store_result }
+    }
   end)
 
   return {
@@ -565,8 +608,7 @@ function AX_apply_offer_screening(args)
     store_results = results,
     screened_out = screened_out,
     capped_out = capped_out,
-    screened_kept = remaining,
-    screening_skipped = skipped or nil
+    screened_kept = remaining
   }
 end
 

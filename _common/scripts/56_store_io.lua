@@ -1,13 +1,13 @@
 --- 스토어별 페이지 수집과 장바구니 담기. 브라우저에 실제로 닿는 층.
 local B = AX_BASE
 local C = AX_COMMERCE
--- Names what this file READS at load time: `matches_query` from 51, `infer_model` from 52, and the paging
--- planner as its own namespace. The old guard named `50_commerce_core` and tested only `C`.
-if not (B and C and C.matches_query and C.infer_model and AX_PAGINATION) then
-  error("_common/scripts/52_identity.lua and 44_pagination.lua must be loaded before 56_store_io.lua")
+-- Names what this file READS at load time: brand provenance from 51, model inference from 52, and the
+-- paging planner as its own namespace.
+if not (B and C and C.brand_matches and C.infer_model and AX_PAGINATION) then
+  error("_common/scripts/51_relevance.lua, 52_identity.lua, and 44_pagination.lua must load before 56_store_io.lua")
 end
 local non_empty = B.non_empty
-local copy_table, array, matches_query, infer_model = C.copy_table, C.array, C.matches_query, C.infer_model
+local copy_table, array, brand_matches, infer_model = C.copy_table, C.array, C.brand_matches, C.infer_model
 
 function C.normalize_search_result(args, raw_result)
   args = args or {}
@@ -45,7 +45,7 @@ function C.normalize_search_result(args, raw_result)
       candidate.brand_source = non_empty(candidate.brand_source) or "metadata"
     else
       local requested_brand = non_empty(args.requested_brand or args.identity_brand)
-      if requested_brand and matches_query({ name = candidate.name }, requested_brand, args) then
+      if requested_brand and brand_matches({ name = candidate.name }, requested_brand, args) then
         candidate.brand = requested_brand
         candidate.brand_source = "title"
       else

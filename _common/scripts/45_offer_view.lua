@@ -347,10 +347,7 @@ local function render_line(number, item, level, display_currency)
   local native = currency ~= "" and currency == trim(item.currency)
   local total_value = native and item.total_for_quantity or item.total_base
   local total_currency = native and item.currency or (item.base_currency or currency)
-  -- A row the site worded differently ("유사") must be visible as such: the user is comparing prices of
-  -- what they believe is one product, and an unmarked near-match is how a wrong purchase happens.
-  local label = item.match_level == "partial" and " (유사)" or ""
-  local parts = { tostring(number) .. ". [" .. tostring(item.site or "?") .. "]" .. label .. " " .. clip(item.name, level.name) }
+  local parts = { tostring(number) .. ". [" .. tostring(item.site or "?") .. "] " .. clip(item.name, level.name) }
   parts[#parts + 1] = "총 " .. V.format_amount(total_value, total_currency)
   if level.item then
     parts[#parts + 1] = "상품가 " .. V.format_amount(item.price, item.currency or total_currency)

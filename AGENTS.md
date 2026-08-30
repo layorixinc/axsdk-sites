@@ -179,7 +179,7 @@ Broad multi-store requests queue every selected supported store in request order
 time, collecting classified per-store failures instead of dropping the remaining queue. They group only
 grounded manufacturer models and pause for an explicit model choice. Exact model requests skip discovery.
 Product-option and comparison snapshots are versioned. For comparison,
-every structurally readable search row may enter a bounded surface (up to six per store / 30 total);
+every structurally readable search row may enter a bounded surface (up to six per store / 60 total);
 `judge_relevance` is the only product-match decision (`AX_build_offer_screening` →
 `screen_store_offers` → `AX_apply_offer_screening`). The three-per-store cap is applied to the LLM's
 survivors, and removed rows are counted in the window. No Lua token/model/brand matcher may overrule that
@@ -1132,7 +1132,7 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   and the user-visible comparison window, so it cannot reintroduce a shadow verdict through presentation.
 - **The LLM relevance surface is bounded and id-backed.** Up to
   `C.SCREEN_LIMIT_PER_SITE` (6) readable rows per store reach `AX_build_offer_screening`, which renders one
-  round-robin numbered list capped at `C.SCREEN_MAX_ROWS` (30). `judge_relevance` names the numbers to keep;
+  round-robin numbered list capped at `C.SCREEN_MAX_ROWS` (60). `judge_relevance` names the numbers to keep;
   `AX_apply_offer_screening` ignores unknown numbers and applies `MAX_OFFERS_PER_SITE` (3) only to survivors.
   The model sees the rendered rows, never the offer payload. An ABSENT verdict is
   `relevance_judgement_unavailable` and routes to error — it never defaults to "keep everything".
@@ -3059,3 +3059,23 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   attributable from here, and not the removal: the removal is live-verified 3/3 against a cart seeded that
   way. `cart-remove.mjs` seeds through the shipped flow first and says which path seeded, so a green
   removal run can never be read as a green add.
+- **A commodity has no manufacturer model to discover, and the runtime dispatcher can erase that fact.**
+  `identity_kind: spec_equivalent` makes category plus observable pack/count/size constraints the locked
+  identity, so an egg tray goes directly from collection to comparison instead of asking the user to choose
+  a fabricated model. The first implementation was green when `AX_prepare_product_identity` was called
+  directly and still failed live: `_common.63_pure_entries` projected selected flow state through
+  `ARGUMENT_MAPS` and omitted both `identity_kind` and `query`, restoring the function's
+  `standardized_model` default. Test the runtime dispatcher, not only the function behind it. Live with
+  `특란 XL, 60~67g`: `collect → prepare(lock) → lock(compare)`, no discovery choice.
+- **Coupang search cards state the tray total and a smaller per-egg amount; whole-row mining chose the
+  smaller one.** Measured 2026-08-29 on twelve Next-layout cards: `.fw-font-bold > span` matched exactly
+  one current buyer price per card (`12,900원`, `14,900원`, `13,090원`, …), while the same card text also
+  carried `(1구당 430원)`, `(1구당 497원)`, `(1구당 436원)`. `last_before_shipping` therefore compared one
+  egg against one tray. Coupang now reads the word-based current-price field and disables the text fallback;
+  a missing field drops the row instead of inventing a cheap total. Live comparison rendered one 30-egg XL
+  tray at `KRW 15,900`, not `KRW 530`.
+- **A ten-store relevance queue cannot fit six rows per store into a 30-row global cap.** The all-store egg
+  run gave each store only its first three rows, so Coupang's valid `13,090원` and `14,900원` trays never
+  reached `judge_relevance`; the rendered "cheapest" complete offer was `15,900원`. The bounded surface is
+  now 60 rows — still one list and one model call — so every one of the existing six candidates per each of
+  ten stores receives a verdict. Round-robin order and the post-verdict three-offer cap remain unchanged.

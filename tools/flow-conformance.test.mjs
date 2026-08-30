@@ -480,6 +480,43 @@ test('broad product choices expose only consumer-safe lockable numbers', () => {
   assert.equal(presenter.kind, 'action_contract');
 });
 
+test('commodity comparisons have a model-free identity contract', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const collectors = [
+    ['collect_request', 'collect_total_cost_request'],
+    ['collect_ready_request', 'collect_ready_total_cost_request'],
+  ];
+  for (const [nodeName, toolName] of collectors) {
+    const node = flow.nodes[nodeName];
+    const tool = common.flowTools[toolName];
+    assert.ok(node.inputSelector.includes('identity_kind'), `${nodeName} must preserve the identity kind`);
+    assert.deepEqual(tool.parameters.properties.identity_kind.enum,
+      ['standardized_model', 'spec_equivalent']);
+    assert.match(node.prompt, /spec_equivalent/);
+    assert.match(node.prompt, /pack|count|unit|form|preparation|grade/i);
+  }
+
+  const prepare = flow.nodes.prepare_identity;
+  const prepareTool = common.flowTools.shopping_prepare_product_identity;
+  assert.ok(prepare.inputSelector.includes('query'));
+  assert.ok(prepare.inputSelector.includes('identity_kind'));
+  assert.deepEqual(prepareTool.parameters.properties.identity_kind.enum,
+    ['standardized_model', 'spec_equivalent']);
+  assert.equal(prepareTool.parameters.properties.query.type, 'string');
+
+  const lock = common.flowTools.shopping_lock_product_identity.parameters;
+  assert.ok(!lock.required.includes('identity_model'),
+    'a spec-equivalent category has no manufacturer model to require');
+  assert.deepEqual(lock.properties.identity_model.type, ['string', 'null']);
+
+  const judge = flow.nodes.judge_relevance;
+  assert.ok(judge.inputSelector.includes('identity_kind'),
+    'the relevance gate must know that a commodity has no model-code anchor');
+  assert.match(judge.prompt, /wordplay|homonym/i,
+    'shared query words must not turn gifts or puns into the requested commodity');
+});
+
 test('memory results reach a deterministic consumer response instead of the terminal model', () => {
   const common = parseFlow('_common/flows.yaml');
   const flow = common.flows.memory;

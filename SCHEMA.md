@@ -534,7 +534,7 @@
   },
   {
     "name": "collect_ready_total_cost_request",
-    "description": "Capture product identity and constraints for a deterministically complete multi-store scope.",
+    "description": "Capture product identity kind and constraints for a deterministically complete multi-store scope.",
     "parameters": {
       "type": "object",
       "additionalProperties": true,
@@ -542,6 +542,7 @@
         "next",
         "query",
         "product_category",
+        "identity_kind",
         "quantity",
         "stores",
         "query_variants",
@@ -560,6 +561,13 @@
         },
         "product_category": {
           "type": "string"
+        },
+        "identity_kind": {
+          "type": "string",
+          "enum": [
+            "standardized_model",
+            "spec_equivalent"
+          ]
         },
         "requested_brand": {
           "type": [
@@ -704,7 +712,7 @@
   },
   {
     "name": "collect_total_cost_request",
-    "description": "Capture one product category, optional exact brand/model and constraints, quantity, and two to ten supported commerce sites, or ask for clarification.",
+    "description": "Capture one product category, identity kind, optional exact brand/model, constraints, quantity, and two to ten supported commerce sites, or ask for clarification.",
     "parameters": {
       "type": "object",
       "additionalProperties": true,
@@ -768,6 +776,13 @@
         },
         "product_category": {
           "type": "string"
+        },
+        "identity_kind": {
+          "type": "string",
+          "enum": [
+            "standardized_model",
+            "spec_equivalent"
+          ]
         },
         "requested_brand": {
           "type": [
@@ -1977,7 +1992,7 @@
   },
   {
     "name": "present_product_options",
-    "description": "Present safe discovery choices and classify a current number without model judgement.",
+    "description": "Present safe grounded choices and classify a current number without model judgement.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -2605,7 +2620,7 @@
   },
   {
     "name": "shopping_build_product_options",
-    "description": "Group live discovery evidence into versioned manufacturer-model choices.",
+    "description": "Group live discovery evidence into versioned, immediately lockable product choices.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -2874,13 +2889,12 @@
   },
   {
     "name": "shopping_lock_product_identity",
-    "description": "Lock one exact manufacturer model or grounded identity into a stable comparison snapshot.",
+    "description": "Lock one exact manufacturer model, spec-equivalent category, or grounded unique listing into a stable comparison snapshot.",
     "parameters": {
       "type": "object",
       "additionalProperties": true,
       "required": [
         "identity_kind",
-        "identity_model",
         "product_category"
       ],
       "properties": {
@@ -2905,7 +2919,10 @@
           ]
         },
         "identity_model": {
-          "type": "string",
+          "type": [
+            "string",
+            "null"
+          ],
           "minLength": 1
         },
         "product_category": {
@@ -3024,7 +3041,7 @@
   },
   {
     "name": "shopping_prepare_product_identity",
-    "description": "Classify product scope and preserve every selected supported store for deterministic queued model discovery.",
+    "description": "Classify exact models, spec-equivalent commodities, and grounded discovery while preserving every selected supported store.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
@@ -3036,6 +3053,17 @@
         "product_category": {
           "type": "string",
           "minLength": 1
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_kind": {
+          "type": "string",
+          "enum": [
+            "standardized_model",
+            "spec_equivalent"
+          ]
         },
         "requested_brand": {
           "type": [

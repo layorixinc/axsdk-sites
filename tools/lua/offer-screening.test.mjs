@@ -155,13 +155,17 @@ test('stores take turns so a long first store cannot starve the rest', () => {
   assert.equal(ids[1].split(':')[0], 'b', 'the second row must come from the second store');
 });
 
-test('the list is bounded, because it is the only thing that enters a prompt', () => {
+test('the all-store list gives every store its full bounded relevance budget', () => {
   const many = (site) => worker(site, Array.from({ length: 8 }, (_, i) => row(`${site}${i}`, `${site} row ${i}`)));
   const built = lua.call('AX_build_offer_screening', {
     store_results: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j'].map(many),
   });
-  assert.ok(built.screening_count <= 30, `too many rows: ${built.screening_count}`);
-  assert.equal(built.screening_ids.split('|').length, built.screening_count);
+  const ids = built.screening_ids.split('|');
+  assert.equal(built.screening_count, 60,
+    'ten supported stores need six judged rows each; a 30-row cap silently halves every store');
+  for (const site of ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']) {
+    assert.equal(ids.filter((id) => id.startsWith(`${site}:`)).length, 6, `${site} lost screening rows`);
+  }
 });
 
 test('retired code-match metadata cannot label the LLM relevance surfaces', () => {

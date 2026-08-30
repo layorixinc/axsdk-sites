@@ -1596,6 +1596,7 @@ flows:
           - requestText
           - stores
           - product_category
+          - identity_kind
           - requested_brand
           - requested_model
           - query_variants
@@ -1612,6 +1613,12 @@ flows:
           - Otherwise answer next="done". Extract one grounded product_category and a concise query that preserves
             every user-stated identity or variant term, without retailer names or comparison/price instructions.
           - Set requested_brand and requested_model only when the user stated them. Never invent either.
+          - Set identity_kind="spec_equivalent" only for a commodity or packaged good whose equivalence is
+            defined by category plus observable specs rather than a manufacturer model. Otherwise set
+            identity_kind="standardized_model".
+          - For spec_equivalent requests, preserve every user-stated pack/count/unit/form/preparation/grade
+            term in hard_constraints. A selling unit such as "한판" belongs to the product spec and query;
+            quantity remains the number of those packages.
           - Put must-match size, capacity, color, condition, or edition in hard_constraints and preferences in
             soft_preferences. Use objects, not prose. Quantity is a positive integer, default 1.
           - Copy `stores` exactly as received. Do not add, remove, reorder, translate, or rename a site.
@@ -1642,6 +1649,7 @@ flows:
           - quantity
           - stores
           - product_category
+          - identity_kind
           - requested_brand
           - requested_model
           - query_variants
@@ -1678,6 +1686,12 @@ flows:
             in stated order or the group order above. Include EVERY explicitly named supported site.
           - Treat "11st" and "11번가" as the 11st site, never as a quantity.
           - Never invent a brand, model, variant, quantity, retailer, or constraint.
+          - Set identity_kind="spec_equivalent" only for a commodity or packaged good whose equivalence is
+            defined by category plus observable specs rather than a manufacturer model. Otherwise set
+            identity_kind="standardized_model".
+          - For spec_equivalent requests, preserve every user-stated pack/count/unit/form/preparation/grade
+            term in hard_constraints. A selling unit such as "한판" belongs to the product spec and query;
+            quantity remains the number of those packages.
           - Remove retailer names, comparison language, and price/shipping instructions from query.
           - Keep the user's own wording and script in product_category, requested_brand, requested_model and
             query. Copy the terms the user wrote; never translate or romanize them there.
@@ -1718,10 +1732,12 @@ flows:
       prepare_identity:
         kind: action_contract
         id: shopping_prepare_product_identity
-        description: Deterministically decide whether the request already names an exact
-          model or needs grounded discovery.
+        description: Deterministically decide whether the request names an exact
+          model, a spec-equivalent commodity, or needs grounded discovery.
         inputSelector:
           - product_category
+          - query
+          - identity_kind
           - requested_brand
           - requested_model
           - hard_constraints
@@ -1758,8 +1774,8 @@ flows:
       discover_products:
         kind: action_contract
         id: shopping_discover_products
-        description: Search a bounded subset of the selected real stores for grounded
-          product models before price comparison.
+        description: Search the selected real stores for grounded product identity
+          evidence before a model-based choice.
         inputSelector:
           - discovery_sites
           - query
@@ -1780,8 +1796,8 @@ flows:
       build_product_options:
         kind: action_contract
         id: shopping_build_product_options
-        description: Deterministically group grounded discovery listings by manufacturer
-          model without merging variants.
+        description: Deterministically group grounded discovery listings into
+          immediately lockable manufacturer-model or exact-listing choices.
         inputSelector:
           - discovery_results
           - discovery_query
@@ -1799,7 +1815,7 @@ flows:
       present_product_options:
         kind: action_contract
         id: present_product_options
-        description: Render only consumer-safe, immediately lockable numbered product
+        description: Render consumer-safe, immediately lockable numbered product
           choices; pause once and classify a number or cancellation deterministically.
         inputSelector:
           - requestText
@@ -1837,8 +1853,8 @@ flows:
         prompt: |-
           You are the product-identity refinement gate. Call choose_product_identity exactly once.
           A deterministic presenter already showed `product_option_summaries`, whose numbered lines are
-          immediately selectable. `unresolved_product_names` contains real search observations that need
-          an exact manufacturer model and were shown without a number.
+          immediately selectable grounded models or exact live listings. `unresolved_product_names`
+          contains observations that could not be grounded and were shown without a number.
 
           Never repeat field names, JSON, confidence labels, wire errors, raw records, or price samples.
           Never invent or extract a model from a URL.
@@ -1849,7 +1865,7 @@ flows:
             canonical_query=<brand + model + category>, hard_constraints=<current constraints>,
             soft_preferences=<current preferences>.
           - Otherwise use next="ask" and product_choice_stage=null. The deterministic presenter will show
-            the same safe numbered list again and explain that unresolved observations remain without a number.
+            the same safe numbered list again and explain any observation that remains without a number.
         next:
           ask: present_product_options
           model: lock_requested_identity
@@ -1947,6 +1963,7 @@ flows:
           - screening_text
           - screening_count
           - product_category
+          - identity_kind
           - identity_brand
           - identity_model
           - locked_hard_constraints
@@ -1972,6 +1989,9 @@ flows:
           - a bundle whose main item is something else, a multi-pack when one unit was requested, or a
             listing for a different product category entirely,
           - a listing whose title shows it is not a product at all (a service, a coupon, an empty box).
+          - For identity_kind="spec_equivalent", matching query words are not identity evidence by themselves.
+            The title must semantically denote the requested product category and satisfy locked_hard_constraints.
+            Drop wordplay, homonyms, event merchandise, and gifts that merely reuse the commodity's words.
 
           Rules:
           - keep is a string of row numbers, e.g. "1, 3, 7". Use only numbers that appear in
@@ -2511,17 +2531,18 @@ flowTools:
         requestText: { type: string }
 
   collect_ready_total_cost_request:
-    description: Capture product identity and constraints for a deterministically complete multi-store scope.
+    description: Capture product identity kind and constraints for a deterministically complete multi-store scope.
     execute: { kind: runtime, implementation: passthrough }
     output: tool.args
     parameters:
       type: object
       additionalProperties: true
-      required: [ next, query, product_category, quantity, stores, query_variants, brand_aliases ]
+      required: [ next, query, product_category, identity_kind, quantity, stores, query_variants, brand_aliases ]
       properties:
         next: { type: string, enum: [ done, cancel ] }
         query: { type: string }
         product_category: { type: string }
+        identity_kind: { type: string, enum: [ standardized_model, spec_equivalent ] }
         requested_brand: { type: [ string, "null" ] }
         requested_model: { type: [ string, "null" ] }
         query_variants: { type: string }
@@ -2559,7 +2580,7 @@ flowTools:
                 }
 
   collect_total_cost_request:
-    description: Capture one product category, optional exact brand/model and
+    description: Capture one product category, identity kind, optional exact brand/model,
       constraints, quantity, and two to ten supported commerce sites, or ask for
       clarification.
     execute: { kind: runtime, implementation: passthrough }
@@ -2585,6 +2606,7 @@ flowTools:
         question: { type: [ string, "null" ] }
         query: { type: string }
         product_category: { type: string }
+        identity_kind: { type: string, enum: [ standardized_model, spec_equivalent ] }
         requested_brand: { type: [ string, "null" ] }
         requested_model: { type: [ string, "null" ] }
         query_variants: { type: [ string, "null" ] }
@@ -2621,8 +2643,8 @@ flowTools:
                 }
 
   shopping_prepare_product_identity:
-    description: Classify product scope and preserve every selected supported store
-      for deterministic queued model discovery.
+    description: Classify exact models, spec-equivalent commodities, and grounded
+      discovery while preserving every selected supported store.
     execute:
       kind: runtime
       implementation: lua
@@ -2666,6 +2688,8 @@ flowTools:
       required: [ product_category, stores ]
       properties:
         product_category: { type: string, minLength: 1 }
+        query: { type: string, minLength: 1 }
+        identity_kind: { type: string, enum: [ standardized_model, spec_equivalent ] }
         requested_brand: { type: [ string, "null" ] }
         requested_model: { type: [ string, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
@@ -2698,8 +2722,8 @@ flowTools:
                 }
 
   shopping_lock_product_identity:
-    description: Lock one exact manufacturer model or grounded identity into a
-      stable comparison snapshot.
+    description: Lock one exact manufacturer model, spec-equivalent category, or
+      grounded unique listing into a stable comparison snapshot.
     execute:
       kind: runtime
       implementation: lua
@@ -2744,12 +2768,12 @@ flowTools:
     parameters:
       type: object
       additionalProperties: true
-      required: [ identity_kind, identity_model, product_category ]
+      required: [ identity_kind, product_category ]
       properties:
         identity_kind: { type: string, enum: [ standardized_model, spec_equivalent, unique_listing ] }
         identity_name: { type: [ string, "null" ] }
         identity_brand: { type: [ string, "null" ] }
-        identity_model: { type: string, minLength: 1 }
+        identity_model: { type: [ string, "null" ], minLength: 1 }
         product_category: { type: string, minLength: 1 }
         canonical_query: { type: [ string, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
@@ -2840,7 +2864,7 @@ flowTools:
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
 
   shopping_build_product_options:
-    description: Group live discovery evidence into versioned manufacturer-model choices.
+    description: Group live discovery evidence into versioned, immediately lockable product choices.
     execute:
       kind: runtime
       implementation: lua
@@ -2887,7 +2911,7 @@ flowTools:
         soft_preferences: { type: [ object, "null" ], additionalProperties: true }
 
   present_product_options:
-    description: Present safe discovery choices and classify a current number without model judgement.
+    description: Present safe grounded choices and classify a current number without model judgement.
     execute:
       kind: runtime
       implementation: lua
@@ -2949,13 +2973,13 @@ flowTools:
         local korean = has_korean(args.requestText)
         local parts = {}
         if summaries ~= "" then
-          parts[#parts + 1] = korean and "비교 가능한 모델과 확인된 판매처:" or "Comparable models and observed stores:"
+          parts[#parts + 1] = korean and "비교 가능한 상품 후보와 확인된 판매처:" or "Comparable product choices and observed stores:"
           parts[#parts + 1] = summaries
         end
         if unresolved ~= "" then
           parts[#parts + 1] = korean
-            and "모델이 확인되지 않아 번호를 부여하지 않은 검색 결과:"
-            or "Search results without a verified model (shown without a number):"
+            and "근거가 부족해 번호를 부여하지 않은 검색 결과:"
+            or "Search results without enough evidence (shown without a number):"
           parts[#parts + 1] = unresolved
         end
         parts[#parts + 1] = korean

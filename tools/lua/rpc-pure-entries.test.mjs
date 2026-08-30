@@ -121,6 +121,20 @@ test('the identity chain keeps its own keys', () => {
   assert.equal(prepared.identity_model, 'M185');
 });
 
+test('the runtime dispatcher preserves the commodity identity kind', () => {
+  const prepared = lua.call('AX_RPC_PURE.run', 'AX_prepare_product_identity', {
+    identity_kind: 'spec_equivalent',
+    product_category: '계란',
+    query: '계란 한판',
+    hard_constraints: { package: '한판' },
+    stores: [{ site: 'coupang' }, { site: 'ssg' }],
+  });
+  assert.equal(prepared.next, 'lock',
+    'the dispatcher must not erase spec_equivalent and send a commodity into model discovery');
+  assert.equal(prepared.identity_kind, 'spec_equivalent');
+  assert.equal(prepared.canonical_query, '계란 한판');
+});
+
 test('an empty accumulator travels as absent, never as an empty table', () => {
   // Measured live on the multi-store discovery path, twice in one turn:
   //   actions.shopping_collect_store_page ... schema rejected value: collected: Invalid input

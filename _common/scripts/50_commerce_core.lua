@@ -13,10 +13,11 @@ C.BASE_CURRENCY = "USD"
 C.FX_URL = "https://api.frankfurter.dev/v1/latest"
 C.MAX_OFFERS_PER_SITE = 3
 -- Every readable row may reach the LLM relevance gate, up to SCREEN_LIMIT_PER_SITE per store. The LLM
--- alone says which rows are the product; MAX_OFFERS_PER_SITE is applied to its survivors. The numbered
--- screening list is the only candidate data that enters a prompt, so it is bounded globally too.
+-- alone says which rows are the product; MAX_OFFERS_PER_SITE is applied to its survivors. Ten supported
+-- stores therefore need six rows each in the one bounded numbered prompt; a smaller global cap silently
+-- gives later rows no relevance decision and can hide the lowest valid offer.
 C.SCREEN_LIMIT_PER_SITE = 6
-C.SCREEN_MAX_ROWS = 30
+C.SCREEN_MAX_ROWS = 60
 C.SCREEN_TITLE_CHARS = 70
 -- Ranking keeps more offers than one window shows: browsing pages through them, and only the window is
 -- ever rendered into a prompt. The cap bounds the serialized flow state, not the model's context.

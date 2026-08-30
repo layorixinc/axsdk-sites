@@ -102,9 +102,9 @@ end
 --- rather than to the state.
 local ARGUMENT_MAPS = {
   AX_prepare_product_identity = {
-    product_category = "product_category", requested_brand = "requested_brand",
-    requested_model = "requested_model", hard_constraints = "hard_constraints",
-    soft_preferences = "soft_preferences", stores = "stores",
+    identity_kind = "identity_kind", product_category = "product_category", query = "query",
+    requested_brand = "requested_brand", requested_model = "requested_model",
+    hard_constraints = "hard_constraints", soft_preferences = "soft_preferences", stores = "stores",
   },
   AX_lock_product_identity = {
     identity_kind = "identity_kind", identity_name = "identity_name", identity_brand = "identity_brand",

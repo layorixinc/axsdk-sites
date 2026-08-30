@@ -149,6 +149,7 @@ const siteCases = [
         url: 'https://www.coupang.com/vp/products/7777777777',
         title: 'Logitech M185 Wireless Mouse',
         image_alt: 'Logitech M185 Wireless Mouse',
+        price_text: '12,900원',
         shipping_text: '무료배송',
         text: 'Logitech M185 Wireless Mouse 12,900원 무료배송',
       }],
@@ -374,10 +375,9 @@ run('storefront cart mutation survives its own navigation in one call', () => {
     'cart adapter cannot click on the old page: the click follows the navigation', names);
 });
 
-run('Coupang current-price text fallback', () => {
-  // Measured card text: struck price, discount percent, sale price, then the shipping cell. The paid
-  // fee lives in the dedicated `[data-badge-type="feePrice"]` badge the config declares — in the ROW
-  // text the trailing `조건부 무료배송` copy would read as free, which is exactly why the badge exists.
+run('Coupang current-price field', () => {
+  // Measured current-price field plus whole card text containing both the paid total and a smaller
+  // per-unit amount. The dedicated shipping badge remains separate for the same reason.
   const page = makePage({
     href: 'https://www.coupang.com/',
     afterNavigate: {
@@ -385,13 +385,14 @@ run('Coupang current-price text fallback', () => {
         url: 'https://www.coupang.com/vp/products/7777777777',
         title: '로지텍 무선마우스, M185, Gray',
         image_alt: '로지텍 무선마우스, M185, Gray',
+        price_text: '10,690원',
         shipping_text: '배송비 2,500원',
-        text: '로지텍 무선마우스, M185, Gray 16,510원 35% 10,690원 배송비 2,500원 조건부 무료배송',
+        text: '로지텍 무선마우스, M185, Gray 16,510원 35% 10,690원 (1개당 356원) 배송비 2,500원 조건부 무료배송',
       }],
     },
   });
   const { value } = searchStore(page, 'coupang', { query: '로지텍 M185', quantity: 1 });
-  assert(value.candidates?.[0]?.price === 10690, 'Coupang should use the current sale price before shipping text', value);
+  assert(value.candidates?.[0]?.price === 10690, 'Coupang should use the dedicated current sale price', value);
   assert(value.candidates[0].shipping_cost === 2500, 'Coupang should parse the separate paid shipping amount', value.candidates[0]);
 });
 

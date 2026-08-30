@@ -449,6 +449,27 @@ tests.push(['identity preparation discovers broad products and locks explicit mo
   assert(missing.next === 'ask_scope' && missing.identity_status === 'missing', 'missing category should ask before searching', missing);
 }]);
 
+tests.push(['commodity identity locks comparable specs without inventing a model', () => {
+  withoutNet();
+  const prepared = lua.call('AX_prepare_product_identity', {
+    identity_kind: 'spec_equivalent',
+    product_category: '계란',
+    query: '계란 한판',
+    hard_constraints: { package_form: '한판' },
+    stores: [{ site: 'coupang' }, { site: 'gmarket' }],
+  });
+  assert(prepared.next === 'lock', 'a commodity request should not enter manufacturer-model discovery', prepared);
+  assert(prepared.identity_kind === 'spec_equivalent' && prepared.identity_model === undefined,
+    'spec equivalence must stay model-free', prepared);
+  assert(prepared.canonical_query === '계란 한판', 'the user wording remains the comparison query', prepared);
+
+  const locked = lua.call('AX_lock_product_identity', prepared);
+  assert(locked.next === 'compare' && locked.identity_kind === 'spec_equivalent',
+    'category plus grounded specs should lock directly', locked);
+  assert(locked.identity_id && locked.identity_model === undefined, 'the lock needs no invented model', locked);
+}]);
+
+
 tests.push(['identity fingerprints are canonical for nested and localized constraints', () => {
   withoutNet();
   const first = lua.call('AX_lock_product_identity', {

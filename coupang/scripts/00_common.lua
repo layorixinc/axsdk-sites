@@ -14,7 +14,10 @@ local CONFIG = {
   result_url_selector = 'a[href*="/vp/products/"]',
   result_title_selector = 'img[alt]',
   result_image_selector = 'img[alt]',
-  price_from_text = true,
+  -- Measured live 2026-08-29: every sampled Next-layout card exposes exactly one buyer-facing current
+  -- price here. Whole-row text also carries a per-egg amount, which is not the tray total the user pays.
+  result_price_selector = '.fw-font-bold > span',
+  price_from_text = false,
   price_text_strategy = "last_before_shipping",
   result_shipping_selector = '[data-badge-type="feePrice"]',
   shipping_from_text = true,

@@ -1447,13 +1447,11 @@ test('arrival is checked against the target, so a fast navigation costs one chec
     `arrival should settle in a few href reads, not a ceiling of them — got ${hrefReads}`);
 });
 
-// coupang states four amounts in one card and declares NO price selector: its sale price is reachable only
-// through hashed CSS-module classes (AGENTS.md 10 forbids those), so the reader parses the card TEXT with
-// the last_before_shipping strategy. Measured live 2026-08-26, a card reads:
+// Historical Coupang cards motivated the generic `last_before_shipping` parser used by text-only adapters:
 //   15,560원 (struck through) · 56% · 6,780원 (what the buyer pays) · (1개당 6,780원) · 최대 339원 적립
-// The strategy cuts at the first cutoff marker and takes the LAST 원 amount before it. 적립 comes AFTER its
-// own amount, so the reward figure is inside the head — and a reward read as a price is the exact failure
-// 13 warns about (a struck-through price, an instalment, a reward figure).
+// Current Coupang cards have a stable buyer-price field and no longer use this fallback. Keep the parser
+// regression because SSG and other text-only layouts still need to distinguish a sale price, shipping fee,
+// and reward amount when they share one card string.
 const COUPANG = {
   site: 'coupang',
   search_url: 'https://www.coupang.com/np/search',
@@ -1464,8 +1462,8 @@ const COUPANG = {
   result_url_selector: 'a',
   result_title_selector: 'img[alt]',
   result_image_selector: 'img[alt]',
-  // The real adapter declares BOTH of these, and a fixture without them tests a config no store has:
-  // mining the row text is opt-in precisely because a reward figure would otherwise be read as a price.
+  // This synthetic config deliberately exercises the opt-in text fallback; it is not the current Coupang
+  // adapter, whose measured selector is covered in rpc-storefront-variants.test.mjs.
   price_from_text: true,
   shipping_from_text: true,
   price_text_strategy: 'last_before_shipping',
@@ -1474,7 +1472,7 @@ const COUPANG = {
   product_url_prefix: 'https://www.coupang.com/vp/products/',
 };
 
-test('coupang: the price is what the buyer pays, not the reward or the struck-through amount', () => {
+test('text-only KRW card: the price is what the buyer pays, not the reward or struck-through amount', () => {
   const page = makePage({
     href: 'https://www.google.com/',
     // The reader navigates when the open page is not this query's result page, so the grid has to be
@@ -1493,7 +1491,7 @@ test('coupang: the price is what the buyer pays, not the reward or the struck-th
   assert.equal(first?.price, 6780, 'the sale price, not 339 (reward) and not 15560 (struck through)');
 });
 
-test('coupang: a shipping FEE beside the price is not the price', () => {
+test('text-only KRW card: a shipping fee beside the price is not the price', () => {
   const page = makePage({
     href: 'https://www.google.com/',
     // The reader navigates when the open page is not this query's result page, so the grid has to be
@@ -1512,7 +1510,7 @@ test('coupang: a shipping FEE beside the price is not the price', () => {
   assert.equal(first?.shipping_cost, 3000, 'the fee is the fee, and it is not the price');
 });
 
-test('coupang: a reward line after the price leaves the price alone', () => {
+test('text-only KRW card: a reward line after the price leaves the price alone', () => {
   const page = makePage({
     href: 'https://www.google.com/',
     // The reader navigates when the open page is not this query's result page, so the grid has to be

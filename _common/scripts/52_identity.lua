@@ -147,6 +147,7 @@ function AX_prepare_product_identity(args)
   local category = non_empty(args.product_category or args.category)
   local brand = non_empty(args.requested_brand or args.brand)
   local model = non_empty(args.requested_model or args.model)
+  local kind = non_empty(args.identity_kind) or "standardized_model"
   if not category and not model then
     return {
       next = "ask_scope",
@@ -160,11 +161,29 @@ function AX_prepare_product_identity(args)
     return {
       next = "lock",
       identity_status = "exact",
-      identity_kind = non_empty(args.identity_kind) or "standardized_model",
+      identity_kind = kind,
       product_category = category,
       identity_brand = brand,
       identity_model = model,
-      canonical_query = query,
+      canonical_query = non_empty(args.query or args.canonical_query) or query,
+      hard_constraints = copy_table(args.hard_constraints),
+      soft_preferences = copy_table(args.soft_preferences)
+    }
+  end
+
+  -- A commodity has no manufacturer model to discover. The user's category and must-match specs ARE
+  -- the identity, so sending it through the model-choice gate can only invent a code or produce an
+  -- unnumbered dead end. The collection model decides this kind from the request; Lua merely enforces it.
+  if kind == "spec_equivalent" then
+    local canonical = non_empty(args.query or args.canonical_query) or query
+    return {
+      next = "lock",
+      identity_status = "exact",
+      identity_kind = kind,
+      identity_name = canonical,
+      product_category = category,
+      identity_brand = brand,
+      canonical_query = canonical,
       hard_constraints = copy_table(args.hard_constraints),
       soft_preferences = copy_table(args.soft_preferences)
     }
@@ -187,7 +206,7 @@ function AX_prepare_product_identity(args)
   return {
     next = "discover",
     identity_status = brand and "family" or "category",
-    identity_kind = non_empty(args.identity_kind) or "standardized_model",
+    identity_kind = kind,
     product_category = category,
     identity_brand = brand,
     discovery_query = query,

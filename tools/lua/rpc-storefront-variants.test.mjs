@@ -26,13 +26,14 @@ const COUPANG = 'https://www.coupang.com/';
 /** A coupang search page that only answers rows for the KOREAN wording. */
 const store = ({ answersFor = '로지텍 M185 마우스', rows = 3 } = {}) => {
   // The store's OWN keys, read from the generated site data: rows are
-  // `li[data-id]:has(a[href*="/vp/products/"])`, the title is an `img[alt]`, and the price comes from the
-  // row's TEXT (`price_from_text = true`, `price_text_strategy = "last_before_shipping"`) — there is no
-  // price selector at all. A fixture that invents one passes against a reader that reads nothing.
+  // `li[data-id]:has(a[href*="/vp/products/"])`, titles are `img[alt]`, and the current Next layout
+  // exposes the amount the buyer pays at `.fw-font-bold > span`. The card text also contains a smaller
+  // per-egg amount, so falling back to whole-row mining would compare one egg against one tray.
   const cards = [];
   for (let index = 1; index <= rows; index += 1) {
     cards.push({
-      text: `로지텍 M185 무선마우스 ${index} 13,900원`,
+      text: `로지텍 M185 무선마우스 ${index} 13,900원 (1개당 463원) 내일 도착 최대 695원 적립`,
+      price_text: '13,900원',
       // A NUMERIC id, because the store's own pattern is `/vp/products/(%d+)` — a letter there drops the
       // row and the reader answers about prices it never reached.
       url: `https://www.coupang.com/vp/products/900${index}`,
@@ -75,6 +76,13 @@ test('the first wording is used on its own when it finds something', () => {
   assert.ok((answer.candidates ?? []).length > 0);
   // One navigation: a variant that is not needed must not cost a page load.
   assert.equal(searched(page).length, 1);
+});
+
+test('coupang reads the tray price instead of the smaller per-unit amount', () => {
+  const page = store();
+  const answer = search(page, { query: '로지텍 M185 마우스', query_variants: '' });
+  assert.equal(answer.candidates?.[0]?.price, 13_900,
+    'the configured current-price field must win over the per-unit amount in the card text');
 });
 
 test('a wording that finds nothing is retried with the next one', () => {

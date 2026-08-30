@@ -83,7 +83,11 @@ local TOTAL_COST_GROUPS = {
     sites = { "coupang", "naver-shopping", "gmarket", "11st", "ssg" },
   },
   {
-    markers = { "all representative stores", "모든 대표 스토어", "대표 스토어 전체" },
+    markers = {
+      "all representative stores", "all supported stores", "every supported store",
+      "모든 대표 스토어", "대표 스토어 전체", "모든 지원 쇼핑몰", "지원하는 모든 쇼핑몰",
+      "전체 지원 쇼핑몰", "모든 쇼핑몰", "전 사이트",
+    },
     sites = {
       "amazon", "walmart", "ebay", "aliexpress", "etsy",
       "coupang", "naver-shopping", "gmarket", "11st", "ssg",

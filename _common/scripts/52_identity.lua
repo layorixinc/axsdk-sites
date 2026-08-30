@@ -170,12 +170,15 @@ function AX_prepare_product_identity(args)
     }
   end
 
+  -- Discovery uses the same bounded sequential store queue as exact-model comparison. Keeping the
+  -- request order makes a ten-store run deterministic; `flow.map` owns the one-at-a-time execution and
+  -- collects a classified failure without dropping the remaining stores.
   local discovery_sites = array()
   local seen_sites = {}
   for index = 1, #(args.stores or {}) do
     local item = args.stores[index] or {}
     local site = non_empty(item.site)
-    if site and not seen_sites[site] and #discovery_sites < 3 then
+    if site and not seen_sites[site] then
       seen_sites[site] = true
       discovery_sites[#discovery_sites + 1] = { site = site }
     end

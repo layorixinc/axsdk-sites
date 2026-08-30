@@ -175,9 +175,10 @@ durable command cannot quietly reappear beside its runtime replacement.
 Access/login/CAPTCHA surfaces are returned as explicit classified errors instead of fabricated empty
 results. These are the ten representative commerce sites accepted by the multi-store flow.
 
-Broad multi-store requests discover live listings on a deterministic frontier of at most three
-user-selected stores, group only grounded manufacturer models, and pause for an explicit model choice.
-Exact model requests skip discovery. Product-option and comparison snapshots are versioned. For comparison,
+Broad multi-store requests queue every selected supported store in request order and process one at a
+time, collecting classified per-store failures instead of dropping the remaining queue. They group only
+grounded manufacturer models and pause for an explicit model choice. Exact model requests skip discovery.
+Product-option and comparison snapshots are versioned. For comparison,
 every structurally readable search row may enter a bounded surface (up to six per store / 30 total);
 `judge_relevance` is the only product-match decision (`AX_build_offer_screening` →
 `screen_store_offers` → `AX_apply_offer_screening`). The three-per-store cap is applied to the LLM's
@@ -1140,10 +1141,19 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   tried only when a store found nothing; a blocked store is never retried. `brand_aliases` may ground
   token-boundary-aware brand provenance and broad discovery recall (`GE` never matches `Storage`), but
   comparison inclusion is the relevance model's decision.
-- **Shipping-CDP live proof, 2026-08-29:** the exact three-store request for `NVIDIA DGX Spark` completed in
-  29.01 s. eBay retained a real DGX Spark workstation offer, ranked one complete-total row and folded two
-  unknown-shipping rows; Naver Shopping reported access restricted; Gmarket reported no relevant result; the
-  LLM counted seven rejected rows. The reply did not ask for an "exact manufacturer model".
+- **All selected stores are one bounded sequential queue.** Both broad discovery and exact-model comparison
+  use `flow.map` with `maxItems: 10`, `concurrency: 1`, input-order preservation, and
+  `onItemError: collect`; one failed child therefore cannot drop the stores behind it. The deterministic
+  preflight expands "all supported stores" / "모든 지원 쇼핑몰" / "전 사이트" to all ten slugs. Shipping-CDP
+  live proof, 2026-08-29: one `NVIDIA DGX Spark` request completed in 121.24 s, reported outcomes for all ten
+  stores (six with results, four classified non-candidates/access outcomes), screened out 39 unrelated rows,
+  folded six unknown-total rows, and paused without cart mutation. The all-ten explicit-store scenario was
+  **11/11** in 81.09 s; the two five-store regional sweep was **40/40** in 84.58 s.
+- **A ten-store outcome line must fit the comparison window.** The first all-ten scenario processed every
+  child but the 1,200-byte renderer dropped all notes at its tightest level: repeating one long successful
+  product title per store consumed the budget before the failures. Successful stores already appear in offer
+  rows, so `C.store_status` now renders the complete count plus every non-success and its actionable reason.
+  The live rerun kept all five non-candidate outcomes visible and passed **11/11**.
 - **A completed collection call does not owe a question.** `collect_ready_total_cost_request` declares
   `question` optional/nullable because providers may emit `question:null` on `next:"done"`.
   `collect_total_cost_request` requires a non-empty question only in its `ask` schema branch; `done` and

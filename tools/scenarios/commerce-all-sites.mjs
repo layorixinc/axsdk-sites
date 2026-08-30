@@ -66,16 +66,11 @@ export function selectSites(all, requested) {
 }
 
 /**
- * The comparison frontier is at most three user-selected stores (AGENTS.md §4), so a batch may ask for
- * three. Sites that share a query wording share a send until that cap; order is preserved within and
- * across batches.
- *
- * Grouping by wording alone put five stores in one request. Measured: it never answered, and the runner
- * died on its own 600s bound after every structural check had passed — the flow was only ever going to
- * compare three of the five, so there was no per-site answer coming for the other two and a longer bound
- * would only have waited longer for it.
+ * `flow.map` is the bounded queue: it accepts all ten supported stores, preserves input order, and
+ * executes one child at a time. A batch therefore contains every selected site that shares its query
+ * wording; `onItemError: collect` keeps a failed store from discarding the remainder.
  */
-export const MAX_SITES_PER_BATCH = 3;
+export const MAX_SITES_PER_BATCH = 10;
 
 export function groupByQuery(sites) {
   const batches = [];

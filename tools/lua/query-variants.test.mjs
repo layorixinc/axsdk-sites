@@ -89,6 +89,23 @@ test('site groups expand deterministically in the documented order', () => {
   ]);
 });
 
+test('the supported-store group expands to the complete ten-store queue', () => {
+  const result = prefill('모든 지원 쇼핑몰에서 NVIDIA DGX Spark를 비교해줘');
+  assert.equal(result.next, 'ready');
+  assert.deepEqual(result.stores, [
+    { site: 'amazon' },
+    { site: 'walmart' },
+    { site: 'ebay' },
+    { site: 'aliexpress' },
+    { site: 'etsy' },
+    { site: 'coupang' },
+    { site: 'naver-shopping' },
+    { site: 'gmarket' },
+    { site: '11st' },
+    { site: 'ssg' },
+  ]);
+});
+
 test('an incomplete request stays on the clarification path', () => {
   assert.equal(prefill('Logitech M185를 Amazon에서 찾아줘').next, 'collect');
   assert.equal(prefill('Amazon, Walmart에서 비교해줘').next, 'collect');

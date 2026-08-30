@@ -420,15 +420,23 @@ tests.push(['identity preparation discovers broad products and locks explicit mo
     product_category: 'wireless mouse',
     requested_brand: 'Logitech',
     stores: [
-      { site: 'walmart' },
-      { site: '11st' },
       { site: 'amazon' },
+      { site: 'walmart' },
+      { site: 'ebay' },
+      { site: 'aliexpress' },
+      { site: 'etsy' },
       { site: 'coupang' },
+      { site: 'naver-shopping' },
+      { site: 'gmarket' },
+      { site: '11st' },
+      { site: 'ssg' },
     ],
   });
   assert(broad.next === 'discover' && broad.identity_status === 'family', 'brand plus category should enter discovery', broad);
   assert(broad.discovery_query === 'Logitech wireless mouse', 'discovery query should preserve grounded product scope', broad);
-  assert(broad.discovery_sites?.map(item => item.site).join(',') === 'walmart,11st,amazon', 'discovery should use a deterministic three-store frontier', broad);
+  assert(broad.discovery_sites?.map(item => item.site).join(',') ===
+    'amazon,walmart,ebay,aliexpress,etsy,coupang,naver-shopping,gmarket,11st,ssg',
+  'discovery should queue every selected supported store in request order', broad);
 
   const exact = lua.call('AX_prepare_product_identity', {
     product_category: 'wireless mouse',

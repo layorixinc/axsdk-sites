@@ -2784,7 +2784,7 @@
   },
   {
     "name": "shopping_discover_products",
-    "description": "Search at most three deterministic frontier stores for live product-model evidence.",
+    "description": "Queue every selected supported store for live product-model evidence, preserving request order and classified per-store failures.",
     "parameters": {
       "type": "object",
       "additionalProperties": true,
@@ -2796,7 +2796,7 @@
         "discovery_sites": {
           "type": "array",
           "minItems": 1,
-          "maxItems": 3,
+          "maxItems": 10,
           "items": {
             "type": "object",
             "additionalProperties": false,
@@ -3024,7 +3024,7 @@
   },
   {
     "name": "shopping_prepare_product_identity",
-    "description": "Classify product scope and deterministically select at most three stores for grounded model discovery.",
+    "description": "Classify product scope and preserve every selected supported store for deterministic queued model discovery.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,

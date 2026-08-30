@@ -404,6 +404,16 @@ test('multi-store shopping discovers and locks product identity before ranking',
   assert.ok(!common.flowTools.shopping_normalize_store_result.execute.rpc, 'a pure command needs no ops');
   assert.ok(common.flowTools.shopping_discover_products.execute.task.budget.maxRemoteCalls >= 5);
   assert.ok(common.flowTools.shopping_search_stores.execute.task.budget.maxRemoteCalls >= 5);
+  for (const name of ['shopping_discover_products', 'shopping_search_stores']) {
+    const queue = common.flowTools[name];
+    assert.equal(queue.execute.implementation, 'flow.map', `${name} must use the bounded subflow queue`);
+    assert.equal(queue.execute.concurrency, 1, `${name} must process one store at a time`);
+    assert.equal(queue.execute.maxItems, 10, `${name} must accept every supported store`);
+    assert.equal(queue.parameters.properties[queue.execute.itemsArg].maxItems, 10,
+      `${name} must validate the complete ten-store queue`);
+    assert.equal(queue.execute.onItemError, 'collect',
+      `${name} must preserve a classified result when one store fails`);
+  }
 
   for (const key of ['identity_status', 'product_options', 'options_version', 'identity_id', 'identity_fingerprint', 'comparison_id']) {
     assert.ok(Object.hasOwn(flow.state, key), `flow state must include ${key}`);

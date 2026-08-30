@@ -86,17 +86,16 @@ test('parseSiteFilter reads --sites= and trims empties', () => {
   assert.deepEqual([...parseSiteFilter(['--sites=amazon, ebay,'])], ['amazon', 'ebay']);
 });
 
-test('batching groups sites by query, up to the comparison frontier', () => {
-  // Sites that share a wording share a send until the three-store frontier, so ten sites are four
-  // batches, not two. Order is preserved within and across them.
+test('batching queues every store that shares a query in request order', () => {
+  // `flow.map` is the bounded sequential queue. The five global stores share one English request and
+  // the five Korean stores share one Korean request; no store is split out merely to satisfy an old cap.
   const batches = groupByQuery(allSites);
-  assert.equal(batches.length, 4);
-  assert.deepEqual(batches.map(batch => batch.query),
-    ['Logitech M185', 'Logitech M185', '로지텍 M185', '로지텍 M185']);
-  assert.deepEqual(batches[0].sites.map(item => item.site), ['amazon', 'walmart', 'ebay']);
-  assert.deepEqual(batches[1].sites.map(item => item.site), ['aliexpress', 'etsy']);
-  assert.deepEqual(batches[2].sites.map(item => item.site), ['coupang', 'naver-shopping', 'gmarket']);
-  assert.deepEqual(batches[3].sites.map(item => item.site), ['11st', 'ssg']);
+  assert.equal(batches.length, 2);
+  assert.deepEqual(batches.map(batch => batch.query), ['Logitech M185', '로지텍 M185']);
+  assert.deepEqual(batches[0].sites.map(item => item.site),
+    ['amazon', 'walmart', 'ebay', 'aliexpress', 'etsy']);
+  assert.deepEqual(batches[1].sites.map(item => item.site),
+    ['coupang', 'naver-shopping', 'gmarket', '11st', 'ssg']);
   // A cross-region subset still splits by query: the request wording is per batch.
   const subset = groupByQuery(selectSites(allSites, new Set(['amazon', 'ssg'])));
   assert.equal(subset.length, 2);
@@ -230,15 +229,10 @@ test('the tally: answered sites classify per site; a site the turn never searche
   assert.equal(ebay.url, '?');
 });
 
-test('no batch asks for more stores than the flow will compare', () => {
-  // The comparison frontier is at most THREE user-selected stores (AGENTS.md §4), so a five-store request
-  // cannot produce a per-site answer for five sites — the flow compares three of them by design.
-  // Measured live: the five-store global batch never answered and the runner died on its own 600s bound
-  // (max(300000, 5 * 120000)), after the four structural checks had all passed. Raising the bound would
-  // have waited longer for an answer the flow was never going to give.
+test('every batch fits the complete supported-store queue', () => {
   for (const batch of groupByQuery(allSites)) {
-    assert.ok(batch.sites.length <= 3,
-      `batch "${batch.query}" asks for ${batch.sites.length} stores; the frontier caps at 3`);
+    assert.ok(batch.sites.length <= 10,
+      `batch "${batch.query}" asks for ${batch.sites.length} stores; the queue caps at 10`);
   }
 });
 
@@ -249,11 +243,11 @@ test('every site is still covered exactly once across the batches', () => {
   assert.equal(new Set(seen).size, allSites.length);
 });
 
-test('a split batch keeps its wording', () => {
-  // Both halves of a query group must still ask the question that group exists for.
+test('a query group stays in one ordered queue', () => {
   const korean = groupByQuery(allSites).filter((batch) => batch.query === '로지텍 M185');
-  assert.ok(korean.length >= 2, 'five Korean stores cannot fit one batch');
-  for (const batch of korean) assert.equal(batch.query, '로지텍 M185');
+  assert.equal(korean.length, 1);
+  assert.deepEqual(korean[0].sites.map((item) => item.site),
+    ['coupang', 'naver-shopping', 'gmarket', '11st', 'ssg']);
 });
 
 // ── the fan-out publishes its results AGGREGATED, one level deeper ────────────

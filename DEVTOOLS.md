@@ -132,8 +132,9 @@ commands. Drive the same path as the user:
 npm run cdp -- send "Logitech M185를 amazon, ebay, walmart에서 총액 비교해줘"
 ```
 
-The flow searches at most three requested stores, locks a grounded manufacturer model, screens
-relevance, verifies product-page identity and price, then renders a numbered comparison window.
+The flow queues up to all ten requested stores and processes them one at a time in request order,
+collecting a classified outcome for each store before it renders the bounded comparison window. It
+locks a grounded manufacturer model, screens relevance, and verifies product-page identity and price.
 Choosing a number is the cart-approval turn and can mutate a real cart. Use `취소` for a read-only
 walkthrough. Checkout review never clicks a place-order control.
 

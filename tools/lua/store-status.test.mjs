@@ -127,10 +127,34 @@ test('a partial DGX Spark result names the successful offer and each blocked sto
 
   assert.equal(ranked.next, 'partial');
   assert.equal(ranked.offers[0].product_id, '206504093493', 'valid offers stay sorted by total cost');
-  assert.match(ranked.comparison_text, /eBay.*DGX Spark.*찾았습니다/);
+  assert.match(ranked.comparison_text, /\[ebay\].*DGX Spark/);
+  assert.match(ranked.comparison_text, /사이트 3곳 중 1곳/);
   assert.match(ranked.comparison_text, /Naver Shopping.*접근이 제한/);
   assert.match(ranked.comparison_text, /Gmarket.*CAPTCHA 확인/);
   assert.doesNotMatch(ranked.comparison_text, /정확한 제조사 모델|exact manufacturer model/i);
+});
+
+test('a ten-store queue keeps every non-candidate outcome inside the bounded window', () => {
+  const successful = ['amazon', 'ebay', 'aliexpress', 'coupang', '11st', 'ssg'].map((site, index) =>
+    offer({
+      site,
+      product_id: `queue-${index}`,
+      name: `NVIDIA DGX Spark workstation listing with a deliberately long storefront title ${index}`,
+      total_base: 1000 + index,
+      total_for_quantity: 1000 + index,
+    }));
+  const ranked = rank(successful, [
+    { site: 'walmart', error: 'no_relevant_offers' },
+    { site: 'etsy', error: 'no_relevant_offers' },
+    { site: 'naver-shopping', error: 'access_denied' },
+    { site: 'gmarket', error: 'no_relevant_offers' },
+  ]);
+
+  assert.ok(ranked.comparison_text.length <= 1200, 'the queue must stay inside the existing window budget');
+  assert.match(ranked.comparison_text, /사이트 10곳 중 6곳/);
+  for (const name of ['월마트', '엣시', 'Naver Shopping', 'Gmarket']) {
+    assert.match(ranked.comparison_text, new RegExp(name), `${name} must not disappear at the tightest level`);
+  }
 });
 
 // ── incomplete totals are folded out of the default view ─────────────────────

@@ -105,14 +105,11 @@ end
 --- One line describing which stores answered and what the others need from the user.
 function C.store_status(failures, offers)
   local ok_sites = {}
-  local ok_order = array()
   local ok_count = 0
   for index = 1, #(offers or {}) do
-    local offer = offers[index] or {}
-    local site = lower(offer.site)
+    local site = lower((offers[index] or {}).site)
     if site ~= "" and not ok_sites[site] then
-      ok_sites[site] = non_empty(offer.name or offer.title) or true
-      ok_order[#ok_order + 1] = site
+      ok_sites[site] = true
       ok_count = ok_count + 1
     end
   end
@@ -136,20 +133,14 @@ function C.store_status(failures, offers)
     return { text = "", ok_count = ok_count, failed_count = 0 }
   end
 
-  local parts = array()
-  for index = 1, #ok_order do
-    local site = ok_order[index]
-    local name = ok_sites[site]
-    local found = type(name) == "string" and (AX_OFFER_VIEW.clip(name, 80) .. " 상품을 찾았습니다")
-      or "상품을 찾았습니다"
-    parts[#parts + 1] = C.store_label(site) .. ": " .. found
-  end
-  for index = 1, #failure_parts do parts[#parts + 1] = failure_parts[index] end
-
+  -- The offer rows already name successful stores. Repeating a long product title for every success
+  -- made a ten-store status exceed the 1200-byte window budget, so the tightest render level dropped ALL
+  -- notes — including the stores that failed. The count plus every failure is the complete compact fact:
+  -- all remaining stores are successes, and each non-success keeps its actionable reason.
   local total = ok_count + failed_count
   local header = string.format("사이트 %d곳 중 %d곳에서 결과를 받았습니다", total, ok_count)
   return {
-    text = header .. " · " .. table.concat(parts, " · "),
+    text = header .. " · " .. table.concat(failure_parts, " · "),
     ok_count = ok_count,
     failed_count = failed_count
   }

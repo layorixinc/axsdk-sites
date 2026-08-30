@@ -971,11 +971,10 @@ function Q.request_quote(args)
                quote_answered = Q.answered(applied), quote_last_step = last_step,
                quote_message = Q.stall_snapshot() }
     end
-    local before = #applied
     local context = Q.ctx()
     local stopped = contact_stop(context)
     if stopped then return stopped end
-    flow = W.drive_step(context, drive, applied, before)
+    flow = W.drive_step(context, drive, applied)
     if not flow then
       -- The wizard answers nil when there is no ACTIVE step, and there are THREE reasons for that, not
       -- two. `classify_absence` names them; the fix for each is different.
@@ -998,7 +997,7 @@ function Q.request_quote(args)
             local context = Q.ctx()
             local stopped = contact_stop(context)
             if stopped then return stopped end
-            flow = W.drive_step(context, drive, applied, #applied)
+            flow = W.drive_step(context, drive, applied)
           end
         elseif why == "transitional" then
           -- Nothing on the page at all: the document is mid-render. Measured live at step six, on "How
@@ -1010,7 +1009,7 @@ function Q.request_quote(args)
             local context = Q.ctx()
             local stopped = contact_stop(context)
             if stopped then return stopped end
-            flow = W.drive_step(context, drive, applied, #applied)
+            flow = W.drive_step(context, drive, applied)
           end
         end
         if flow or why == "closed" then break end
@@ -1065,6 +1064,7 @@ function Q.request_quote(args)
       if stalled >= Q.MAX_STALLED then
         return { next = "error", quote_error = "quote_stalled", quote_status = "stalled",
                  quote_advance_reason = flow.advance_reason, quote_steps = steps, quote_clock = clock() ~= nil,
+                 quote_answered = Q.answered(applied), quote_last_step = last_step,
                  quote_message = Q.stall_snapshot() }
       end
     end

@@ -203,6 +203,23 @@ test('a figure past the summary cut is still read', () => {
   assert.equal(candidate.hire_count, 812);
   assert.ok(candidate.summary.length <= 360, 'the stored summary stays bounded');
 });
+
+test('a multibyte card summary remains valid UTF-8 at the byte limit', () => {
+  // Live on house-cleaning results, the 360-byte cut split a multibyte card character. Fengari then
+  // refused the whole tool result with "cannot convert invalid utf8 to javascript string", while other
+  // service categories happened to pass because their 360th byte fell on an ASCII boundary.
+  const card = {
+    text: `${'a'.repeat(359)}한글 tail`,
+    name: 'Clean CoClean Co',
+    url: 'https://www.thumbtack.com/ca/sf/house-cleaning/clean-co/service/700000000000000002/',
+  };
+  const page = makePage({ href: 'https://www.google.com/', afterNavigate: {}, sequence: { [CARD]: [[card], [card]] } });
+  const candidate = Object.values(search(page).value.candidates)[0];
+
+  assert.ok(Buffer.byteLength(candidate.summary, 'utf8') <= 360);
+  assert.equal(Buffer.from(candidate.summary, 'utf8').toString('utf8'), candidate.summary);
+  assert.ok(!candidate.summary.includes('\uFFFD'));
+});
 // The arrival wait must name its TARGET. Without a `url` the port asks "has the address changed since I
 // started" and reads that baseline through a round trip, so a navigation that commits first — an Amazon search
 // commits in ~460ms, about what one op costs — can never look like a change, and the wait polls its whole

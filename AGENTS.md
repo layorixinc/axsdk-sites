@@ -3011,6 +3011,22 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   javascript string" on the packaged artifact — the user read a generic failure while the cart was fine.
   `R.cut` steps back off UTF-8 continuation bytes (`10xxxxxx`). The store's titles are Korean in this
   locale, so this is the NORMAL case, not an edge one.
+- **Every bounded live string must cut at a UTF-8 boundary, not only cart labels.** The same failure
+  recurred in Thumbtack: `64_rpc_thumbtack` stored the first 360 BYTES of a card summary, a live
+  house-cleaning card put that byte inside a multibyte character, and `search_service` died before
+  publishing any candidate with `cannot convert invalid utf8 to javascript string`; handyman and lawn
+  mowing happened to land on ASCII boundaries and hid it. The result-card cut now steps back off
+  continuation bytes too, and the unit fixture chooses byte 360 to split `한` so a character-count test
+  cannot pass accidentally.
+- **The wizard's `applied` list is an AUDIT TRAIL, not the current step's answer state.**
+  `W.drive_step` seeded `supplied=true` from any successful EARLIER entry. On the live handyman form,
+  `"install shelves"` did not strongly match Thumbtack's `"Installation"` wording, then a later required
+  checkbox question matched nothing; the old state skipped both current-step fallbacks and pressed Next
+  on an empty form until every available pro reported `quote_stalled`. Current-step `attempted`/`supplied`
+  now start false while the cross-step list remains reporting-only, and a stalled answer carries
+  `quote_answered` + `quote_last_step` instead of discarding the evidence. Shipping-CDP live after:
+  `test:thumbtack:live` **7/7 in 116.54 s**; one pro's own unavailability stayed classified, the next
+  reached `contact_boundary`, and no quote was sent.
 - **Four fixture traps met in one feature, each hiding a real check:** a flat array of tool calls where the
   run produces TWO turns (the smoke's own verdict then could not be satisfied by any real run while the
   unit test passed); `dom` values written as strings where the stub answers `row.text`, so every count

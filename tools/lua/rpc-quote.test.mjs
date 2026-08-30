@@ -38,13 +38,13 @@ const TIME_BUDGET_MS = 90000;
 const PRO_URL = 'https://www.thumbtack.com/ca/san-francisco/house-cleaning/maxima/service/583813840609927168';
 
 /** One request-flow step, expressed the way the page renders it. */
-function step(text, { choices = [], buttons = ['Next'], textarea = false, contact = false, error = null } = {}) {
+function step(text, { choices = [], control = 'radio', buttons = ['Next'], textarea = false, contact = false, error = null } = {}) {
   const dom = { [ACTIVE]: [{ text }] };
   if (error) dom['#request-flow-error'] = [{ text: `${error} Close alert` }];
   if (choices.length > 0) {
     // The rows are shared objects: clicking one flips its `checked`, because the module now confirms the
     // site accepted the click instead of trusting that it fired.
-    const rows = choices.map((choice, index) => ({ text: choice, control: 'radio', group: 'g', id: `opt${index}`, checked: false }));
+    const rows = choices.map((choice, index) => ({ text: choice, control, group: 'g', id: `opt${index}`, checked: false }));
     dom[`${ACTIVE} label:has(input[type="radio"]), ${ACTIVE} label:has(input[type="checkbox"])`] = rows;
     dom['label:has(input[type="radio"]), label:has(input[type="checkbox"])'] = rows;
     rows.forEach((row) => {
@@ -483,6 +483,27 @@ test('each extra step costs a bounded number of round trips', () => {
   assert.ok(perStep <= 16, `a step must stay cheap, each costs ${perStep.toFixed(1)} ops`);
 });
 
+test('a later unmatched checkbox step gets its own fallback answer', () => {
+  // Live, "install shelves" did not strongly match Thumbtack's "Installation" wording, and the next
+  // checkbox step had no requirement match at all. `drive_step` counted a successful answer from an
+  // EARLIER step as if the current step were supplied, skipped the required-checkbox fallback, and pressed
+  // Next on an empty form until the wizard stalled.
+  const service = step('What do you need help with?', {
+    choices: ['Installation', 'Repairs'],
+    control: 'checkbox',
+  });
+  const area = step('Which areas of the home need work?', {
+    choices: ['Bathroom', 'Kitchen'],
+    control: 'checkbox',
+  });
+  const page = quotePage({ steps: [service, area, finalStep()] });
+  const result = drive(page, { user_requirements: 'install shelves within 48 hours' });
+  const areaRows = area.dom[`${ACTIVE} label:has(input[type="radio"]), ${ACTIVE} label:has(input[type="checkbox"])`];
+
+  assert.equal(result.next, 'submit');
+  assert.ok(areaRows.some((row) => row.checked), 'the current required checkbox step needs its own answer');
+});
+
 test('an option is not called selected until it is checked', () => {
   // Surveyed live: the step's radios do carry ids, so the label selector resolves — yet the form refused
   // to advance and re-rendered the same question twice (`advance_not_confirmed`). A bare click can fire
@@ -580,6 +601,8 @@ test('a stall reports what the form saw at one instant', () => {
   assert.equal(result.quote_error, 'quote_stalled');
   assert.match(result.quote_message, /checked/, 'the option state must be in the answer');
   assert.match(result.quote_message, /disabled/, 'and so must the button state');
+  assert.match(result.quote_last_step ?? '', /How much help/, 'the failed question must survive the stop');
+  assert.match(result.quote_answered ?? '', /A full day/, 'the answers already applied must survive the stop');
 });
 
 test('a step whose button click is ignored is submitted as a form', () => {

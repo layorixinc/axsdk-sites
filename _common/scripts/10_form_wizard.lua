@@ -276,7 +276,7 @@ end
 --   apply_contact(args,applied)->{attempted,supplied}, has_text()->bool, control_count()->int,
 --   extra_control_count()->int, read_buttons()->rows, advance_click(decision)->bool, wait(ms),
 --   labels?(advance/skip/submit), requirement_keys?.
-function W.drive_step(ctx, args, applied, prior_updates)
+function W.drive_step(ctx, args, applied)
   if not ctx.active_exists() then
     return nil
   end
@@ -294,14 +294,10 @@ function W.drive_step(ctx, args, applied, prior_updates)
   local before_text = ctx.current_text()
   flow.before_text = before_text
   local auto_enabled = W.auto_enabled(args)
+  -- Answers are scoped to THIS step. `applied` is the cross-step audit trail; treating one of its earlier
+  -- successes as a current answer skips required checkbox fallbacks and presses Next on an empty form.
   local supplied = false
-  local attempted = (prior_updates or 0) > 0
-  for index = 1, (prior_updates or 0) do
-    if applied[index] and applied[index].ok == true then
-      supplied = true
-      break
-    end
-  end
+  local attempted = false
 
   local choices = W.choice_values(args)
   if #choices == 0 and auto_enabled then

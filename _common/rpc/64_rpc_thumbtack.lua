@@ -30,6 +30,22 @@ local function trim(value)
   return text ~= "" and text or nil
 end
 
+--- Cuts live card text to at most `limit` bytes without splitting a UTF-8 sequence.
+---
+--- Lua strings are bytes. A house-cleaning card's 360-byte cut split a multibyte character and Fengari
+--- refused the whole search result with "cannot convert invalid utf8 to javascript string".
+local function cut(text, limit)
+  local value = tostring(text or "")
+  if #value <= limit then return value end
+  local boundary = limit
+  while boundary > 0 do
+    local following = value:byte(boundary + 1)
+    if not following or following < 0x80 or following >= 0xC0 then break end
+    boundary = boundary - 1
+  end
+  return value:sub(1, boundary)
+end
+
 local function array(value)
   if ax and type(ax.array) == "function" then
     local out = ax.array()
@@ -139,7 +155,7 @@ local function candidate_from(row)
     url = url,
     -- The card text repeats itself and carries the avatar markup; the view layer strips markup when it
     -- renders, but an unbounded card multiplies the flow state by ten. The durable reader kept 360.
-    summary = trim(text:sub(1, 360)),
+    summary = trim(cut(text, 360)),
   }
 end
 

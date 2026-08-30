@@ -195,6 +195,29 @@ test('a price the page will not show is a failed revalidation', () => {
   assert.deepEqual(clicks(page), []);
 });
 
+test('coupang revalidates the price from its current product layout', () => {
+  // Measured live on /vp/products/9629131654: the former three selectors match nothing, while this
+  // word-based layout class is unique and says exactly "9,400,000원".
+  const coupang = loadLuaModules([
+    '_common/rpc/61_rpc_storefront.lua',
+    '_common/rpc/62_rpc_sites.lua',
+    '_common/rpc/67_rpc_cart.lua',
+  ]);
+  coupang.define('function __coupang_config() return RPC_SITES["coupang"] end', 'coupang config reader');
+  const config = coupang.call('__coupang_config');
+  const page = makePage({
+    href: 'https://www.coupang.com/vp/products/9629131654',
+    dom: { '.price-layout-container': [{ text: '9,400,000원' }] },
+  });
+  installRpcStub(coupang, page);
+
+  const refusal = coupang.call('AX_RPC_CART.price_error', config,
+    { expected_unit_price: 9_400_000, expected_currency: 'KRW' }, '9629131654');
+  coupang.close();
+
+  assert.equal(refusal, null, 'the approved live price is readable and unchanged');
+});
+
 test('a required variation stops the add', () => {
   const page = shop({ extra: { '#variation_color_name select': [{ text: '' }] } });
   const result = add(page, { config: { ...CONFIG, required_option_selectors: ['#variation_color_name select'] } });

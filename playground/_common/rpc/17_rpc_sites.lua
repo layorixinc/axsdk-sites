@@ -334,6 +334,7 @@ RPC_SITES["coupang"] = {
     "h1"
   },
   product_price_selectors = {
+    ".price-layout-container",
     ".total-price strong",
     ".prod-sale-price .total-price",
     "[data-product-price]"

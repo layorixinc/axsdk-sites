@@ -25,7 +25,10 @@ local CONFIG = {
   product_id_patterns = { "/vp/products/(%d+)", "productId=(%d+)" },
   product_url_prefix = "https://www.coupang.com/vp/products/",
   product_title_selectors = { 'h2.prod-buy-header__title', 'h1[data-product-title]', 'h1' },
-  product_price_selectors = { '.total-price strong', '.prod-sale-price .total-price', '[data-product-price]' },
+  -- Measured live 2026-08-29 on `/vp/products/9629131654`: the current Next layout exposes one
+  -- `.price-layout-container` saying exactly `9,400,000원`; all three legacy selectors match 0.
+  product_price_selectors = { '.price-layout-container', '.total-price strong',
+    '.prod-sale-price .total-price', '[data-product-price]' },
   add_selectors = { 'button.prod-cart-btn', 'button[data-button-name="add-to-cart"]' },
   quantity_selectors = { 'select.prod-quantity__input', 'input[name="quantity"]' },
   required_option_selectors = { 'select[required]' },

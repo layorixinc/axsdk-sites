@@ -65,15 +65,29 @@ export function lastToolOutput(toolCalls, suffix) {
 }
 
 export function discoveryChoiceSurface(turn) {
-  const call = findToolCall(turn?.toolCalls, 'present_product_options');
+  const call = findToolCall(turn?.toolCalls, 'present_product_exploration');
   const output = decode(call?.output);
   const question = String(output?.question || turn?.text || '');
-  const forbidden = /identity_confidence|source_sites|source_refs|sample[_ ]prices?/i;
+  const forbidden = /identity_confidence|source_sites|source_refs|sample[_ ]prices?|exploration_state/i;
   return call?.status === 'completed'
     && output?.next === 'ask'
     && /(?:^|\n)\s*1\.\s+\S/m.test(question)
-    && /found at|확인된 판매처|observed stores/i.test(question)
+    && /관측 판매처|observed stores?/i.test(question)
     && !forbidden.test(question);
+}
+
+/** A filter/sort turn must issue and render a new exploration snapshot without repeating live discovery. */
+export function refinedExplorationSurface(turn, previousId) {
+  const refined = findToolCall(turn?.toolCalls, 'shopping_refine_product_exploration');
+  const presented = findToolCall(turn?.toolCalls, 'present_product_exploration');
+  const output = decode(presented?.output);
+  return refined?.status === 'completed'
+    && presented?.status === 'completed'
+    && output?.next === 'ask'
+    && typeof output?.exploration_id === 'string'
+    && output.exploration_id !== previousId
+    && discoveryChoiceSurface(turn)
+    && !findToolCall(turn?.toolCalls, 'shopping_discover_products');
 }
 
 export function sitesFromWindow(text, requestedSites) {
@@ -122,32 +136,47 @@ async function main() {
     const prefilledSites = Object.values(prefillOutput?.stores ?? {}).map((item) => item?.site).filter(Boolean);
     check(checks, 'deterministic preflight keeps every requested store', requestedSites.every((site) => prefilledSites.includes(site)), prefilledSites.join(','));
     if (discoveryMode) {
-      const optionOutput = lastToolOutput(compare.toolCalls, 'shopping_build_product_options');
-      const productOptions = Array.isArray(optionOutput?.product_options) ? optionOutput.product_options : [];
+      const explorationOutput = lastToolOutput(compare.toolCalls, 'shopping_build_product_exploration');
+      const explorationState = (() => {
+        try { return JSON.parse(explorationOutput?.exploration_state || ''); } catch { return null; }
+      })();
+      const productGroups = Array.isArray(explorationState?.groups) ? explorationState.groups : [];
       const discoveryReply = String(compare.text || '');
-      const numberedOptions = (discoveryReply.match(/(?:^|\n)\s*\d+\.\s+/g) || []).length;
-      check(checks, 'broad request discovers grounded product options', productOptions.length > 0 || numberedOptions > 0, `options=${productOptions.length || numberedOptions}`);
-      check(checks, 'consumer sees a safe numbered product list', discoveryChoiceSurface(compare), discoveryReply.replace(/\s+/g, ' ').slice(0, 300));
-      const sourceMetadataValid = productOptions.length > 0
-        ? productOptions.every(option => {
-            const sourceSites = Array.isArray(option.source_sites) ? option.source_sites : [];
-            const sourceRefs = Array.isArray(option.source_refs) ? option.source_refs : [];
-            return Number(option.source_site_count) === new Set(sourceSites).size
+      const numberedGroups = (discoveryReply.match(/(?:^|\n)\s*\d+\.\s+/g) || []).length;
+      check(checks, 'broad request discovers grounded product groups',
+        productGroups.length > 0 || numberedGroups > 0, `groups=${productGroups.length || numberedGroups}`);
+      check(checks, 'consumer sees a safe numbered product list', discoveryChoiceSurface(compare),
+        discoveryReply.replace(/\s+/g, ' ').slice(0, 300));
+      const sourceMetadataValid = productGroups.length > 0
+        ? productGroups.every(group => {
+            const sourceSites = Array.isArray(group.source_sites) ? group.source_sites : [];
+            const sourceRefs = Array.isArray(group.source_refs) ? group.source_refs : [];
+            return Number(group.source_site_count) === new Set(sourceSites).size
               && sourceSites.every(site => requestedSites.includes(site))
               && sourceRefs.every(ref => sourceSites.includes(ref.site));
           })
         : requestedSites.some(site => discoveryReply.includes(site));
-      check(checks, 'product option provenance names live sites', sourceMetadataValid, productOptions.length > 0
-        ? productOptions.map(option => `${option.option_id}:${option.source_site_count}/${option.source_sites?.join(',') || '-'}`).join(' ')
-        : requestedSites.filter(site => discoveryReply.includes(site)).join(','));
-      const claimedSourceCounts = [...String(compare.text || '').matchAll(/\b(\d+)\s+source\s+sites?\b/gi)]
-        .map(match => Number(match[1]));
-      check(checks, 'product option prose does not inflate source sites', claimedSourceCounts.every(count => count <= requestedSites.length), claimedSourceCounts.join(','));
-      check(checks, 'product identity is approved before store ranking', Boolean(findToolCall(compare.toolCalls, 'present_product_options')) && !findToolCall(compare.toolCalls, 'shopping_rank_store_offers'));
+      check(checks, 'product exploration provenance names live sites', sourceMetadataValid,
+        productGroups.length > 0
+          ? productGroups.map(group => `${group.group_id}:${group.source_site_count}/${group.source_sites?.join(',') || '-'}`).join(' ')
+          : requestedSites.filter(site => discoveryReply.includes(site)).join(','));
+      check(checks, 'product identity is approved before store ranking',
+        Boolean(findToolCall(compare.toolCalls, 'present_product_exploration'))
+          && !findToolCall(compare.toolCalls, 'shopping_rank_store_offers'));
       check(checks, 'discovery cannot mutate a cart', !findToolCall(compare.toolCalls, 'shopping_add_selected_store_offer'));
-      console.log(`DISCOVER  ${String(compare.text || '').replace(/\s+/g, ' ').slice(0, 500)}`);
+      console.log(`DISCOVER  ${discoveryReply.replace(/\s+/g, ' ').slice(0, 500)}`);
+      const initialExplorationId = explorationOutput?.exploration_id;
+      const refined = await session.send('이름순으로 보여줘', { timeoutMs: 120000 });
+      check(checks, 'filter and sort stay inside the exploration snapshot',
+        refinedExplorationSurface(refined, initialExplorationId),
+        String(refined.text || '').replace(/\s+/g, ' ').slice(0, 240));
+      check(checks, 'exploration refinement cannot mutate a cart',
+        !findToolCall(refined.toolCalls, 'shopping_add_selected_store_offer'));
+      console.log(`REFINE   ${String(refined.text || '').replace(/\s+/g, ' ').slice(0, 500)}`);
       compare = await session.send(productChoice, { timeoutMs: Math.max(300000, requestedSites.length * 120000) });
-      check(checks, 'current product option locks before comparison', Boolean(findToolCall(compare.toolCalls, 'shopping_resolve_product_option')) && Boolean(findToolCall(compare.toolCalls, 'shopping_verify_product_offers')));
+      check(checks, 'current exploration number locks before comparison',
+        Boolean(findToolCall(compare.toolCalls, 'shopping_resolve_product_exploration'))
+          && Boolean(findToolCall(compare.toolCalls, 'shopping_verify_product_offers')));
     }
     const workerResults = (compare.toolCalls || [])
       .filter(call => call.name === 'shopping_search_one_store')
@@ -192,6 +221,30 @@ async function main() {
       && /numbered offer|offer number|번호|cancel/i.test(reply)
       && !findToolCall(compare.toolCalls, 'shopping_add_selected_store_offer'));
     console.log(`COMPARE  ${String(compare.text || '').replace(/\s+/g, ' ').slice(0, 500)}`);
+
+    if (discoveryMode) {
+      const firstIdentity = lastToolOutput(compare.toolCalls, 'shopping_resolve_product_exploration')?.identity_id;
+      const restored = await session.send('다른 모델 보여줘', { timeoutMs: 120000 });
+      check(checks, 'locked comparison restores the pre-lock exploration',
+        Boolean(findToolCall(restored.toolCalls, 'shopping_invalidate_identity_selection'))
+          && Boolean(findToolCall(restored.toolCalls, 'present_product_exploration'))
+          && discoveryChoiceSurface(restored),
+        String(restored.text || '').replace(/\s+/g, ' ').slice(0, 240));
+      check(checks, 'returning to exploration cannot mutate a cart',
+        !findToolCall(restored.toolCalls, 'shopping_add_selected_store_offer'));
+
+      const switched = await session.send('2번', {
+        timeoutMs: Math.max(300000, requestedSites.length * 120000),
+      });
+      const secondIdentity = lastToolOutput(switched.toolCalls, 'shopping_resolve_product_exploration')?.identity_id;
+      check(checks, 'a different exploration number issues a new locked identity',
+        Boolean(secondIdentity) && secondIdentity !== firstIdentity
+          && Boolean(findToolCall(switched.toolCalls, 'shopping_verify_product_offers')),
+        `${firstIdentity || '-'} -> ${secondIdentity || '-'}`);
+      check(checks, 'identity replacement still requires a later offer approval',
+        !findToolCall(switched.toolCalls, 'shopping_add_selected_store_offer'));
+      compare = switched;
+    }
 
     if (cancelOnly) {
       const cancelled = await session.send('취소', { timeoutMs: 120000 });

@@ -603,5 +603,83 @@ function AX_apply_offer_screening(args)
   }
 end
 
+--- Exploration keeps every semantically accepted row up to the screening budget and attaches only facet
+--- evidence that appears in the exact title the model was shown. A malformed facet payload degrades the
+--- filter catalog; it never throws away an otherwise accepted live result.
+function AX_apply_exploration_screening(args)
+  args = args or {}
+  local ids = split_list(args.screening_ids)
+  if args.keep == nil then
+    return { next = "error", error = "relevance_judgement_unavailable" }
+  end
+  local keep = {}
+  for number in tostring(args.keep):gmatch("%d+") do
+    local position = tonumber(number)
+    local id = position and ids[position]
+    if id then keep[id] = true end
+  end
+
+  local facet_rows = {}
+  if type(args.facets_json) == "string" and args.facets_json ~= ""
+      and type(json) == "table" and type(json.decode) == "function" then
+    local ok, decoded = pcall(json.decode, args.facets_json)
+    if ok and type(decoded) == "table" then facet_rows = decoded end
+  end
+
+  local results, remaining, screened_out = array(), 0, 0
+  each_store_result(args.store_results or args.results, function(record, value, site)
+    if not value then
+      results[#results + 1] = record
+      return
+    end
+    local kept = array()
+    for index = 1, #(value.candidates or {}) do
+      local candidate = value.candidates[index] or {}
+      local product_id = non_empty(candidate.product_id or candidate.id)
+      local row_id = product_id and (site .. ":" .. product_id) or nil
+      if not row_id or not keep[row_id] then
+        screened_out = screened_out + 1
+      elseif #kept < C.SCREEN_LIMIT_PER_SITE then
+        local copy = copy_table(candidate)
+        local title = tostring(candidate.name or candidate.title or "")
+        local lowered = title:lower()
+        local facets = {}
+        local proposed = type(facet_rows[row_id]) == "table" and facet_rows[row_id] or {}
+        for facet, record in pairs(proposed) do
+          local value_text = type(record) == "table" and non_empty(record.value) or nil
+          local evidence = type(record) == "table" and non_empty(record.evidence) or nil
+          if non_empty(facet) and value_text and evidence
+              and lowered:find(tostring(evidence):lower(), 1, true) then
+            facets[tostring(facet)] = { value = value_text, evidence = evidence }
+          end
+        end
+        copy.facets = next(facets) and facets or nil
+        kept[#kept + 1] = copy
+      else
+        screened_out = screened_out + 1
+      end
+    end
+    remaining = remaining + #kept
+    local store_result = copy_table(value)
+    store_result.candidates = #kept > 0 and kept or nil
+    store_result.total_count = #kept
+    if #kept == 0 then
+      store_result.error = non_empty(store_result.error) or "no_relevant_offers"
+      store_result.status = store_result.error
+    end
+    results[#results + 1] = {
+      key = non_empty(record.key) or site,
+      status = "completed",
+      value = { store_result = store_result }
+    }
+  end)
+  return {
+    next = remaining > 0 and "done" or "empty",
+    store_results = results,
+    screened_out = screened_out,
+    screened_kept = remaining,
+  }
+end
+
 -- 다른 commerce 모듈과 공유한다. 파일 순서상 이 아래 모듈들이 헤더에서 집어 간다.
 C.compare_offers, C.uniform_currency, C.persist_comparison = compare_offers, uniform_currency, persist_comparison

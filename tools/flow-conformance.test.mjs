@@ -219,17 +219,18 @@ test('multi-store shopping discovers and locks product identity before ranking',
 
   assert.equal(nodes.collect_request.next.done, 'prepare_identity');
   assert.equal(nodes.prepare_identity.id, 'shopping_prepare_product_identity');
-  assert.equal(nodes.prepare_identity.next.discover, 'discover_products');
+  assert.equal(nodes.prepare_identity.next.explore, 'discover_products');
   assert.equal(nodes.prepare_identity.next.lock, 'lock_requested_identity');
   assert.equal(nodes.discover_products.id, 'shopping_discover_products');
-  assert.equal(nodes.discover_products.next.done, 'build_product_options');
-  assert.equal(nodes.build_product_options.id, 'shopping_build_product_options');
-  assert.equal(nodes.build_product_options.next.choose, 'present_product_options');
-  assert.equal(nodes.present_product_options.next.select, 'resolve_product');
-  assert.deepEqual(nodes.choose_product.allowedTools, ['choose_product_identity']);
-  assert.equal(nodes.resolve_product.id, 'shopping_resolve_product_option');
-  assert.equal(nodes.resolve_product.next.lock, 'search_stores');
-  assert.equal(nodes.choose_product.messagePolicy?.currentUserText, 'active_node_only');
+  assert.equal(nodes.discover_products.next.done, 'build_exploration_screen');
+  assert.equal(nodes.build_exploration_screen.id, 'shopping_build_exploration_screening');
+  assert.equal(nodes.build_exploration_screen.next.judge, 'judge_exploration');
+  assert.deepEqual(nodes.judge_exploration.allowedTools, ['screen_store_offers']);
+  assert.equal(nodes.apply_exploration_screen.id, 'shopping_apply_exploration_screening');
+  assert.equal(nodes.build_exploration.id, 'shopping_build_product_exploration');
+  assert.equal(nodes.present_exploration.next.select, 'resolve_exploration');
+  assert.equal(nodes.resolve_exploration.id, 'shopping_resolve_product_exploration');
+  assert.equal(nodes.resolve_exploration.next.lock, 'search_stores');
 
   // Search first completes the user-selected frontier: a missing fan-out child is an explicit `unsearched`
   // record, never a silently omitted store. The complete list then feeds the two-stage relevance decision.
@@ -415,16 +416,22 @@ test('multi-store shopping discovers and locks product identity before ranking',
       `${name} must preserve a classified result when one store fails`);
   }
 
-  for (const key of ['identity_status', 'product_options', 'options_version', 'identity_id', 'identity_fingerprint', 'comparison_id']) {
+  for (const key of [
+    'identity_status', 'identity_revision', 'exploration_id', 'exploration_state',
+    'identity_id', 'identity_fingerprint', 'comparison_id',
+  ]) {
     assert.ok(Object.hasOwn(flow.state, key), `flow state must include ${key}`);
   }
 
   for (const tool of [
     'shopping_prepare_product_identity',
     'shopping_discover_products',
-    'shopping_build_product_options',
-    'choose_product_identity',
-    'shopping_resolve_product_option',
+    'shopping_build_exploration_screening',
+    'shopping_apply_exploration_screening',
+    'shopping_build_product_exploration',
+    'present_product_exploration',
+    'shopping_refine_product_exploration',
+    'shopping_resolve_product_exploration',
     'shopping_verify_product_offers',
   ]) {
     assert.ok(common.flowTools?.[tool], `${tool} flowTool must exist`);
@@ -445,39 +452,26 @@ function assertStallGuard(flow, flowName, nodeName) {
   assert.notEqual(target, nodeName, `${flowName}.${nodeName} must not stall into itself`);
 }
 
-test('broad product choices expose only consumer-safe lockable numbers', () => {
-  // Live, the gate printed identity_confidence, source_sites JSON and sample-price internals, then gave
-  // number 1 to a low-confidence listing that the next deterministic node refused to lock.
+test('product exploration keeps raw groups out of every model prompt', () => {
   const common = parseFlow('_common/flows.yaml');
   const flow = common.flows.shopping_multi_store_total_cost;
-  const classifier = flow.nodes.choose_product;
-  const presenter = flow.nodes.present_product_options;
-  const prompt = classifier.prompt;
-  const builder = common.flowTools.shopping_build_product_options;
+  const presenter = flow.nodes.present_exploration;
+  const interpreter = flow.nodes.interpret_exploration_filter;
+  const builder = common.flowTools.shopping_build_product_exploration;
 
-  assert.ok(Object.hasOwn(flow.state, 'product_option_summaries'));
-  assert.ok(Object.hasOwn(flow.state, 'unresolved_product_names'));
-  assert.equal(flow.nodes.build_product_options.next.choose, 'present_product_options');
+  assert.equal(flow.nodes.build_exploration.next.present, 'present_exploration');
   assert.equal(presenter.kind, 'action_contract');
-  assert.ok(presenter.inputSelector.includes('product_option_summaries'));
+  assert.ok(presenter.inputSelector.includes('exploration_state'));
   assert.ok(presenter.inputSelector.includes('userMessages'));
-  assert.equal(presenter.next.select, 'resolve_product');
-  assert.ok(!classifier.inputSelector.includes('product_options'), 'raw option records never enter a model prompt');
-  assert.equal(builder.output.product_option_summaries, 'result.product_option_summaries');
-  assert.equal(builder.output.unresolved_product_names, 'result.unresolved_product_names');
-  assert.doesNotMatch(prompt, /identity_confidence|source_sites|source_refs|sample[_ ]prices?/i);
-  assert.match(prompt, /without a number|번호를 부여하지/i);
-  assert.match(prompt, /product_option_summaries/);
-  assert.match(prompt, /unresolved_product_names/);
-  assert.equal(common.flowTools.present_product_options.execute.implementation, 'lua');
-  assert.equal(common.flowTools.present_product_options.parameters.properties.next, undefined);
-  assert.equal(presenter.next.model, 'choose_product');
+  assert.equal(presenter.next.select, 'resolve_exploration');
   assert.equal(presenter.next.cancel, 'cancelled');
-  assert.equal(presenter.next.ask, 'present_product_options');
-  assert.equal(presenter.next.error, 'error');
-  assert.equal(presenter.fallback.invalidNext, 'error');
-  assert.equal(presenter.fallback.exhaustedNext, 'error');
-  assert.equal(presenter.kind, 'action_contract');
+  assert.equal(presenter.next.ask, 'present_exploration');
+  assert.ok(!interpreter.inputSelector.includes('exploration_state'),
+    'the facet model sees only the bounded catalog, never raw groups');
+  assert.deepEqual(interpreter.inputSelector,
+    ['exploration_filter_request', 'facet_catalog_text']);
+  assert.equal(builder.output.exploration_state, 'result.exploration_state');
+  assert.equal(typeof builder.parameters.properties.exploration_query.type, 'string');
 });
 
 test('commodity comparisons have a model-free identity contract', () => {
@@ -515,6 +509,62 @@ test('commodity comparisons have a model-free identity contract', () => {
     'the relevance gate must know that a commodity has no model-code anchor');
   assert.match(judge.prompt, /wordplay|homonym/i,
     'shared query words must not turn gifts or puns into the requested commodity');
+});
+
+test('broad product discovery uses a restorable exploration window instead of a one-shot model gate', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const nodes = flow.nodes;
+
+  for (const stateKey of [
+    'exploration_query', 'exploration_id', 'exploration_state', 'exploration_stage',
+    'exploration_page', 'choice_exploration_id', 'identity_revision', 'identity_change_request',
+  ]) {
+    assert.ok(Object.hasOwn(flow.state, stateKey), `missing exploration state: ${stateKey}`);
+  }
+  assert.ok(!Object.hasOwn(flow.state, 'exploration_pages'));
+  assert.ok(!Object.hasOwn(flow.state, 'exploration_total'));
+  assert.equal(common.flowTools.shopping_refine_product_exploration.output.exploration_stage, null,
+    'a refined snapshot must re-render before the presenter classifies another message');
+
+  assert.equal(nodes.prepare_identity.next.explore, 'discover_products');
+  assert.equal(nodes.discover_products.next.done, 'build_exploration_screen');
+  assert.equal(nodes.build_exploration.next.present, 'present_exploration');
+  assert.equal(nodes.present_exploration.kind, 'action_contract');
+  assert.equal(nodes.present_exploration.next.select, 'resolve_exploration');
+  assert.equal(nodes.present_exploration.next.refine, 'refine_exploration');
+  assert.equal(nodes.resolve_exploration.next.lock, 'search_stores');
+
+  const serialized = JSON.stringify(common);
+  for (const obsolete of [
+    'shopping_build_product_options', 'present_product_options',
+    'choose_product_identity', 'shopping_resolve_product_option',
+  ]) {
+    assert.doesNotMatch(serialized, new RegExp(`\\b${obsolete}\\b`), `obsolete choice path remains: ${obsolete}`);
+  }
+});
+
+test('changing identity from a comparison clears every stale mutation approval before restoration', () => {
+  const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const nodes = flow.nodes;
+  const presenter = nodes.present_offers;
+  const invalidator = nodes.invalidate_identity_selection;
+
+  assert.equal(presenter.next.change_identity, 'invalidate_identity_selection');
+  assert.equal(invalidator.kind, 'action_contract');
+  assert.equal(invalidator.next.restore, 'restore_exploration');
+  assert.ok(invalidator.inputSelector.includes('identity_change_request'));
+
+  const cleared = new Set(invalidator.state?.clear ?? []);
+  for (const field of [
+    'identity_id', 'identity_approval', 'comparison_id', 'comparison_state',
+    'comparison_approval', 'choice_comparison_id', 'selected_offer', 'cart_approval',
+  ]) {
+    assert.ok(cleared.has(field), `identity replacement must clear ${field}`);
+  }
+  assert.ok(!cleared.has('exploration_state'), 'the previous exploration is the return path');
+  assert.ok(!cleared.has('identity_revision'), 'the next lock increments the revision');
 });
 
 test('memory results reach a deterministic consumer response instead of the terminal model', () => {

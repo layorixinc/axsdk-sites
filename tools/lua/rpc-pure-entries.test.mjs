@@ -90,12 +90,15 @@ test('a ported command receives the keys its input block named', () => {
     'the offer must survive the rename into the verifier');
 });
 
-test('a constant in the mapping is passed through', () => {
-  // `max_options: 6` is part of the contract, not of the state.
-  const value = lua.call('AX_RPC_PURE.run', 'AX_build_product_options', {
-    discovery_results: [], discovery_query: '마우스', product_category: '마우스',
+test('identity revision crosses the pure dispatcher mapping', () => {
+  const value = lua.call('AX_RPC_PURE.run', 'AX_lock_product_identity', {
+    identity_kind: 'standardized_model',
+    identity_model: 'M185',
+    product_category: '마우스',
+    identity_revision: 4,
   });
-  assert.ok(value.next);
+  assert.equal(value.next, 'compare');
+  assert.equal(value.identity_revision, 5);
 });
 
 test('the compact post-screening summary is reachable through the runtime dispatcher', () => {
@@ -129,10 +132,10 @@ test('the runtime dispatcher preserves the commodity identity kind', () => {
     hard_constraints: { package: '한판' },
     stores: [{ site: 'coupang' }, { site: 'ssg' }],
   });
-  assert.equal(prepared.next, 'lock',
-    'the dispatcher must not erase spec_equivalent and send a commodity into model discovery');
+  assert.equal(prepared.next, 'explore',
+    'the dispatcher must preserve spec_equivalent while routing the commodity into grounded exploration');
   assert.equal(prepared.identity_kind, 'spec_equivalent');
-  assert.equal(prepared.canonical_query, '계란 한판');
+  assert.equal(prepared.exploration_query, '계란 한판');
 });
 
 test('an empty accumulator travels as absent, never as an empty table', () => {

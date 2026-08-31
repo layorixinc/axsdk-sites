@@ -284,92 +284,6 @@
     }
   },
   {
-    "name": "choose_product_identity",
-    "description": "Ask again, cancel, or record an exact user-supplied manufacturer model.",
-    "parameters": {
-      "type": "object",
-      "additionalProperties": true,
-      "required": [
-        "next"
-      ],
-      "properties": {
-        "next": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "model",
-            "cancel"
-          ]
-        },
-        "question": {
-          "type": "string"
-        },
-        "product_choice_stage": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "identity_kind": {
-          "type": [
-            "string",
-            "null"
-          ],
-          "enum": [
-            "standardized_model",
-            "spec_equivalent",
-            "unique_listing",
-            null
-          ]
-        },
-        "identity_name": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "identity_brand": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "identity_model": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "product_category": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "canonical_query": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "hard_constraints": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
-        },
-        "soft_preferences": {
-          "type": [
-            "object",
-            "null"
-          ],
-          "additionalProperties": true
-        }
-      }
-    }
-  },
-  {
     "name": "collect_quote_contact",
     "description": "Extract every supplied first name, last name, email, and phone from the complete latest user message, then ask for all still-missing contacts in the user's language. For Korean input ask in Korean, for example \"이름, 성, 이메일, 전화번호를 알려주세요.\"",
     "parameters": {
@@ -1264,6 +1178,39 @@
     }
   },
   {
+    "name": "interpret_product_exploration_filter",
+    "description": "Select one observed facet value for an otherwise-unparsed product filter.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "done",
+            "invalid"
+          ]
+        },
+        "operation": {
+          "type": "string",
+          "enum": [
+            "include",
+            "exclude"
+          ]
+        },
+        "facet": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  {
     "name": "list_memory",
     "description": "List all saved memory keys.",
     "parameters": {
@@ -1991,11 +1938,15 @@
     }
   },
   {
-    "name": "present_product_options",
-    "description": "Present safe grounded choices and classify a current number without model judgement.",
+    "name": "present_product_exploration",
+    "description": "Render the exact pre-lock product window and read its current reply deterministically.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "exploration_id",
+        "exploration_state"
+      ],
       "properties": {
         "requestText": {
           "type": [
@@ -2012,27 +1963,24 @@
             "type": "string"
           }
         },
-        "product_option_summaries": {
+        "exploration_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exploration_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exploration_stage": {
           "type": [
             "string",
             "null"
           ]
         },
-        "unresolved_product_names": {
+        "exploration_page": {
           "type": [
-            "string",
-            "null"
-          ]
-        },
-        "options_version": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "product_choice_stage": {
-          "type": [
-            "string",
+            "integer",
+            "number",
             "null"
           ]
         }
@@ -2348,6 +2296,9 @@
         },
         "note": {
           "type": "string"
+        },
+        "facets_json": {
+          "type": "string"
         }
       }
     }
@@ -2549,6 +2500,40 @@
     }
   },
   {
+    "name": "shopping_apply_exploration_screening",
+    "description": "Apply broad relevance while retaining six rows per store and verifying title facet evidence.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery_results",
+        "exploration_screening_ids",
+        "exploration_screening_keep"
+      ],
+      "properties": {
+        "discovery_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "exploration_screening_ids": {
+          "type": "string"
+        },
+        "exploration_screening_keep": {
+          "type": "string"
+        },
+        "exploration_facets_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "shopping_apply_offer_screening",
     "description": "Keep only the judged-relevant listings, apply the per-store comparison cap, and report how many rows were removed.",
     "parameters": {
@@ -2576,6 +2561,57 @@
             "string",
             "null"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_build_exploration_screening",
+    "description": "Number broad live discovery rows for one relevance and grounded-facet judgement.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "discovery_results"
+      ],
+      "properties": {
+        "discovery_results": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "product_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "identity_kind": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "standardized_model",
+            "spec_equivalent",
+            "unique_listing",
+            null
+          ]
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       }
     }
@@ -2619,14 +2655,14 @@
     }
   },
   {
-    "name": "shopping_build_product_options",
-    "description": "Group live discovery evidence into versioned, immediately lockable product choices.",
+    "name": "shopping_build_product_exploration",
+    "description": "Build the versioned restorable product exploration as one scalar flow-state snapshot.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
         "discovery_results",
-        "discovery_query",
+        "exploration_query",
         "product_category"
       ],
       "properties": {
@@ -2637,7 +2673,7 @@
             "additionalProperties": true
           }
         },
-        "discovery_query": {
+        "exploration_query": {
           "type": "string",
           "minLength": 1
         },
@@ -2645,10 +2681,16 @@
           "type": "string",
           "minLength": 1
         },
-        "requested_brand": {
+        "identity_kind": {
           "type": [
             "string",
             "null"
+          ],
+          "enum": [
+            "standardized_model",
+            "spec_equivalent",
+            "unique_listing",
+            null
           ]
         },
         "hard_constraints": {
@@ -2888,6 +2930,23 @@
     }
   },
   {
+    "name": "shopping_invalidate_identity_selection",
+    "description": "Carry one identity-change request across the state-clear boundary.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity_change_request"
+      ],
+      "properties": {
+        "identity_change_request": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  },
+  {
     "name": "shopping_lock_product_identity",
     "description": "Lock one exact manufacturer model, spec-equivalent category, or grounded unique listing into a stable comparison snapshot.",
     "parameters": {
@@ -2948,6 +3007,13 @@
             "null"
           ],
           "additionalProperties": true
+        },
+        "identity_revision": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
         },
         "identity_source_refs": {
           "type": [
@@ -3172,6 +3238,77 @@
     }
   },
   {
+    "name": "shopping_refine_product_exploration",
+    "description": "Page, filter, and sort only grounded groups from the carried exploration snapshot.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "exploration_id",
+        "exploration_state"
+      ],
+      "properties": {
+        "exploration_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exploration_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "exploration_page": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "page_command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "page_number": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "refine_request": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exploration_filter_operation": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "include",
+            "exclude",
+            null
+          ]
+        },
+        "exploration_filter_facet": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exploration_filter_value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
     "name": "shopping_refine_store_offers",
     "description": "Move the comparison window, or filter and sort the listing, from the user's own words.",
     "parameters": {
@@ -3250,45 +3387,33 @@
     }
   },
   {
-    "name": "shopping_resolve_product_option",
-    "description": "Resolve one current discovery option and create a locked identity only from its grounded evidence.",
+    "name": "shopping_resolve_product_exploration",
+    "description": "Resolve one current exploration number into a new identity revision, never cart approval.",
     "parameters": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "product_options",
-        "options_version",
-        "choice_options_version"
+        "exploration_id",
+        "exploration_state",
+        "choice_exploration_id"
       ],
       "properties": {
-        "product_options": {
-          "type": "array",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "options_version": {
+        "exploration_id": {
           "type": "string",
           "minLength": 1
         },
-        "product_choice_index": {
+        "exploration_state": {
+          "type": "string",
+          "minLength": 1
+        },
+        "choice_exploration_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "choice_exploration_index": {
           "type": [
             "integer",
             "number",
-            "null"
-          ]
-        },
-        "product_choice_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "choice_options_version": {
-          "type": [
-            "string",
             "null"
           ]
         },
@@ -3305,6 +3430,13 @@
             "null"
           ],
           "additionalProperties": true
+        },
+        "identity_revision": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
         }
       }
     }
@@ -3357,6 +3489,95 @@
             "integer",
             "number"
           ]
+        }
+      }
+    }
+  },
+  {
+    "name": "shopping_restore_product_exploration",
+    "description": "Restore a retained exploration, resolve a named known model, or restart its saved broad query.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity_change_request",
+        "exploration_query"
+      ],
+      "properties": {
+        "exploration_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exploration_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "exploration_query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_change_request": {
+          "type": "string",
+          "minLength": 1
+        },
+        "identity_revision": {
+          "type": [
+            "integer",
+            "number",
+            "null"
+          ]
+        },
+        "discovery_sites": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "product_category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requested_brand": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "query_variants": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "brand_aliases": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hard_constraints": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "soft_preferences": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       }
     }

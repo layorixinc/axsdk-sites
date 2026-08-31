@@ -115,16 +115,17 @@ planner:
     collected, and a refusal belongs to this flow's own cancel branch.
 
     If activeFlow=shopping_multi_store_total_cost and activeNode is present_offers, browse_offers,
-    present_product_options or choose_product, a numbered list is on screen and the latest message is almost always the user answering it.
-    Use continue_current with that flow first — and copy the message verbatim into segments and
-    state.requestText — for a bare number ("2번", "3"), a page move ("다음", "이전", "3페이지", "more"), and
-    ANY narrowing/sorting/unfolding phrase about the SAME product ("무료배송만", "3만원 이하만 보여줘",
-    "평점 높은 순", "쿠팡 것만", "미확인 포함", "필터 해제"). Those read like new shopping requests but they
-    are answers: replacing the flow throws away the comparison the user is looking at and its numbering. Never ask for clarification
-    while that listing is on screen — asking "어떤 제품을 비교하고 싶으신가요?" discards
-    it exactly as replacing it would. The decidable test: if the message names no product and no other task, it
-    is an ANSWER, whatever else it looks like. Use replace_current only when the message names a DIFFERENT
-    product or a different task (a service quote, checkout, memory, farewell).
+    present_exploration, refine_exploration, interpret_exploration_filter, or restore_exploration, a numbered
+    product or offer list is on screen and the latest message is almost always the user answering it. Use
+    continue_current with that flow first — and copy the message verbatim into segments and state.requestText —
+    for a bare number ("2번", "3"), a page move ("다음", "이전", "3페이지", "more"), any narrowing/sorting phrase,
+    and an identity change inside the SAME product family ("다른 모델", "검색 결과로 돌아가", "M185 말고 M240",
+    "다른 색상", "256GB 말고 512GB", "특란 말고 대란"). A locked identity is replaceable: the flow invalidates
+    its old comparison and approval markers before restoring the pre-lock exploration or issuing a new lock.
+    These messages read like new shopping requests but are answers; replacing the flow throws away the snapshot
+    and the numbers the user is looking at. If it names no product, or only a product in the SAME category,
+    never ask for clarification; the active deterministic node classifies it. Use replace_current only when
+    the message names a materially DIFFERENT product category or a different task (service quote, checkout, memory, farewell).
 
     CART REMOVAL FOLLOW-UP: if activeFlow=cart_remove_item and activeNode is present, the cart's own lines
     are on screen numbered and the latest message is the user answering it. Always use continue_current with
@@ -1512,26 +1513,38 @@ flows:
       identity_model: null
       identity_name: null
       identity_id: null
+      identity_revision: 0
       identity_fingerprint: null
       identity_approval: null
       canonical_query: null
       locked_hard_constraints: null
       locked_soft_preferences: null
       identity_source_refs: null
+      exploration_query: null
       discovery_query: null
       discovery_sites: null
       discovery_results: null
-      discovery_failures: null
-      product_options: null
-      product_option_summaries: null
-      unresolved_product_names: null
-      options_version: null
-      product_choice_stage: null
-      product_choice_index: null
-      product_choice_id: null
-      choice_options_version: null
-      selected_option: null
-      selected_option_id: null
+      exploration_screening_text: null
+      exploration_screening_ids: null
+      exploration_screening_count: null
+      exploration_screening_keep: null
+      exploration_facets_json: null
+      exploration_id: null
+      exploration_state: null
+      exploration_stage: null
+      exploration_page: null
+      exploration_filter_request: null
+      exploration_filter_error: null
+      exploration_filter_operation: null
+      exploration_filter_facet: null
+      exploration_filter_value: null
+      facet_catalog_text: null
+      choice_exploration_id: null
+      choice_exploration_index: null
+      selected_exploration_group: null
+      selected_exploration_group_id: null
+      selected_exploration_id: null
+      identity_change_request: null
       selection_error: null
       store_results: null
       screening_text: null
@@ -1744,7 +1757,7 @@ flows:
           - soft_preferences
           - stores
         next:
-          discover: discover_products
+          explore: discover_products
           lock: lock_requested_identity
           ask_scope: error
           error: error
@@ -1765,9 +1778,10 @@ flows:
           - hard_constraints
           - soft_preferences
           - identity_source_refs
+          - identity_revision
         next:
           compare: search_stores
-          invalid: choose_product
+          invalid: error
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -1787,115 +1801,187 @@ flows:
           - brand_aliases
           - hard_constraints
         next:
-          done: build_product_options
-          partial: build_product_options
+          done: build_exploration_screen
+          partial: build_exploration_screen
           empty: no_results
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
-      build_product_options:
+      build_exploration_screen:
         kind: action_contract
-        id: shopping_build_product_options
-        description: Deterministically group grounded discovery listings into
-          immediately lockable manufacturer-model or exact-listing choices.
+        id: shopping_build_exploration_screening
+        description: Number every grounded discovery row before one bounded relevance and facet judgement.
         inputSelector:
           - discovery_results
-          - discovery_query
           - product_category
+          - identity_kind
           - requested_brand
           - hard_constraints
-          - soft_preferences
         next:
-          choose: present_product_options
+          judge: judge_exploration
           empty: no_results
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
-
-      present_product_options:
-        kind: action_contract
-        id: present_product_options
-        description: Render consumer-safe, immediately lockable numbered product
-          choices; pause once and classify a number or cancellation deterministically.
-        inputSelector:
-          - requestText
-          - userMessages
-          - product_option_summaries
-          - unresolved_product_names
-          - options_version
-          - product_choice_stage
-        next:
-          ask: present_product_options
-          select: resolve_product
-          model: choose_product
-          cancel: cancelled
-          error: error
-        fallback: { invalidNext: error, exhaustedNext: error }
-
-      choose_product:
+      judge_exploration:
         kind: action_unit
-        messagePolicy: { currentUserText: active_node_only }
-        description: Interpret only a non-number product-model refinement or recover
-          from an invalid/stale selection. The deterministic presenter owns the list
-          and all current-number choices.
+        description: Keep real products from the broad search and attach only title-evidenced product facets.
         inputSelector:
-          - requestText
-          - product_option_summaries
-          - unresolved_product_names
-          - options_version
-          - product_choice_stage
-          - selection_error
-          - requested_brand
+          - exploration_screening_text
+          - exploration_screening_count
           - product_category
+          - identity_kind
+          - requested_brand
           - hard_constraints
-          - soft_preferences
-        allowedTools: [ choose_product_identity ]
+        allowedTools: [ screen_store_offers ]
         prompt: |-
-          You are the product-identity refinement gate. Call choose_product_identity exactly once.
-          A deterministic presenter already showed `product_option_summaries`, whose numbered lines are
-          immediately selectable grounded models or exact live listings. `unresolved_product_names`
-          contains observations that could not be grounded and were shown without a number.
+          You are the product-exploration relevance and facet gate. Call screen_store_offers exactly once.
+          Keep rows in the requested category. Drop accessories, services, coupons, empty boxes, unrelated
+          categories, and rows contradicting hard_constraints. Variants remain choices unless explicitly constrained.
 
-          Never repeat field names, JSON, confidence labels, wire errors, raw records, or price samples.
-          Never invent or extract a model from a URL.
-          - Clear cancellation -> next="cancel".
-          - An exact manufacturer model supplied by the user -> next="model",
-            identity_kind="standardized_model", identity_brand=<only a stated/current grounded brand>,
-            identity_model=<exact user model>, product_category=<current category>,
-            canonical_query=<brand + model + category>, hard_constraints=<current constraints>,
-            soft_preferences=<current preferences>.
-          - Otherwise use next="ask" and product_choice_stage=null. The deterministic presenter will show
-            the same safe numbered list again and explain any observation that remains without a number.
+          Return keep as the comma-separated numbers to keep. Also return facets_json as ONE JSON OBJECT string:
+          {"<site>:<product_id>":{"<facet>":{"value":"<normalized value>","evidence":"<exact title text>"}}}
+          Use only shown ids and title facts. evidence must be an exact contiguous substring of the row title.
+          Useful facets: brand, model, color, size, capacity, count, form, preparation, grade, condition.
+          Omit uncertain facets; never infer an unseen attribute. Price, shipping, store, and rating are not facets.
+          With no safe facet, use facets_json="{}". Never explain the verdict to the user.
         next:
-          ask: present_product_options
-          model: lock_requested_identity
-          cancel: cancelled
+          done: apply_exploration_screen
           error: error
         fallback:
           {
             invalidNext: error,
             exhaustedNext: error,
-            maxStalledSteps: 3,
-            stalledNext: cancel
+            maxStalledSteps: 2,
+            stalledNext: error
           }
 
-      resolve_product:
+      apply_exploration_screen:
         kind: action_contract
-        id: shopping_resolve_product_option
-        description: Validate the current discovery snapshot and lock only the selected
-          grounded model identity.
+        id: shopping_apply_exploration_screening
+        description: Apply the grounded relevance verdict and verify every proposed facet against its title.
         inputSelector:
-          - product_options
-          - options_version
-          - product_choice_index
-          - product_choice_id
-          - choice_options_version
+          - discovery_results
+          - exploration_screening_ids
+          - exploration_screening_keep
+          - exploration_facets_json
+        next:
+          done: build_exploration
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      build_exploration:
+        kind: action_contract
+        id: shopping_build_product_exploration
+        description: Group screened rows into a versioned, restorable pre-lock product exploration.
+        inputSelector:
+          - discovery_results
+          - exploration_query
+          - product_category
+          - identity_kind
           - hard_constraints
           - soft_preferences
         next:
+          present: present_exploration
+          empty: no_results
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      present_exploration:
+        kind: action_contract
+        id: present_product_exploration
+        description: Render the current exploration, pause on it, and classify its user's reply deterministically.
+        inputSelector:
+          - requestText
+          - userMessages
+          - exploration_id
+          - exploration_state
+          - exploration_stage
+          - exploration_page
+        next:
+          ask: present_exploration
+          select: resolve_exploration
+          page: refine_exploration
+          refine: refine_exploration
+          cancel: cancelled
+          restart: collect_request
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      refine_exploration:
+        kind: action_contract
+        id: shopping_refine_product_exploration
+        description: Page, filter, or sort the exploration without a new store search.
+        inputSelector:
+          - exploration_id
+          - exploration_state
+          - exploration_page
+          - page_command
+          - page_number
+          - refine_request
+        next:
+          ask: present_exploration
+          interpret: interpret_exploration_filter
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      interpret_exploration_filter:
+        kind: action_unit
+        messagePolicy: { currentUserText: active_node_only }
+        description: Map one unparsed product phrase onto the closed facet catalog, never onto raw offers.
+        inputSelector:
+          - exploration_filter_request
+          - facet_catalog_text
+        allowedTools: [ interpret_product_exploration_filter ]
+        prompt: |-
+          Call interpret_product_exploration_filter exactly once. Map exploration_filter_request to ONE value
+          that appears verbatim in facet_catalog_text. Use operation="include" for "only/include/show" and
+          operation="exclude" for "exclude/without/not". Copy facet and value exactly from the catalog.
+          If no unique grounded value matches, use next="invalid". Never invent a facet or value.
+        next:
+          done: apply_interpreted_exploration_filter
+          invalid: present_exploration
+          error: error
+        fallback:
+          {
+            invalidNext: error,
+            exhaustedNext: error,
+            maxStalledSteps: 2,
+            stalledNext: error
+          }
+
+      apply_interpreted_exploration_filter:
+        kind: action_contract
+        id: shopping_refine_product_exploration
+        description: Validate and apply the model-selected catalog value deterministically.
+        inputSelector:
+          - exploration_id
+          - exploration_state
+          - exploration_filter_operation
+          - exploration_filter_facet
+          - exploration_filter_value
+        next:
+          ask: present_exploration
+          interpret: present_exploration
+          error: error
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      resolve_exploration:
+        kind: action_contract
+        id: shopping_resolve_product_exploration
+        description: Lock only a number from the current exploration; never create cart approval.
+        inputSelector:
+          - exploration_id
+          - exploration_state
+          - choice_exploration_id
+          - choice_exploration_index
+          - hard_constraints
+          - soft_preferences
+          - identity_revision
+        next:
           lock: search_stores
-          enrich: choose_product
-          invalid: choose_product
+          invalid: present_exploration
           error: error
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -2109,8 +2195,103 @@ flows:
           select: resolve_offer
           page: browse_offers
           refine: browse_offers
+          change_identity: invalidate_identity_selection
           cancel: cancelled
           restart: restarted
+          error: comparison_lost
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      invalidate_identity_selection:
+        kind: action_contract
+        id: shopping_invalidate_identity_selection
+        description: Invalidate the current lock, comparison numbers, and cart approvals before model replacement.
+        inputSelector:
+          - identity_change_request
+        state:
+          clear:
+            - query
+            - requested_model
+            - identity_status
+            - identity_kind
+            - identity_brand
+            - identity_model
+            - identity_name
+            - identity_id
+            - identity_fingerprint
+            - identity_approval
+            - canonical_query
+            - locked_hard_constraints
+            - locked_soft_preferences
+            - identity_source_refs
+            - store_results
+            - screening_text
+            - screening_ids
+            - screening_count
+            - screening_keep
+            - screened_out
+            - verified_offers
+            - store_outcomes
+            - store_outcome_response
+            - offers
+            - failures
+            - comparison_id
+            - comparison_state
+            - comparison_approval
+            - comparison_text
+            - store_status
+            - all_offers
+            - view_sort
+            - view_page
+            - view_pages
+            - view_total
+            - page_command
+            - page_number
+            - refine_request
+            - refine_error
+            - incomplete_count
+            - choice_stage
+            - choice_index
+            - choice_comparison_id
+            - selected_offer
+            - selected_rank
+            - site
+            - product_id
+            - product_name
+            - expected_unit_price
+            - expected_currency
+            - expected_identity_model
+            - approved_total_base
+            - cart_approval
+            - cart_status
+            - cart_error
+            - cart_stage
+            - cart_confirmation
+        next:
+          restore: restore_exploration
+          error: comparison_lost
+        fallback: { invalidNext: error, exhaustedNext: error }
+
+      restore_exploration:
+        kind: action_contract
+        id: shopping_restore_product_exploration
+        description: Restore the prior exploration, select a named known model, or run the saved broad query.
+        inputSelector:
+          - exploration_id
+          - exploration_state
+          - exploration_query
+          - identity_change_request
+          - identity_revision
+          - discovery_sites
+          - product_category
+          - requested_brand
+          - query_variants
+          - brand_aliases
+          - hard_constraints
+          - soft_preferences
+        next:
+          present: present_exploration
+          select: resolve_exploration
+          search: discover_products
           error: comparison_lost
         fallback: { invalidNext: error, exhaustedNext: error }
 
@@ -2676,6 +2857,7 @@ flowTools:
       product_category: result.product_category
       identity_brand: result.identity_brand
       identity_model: result.identity_model
+      exploration_query: result.exploration_query
       discovery_query: result.discovery_query
       discovery_sites: result.discovery_sites
       canonical_query: result.canonical_query
@@ -2752,6 +2934,7 @@ flowTools:
       next: result.next
       identity_status: result.identity_status
       identity_id: result.identity_id
+      identity_revision: result.identity_revision
       identity_fingerprint: result.identity_fingerprint
       identity_kind: result.identity_kind
       identity_name: result.identity_name
@@ -2778,6 +2961,7 @@ flowTools:
         canonical_query: { type: [ string, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
         soft_preferences: { type: [ object, "null" ], additionalProperties: true }
+        identity_revision: { type: [ integer, number, "null" ] }
         identity_source_refs:
           {
             type: [ array, "null" ],
@@ -2863,12 +3047,11 @@ flowTools:
         brand_aliases: { type: [ string, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
 
-  shopping_build_product_options:
-    description: Group live discovery evidence into versioned, immediately lockable product choices.
+  shopping_build_exploration_screening:
+    description: Number broad live discovery rows for one relevance and grounded-facet judgement.
     execute:
       kind: runtime
       implementation: lua
-      # No rpc block: this command never touches the browser, so it is granted no ops.
       modules:
         [
           "_common.00_base",
@@ -2881,164 +3064,81 @@ flowTools:
           "_common.53_verify",
           "_common.54_comparison",
           "_common.55_offers",
-          "_common.56_store_io",
-          "_common.63_pure_entries"
+          "_common.56_store_io"
         ]
       entry: run
       lua: |
         function run(args)
-          return AX_RPC_PURE.run("AX_build_product_options", args)
+          return AX_build_offer_screening({ store_results = args.discovery_results })
         end
     output:
       next: result.next
-      product_options: result.options
-      options_version: result.options_version
-      product_option_summaries: result.product_option_summaries
-      unresolved_product_names: result.unresolved_product_names
-      discovery_failures: result.failures
-      product_choice_stage: null
-      selection_error: null
+      exploration_screening_text: result.screening_text
+      exploration_screening_ids: result.screening_ids
+      exploration_screening_count: result.screening_count
     parameters:
       type: object
       additionalProperties: false
-      required: [ discovery_results, discovery_query, product_category ]
+      required: [ discovery_results ]
       properties:
         discovery_results: { type: array, items: { type: object, additionalProperties: true } }
-        discovery_query: { type: string, minLength: 1 }
-        product_category: { type: string, minLength: 1 }
-        requested_brand: { type: [ string, "null" ] }
-        hard_constraints: { type: [ object, "null" ], additionalProperties: true }
-        soft_preferences: { type: [ object, "null" ], additionalProperties: true }
-
-  present_product_options:
-    description: Present safe grounded choices and classify a current number without model judgement.
-    execute:
-      kind: runtime
-      implementation: lua
-      lua: |
-        local function current_text()
-          local messages = args.userMessages
-          if type(messages) == "table" then
-            for index = #messages, 1, -1 do
-              if type(messages[index]) == "string" and messages[index] ~= "" then return messages[index] end
-            end
-          end
-          return type(args.requestText) == "string" and args.requestText or ""
-        end
-        local function is_cancel(text)
-          local lowered = tostring(text or ""):lower()
-          local words = {
-            "취소", "그만", "됐어", "안 할래", "안할래",
-            "cancel", "never mind", "nevermind", "no thanks", "stop"
-          }
-          for index = 1, #words do
-            if lowered:find(words[index], 1, true) then return true end
-          end
-          return false
-        end
-        local function selected_number(text)
-          local value = tostring(text or ""):gsub("^%s+", ""):gsub("%s+$", "")
-          local number = value:match("^(%d+)$") or value:match("^(%d+)%s*번$")
-            or value:lower():match("^option%s+(%d+)$")
-          return number and tonumber(number) or nil
-        end
-        local function has_korean(text)
-          text = tostring(text or "")
-          for index = 1, #text do
-            local byte = text:byte(index)
-            if byte and byte >= 234 and byte <= 237 then return true end
-          end
-          return false
-        end
-        if args.product_choice_stage == "asked" then
-          local text = current_text()
-          if is_cancel(text) then return { next = "cancel" } end
-          local choice = selected_number(text)
-          if choice then
-            return {
-              next = "select",
-              product_choice_index = choice,
-              choice_options_version = args.options_version,
-            }
-          end
-          return { next = "model", product_choice_stage = "asked" }
-        end
-
-        local summaries = type(args.product_option_summaries) == "string"
-          and args.product_option_summaries or ""
-        local unresolved = type(args.unresolved_product_names) == "string"
-          and args.unresolved_product_names or ""
-        if summaries == "" and unresolved == "" then return { next = "error" } end
-
-        local korean = has_korean(args.requestText)
-        local parts = {}
-        if summaries ~= "" then
-          parts[#parts + 1] = korean and "비교 가능한 상품 후보와 확인된 판매처:" or "Comparable product choices and observed stores:"
-          parts[#parts + 1] = summaries
-        end
-        if unresolved ~= "" then
-          parts[#parts + 1] = korean
-            and "근거가 부족해 번호를 부여하지 않은 검색 결과:"
-            or "Search results without enough evidence (shown without a number):"
-          parts[#parts + 1] = unresolved
-        end
-        parts[#parts + 1] = korean
-          and "비교할 번호나 정확한 제조사 모델명을 입력해 주세요. 취소하려면 '취소'라고 입력하세요."
-          or "Choose a number or enter the exact manufacturer model. Type 'cancel' to stop."
-        return {
-          next = "ask",
-          question = table.concat(parts, "\n"),
-          product_choice_stage = "asked",
-        }
-    output:
-      next: result.next
-      question: result.question
-      product_choice_stage: result.product_choice_stage
-      product_choice_index: result.product_choice_index
-      choice_options_version: result.choice_options_version
-    parameters:
-      type: object
-      additionalProperties: false
-      properties:
-        requestText: { type: [ string, "null" ] }
-        userMessages: { type: [ array, "null" ], items: { type: string } }
-        product_option_summaries: { type: [ string, "null" ] }
-        unresolved_product_names: { type: [ string, "null" ] }
-        options_version: { type: [ string, "null" ] }
-        product_choice_stage: { type: [ string, "null" ] }
-
-  choose_product_identity:
-    description: Ask again, cancel, or record an exact user-supplied manufacturer model.
-    execute: { kind: runtime, implementation: passthrough }
-    output: tool.args
-    parameters:
-      type: object
-      additionalProperties: true
-      required: [ next ]
-      properties:
-        next: { type: string, enum: [ ask, model, cancel ] }
-        question: { type: string }
-        product_choice_stage: { type: [ string, "null" ] }
+        product_category: { type: [ string, "null" ] }
         identity_kind:
           {
             type: [ string, "null" ],
             enum: [ standardized_model, spec_equivalent, unique_listing, null ]
           }
-        identity_name: { type: [ string, "null" ] }
-        identity_brand: { type: [ string, "null" ] }
-        identity_model: { type: [ string, "null" ] }
-        product_category: { type: [ string, "null" ] }
-        canonical_query: { type: [ string, "null" ] }
+        requested_brand: { type: [ string, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
-        soft_preferences: { type: [ object, "null" ], additionalProperties: true }
 
-  shopping_resolve_product_option:
-    description: Resolve one current discovery option and create a locked identity
-      only from its grounded evidence.
+  shopping_apply_exploration_screening:
+    description: Apply broad relevance while retaining six rows per store and verifying title facet evidence.
     execute:
       kind: runtime
       implementation: lua
-      # No rpc block: this command never touches the browser, so it is granted no ops.
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.50_commerce_core",
+          "_common.51_relevance",
+          "_common.52_identity",
+          "_common.53_verify",
+          "_common.54_comparison",
+          "_common.55_offers",
+          "_common.56_store_io"
+        ]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_apply_exploration_screening({
+            store_results = args.discovery_results,
+            screening_ids = args.exploration_screening_ids,
+            keep = args.exploration_screening_keep,
+            facets_json = args.exploration_facets_json
+          })
+        end
+    output:
+      next: result.next
+      discovery_results: result.store_results
+      screened_out: result.screened_out
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ discovery_results, exploration_screening_ids, exploration_screening_keep ]
+      properties:
+        discovery_results: { type: array, items: { type: object, additionalProperties: true } }
+        exploration_screening_ids: { type: string }
+        exploration_screening_keep: { type: string }
+        exploration_facets_json: { type: [ string, "null" ] }
+
+  shopping_build_product_exploration:
+    description: Build the versioned restorable product exploration as one scalar flow-state snapshot.
+    execute:
+      kind: runtime
+      implementation: lua
       modules:
         [
           "_common.00_base",
@@ -3052,21 +3152,189 @@ flowTools:
           "_common.54_comparison",
           "_common.55_offers",
           "_common.56_store_io",
-          "_common.63_pure_entries"
+          "_common.73_rpc_offers"
         ]
       entry: run
       lua: |
         function run(args)
-          return AX_RPC_PURE.run("AX_resolve_product_option", args)
+          return AX_RPC_OFFERS.build_exploration(args)
+        end
+    output:
+      next: result.next
+      exploration_id: result.exploration_id
+      exploration_state: result.exploration_state
+      exploration_stage: null
+      exploration_page: result.exploration_page
+      selection_error: null
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ discovery_results, exploration_query, product_category ]
+      properties:
+        discovery_results: { type: array, items: { type: object, additionalProperties: true } }
+        exploration_query: { type: string, minLength: 1 }
+        product_category: { type: string, minLength: 1 }
+        identity_kind:
+          {
+            type: [ string, "null" ],
+            enum: [ standardized_model, spec_equivalent, unique_listing, null ]
+          }
+        hard_constraints: { type: [ object, "null" ], additionalProperties: true }
+        soft_preferences: { type: [ object, "null" ], additionalProperties: true }
+
+  present_product_exploration:
+    description: Render the exact pre-lock product window and read its current reply deterministically.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.50_commerce_core",
+          "_common.51_relevance",
+          "_common.52_identity",
+          "_common.53_verify",
+          "_common.54_comparison",
+          "_common.55_offers",
+          "_common.56_store_io",
+          "_common.73_rpc_offers"
+        ]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.present_exploration(args)
+        end
+    output:
+      next: result.next
+      question: result.question
+      exploration_id: result.exploration_id
+      exploration_state: result.exploration_state
+      exploration_stage: result.exploration_stage
+      exploration_page: result.exploration_page
+      choice_exploration_id: result.choice_exploration_id
+      choice_exploration_index: result.choice_index
+      page_command: result.page_command
+      page_number: result.page_number
+      refine_request: result.refine_request
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ exploration_id, exploration_state ]
+      properties:
+        requestText: { type: [ string, "null" ] }
+        userMessages: { type: [ array, "null" ], items: { type: string } }
+        exploration_id: { type: string, minLength: 1 }
+        exploration_state: { type: string, minLength: 1 }
+        exploration_stage: { type: [ string, "null" ] }
+        exploration_page: { type: [ integer, number, "null" ] }
+
+  shopping_refine_product_exploration:
+    description: Page, filter, and sort only grounded groups from the carried exploration snapshot.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.50_commerce_core",
+          "_common.51_relevance",
+          "_common.52_identity",
+          "_common.53_verify",
+          "_common.54_comparison",
+          "_common.55_offers",
+          "_common.56_store_io",
+          "_common.73_rpc_offers"
+        ]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.refine_exploration(args)
+        end
+    output:
+      next: result.next
+      exploration_id: result.exploration_id
+      exploration_state: result.exploration_state
+      exploration_stage: null
+      exploration_page: result.exploration_page
+      exploration_filter_request: result.exploration_filter_request
+      exploration_filter_error: result.error
+      facet_catalog_text: result.facet_catalog_text
+      page_command: null
+      page_number: null
+      refine_request: null
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ exploration_id, exploration_state ]
+      properties:
+        exploration_id: { type: string, minLength: 1 }
+        exploration_state: { type: string, minLength: 1 }
+        exploration_page: { type: [ integer, number, "null" ] }
+        page_command: { type: [ string, "null" ] }
+        page_number: { type: [ integer, number, "null" ] }
+        refine_request: { type: [ string, "null" ] }
+        exploration_filter_operation: { type: [ string, "null" ], enum: [ include, exclude, null ] }
+        exploration_filter_facet: { type: [ string, "null" ] }
+        exploration_filter_value: { type: [ string, "null" ] }
+
+  interpret_product_exploration_filter:
+    description: Select one observed facet value for an otherwise-unparsed product filter.
+    execute: { kind: runtime, implementation: passthrough }
+    output:
+      next: tool.args.next
+      exploration_filter_operation: tool.args.operation
+      exploration_filter_facet: tool.args.facet
+      exploration_filter_value: tool.args.value
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ next ]
+      properties:
+        next: { type: string, enum: [ done, invalid ] }
+        operation: { type: string, enum: [ include, exclude ] }
+        facet: { type: string }
+        value: { type: string }
+
+  shopping_resolve_product_exploration:
+    description: Resolve one current exploration number into a new identity revision, never cart approval.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.50_commerce_core",
+          "_common.51_relevance",
+          "_common.52_identity",
+          "_common.53_verify",
+          "_common.54_comparison",
+          "_common.55_offers",
+          "_common.56_store_io",
+          "_common.73_rpc_offers"
+        ]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.resolve_exploration(args)
         end
     output:
       next: result.next
       selection_error: result.error
-      product_choice_stage: result.next
-      selected_option: result.selected_option
-      selected_option_id: result.selected_option_id
+      selected_exploration_group: result.selected_exploration_group
+      selected_exploration_group_id: result.selected_exploration_group_id
+      selected_exploration_id: result.selected_exploration_id
       identity_status: result.identity_status
       identity_id: result.identity_id
+      identity_revision: result.identity_revision
       identity_fingerprint: result.identity_fingerprint
       identity_kind: result.identity_kind
       identity_name: result.identity_name
@@ -3079,23 +3347,19 @@ flowTools:
       locked_soft_preferences: result.locked_soft_preferences
       identity_source_refs: result.identity_source_refs
       identity_approval: result.identity_approval
+      exploration_stage: null
     parameters:
       type: object
       additionalProperties: false
-      required: [ product_options, options_version, choice_options_version ]
+      required: [ exploration_id, exploration_state, choice_exploration_id ]
       properties:
-        product_options:
-          {
-            type: array,
-            minItems: 1,
-            items: { type: object, additionalProperties: true }
-          }
-        options_version: { type: string, minLength: 1 }
-        product_choice_index: { type: [ integer, number, "null" ] }
-        product_choice_id: { type: [ string, "null" ] }
-        choice_options_version: { type: [ string, "null" ] }
+        exploration_id: { type: string, minLength: 1 }
+        exploration_state: { type: string, minLength: 1 }
+        choice_exploration_id: { type: string, minLength: 1 }
+        choice_exploration_index: { type: [ integer, number, "null" ] }
         hard_constraints: { type: [ object, "null" ], additionalProperties: true }
         soft_preferences: { type: [ object, "null" ], additionalProperties: true }
+        identity_revision: { type: [ integer, number, "null" ] }
 
   shopping_search_stores:
     description: Run the real store-search subflow for every selected store using
@@ -3519,6 +3783,8 @@ flowTools:
     output:
       next: tool.args.next
       screening_keep: tool.args.keep
+      exploration_screening_keep: tool.args.keep
+      exploration_facets_json: tool.args.facets_json
     parameters:
       type: object
       additionalProperties: false
@@ -3527,6 +3793,7 @@ flowTools:
         next: { type: string, enum: [ done ] }
         keep: { type: string }
         note: { type: string }
+        facets_json: { type: string }
 
   shopping_apply_offer_screening:
     description: Keep only the judged-relevant listings, apply the per-store
@@ -3757,6 +4024,7 @@ flowTools:
       refine_request: result.refine_request
       choice_index: result.choice_index
       choice_comparison_id: result.choice_comparison_id
+      identity_change_request: result.identity_change_request
     parameters:
       type: object
       additionalProperties: false
@@ -3775,6 +4043,80 @@ flowTools:
         # projects an action_contract's arguments through this schema, and an `input:` block on a runtime
         # tool is a compile error. Nullable and not required: the first pass has no listing yet.
         comparison_state: { type: [ string, "null" ] }
+
+  shopping_invalidate_identity_selection:
+    description: Carry one identity-change request across the state-clear boundary.
+    execute:
+      kind: runtime
+      implementation: lua
+      lua: |
+        function run(args)
+          return { next = "restore", identity_change_request = args.identity_change_request }
+        end
+    output:
+      next: result.next
+      identity_change_request: result.identity_change_request
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ identity_change_request ]
+      properties:
+        identity_change_request: { type: string, minLength: 1 }
+
+  shopping_restore_product_exploration:
+    description: Restore a retained exploration, resolve a named known model, or restart its saved broad query.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules:
+        [
+          "_common.00_base",
+          "_common.44_pagination",
+          "_common.45_offer_view",
+          "_common.46_candidate_browser",
+          "_common.50_commerce_core",
+          "_common.51_relevance",
+          "_common.52_identity",
+          "_common.53_verify",
+          "_common.54_comparison",
+          "_common.55_offers",
+          "_common.56_store_io",
+          "_common.73_rpc_offers"
+        ]
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_OFFERS.restore_exploration(args)
+        end
+    output:
+      next: result.next
+      query: result.query
+      discovery_query: result.discovery_query
+      exploration_query: result.exploration_query
+      exploration_id: result.exploration_id
+      exploration_state: result.exploration_state
+      exploration_stage: null
+      exploration_page: result.exploration_page
+      choice_exploration_id: result.choice_exploration_id
+      choice_exploration_index: result.choice_index
+      selection_error: result.error
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ identity_change_request, exploration_query ]
+      properties:
+        exploration_id: { type: [ string, "null" ] }
+        exploration_state: { type: [ string, "null" ] }
+        exploration_query: { type: string, minLength: 1 }
+        identity_change_request: { type: string, minLength: 1 }
+        identity_revision: { type: [ integer, number, "null" ] }
+        discovery_sites: { type: [ array, "null" ], items: { type: object, additionalProperties: true } }
+        product_category: { type: [ string, "null" ] }
+        requested_brand: { type: [ string, "null" ] }
+        query_variants: { type: [ string, "null" ] }
+        brand_aliases: { type: [ string, "null" ] }
+        hard_constraints: { type: [ object, "null" ], additionalProperties: true }
+        soft_preferences: { type: [ object, "null" ], additionalProperties: true }
 
   shopping_refine_store_offers:
     description: Move the comparison window, or filter and sort the listing, from

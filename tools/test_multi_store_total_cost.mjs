@@ -432,8 +432,8 @@ tests.push(['identity preparation discovers broad products and locks explicit mo
       { site: 'ssg' },
     ],
   });
-  assert(broad.next === 'discover' && broad.identity_status === 'family', 'brand plus category should enter discovery', broad);
-  assert(broad.discovery_query === 'Logitech wireless mouse', 'discovery query should preserve grounded product scope', broad);
+  assert(broad.next === 'explore' && broad.identity_status === 'family', 'brand plus category should enter exploration', broad);
+  assert(broad.exploration_query === 'Logitech wireless mouse', 'exploration query should preserve grounded product scope', broad);
   assert(broad.discovery_sites?.map(item => item.site).join(',') ===
     'amazon,walmart,ebay,aliexpress,etsy,coupang,naver-shopping,gmarket,11st,ssg',
   'discovery should queue every selected supported store in request order', broad);
@@ -449,7 +449,7 @@ tests.push(['identity preparation discovers broad products and locks explicit mo
   assert(missing.next === 'ask_scope' && missing.identity_status === 'missing', 'missing category should ask before searching', missing);
 }]);
 
-tests.push(['commodity identity locks comparable specs without inventing a model', () => {
+tests.push(['commodity identity explores comparable specs without inventing a model', () => {
   withoutNet();
   const prepared = lua.call('AX_prepare_product_identity', {
     identity_kind: 'spec_equivalent',
@@ -458,15 +458,12 @@ tests.push(['commodity identity locks comparable specs without inventing a model
     hard_constraints: { package_form: '한판' },
     stores: [{ site: 'coupang' }, { site: 'gmarket' }],
   });
-  assert(prepared.next === 'lock', 'a commodity request should not enter manufacturer-model discovery', prepared);
+  assert(prepared.next === 'explore', 'a commodity request should browse grounded spec groups before locking', prepared);
   assert(prepared.identity_kind === 'spec_equivalent' && prepared.identity_model === undefined,
     'spec equivalence must stay model-free', prepared);
-  assert(prepared.canonical_query === '계란 한판', 'the user wording remains the comparison query', prepared);
-
-  const locked = lua.call('AX_lock_product_identity', prepared);
-  assert(locked.next === 'compare' && locked.identity_kind === 'spec_equivalent',
-    'category plus grounded specs should lock directly', locked);
-  assert(locked.identity_id && locked.identity_model === undefined, 'the lock needs no invented model', locked);
+  assert(prepared.exploration_query === '계란 한판', 'the user wording remains the exploration query', prepared);
+  assert(prepared.discovery_sites?.map(item => item.site).join(',') === 'coupang,gmarket',
+    'commodity exploration keeps the selected store frontier', prepared);
 }]);
 
 
@@ -559,23 +556,27 @@ tests.push(['localized discovery rejects unrelated listings and preserves observ
   assert(result.candidates.length === 1 && result.candidates[0].product_id === 'good', 'Korean discovery must reject unrelated product categories', result);
   assert(result.candidates[0].brand === '로지텍' && result.candidates[0].brand_source === 'title', 'requested brand may become observed only when the title proves it', result.candidates[0]);
 
-  const options = lua.call('AX_build_product_options', {
+  const exploration = lua.call('AX_build_product_exploration', {
     query: '로지텍 무선 마우스',
     requested_brand: '로지텍',
+    product_category: '마우스',
+    identity_kind: 'standardized_model',
     results: [{ key: 'review-store', status: 'completed', value: { site: 'review-store', candidates: [
       result.candidates[0],
       { ...result.candidates[0], product_id: 'good-2', url: 'https://review.example/good-2' },
     ] } }],
   });
-  assert(options.options[0].source_site_count === 1, 'duplicate listings from one storefront count as one independent site', options.options[0]);
-  assert(options.options[0].identity_confidence === 'medium', 'same-site duplicate listings cannot create high identity confidence', options.options[0]);
+  assert(exploration.groups[0].source_site_count === 1,
+    'duplicate listings from one storefront count as one independent site', exploration.groups[0]);
 }]);
 
-tests.push(['discovery options group grounded model evidence without merging variants', () => {
+tests.push(['exploration groups grounded model evidence without merging variants', () => {
   withoutNet();
-  const value = lua.call('AX_build_product_options', {
+  const value = lua.call('AX_build_product_exploration', {
     query: 'Logitech wireless mouse',
-    max_options: 5,
+    product_category: 'wireless mouse',
+    identity_kind: 'standardized_model',
+    max_groups: 15,
     results: [
       { key: 'walmart', status: 'completed', value: { site: 'walmart', candidates: [
         { product_id: 'W185', name: 'Logitech M185 Wireless Mouse', url: 'https://www.walmart.com/ip/W185', brand: 'Logitech', manufacturer_model: 'M185', price: 13, currency: 'USD' },
@@ -586,18 +587,20 @@ tests.push(['discovery options group grounded model evidence without merging var
       ] } },
     ],
   });
-  assert(value.next === 'choose' && value.options.length === 2, 'two model families should remain', value);
-  const m185 = value.options.find(option => option.model === 'M185');
-  assert(m185?.source_refs?.length === 2, 'M185 option should retain both live source references', m185);
-  assert(m185.source_refs.every(source => source.site && source.product_id && source.url), 'every option source must be grounded', m185.source_refs);
-  assert(typeof value.options_version === 'string' && value.options_version.length > 4, 'discovery snapshot must be versioned', value);
+  assert(value.next === 'present' && value.groups.length === 2, 'two model families should remain', value);
+  const m185 = value.groups.find(group => group.identity_model === 'M185');
+  assert(m185?.source_refs?.length === 2, 'M185 group should retain both live source references', m185);
+  assert(m185.source_refs.every(source => source.site && source.product_id && source.url), 'every group source must be grounded', m185.source_refs);
+  assert(typeof value.exploration_id === 'string' && value.exploration_id.length > 4, 'exploration snapshot must be versioned', value);
 }]);
 
-tests.push(['product option versions bind source listings and displayed prices', () => {
+tests.push(['exploration versions bind source listings and displayed prices', () => {
   withoutNet();
-  const build = (productId, price) => lua.call('AX_build_product_options', {
+  const build = (productId, price) => lua.call('AX_build_product_exploration', {
     query: 'Logitech M185 wireless mouse',
     requested_brand: 'Logitech',
+    product_category: 'wireless mouse',
+    identity_kind: 'standardized_model',
     hard_constraints: { color: 'black' },
     results: [{ key: 'walmart', status: 'completed', value: { site: 'walmart', candidates: [{
       product_id: productId,
@@ -612,42 +615,48 @@ tests.push(['product option versions bind source listings and displayed prices',
   });
   const before = build('old-product', 10);
   const after = build('new-product', 99);
-  assert(before.options_version !== after.options_version, 'source product or displayed price changes must invalidate the option snapshot', { before, after });
+  assert(before.exploration_id !== after.exploration_id,
+    'source product or observed price changes must invalidate the exploration snapshot', { before, after });
 }]);
 
-tests.push(['product option resolver rejects stale snapshots and locks only current evidence', () => {
+tests.push(['exploration resolver rejects stale snapshots and locks only current evidence', () => {
   withoutNet();
-  const options = [{
-    option_id: 'D1',
+  const groups = [{
+    group_id: 'G1',
     identity_kind: 'standardized_model',
     display_name: 'Logitech M185',
-    brand: 'Logitech',
-    model: 'M185',
-    identity_confidence: 'high',
+    identity_brand: 'Logitech',
+    identity_model: 'M185',
+    product_category: 'wireless mouse',
     source_refs: [{ site: 'walmart', product_id: 'W185', url: 'https://www.walmart.com/ip/W185' }],
   }];
-  const stale = lua.call('AX_resolve_product_option', {
-    options,
-    options_version: 'disc-current',
-    choice_options_version: 'disc-old',
+  const stale = lua.call('AX_resolve_product_exploration', {
+    groups,
+    exploration_id: 'exp-current',
+    choice_exploration_id: 'exp-old',
     choice_index: 1,
   });
-  assert(stale.next === 'invalid' && stale.error === 'stale_product_options', 'stale model choice must fail closed', stale);
-  const unversioned = lua.call('AX_resolve_product_option', {
-    options,
-    options_version: 'disc-current',
+  assert(stale.next === 'invalid' && stale.error === 'stale_exploration',
+    'stale exploration choice must fail closed', stale);
+  const unversioned = lua.call('AX_resolve_product_exploration', {
+    groups,
+    exploration_id: 'exp-current',
     choice_index: 1,
   });
-  assert(unversioned.next === 'invalid' && unversioned.error === 'product_options_version_required', 'unversioned model choice must fail closed', unversioned);
+  assert(unversioned.next === 'invalid' && unversioned.error === 'exploration_version_required',
+    'unversioned exploration choice must fail closed', unversioned);
 
-  const current = lua.call('AX_resolve_product_option', {
-    options,
-    options_version: 'disc-current',
-    choice_options_version: 'disc-current',
+  const current = lua.call('AX_resolve_product_exploration', {
+    groups,
+    exploration_id: 'exp-current',
+    choice_exploration_id: 'exp-current',
     choice_index: 1,
+    identity_revision: 2,
   });
-  assert(current.next === 'lock' && current.identity_status === 'locked', 'current grounded option should lock', current);
-  assert(current.identity_id && current.identity_fingerprint, 'locked option should emit stable identity evidence', current);
+  assert(current.next === 'lock' && current.identity_status === 'locked',
+    'current grounded group should lock', current);
+  assert(current.identity_id && current.identity_fingerprint && current.identity_revision === 3,
+    'locked group should emit stable identity evidence and a new revision', current);
 }]);
 
 tests.push(['offer identity attachment trusts the preceding LLM screening verdict', () => {

@@ -194,7 +194,7 @@ test('the planner prompt says nothing about what the profile removed', () => {
   }
   // and the sentences that carry the shopping surface's own rules survive whole
   for (const sentence of [
-    'Use replace_current only when the message names a DIFFERENT',
+    'materially DIFFERENT product category or a different task (checkout or farewell)',
     'NEVER emit `shopping`; that inherited base intent runs a different flow.',
     'Also set conversationSummary',
   ]) {
@@ -297,7 +297,7 @@ test('the AUTHORED prompt is never edited for the store profile\'s convenience',
   for (const sentence of [
     'A service quote, product purchase, checkout, explicit memory request, or farewell is NEVER out_of_scope.',
     'e.g. the name/email/phone/ZIP given for a service quote',
-    'product or a different task (a service quote, checkout, memory, farewell).',
+    'product category or a different task (service quote, checkout, memory, farewell).',
   ]) {
     assert.ok(prompt.includes(sentence), `the authored prompt lost: ${sentence}`);
   }

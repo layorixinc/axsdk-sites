@@ -70,8 +70,8 @@ const STORE_PROMPT_OVERRIDES = [
     'A product purchase, a checkout, or a farewell is NEVER out_of_scope.',
   ],
   [
-    'product or a different task (a service quote, checkout, memory, farewell).',
-    'product or a different task (a checkout or a farewell).',
+    'product category or a different task (service quote, checkout, memory, farewell).',
+    'product category or a different task (checkout or farewell).',
   ],
 ];
 

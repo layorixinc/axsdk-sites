@@ -132,9 +132,9 @@ Design rules:
 | `46_candidate_browser.lua` | `AX_browse_service_candidates` | deterministic ranking/window/selection over searched service pros (Thumbtack) — the model relays words and numbers, never the list |
 | `50_commerce_core.lua` | `AX_COMMERCE` (no command) | adapter registry, `ensure_adapter`, FX fetch/convert, and the helpers the other six take in their headers. The **commerce layer** below is seven files building one `AX_COMMERCE` in filename order — each exports what the later ones alias, so a file loaded out of order raises instead of silently missing a function |
 | `51_relevance.lua` | — | query variants, discovery-only brand recall, and structural/cost normalization; comparison relevance is never decided here |
-| `52_identity.lua` | `AX_prepare_product_identity`, `AX_lock_product_identity`, `AX_build_product_options`, `AX_resolve_product_option` | cross-site product identity and versioned option snapshots |
+| `52_identity.lua` | `AX_prepare_product_identity`, `AX_lock_product_identity`, `AX_build_product_exploration`, `AX_resolve_product_exploration` | cross-site identity plus versioned, provenance-backed exploration snapshots; model groups, spec-equivalent groups, and exact unique listings are all selectable |
 | `53_verify.lua` | `AX_verify_product_offers` | attaches the locked identity to structurally valid offers already kept by the LLM relevance gate; never performs a second semantic match |
-| `54_comparison.lua` | `AX_build_offer_screening`, `AX_apply_offer_screening` | comparison window (page/budget/persistence), store-outcome lines, LLM relevance screening |
+| `54_comparison.lua` | `AX_build_offer_screening`, `AX_apply_offer_screening`, `AX_apply_exploration_screening` | comparison and exploration relevance surfaces; exploration facet evidence is accepted only when it appears in the exact rendered title |
 | `55_offers.lua` | `AX_rank_store_offers`, `AX_present_store_offers`, `AX_refine_store_offers`, `AX_resolve_store_offer` | deterministic ranking and the numbered surface the user chooses from |
 | `56_store_io.lua` | `AX_search_store_product`, `AX_collect_store_page`, `AX_normalize_store_product_result`, `AX_add_store_product_to_cart` | per-store page collection and the guarded cart add |
 
@@ -2396,23 +2396,25 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   buttons untouched. The flow exposes no `submit_quote` tool. `npm run test:thumbtack:live` is **7/7** across
   house cleaning `94101`, handyman `94103`, and lawn mowing `94101` in 146.08 s; cancellation traces contain
   neither `open_quote` nor any send tool.
-- **A discovery number is an executable promise.** The identity builder used to number low-confidence,
-  no-model listings that the resolver could only reject; option 1 could therefore be a dead end. Numbering is
-  now reserved for grounded manufacturer models with source references, while unresolved real listings remain
-  visible in a separate unnumbered section. Every numbered discovery option resolves directly to identity lock.
-- **A model cannot choose from a list the user was never shown.** Broad discovery built `product_options`,
-  then its model gate asked for a number without rendering the options. A deterministic pausing presenter now
-  owns the visible choice surface and parses numbers and cancellation from the resumed raw message; the model
-  receives neither the raw option records nor `identity_confidence`, source references, JSON or sample prices.
+- **A discovery number is a versioned executable promise, not a one-shot model gate.** Every structurally
+  readable live row first crosses one bounded relevance/facet surface. The deterministic builder then groups
+  grounded manufacturer models across stores, groups commodities by observed specs, and preserves any remaining
+  real row as an exact `unique_listing`. Every numbered group has source references and resolves directly to a
+  new identity revision; a stale exploration id resolves nothing.
+- **The product list the user browses is one scalar snapshot in flow state.** The deterministic presenter owns
+  paging, filtering, sorting, number selection, and cancellation. Changing membership or order reissues the
+  exploration id, so numbers from the previous window fail closed. Raw groups, provenance records, facet JSON,
+  and sample-price internals never enter a model prompt; only the bounded screening rows and closed facet
+  catalog do.
 - **Large worker output is not evidence that a store did or did not run.** Chat truncates large fan-out
   payloads, so a completed 11st+Walmart turn looked like only 11st ran. The compact post-screening store
   outcomes are the definitive runner channel. Separately, `AX_complete_store_results` materializes any
   genuinely absent selected child as `unsearched`, so it cannot vanish from screening or the user-visible
   store outcomes.
-- **Broad discovery is live-proven on the shipping CDP extension.** `npm run
-  test:commerce:live:discovery` is **18/18** in 67.16 s: the preflight retains 11st+Walmart, the user sees
-  grounded choices from both stores, option 1 locks, searches, screens and ranks, and cancellation performs no
-  cart mutation.
+- **The discovery live gate is a multi-turn exploration journey.** `npm run
+  test:commerce:live:discovery` checks initial browse → deterministic sort without another store search →
+  identity lock and comparison → restoration from the comparison → a different identity revision. Every
+  intermediate turn asserts that no cart mutation ran; the final cancel still performs no mutation.
 - **A terminal model given the whole memory state may print the wire instead of the answer.** Successful
   set/update/delete turns rendered `memory_result`, `next`, `ok`, and `operation` verbatim. Every memory
   outcome now passes through `AX_RPC_MEMORY.present`, and the terminal is a deterministic data terminal over

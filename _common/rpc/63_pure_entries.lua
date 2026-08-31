@@ -111,17 +111,7 @@ local ARGUMENT_MAPS = {
     identity_model = "identity_model", product_category = "product_category",
     canonical_query = "canonical_query", hard_constraints = "hard_constraints",
     soft_preferences = "soft_preferences", source_refs = "identity_source_refs",
-  },
-  AX_build_product_options = {
-    results = "discovery_results", query = "discovery_query", product_category = "product_category",
-    requested_brand = "requested_brand", hard_constraints = "hard_constraints",
-    soft_preferences = "soft_preferences", max_options = { value = 6 },
-  },
-  AX_resolve_product_option = {
-    options = "product_options", options_version = "options_version",
-    choice_index = "product_choice_index", choice_id = "product_choice_id",
-    choice_options_version = "choice_options_version", hard_constraints = "hard_constraints",
-    soft_preferences = "soft_preferences",
+    identity_revision = "identity_revision",
   },
   AX_complete_store_results = {
     stores = "stores", store_results = "store_results",
@@ -137,6 +127,10 @@ local ARGUMENT_MAPS = {
   },
   AX_apply_offer_screening = {
     store_results = "store_results", screening_ids = "screening_ids", keep = "screening_keep",
+  },
+  AX_apply_exploration_screening = {
+    store_results = "discovery_results", screening_ids = "exploration_screening_ids",
+    keep = "exploration_screening_keep", facets_json = "exploration_facets_json",
   },
   AX_summarize_store_outcomes = {
     store_results = "store_results", screened_out = "screened_out",

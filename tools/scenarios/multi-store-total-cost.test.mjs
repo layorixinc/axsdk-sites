@@ -8,6 +8,7 @@ import {
   findToolCall,
   lastToolOutput,
   discoveryChoiceSurface,
+  refinedExplorationSurface,
   sitesFromWindow,
 } from './multi-store-total-cost.mjs';
 
@@ -63,21 +64,37 @@ test('lastToolOutput decodes the matched output', () => {
   assert.equal(lastToolOutput(calls, 'missing_tool'), null);
 });
 
-test('discovery choice proof requires a visible numbered list without internal fields', () => {
+test('discovery choice proof requires a visible numbered exploration without internal fields', () => {
   const safe = {
-    text: '비교 가능한 모델과 확인된 판매처:\n1. Logitech G304 — found at 11st',
+    text: '상품 탐색 결과 1-1/1\n1. Logitech G304 · 관측 판매처 1곳 · 관측 총액 KRW 48,000',
     toolCalls: [{
-      name: 'present_product_options',
+      name: 'present_product_exploration',
       status: 'completed',
       output: {
         next: 'ask',
-        question: '비교 가능한 모델과 확인된 판매처:\n1. Logitech G304 — found at 11st',
+        question: '상품 탐색 결과 1-1/1\n1. Logitech G304 · 관측 판매처 1곳 · 관측 총액 KRW 48,000',
       },
     }],
   };
   assert.equal(discoveryChoiceSurface(safe), true);
-  safe.toolCalls[0].output.question += '\nidentity_confidence: medium';
+  safe.toolCalls[0].output.question += '\nexploration_state: internal';
   assert.equal(discoveryChoiceSurface(safe), false);
+});
+
+test('exploration refinement proves a new snapshot without another store search', () => {
+  const turn = {
+    toolCalls: [
+      { name: 'shopping_refine_product_exploration', status: 'completed', output: { next: 'ask' } },
+      {
+        name: 'present_product_exploration',
+        status: 'completed',
+        output: { next: 'ask', exploration_id: 'exp-new', question: '상품 탐색 결과\n1. Logitech G304 · 관측 판매처 1곳' },
+      },
+    ],
+  };
+  assert.equal(refinedExplorationSurface(turn, 'exp-old'), true);
+  turn.toolCalls.push({ name: 'shopping_discover_products', status: 'completed', output: { next: 'done' } });
+  assert.equal(refinedExplorationSurface(turn, 'exp-old'), false);
 });
 
 test('comparison attribution reads offer tags and classified failure labels', () => {

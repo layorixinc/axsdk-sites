@@ -80,6 +80,105 @@ local function restore(text)
   return value
 end
 
+local V = AX_OFFER_VIEW
+local PAGE_SIZE = 5
+
+local function encode_exploration(snapshot)
+  local codecs = codec()
+  if not codecs or type(snapshot) ~= "table" then return nil end
+  local ok, text = pcall(codecs.encode, {
+    exploration_id = snapshot.exploration_id,
+    base_exploration_id = snapshot.base_exploration_id or snapshot.exploration_id,
+    query = snapshot.query,
+    product_category = snapshot.product_category,
+    identity_kind = snapshot.identity_kind,
+    groups = snapshot.groups,
+    all_groups = snapshot.all_groups or snapshot.groups,
+    facet_catalog = snapshot.facet_catalog,
+    filters = snapshot.filters,
+    sort = snapshot.sort,
+    page = snapshot.page,
+    failures = snapshot.failures,
+  })
+  return ok and text or nil
+end
+
+local function restore_exploration_state(text)
+  local codecs = codec()
+  if not codecs or type(text) ~= "string" or text == "" then return nil end
+  local ok, value = pcall(codecs.decode, text)
+  if not ok or type(value) ~= "table" or type(value.groups) ~= "table" then return nil end
+  return value
+end
+
+local function exploration_catalog_text(snapshot)
+  local rows = {}
+  for index = 1, #(snapshot.facet_catalog or {}) do
+    local entry = snapshot.facet_catalog[index] or {}
+    rows[#rows + 1] = tostring(entry.facet or "") .. "=" .. tostring(entry.value or "")
+      .. " (" .. tostring(entry.evidence or "") .. ")"
+  end
+  return table.concat(rows, "\n")
+end
+
+local function render_exploration(snapshot, requested_page, reason)
+  local groups = snapshot.groups or {}
+  local pages = math.max(1, math.ceil(#groups / PAGE_SIZE))
+  local page = math.max(1, math.min(math.floor(tonumber(requested_page) or 1), pages))
+  local first = (page - 1) * PAGE_SIZE + 1
+  local last = math.min(#groups, first + PAGE_SIZE - 1)
+  local lines = {
+    string.format("상품 탐색 결과 %d-%d/%d — 번호를 선택하면 비교할 상품을 확정합니다.", first, last, #groups),
+    "이 단계에서는 장바구니와 주문이 변경되지 않습니다.",
+  }
+  if reason then lines[#lines + 1] = reason end
+  for index = first, last do
+    local group = groups[index] or {}
+    local sites = tonumber(group.source_site_count) or #(group.source_sites or {})
+    local observed = V and V.format_amount(group.observed_total, group.observed_currency) or "미확인"
+    local kind = group.identity_kind == "unique_listing" and "[스토어 단일 상품] " or ""
+    lines[#lines + 1] = string.format("%d. %s%s · 관측 판매처 %d곳 · 관측 총액 %s",
+      index, kind, tostring(group.display_name or "상품명 미확인"), sites, observed)
+  end
+  lines[#lines + 1] = "필터·정렬·다음/이전·번호 선택이 가능합니다. 취소하려면 '취소'라고 입력하세요."
+  snapshot.page = page
+  return {
+    next = "ask",
+    ok = true,
+    exploration_id = snapshot.exploration_id,
+    exploration_state = encode_exploration(snapshot),
+    question = table.concat(lines, "\n"),
+    exploration_page = page,
+    exploration_pages = pages,
+    exploration_total = #groups,
+    facet_catalog_text = exploration_catalog_text(snapshot),
+    exploration_stage = "asked",
+  }
+end
+
+local function identity_change_request(text)
+  local raw = tostring(text or "")
+  local lowered = raw:lower()
+  if lowered == "" then return nil end
+  local direct = {
+    "다른 모델", "모델 바", "모델을 바", "검색 결과로", "아까 목록", "아까 결과",
+    "다른 색상", "다른 용량", "다른 사이즈", "other model", "change model", "switch model",
+    "back to results",
+  }
+  for index = 1, #direct do
+    if lowered:find(direct[index], 1, true) then return raw end
+  end
+  local offer_only = {
+    "원 이하", "원 이상", "달러", "무료배송", "평점", "별점",
+    "amazon", "아마존", "walmart", "월마트", "쿠팡", "11번가", "gmarket", "ssg",
+  }
+  for index = 1, #offer_only do
+    if lowered:find(offer_only[index], 1, true) then return nil end
+  end
+  if lowered:find("말고", 1, true) and C.infer_model and C.infer_model(raw) then return raw end
+  return nil
+end
+
 --- Renders the listing the module currently holds and packs it for the flow.
 local function present_current(snapshot, page)
   local rendered = C.render_comparison(snapshot, page)
@@ -163,6 +262,16 @@ function O.present(args)
   end
 
   if args.choice_stage == "asked" then
+    local current_text = N.current_user_text(args)
+    local change = identity_change_request(current_text)
+    if change then
+      return {
+        next = "change_identity",
+        ok = true,
+        comparison_id = snapshot.comparison_id,
+        identity_change_request = change,
+      }
+    end
     local reply = N.classify_reply(N.current_user_text(args))
     if reply.kind == "cancel" then
       return { next = "cancel", ok = true, comparison_id = snapshot.comparison_id }
@@ -291,4 +400,367 @@ function O.resolve(args)
     return { next = "error", ok = false, error = "resolve_failed" }
   end
   return result
+end
+
+local function copy_map(value)
+  local out = {}
+  for key, item in pairs(type(value) == "table" and value or {}) do
+    if type(item) == "table" then
+      local nested = {}
+      for nested_key, nested_value in pairs(item) do nested[nested_key] = nested_value end
+      out[key] = nested
+    else
+      out[key] = item
+    end
+  end
+  return out
+end
+
+local function issue_exploration(snapshot, groups, filters, sort)
+  snapshot.groups = groups
+  snapshot.filters = filters or {}
+  snapshot.sort = sort or "total_asc"
+  local codecs = codec()
+  if not codecs then return nil end
+  local ok, signature = pcall(codecs.encode, {
+    base = snapshot.base_exploration_id or snapshot.exploration_id,
+    filters = snapshot.filters,
+    sort = snapshot.sort,
+    groups = groups,
+  })
+  if not ok or type(signature) ~= "string" or not C.stable_hash then return nil end
+  snapshot.exploration_id = "exp-" .. C.stable_hash(signature)
+  for index = 1, #groups do groups[index].exploration_id = snapshot.exploration_id end
+  snapshot.page = 1
+  return snapshot
+end
+
+local function group_total(group)
+  return tonumber(group.observed_total_base) or tonumber(group.observed_total) or math.huge
+end
+
+local function sort_exploration(groups, sort)
+  table.sort(groups, function(left, right)
+    if sort == "total_desc" then
+      if group_total(left) ~= group_total(right) then return group_total(left) > group_total(right) end
+    elseif sort == "name_asc" then
+      local left_name = tostring(left.display_name or ""):lower()
+      local right_name = tostring(right.display_name or ""):lower()
+      if left_name ~= right_name then return left_name < right_name end
+    else
+      if group_total(left) ~= group_total(right) then return group_total(left) < group_total(right) end
+    end
+    return tostring(left.group_id or "") < tostring(right.group_id or "")
+  end)
+end
+
+local function catalog_match(snapshot, term)
+  local needle = tostring(term or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+  if needle == "" then return nil end
+  local matches = {}
+  for index = 1, #(snapshot.facet_catalog or {}) do
+    local entry = snapshot.facet_catalog[index] or {}
+    local value = tostring(entry.value or ""):lower()
+    local evidence = tostring(entry.evidence or ""):lower()
+    if value == needle or evidence == needle or value:find(needle, 1, true)
+        or evidence:find(needle, 1, true) or needle:find(value, 1, true) then
+      matches[tostring(entry.facet) .. "|" .. tostring(entry.value)] = entry
+    end
+  end
+  local found = nil
+  for _, entry in pairs(matches) do
+    if found then return nil end
+    found = entry
+  end
+  return found
+end
+
+local function group_has_facet(group, facet, value)
+  local record = type(group.facets) == "table" and group.facets[facet] or nil
+  return type(record) == "table"
+    and tostring(record.value or ""):lower() == tostring(value or ""):lower()
+end
+
+local function group_matches_exploration(group, filters)
+  filters = filters or {}
+  if type(filters.sites) == "table" then
+    local allowed = false
+    for site_index = 1, #(group.source_sites or {}) do
+      for wanted_index = 1, #filters.sites do
+        if tostring(group.source_sites[site_index]):lower() == tostring(filters.sites[wanted_index]):lower() then
+          allowed = true
+          break
+        end
+      end
+      if allowed then break end
+    end
+    if not allowed then return false end
+  end
+  local price = tonumber(group.observed_total)
+  if filters.price_currency and tostring(group.observed_currency or ""):upper() ~= filters.price_currency then
+    price = filters.price_currency == "USD" and tonumber(group.observed_total_base) or nil
+  end
+  if filters.price_max and (not price or price > filters.price_max) then return false end
+  if filters.price_min and (not price or price < filters.price_min) then return false end
+  for facet, value in pairs(type(filters.facet_include) == "table" and filters.facet_include or {}) do
+    if not group_has_facet(group, facet, value) then return false end
+  end
+  for facet, value in pairs(type(filters.facet_exclude) == "table" and filters.facet_exclude or {}) do
+    if group_has_facet(group, facet, value) then return false end
+  end
+  return true
+end
+
+local function parse_facet_request(snapshot, request)
+  local raw = tostring(request or ""):gsub("^%s+", ""):gsub("%s+$", "")
+  local exclude = raw:match("^(.-)%s*제외") or raw:match("^(.-)%s*빼고") or raw:match("^(.-)%s*없이")
+  local include = raw:match("^(.-)%s*만%s*보") or raw:match("^(.-)%s*만$")
+  local term = exclude or include
+  if not term then return nil end
+  term = term:gsub("^그럼%s*", ""):gsub("^이제%s*", ""):gsub("%s+$", "")
+  local entry = catalog_match(snapshot, term)
+  if not entry then return { unparsed = true, term = term } end
+  return {
+    operation = exclude and "exclude" or "include",
+    facet = entry.facet,
+    value = entry.value,
+  }
+end
+
+local function model_choice(snapshot, request)
+  local lowered = tostring(request or ""):lower()
+  local choice = nil
+  for index = 1, #(snapshot.groups or {}) do
+    local model = tostring(snapshot.groups[index].identity_model or ""):lower()
+    if model ~= "" and lowered:find(model, 1, true) then
+      if choice then return nil end
+      choice = index
+    end
+  end
+  return choice
+end
+
+--- Builds the pre-lock listing and carries it as one scalar, separate from a cart-capable comparison.
+function O.build_exploration(args)
+  args = type(args) == "table" and args or {}
+  if not codec() then return { next = "error", error = "json_unavailable" } end
+  local result = AX_build_product_exploration({
+    results = args.discovery_results or args.store_results,
+    query = args.exploration_query or args.discovery_query or args.query,
+    product_category = args.product_category,
+    identity_kind = args.identity_kind,
+    hard_constraints = args.hard_constraints,
+    max_groups = args.max_groups,
+  })
+  if type(result) ~= "table" or result.next == "empty" then
+    return { next = "empty", error = type(result) == "table" and result.error or "exploration_build_failed" }
+  end
+  local snapshot = {
+    exploration_id = result.exploration_id,
+    base_exploration_id = result.exploration_id,
+    query = result.exploration_query,
+    product_category = args.product_category,
+    identity_kind = args.identity_kind,
+    groups = result.groups,
+    all_groups = result.groups,
+    facet_catalog = result.facet_catalog,
+    filters = {},
+    sort = "total_asc",
+    page = 1,
+    failures = result.failures,
+  }
+  sort_exploration(snapshot.groups, snapshot.sort)
+  local shown = render_exploration(snapshot, 1)
+  shown.next = "present"
+  return shown
+end
+
+--- Renders and classifies the exact exploration window that paused.
+function O.present_exploration(args)
+  args = type(args) == "table" and args or {}
+  local snapshot = restore_exploration_state(args.exploration_state)
+  if not snapshot then return { next = "error", error = "exploration_unreadable" } end
+  if type(args.exploration_id) == "string" and args.exploration_id ~= ""
+      and args.exploration_id ~= snapshot.exploration_id then
+    return { next = "error", error = "stale_exploration" }
+  end
+  if args.exploration_stage == "asked" then
+    local text = N.current_user_text(args)
+    local direct = model_choice(snapshot, text)
+    if direct then
+      return {
+        next = "select", choice_index = direct,
+        choice_exploration_id = snapshot.exploration_id,
+        exploration_id = snapshot.exploration_id,
+      }
+    end
+    local reply = N.classify_reply(text)
+    if reply.kind == "cancel" then return { next = "cancel" } end
+    if reply.kind == "restart" then return { next = "restart" } end
+    if reply.kind == "choice" then
+      local numbers = N.parse_choice_numbers(reply.choice_numbers)
+      return {
+        next = "select", choice_index = numbers[1],
+        choice_exploration_id = snapshot.exploration_id,
+        exploration_id = snapshot.exploration_id,
+      }
+    end
+    if reply.kind == "page" then
+      return {
+        next = "page", page_command = reply.page_command, page_number = reply.page_number,
+        exploration_id = snapshot.exploration_id,
+      }
+    end
+    if reply.kind == "refine" then
+      return {
+        next = "refine", refine_request = reply.refine_request,
+        exploration_id = snapshot.exploration_id,
+      }
+    end
+  end
+  local shown = render_exploration(snapshot, args.exploration_page or snapshot.page)
+  return shown
+end
+
+--- Applies deterministic page/filter/sort changes. Unknown facet language is handed to one closed model
+--- contract that may select only a value from `facet_catalog_text`.
+function O.refine_exploration(args)
+  args = type(args) == "table" and args or {}
+  local snapshot = restore_exploration_state(args.exploration_state)
+  if not snapshot then return { next = "error", error = "exploration_unreadable" } end
+  if type(args.exploration_id) == "string" and args.exploration_id ~= ""
+      and args.exploration_id ~= snapshot.exploration_id then
+    return { next = "error", error = "stale_exploration" }
+  end
+
+  if args.page_command or args.page_number then
+    local pages = math.max(1, math.ceil(#(snapshot.groups or {}) / PAGE_SIZE))
+    local page = V.resolve_page(snapshot.page or 1, args.page_command, args.page_number, pages)
+    return render_exploration(snapshot, page)
+  end
+
+  local request = tostring(args.refine_request or "")
+  local lowered = request:lower()
+  local filters = copy_map(snapshot.filters)
+  local sort = snapshot.sort or "total_asc"
+  local reset = lowered:find("필터 해제", 1, true) or lowered:find("처음 검색", 1, true)
+    or lowered:find("clear filter", 1, true) or lowered:find("reset filter", 1, true)
+  if reset then
+    filters = {}
+    sort = "total_asc"
+  else
+    local filter_facet = args.filter_facet or args.exploration_filter_facet
+    local filter_value = args.filter_value or args.exploration_filter_value
+    local filter_operation = args.filter_operation or args.exploration_filter_operation
+    local facet_request
+    if filter_facet and filter_value and (filter_operation == "include" or filter_operation == "exclude") then
+      local grounded = catalog_match(snapshot, filter_value)
+      if grounded and tostring(grounded.facet) == tostring(filter_facet) then
+        facet_request = {
+          operation = filter_operation,
+          facet = grounded.facet,
+          value = grounded.value,
+        }
+      else
+        return render_exploration(snapshot, snapshot.page, "현재 결과에서 확인할 수 없는 조건이라 적용하지 않았습니다.")
+      end
+    else
+      facet_request = parse_facet_request(snapshot, request)
+    end
+    if facet_request and facet_request.unparsed then
+      return {
+        next = "interpret",
+        exploration_id = snapshot.exploration_id,
+        exploration_state = encode_exploration(snapshot),
+        exploration_filter_request = request,
+        facet_catalog_text = exploration_catalog_text(snapshot),
+      }
+    elseif facet_request then
+      local key = facet_request.operation == "exclude" and "facet_exclude" or "facet_include"
+      filters[key] = copy_map(filters[key])
+      filters[key][facet_request.facet] = facet_request.value
+    end
+
+    local parsed = V.parse_refine(request)
+    if parsed.reset then filters = {}; sort = "total_asc" end
+    if type(parsed.filters) == "table" then
+      for _, key in ipairs({ "sites", "price_max", "price_min", "price_currency" }) do
+        if parsed.filters[key] ~= nil then filters[key] = parsed.filters[key] end
+      end
+    end
+    if parsed.sort == "total_asc" then sort = "total_asc" end
+    if lowered:find("비싼", 1, true) or lowered:find("highest price", 1, true) then
+      sort = "total_desc"
+      parsed.sort = sort
+    end
+    if lowered:find("이름순", 1, true) or lowered:find("name", 1, true) then
+      sort = "name_asc"
+      parsed.sort = sort
+    end
+    if not facet_request and parsed.unparsed and not parsed.sort and next(parsed.filters or {}) == nil then
+      return render_exploration(snapshot, snapshot.page,
+        "말씀하신 조건을 현재 탐색 결과에 적용하지 못했습니다.")
+    end
+  end
+
+  local visible = {}
+  for index = 1, #(snapshot.all_groups or {}) do
+    local group = snapshot.all_groups[index]
+    if group_matches_exploration(group, filters) then visible[#visible + 1] = group end
+  end
+  if #visible == 0 then
+    return render_exploration(snapshot, snapshot.page,
+      "조건에 맞는 상품이 없어 이전 탐색 결과를 그대로 보여드립니다.")
+  end
+  sort_exploration(visible, sort)
+  local issued = issue_exploration(snapshot, visible, filters, sort)
+  if not issued then return { next = "error", error = "exploration_encode_failed" } end
+  local shown = render_exploration(issued, 1)
+  return shown
+end
+
+function O.resolve_exploration(args)
+  args = type(args) == "table" and args or {}
+  local snapshot = restore_exploration_state(args.exploration_state)
+  if not snapshot then return { next = "error", error = "exploration_unreadable" } end
+  local call = {}
+  for key, value in pairs(args) do call[key] = value end
+  call.groups = snapshot.groups
+  call.exploration_id = snapshot.exploration_id
+  local result = AX_resolve_product_exploration(call)
+  return result
+end
+
+--- Restores the last pre-lock surface. A named model already present in it is selected immediately; a
+--- generic request re-renders it; an exact-model fast path with no prior snapshot starts broad exploration.
+function O.restore_exploration(args)
+  args = type(args) == "table" and args or {}
+  local snapshot = restore_exploration_state(args.exploration_state)
+  if not snapshot then
+    local query = args.exploration_query
+    if type(query) ~= "string" or query == "" then
+      return { next = "error", error = "exploration_unavailable" }
+    end
+    return {
+      next = "search",
+      exploration_query = query,
+      discovery_query = query,
+      query = query,
+    }
+  end
+  local choice = model_choice(snapshot, args.identity_change_request)
+  if choice then
+    return {
+      next = "select",
+      exploration_id = snapshot.exploration_id,
+      exploration_state = encode_exploration(snapshot),
+      choice_exploration_id = snapshot.exploration_id,
+      choice_index = choice,
+    }
+  end
+  local shown = render_exploration(snapshot, 1)
+  shown.next = "present"
+  shown.exploration_stage = nil
+  shown.question = nil
+  return shown
 end

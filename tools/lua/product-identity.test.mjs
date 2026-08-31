@@ -21,9 +21,10 @@ after(() => lua.close());
 
 /** One discovery result, shaped the way the fan-out publishes it. */
 function discovered(name) {
-  return lua.call('AX_build_product_options', {
+  return lua.call('AX_build_product_exploration', {
     requested_brand: '로지텍',
     product_category: '마우스',
+    identity_kind: 'standardized_model',
     results: [{
       key: '11st',
       status: 'completed',
@@ -39,8 +40,8 @@ function discovered(name) {
   });
 }
 
-// The builder answers `options`, keyed by group.
-const modelOf = (built) => Object.values(built?.options ?? {})[0]?.model;
+// The builder answers `groups`, keyed by the product identity shown to the user.
+const modelOf = (built) => Object.values(built?.groups ?? {})[0]?.identity_model;
 
 test('a promo tag in front of the title is not the product model', () => {
   // Measured on live 11st, and offered to the user as "로지텍 11Pay3":
@@ -93,7 +94,7 @@ test('an unbracketed title is unaffected', () => {
 
 test('a listing that carries its own model is trusted over the title', () => {
   // The adapter may read a model from the page. That beats any inference.
-  const options = lua.call('AX_build_product_options', {
+  const options = lua.call('AX_build_product_exploration', {
     requested_brand: '로지텍',
     results: [{
       key: '11st',
@@ -146,14 +147,11 @@ test('an offer kept by the LLM is not rejected by a second code matcher', () => 
   assert.equal(accepted.excluded_offers, undefined);
 });
 
-test('every numbered discovery option is immediately lockable', () => {
-  // Measured live, the unmodelled listing came back first. It was numbered as option 1 and selecting the
-  // default correctly refused to lock it, so the broad journey stopped before any store comparison. Real
-  // but unresolved listings may be explained without a number; every numbered choice is a promise that the
-  // next deterministic step can lock it.
-  const built = lua.call('AX_build_product_options', {
+test('every numbered exploration result is immediately lockable', () => {
+  const built = lua.call('AX_build_product_exploration', {
     requested_brand: '로지텍',
     product_category: '마우스',
+    identity_kind: 'standardized_model',
     results: [{
       key: '11st',
       status: 'completed',
@@ -164,25 +162,24 @@ test('every numbered discovery option is immediately lockable', () => {
           { site: '11st', product_id: '2', name: '로지텍 G304 무선 게이밍 마우스', price: 48420, currency: 'KRW', url: 'https://www.11st.co.kr/products/2' },
           { site: '11st', product_id: '3', name: '로지텍 M170 무선 마우스', price: 12780, currency: 'KRW', url: 'https://www.11st.co.kr/products/3' },
           { site: '11st', product_id: '4', name: '로지텍 M240 무선 마우스', price: 27760, currency: 'KRW', url: 'https://www.11st.co.kr/products/4' },
-          { site: '11st', product_id: '5', name: '로지텍 M750 무선 마우스', price: 54360, currency: 'KRW', url: 'https://www.11st.co.kr/products/5' },
-          { site: '11st', product_id: '6', name: '[무료배송] 로지텍 정품 무선 마우스 세트', price: 19900, currency: 'KRW', url: 'https://www.11st.co.kr/products/6' },
         ],
       },
     }],
   });
 
-  const numbered = Object.values(built?.options ?? {});
-  assert.ok(numbered.length >= 2, `expected several options, got ${numbered.length}`);
-  assert.ok(numbered.every((option) => option.model && option.needs_enrichment !== true
-    && option.identity_confidence !== 'low'), `every number must be lockable: ${JSON.stringify(numbered)}`);
-  assert.match(String(built?.unresolved_product_names ?? ''), /LIFT/,
-    'the real unresolved listing remains visible without taking a number');
+  const numbered = Object.values(built?.groups ?? {});
+  assert.ok(numbered.length >= 3, `expected grounded results, got ${numbered.length}`);
+  assert.ok(numbered.every((group) => group.source_refs?.length > 0),
+    `every number must carry live source evidence: ${JSON.stringify(numbered)}`);
+  assert.ok(numbered.some((group) => group.identity_kind === 'unique_listing'),
+    'a grounded listing without a manufacturer model remains selectable as that exact listing');
 
-  const selected = lua.call('AX_resolve_product_option', {
-    product_options: built.options,
-    options_version: built.options_version,
-    choice_options_version: built.options_version,
+  const selected = lua.call('AX_resolve_product_exploration', {
+    exploration_groups: built.groups,
+    exploration_id: built.exploration_id,
+    choice_exploration_id: built.exploration_id,
     choice_index: 1,
   });
-  assert.equal(selected.next, 'lock', `the default first choice must continue to comparison: ${JSON.stringify(selected)}`);
+  assert.equal(selected.next, 'lock',
+    `the first grounded choice must continue to comparison: ${JSON.stringify(selected)}`);
 });

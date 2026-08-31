@@ -78,8 +78,9 @@ dassi에서 확인된 기준선 — **번들 크기(9.86 MiB)도, 데이터가 �
 > **설치 트리거와 저장소 한계도 분리됐다.** 설치는 MV3 워커 모듈 스코프에서 시작되고 digest가 같은
 > 워커 수명에는 한 번만 검증한다. 새 digest는 digest·source switch·빈 legacy cache를 선택하고,
 > 같은 digest의 switch만 drift하면 stored override를 지우지 않고 local source를 다시 선택한다.
-> `flowsStore.setFlows`/remote fetch의 256 KiB 한계는 dev 저장 경로에 남아 있지만 C3 package asset은
-> 그 경로를 지나지 않는다. 다만 최종 compiler가 256 KiB 초과 합성 문서를 받는지는 아직 별도 실험이다.
+> `flowsStore.setFlows`/remote fetch의 256 KiB 한계는 dev 저장 슬롯에 남아 있고 harness가 chunking한다.
+> C3 package asset은 그 저장 경로를 지나지 않는다. 별도 backend session document 한계는 2026-08-29
+> **512 KiB**로 상향됐으며, canonical 256.5 KiB 문서가 실제 compile·10-site 실행까지 통과했다.
 >
 > **정책 잔여:** generic SDK의 remote loader 코드와 개발용 토글은 아직 CWS artifact에도 있다.
 > C3는 기본/재시작 경로에서 모두 local source를 선택하지만, remote 코드를 CWS 빌드에서 물리적으로

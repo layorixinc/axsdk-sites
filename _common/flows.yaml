@@ -1500,6 +1500,7 @@ flows:
       query: null
       quantity: 1
       stores: null
+      collect_stage: null
       product_category: null
       requested_brand: null
       requested_model: null
@@ -1661,6 +1662,7 @@ flows:
           - query
           - quantity
           - stores
+          - collect_stage
           - product_category
           - identity_kind
           - requested_brand
@@ -1683,13 +1685,20 @@ flows:
           Site groups:
           - "all global stores" means amazon, walmart, ebay, aliexpress, etsy.
           - "all Korean stores" means coupang, naver-shopping, gmarket, 11st, ssg.
-          - "all representative stores", "all supported stores", "모든 지원 쇼핑몰", "모든 쇼핑몰", and
-            "전 사이트" mean all ten sites above.
+          - "all representative stores", "all supported stores", "모든 지원 쇼핑몰", "모든 쇼핑몰",
+            "전 사이트", and "전체 사이트" mean all ten sites above.
 
-          - If no product category or product is named, use next="ask" and ask what to compare.
-          - If several materially different product categories are named, use next="ask" and ask which ONE first.
-          - If fewer than two supported sites or a supported site group are specified, use next="ask" and ask
-            which sites or group to compare. Never silently choose stores.
+          - Existing non-null product fields are established answers from the previous turn. Preserve every
+            existing non-null product field unless the latest requestText explicitly replaces it. A site-only
+            follow-up never clears query, product_category, identity_kind, brand, model, constraints, or quantity.
+          - If no product category or product is named or preserved, use next="ask" with
+            collect_stage="product" and ask what to compare.
+          - If several materially different product categories are named, use next="ask" with
+            collect_stage="product" and ask which ONE first.
+          - If fewer than two supported sites or a supported site group are specified, use next="ask" with
+            collect_stage="stores" and ask which sites or group to compare. Never silently choose stores.
+            This branch MUST emit query, product_category, identity_kind, quantity, and every other grounded
+            product field so the answer can complete this same request on the next turn.
           - Otherwise use next="done". Set product_category to the grounded product family, requested_brand and
             requested_model only when the user stated them, and query to a concise discovery/search query that
             preserves every user-stated identity or variant term.
@@ -1722,10 +1731,11 @@ flows:
               brand_aliases="Logitech|로지텍". For query "삼성 32인치 모니터": query_variants="Samsung 32 inch
               monitor|삼성 모니터 32", brand_aliases="삼성|Samsung".
             - Send "" only when no brand is named, or when you genuinely know no other wording.
-          - Whenever you use next="ask", end the question with one short sentence in the user's language
-            saying that the sites are processed one at a time and a large queue can take several minutes
-            (쇼핑몰을 하나씩 처리하므로 선택한 수에 따라 몇 분 정도 걸릴 수 있습니다). A multi-store search is
-            slow by nature; the user must know that before the wait, not after it.
+          - Whenever you use next="ask", set collect_stage to "product" or "stores" and end the question with
+            one short sentence in the user's language saying that the sites are processed one at a time and a
+            large queue can take several minutes
+            (쇼핑몰을 하나씩 처리하므로 선택한 수에 따라 몇 분 정도 걸릴 수 있습니다).
+            A multi-store search is slow by nature; the user must know that before the wait, not after it.
           - If the user REFUSES — "취소", "그만", "아니 안 할래", "됐어" — answer next="cancel" and nothing
             else. Never re-ask and never start comparing: this node holds the user, so a no that is not
             routed here is a no that does nothing.
@@ -2771,19 +2781,25 @@ flowTools:
       additionalProperties: true
       required: [ next ]
       anyOf:
-        - required: [ next, question ]
+        - required: [ next, question, collect_stage ]
           properties:
             next: { const: ask }
+            collect_stage: { const: product }
+            question: { type: string, minLength: 1 }
+        - required: [ next, question, collect_stage, query, product_category, identity_kind, quantity ]
+          properties:
+            next: { const: ask }
+            collect_stage: { const: stores }
             question: { type: string, minLength: 1 }
         - required: [ next ]
           properties:
             next: { type: string, enum: [ done, cancel ] }
             question: { type: [ string, "null" ] }
       properties:
-        # `cancel` because this node HOLDS the user: without it a refusal could only be answered `ask`
-        # (re-question) or `done` (start comparing), so the user's no did nothing while the planner prompt
-        # promised "the flow owns its own cancel path". Same enum as the single-site collector.
+        # The `ask` branch is the engine's pause contract. collect_stage makes its two partial-state
+        # shapes enforceable without replacing that branch and accidentally starting a fresh flow.
         next: { type: string, enum: [ ask, done, cancel ] }
+        collect_stage: { type: string, enum: [ product, stores ] }
         question: { type: [ string, "null" ] }
         query: { type: string }
         product_category: { type: string }

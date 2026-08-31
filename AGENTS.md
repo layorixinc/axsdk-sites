@@ -645,11 +645,11 @@ They are therefore not package runtime assets. All 26 runtime modules are separa
 name→source map needs physical 256 KiB slots.
 
 **Capacity consequence:** the confirmed 256 KiB cap in `flowsStore.setFlows` and remote-site flow
-fetching still protects persisted/remote development paths. Package flow, Lua and module sources bypass
-that store entirely. The package producer has a regression fixture with one valid flow asset larger
-than 256 KiB. This does **not** prove the final compiler accepts a composed document above 256 KiB;
-the per-tool compiled `execute.lua` limit (~64 KiB) also remains. A direct >256 KiB compiler probe is
-still the next experiment before treating package assets as unlimited compiler input.
+fetching still protects each persisted/remote development slot; the harness chunks larger layers.
+Package flow, Lua and module sources bypass that store. The separate backend session limit for the
+composed `clientFlowDocument` is **512 KiB** as of 2026-08-29. A canonical **256.5 KiB** document
+opened, compiled, and ran the live ten-site DGX Spark comparison after that change, proving compiler
+input above 256 KiB. The per-tool compiled `execute.lua` limit (~64 KiB) still applies.
 
 Current measured package (2026-08-24):
 
@@ -2443,13 +2443,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   and core merges them by name, but the CWS package carries each of the 26 runtime modules as its own
   content-addressed asset. Module headroom is now governed by individual tool/compiler constraints,
   not one encoded name→source store value.
-- **The 256 KiB flow boundary is now per SLOT, not per document — the persisted layer chunks**
-  (superseded 2026-08-26; see the chunking entry above). `flowsStore.setFlows` and remote-site fetching
-  still cap one individual VALUE at 256 KiB, and that is what the harness splits `:` / `:|2` against;
-  the package path never wrote through either. A regression builds a >256 KiB flow asset successfully,
-  and a 262,874-byte document is live-proven through the persisted path. Still unproven, and still the
-  narrower open question: whether the final compiler accepts a composed document above 256 KiB — no
-  matching compiler check was ever found. Canonical YAML remains useful for transport and review.
+- **The persisted 256 KiB flow boundary is per SLOT, while the backend session document limit is
+  512 KiB.** `flowsStore.setFlows` and remote-site fetching still cap one individual VALUE at 256 KiB,
+  and the harness splits larger layers into `:` / `:|2` slots; the package path never writes through
+  either. Separately, every composed `clientFlowDocument` travels through `POST /sessions`. That endpoint's
+  former 256 KiB limit was raised to **512 KiB on 2026-08-29**. A canonical 256.5 KiB document then opened,
+  compiled, and completed the live ten-site DGX Spark journey. This proves input above 256 KiB, not
+  unlimited compiler input; the 512 KiB session gate and per-tool Lua ceiling remain.
 - **The exact User Script executor feasibility gate is GREEN, not production code — and reload
   lifecycles are not interchangeable.** On Chrome 151, four inactive task/provider tabs in two
   same-release groups executed only after frame-0 no-ops returned exact `documentId` values. The task
@@ -2832,12 +2832,12 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   8.47 MiB / 56 entries): comparison 19.6 s across amazon+ebay, refinement 6.4 s, cancel 5.3 s with no
   mutation, a site-confirmed cart add 21.8 s, checkout review 46.4 s with no order — `stores unchanged`,
   script ownership `axsdk-default-form-tools,packaged-lua:`.
-- **Correction to the last entry of this section: package assets do NOT bypass the 256 KiB boundary.**
+- **Package assets do not bypass the backend session-document boundary; that boundary is now 512 KiB.**
   They bypass the persisted STORE's 256 KiB physical value, which is a different limit in a different
-  place. The document still travels to `POST /sessions` on every session creation, and that endpoint
-  enforces 256 KiB of UTF-8 on `clientFlowDocument`. The open proof recorded there — pass a >256 KiB
-  document from package assets to the compiler — is answered: **the backend refuses it before any
-  compiler sees it.**
+  place. The 2026-08-26 measurement above remains the historical 256 KiB refusal. The backend raised
+  `clientFlowDocument` to **512 KiB on 2026-08-29**; the canonical 256.5 KiB document then opened,
+  compiled, and ran a live ten-site DGX Spark comparison. `check:flows` measures canonical UTF-8 bytes
+  against 512 KiB while the persisted-slot gates remain 256 KiB.
 - **bluemoonsoft is gone from the product (2026-08-26), and the cutover is the interesting part.** One
   customer's site had its own flow overlay, its own intent and route, four tools nobody else called, and a
   runtime module (`72_rpc_sitemap`) with exactly one caller. It fit no single-purpose sentence — every one

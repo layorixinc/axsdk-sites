@@ -652,14 +652,18 @@ test('store outcomes reach the user, not just the log', () => {
     'an empty comparison must emit the deterministic per-store outcome rendering');
 });
 
-test('multi-store collection requires a question only on the ask branch', () => {
+test('multi-store collection preserves grounded product state while asking for stores', () => {
   const common = parseFlow('_common/flows.yaml');
+  const flow = common.flows.shopping_multi_store_total_cost;
+  const collector = flow.nodes.collect_request;
   const ready = common.flowTools.collect_ready_total_cost_request.parameters;
   const schema = common.flowTools.collect_total_cost_request.parameters;
   const accepts = (value) => schema.anyOf.some((branch) => {
     if ((branch.required ?? []).some((key) => !Object.hasOwn(value, key))) return false;
     const next = branch.properties?.next;
     if (next?.const !== undefined && value.next !== next.const) return false;
+    const collectStage = branch.properties?.collect_stage;
+    if (collectStage?.const !== undefined && value.collect_stage !== collectStage.const) return false;
     if (next?.enum && !next.enum.includes(value.next)) return false;
     const question = branch.properties?.question;
     if (typeof value.question === 'string' && question?.minLength
@@ -668,13 +672,30 @@ test('multi-store collection requires a question only on the ask branch', () => 
     return true;
   });
 
+  assert.equal(collector.next.ask, 'collect_request',
+    'the ask branch is the engine pause contract; alternate branch names start a fresh flow');
+  assert.ok(collector.inputSelector.includes('collect_stage'));
+  assert.ok(Object.hasOwn(flow.state, 'collect_stage'));
+  assert.match(collector.prompt, /preserve every\s+existing non-null product field/i);
+  assert.match(collector.prompt, /전체 사이트/);
   assert.ok(!ready.required.includes('question'), 'a prefilled complete request never owes a question');
   assert.deepEqual(ready.properties.question.type, ['string', 'null'],
     'the provider may still emit question:null for a completed request');
   assert.deepEqual(schema.required, ['next'], 'question is not globally required');
-  assert.equal(accepts({ next: 'ask' }), false, 'ask still owes the user a non-empty question');
-  assert.equal(accepts({ next: 'ask', question: '' }), false);
-  assert.equal(accepts({ next: 'ask', question: '어떤 제품을 비교할까요?' }), true);
+  assert.equal(accepts({ next: 'ask', collect_stage: 'product', question: '어떤 제품을 비교할까요?' }), true);
+  assert.equal(accepts({ next: 'ask', collect_stage: 'stores', question: '어느 사이트를 비교할까요?' }), false,
+    'a store question without the product it just named would lose that product on the next turn');
+  assert.equal(accepts({
+    next: 'ask',
+    collect_stage: 'stores',
+    question: '어느 사이트를 비교할까요?',
+    query: 'DGX Spark',
+    product_category: 'DGX Spark',
+    identity_kind: 'standardized_model',
+    quantity: 1,
+  }), true);
+  assert.equal(accepts({ next: 'ask', question: '어떤 제품을 비교할까요?' }), false,
+    'an undifferentiated ask cannot enforce which partial state must survive');
   assert.equal(accepts({ next: 'done' }), true, 'a complete request may omit question');
   assert.equal(accepts({ next: 'done', question: null }), true, 'provider null is accepted off the ask branch');
 });
@@ -2520,18 +2541,15 @@ test('a context is selected by the node AND declared by the tool, and is never a
 });
 
 /**
- * The size the BACKEND refuses, measured against the live endpoint on 2026-08-26.
+ * The size the BACKEND refuses. The original live boundary measured on 2026-08-26 was 256 KiB:
+ * 261,747 B accepted and 262,647 B refused. The backend limit was raised to 512 KiB on 2026-08-29,
+ * and a live session then accepted this canonical document above the old boundary.
  *
- * `POST /axsdk/v2/sessions` answers 400 `BadRequest` with `data.message: "clientFlowDocument is too
- * large"` above 256 KiB of UTF-8: 261,747 B accepted, 262,647 B refused. Nothing local enforced it, so
- * the authored document reached 265,009 B and the shipped package-only artifact could not open a session
- * at all — while every offline gate and every stored-mode live run stayed green, because merging two
- * layers re-emitted the document canonically at 246,846 B and only the SHIPPED path sent it verbatim.
- *
- * The metric is therefore the CANONICAL size (the SDK canonicalises every layer since that measurement),
- * and it is UTF-8 bytes, not characters: this document is Korean-heavy, so the two differ by ~5.8 KB.
+ * The metric remains the CANONICAL size (the SDK canonicalises every layer), and it is UTF-8 bytes,
+ * not characters: this document is Korean-heavy, so the two differ by several KB. Keeping the gate at
+ * the backend's real ceiling prevents a package that builds locally from failing before its first turn.
  */
-const SESSION_DOCUMENT_LIMIT = 256 * 1024;
+const SESSION_DOCUMENT_LIMIT = 512 * 1024;
 
 test('every shipped flow document fits the backend session limit once canonicalised', () => {
   const { stringify, parse } = YAML;
@@ -2564,7 +2582,8 @@ test('every shipped flow document fits the backend session limit once canonicali
   const report = measured
     .map((item) => `${item.label} ${(item.bytes / 1024).toFixed(1)} KiB (${((item.bytes / SESSION_DOCUMENT_LIMIT) * 100).toFixed(1)}%)`)
     .join(' · ');
-  assert.deepEqual(over, [], `over the 256 KiB session document limit: ${report}`);
+  assert.deepEqual(over, [],
+    `over the ${SESSION_DOCUMENT_LIMIT / 1024} KiB session document limit: ${report}`);
   console.log(`FLOW DOCUMENT ${report}`);
 });
 

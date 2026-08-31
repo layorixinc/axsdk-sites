@@ -637,11 +637,38 @@
         {
           "required": [
             "next",
-            "question"
+            "question",
+            "collect_stage"
           ],
           "properties": {
             "next": {
               "const": "ask"
+            },
+            "collect_stage": {
+              "const": "product"
+            },
+            "question": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "required": [
+            "next",
+            "question",
+            "collect_stage",
+            "query",
+            "product_category",
+            "identity_kind",
+            "quantity"
+          ],
+          "properties": {
+            "next": {
+              "const": "ask"
+            },
+            "collect_stage": {
+              "const": "stores"
             },
             "question": {
               "type": "string",
@@ -677,6 +704,13 @@
             "ask",
             "done",
             "cancel"
+          ]
+        },
+        "collect_stage": {
+          "type": "string",
+          "enum": [
+            "product",
+            "stores"
           ]
         },
         "question": {

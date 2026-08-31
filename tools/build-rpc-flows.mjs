@@ -174,7 +174,7 @@ export function emitWorkspace({ root, dest, delivery = 'inline' }) {
   return built.__report;
 }
 
-const CEILING = 256 * 1024;
+const CEILING = 512 * 1024;
 
 if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))) {
   const rootArg = process.argv[2] ?? 'playground';
@@ -185,7 +185,7 @@ if (process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import
   console.log(`built ${rootArg} → ${relative(repoRoot, dest)}`);
   for (const doc of report.documents) console.log(`  ${doc.path.padEnd(28)} ${(doc.bytes / 1024).toFixed(1)} KiB`);
   console.log(`  ${report.tools} tool(s), ${report.modules.length} module(s) inlined`);
-  console.log(`  total ${(report.bytes / 1024).toFixed(1)} KiB — ${pct}% of the 256 KiB clientFlows ceiling`);
+  console.log(`  total ${(report.bytes / 1024).toFixed(1)} KiB — ${pct}% of the 512 KiB clientFlows ceiling`);
   if (report.bytes > CEILING) {
     console.error('  ERROR: over the clientFlows ceiling');
     process.exitCode = 1;

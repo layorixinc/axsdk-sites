@@ -109,14 +109,14 @@ test('the emitted document reports what it cost', () => {
   });
   const built = buildRpcFlows({ root, modulePaths: { '_common.helpers': '_common/scripts/helpers.lua', '_common.reader': '_common/scripts/reader.lua' } });
 
-  // The document has a hard 256 KiB ceiling and inlining is what pushes against it. A build that does not
-  // report its own size is a build that discovers the ceiling in production.
+  // The backend clientFlows document has a hard 512 KiB ceiling; inlining spends that budget. A build
+  // that does not report its own size is a build that discovers the ceiling in production.
   assert.ok(built.__report.bytes > 0);
   assert.equal(built.__report.tools, 1);
   assert.deepEqual(built.__report.modules.sort(), ['_common.helpers', '_common.reader']);
 });
 
-// Inlining was always the stopgap: it spends the document's 256 KiB budget on Lua that the runtime can
+// Inlining was always the stopgap: it spends the document's 512 KiB budget on Lua that the runtime can
 // now hold separately. Registry delivery sends the NAMES and uploads the sources, so the document costs
 // one line per module regardless of how big the layer grows. Both modes read the same `modules:`
 // declaration, which is the whole reason the declaration was written that way.

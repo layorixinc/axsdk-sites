@@ -556,6 +556,9 @@ test('changing identity from a comparison clears every stale mutation approval b
   assert.equal(invalidator.next.restore, 'restore_exploration');
   assert.ok(invalidator.inputSelector.includes('identity_change_request'));
 
+  const tool = common.flowTools.shopping_invalidate_identity_selection;
+  assert.equal(tool.execute.entry, 'run',
+    'a named Lua function that is never selected produces an empty completed result');
   const cleared = new Set(invalidator.state?.clear ?? []);
   for (const field of [
     'identity_id', 'identity_approval', 'comparison_id', 'comparison_state',
@@ -563,6 +566,8 @@ test('changing identity from a comparison clears every stale mutation approval b
   ]) {
     assert.ok(cleared.has(field), `identity replacement must clear ${field}`);
   }
+  assert.equal(tool.output.next, 'result.next');
+  assert.equal(tool.output.identity_change_request, 'result.identity_change_request');
   assert.ok(!cleared.has('exploration_state'), 'the previous exploration is the return path');
   assert.ok(!cleared.has('identity_revision'), 'the next lock increments the revision');
 });

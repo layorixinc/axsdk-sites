@@ -9,6 +9,7 @@ import {
   lastToolOutput,
   discoveryChoiceSurface,
   refinedExplorationSurface,
+  explorationSnapshot,
   sitesFromWindow,
 } from './multi-store-total-cost.mjs';
 
@@ -95,6 +96,45 @@ test('exploration refinement proves a new snapshot without another store search'
   assert.equal(refinedExplorationSurface(turn, 'exp-old'), true);
   turn.toolCalls.push({ name: 'shopping_discover_products', status: 'completed', output: { next: 'done' } });
   assert.equal(refinedExplorationSurface(turn, 'exp-old'), false);
+});
+
+test('truncated tool output falls back to complete exploration state from the node trace', () => {
+  const snapshot = {
+    exploration_id: 'exp-new',
+    groups: [
+      { source_refs: [{ site: '11st' }] },
+      { source_refs: [{ site: 'walmart' }] },
+    ],
+  };
+  const turn = {
+    text: '상품 탐색 결과 1-2/2\n1. Logitech M185 · 관측 판매처 1곳\n2. Logitech M240 · 관측 판매처 1곳',
+    parts: [{
+      type: 'step-start',
+      debug: {
+        node: 'present_exploration',
+        localState: {
+          exploration_id: snapshot.exploration_id,
+          exploration_state: JSON.stringify(snapshot),
+        },
+      },
+    }],
+    toolCalls: [
+      {
+        name: 'shopping_refine_product_exploration',
+        status: 'completed',
+        output: '{"next":"ask","exploration_state":"... [9000 chars trimmed]',
+      },
+      {
+        name: 'present_product_exploration',
+        status: 'completed',
+        output: '{"next":"ask","question":"... [9000 chars trimmed]',
+      },
+    ],
+  };
+
+  assert.deepEqual(explorationSnapshot(turn), snapshot);
+  assert.equal(discoveryChoiceSurface(turn), true);
+  assert.equal(refinedExplorationSurface(turn, 'exp-old'), true);
 });
 
 test('comparison attribution reads offer tags and classified failure labels', () => {

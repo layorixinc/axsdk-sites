@@ -64,13 +64,28 @@ export function lastToolOutput(toolCalls, suffix) {
   return call === undefined ? null : decode(call.output) ?? null;
 }
 
+/** Complete exploration snapshot from the node trace; tool output may be cut at the chat-store limit. */
+export function explorationSnapshot(turn) {
+  const parts = Array.isArray(turn?.parts) ? turn.parts : [];
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index];
+    if (part?.type !== 'step-start' || part.debug?.node !== 'present_exploration') continue;
+    const snapshot = decode(part.debug?.localState?.exploration_state);
+    if (snapshot !== null && typeof snapshot === 'object' && Array.isArray(snapshot.groups)) return snapshot;
+  }
+  return null;
+}
+
 export function discoveryChoiceSurface(turn) {
   const call = findToolCall(turn?.toolCalls, 'present_product_exploration');
   const output = decode(call?.output);
-  const question = String(output?.question || turn?.text || '');
+  const question = String(
+    output !== null && typeof output === 'object' ? output.question || turn?.text || '' : turn?.text || '',
+  );
   const forbidden = /identity_confidence|source_sites|source_refs|sample[_ ]prices?|exploration_state/i;
+  const renderedSnapshot = explorationSnapshot(turn);
   return call?.status === 'completed'
-    && output?.next === 'ask'
+    && (output?.next === 'ask' || renderedSnapshot !== null)
     && /(?:^|\n)\s*1\.\s+\S/m.test(question)
     && /관측 판매처|observed stores?/i.test(question)
     && !forbidden.test(question);
@@ -81,11 +96,15 @@ export function refinedExplorationSurface(turn, previousId) {
   const refined = findToolCall(turn?.toolCalls, 'shopping_refine_product_exploration');
   const presented = findToolCall(turn?.toolCalls, 'present_product_exploration');
   const output = decode(presented?.output);
+  const snapshot = explorationSnapshot(turn);
+  const currentId = output !== null && typeof output === 'object'
+    ? output.exploration_id || snapshot?.exploration_id
+    : snapshot?.exploration_id;
   return refined?.status === 'completed'
     && presented?.status === 'completed'
-    && output?.next === 'ask'
-    && typeof output?.exploration_id === 'string'
-    && output.exploration_id !== previousId
+    && (output?.next === 'ask' || snapshot !== null)
+    && typeof currentId === 'string'
+    && currentId !== previousId
     && discoveryChoiceSurface(turn)
     && !findToolCall(turn?.toolCalls, 'shopping_discover_products');
 }
@@ -137,7 +156,7 @@ async function main() {
     check(checks, 'deterministic preflight keeps every requested store', requestedSites.every((site) => prefilledSites.includes(site)), prefilledSites.join(','));
     if (discoveryMode) {
       const explorationOutput = lastToolOutput(compare.toolCalls, 'shopping_build_product_exploration');
-      const explorationState = (() => {
+      const explorationState = explorationSnapshot(compare) ?? (() => {
         try { return JSON.parse(explorationOutput?.exploration_state || ''); } catch { return null; }
       })();
       const productGroups = Array.isArray(explorationState?.groups) ? explorationState.groups : [];
@@ -165,7 +184,7 @@ async function main() {
           && !findToolCall(compare.toolCalls, 'shopping_rank_store_offers'));
       check(checks, 'discovery cannot mutate a cart', !findToolCall(compare.toolCalls, 'shopping_add_selected_store_offer'));
       console.log(`DISCOVER  ${discoveryReply.replace(/\s+/g, ' ').slice(0, 500)}`);
-      const initialExplorationId = explorationOutput?.exploration_id;
+      const initialExplorationId = explorationState?.exploration_id ?? explorationOutput?.exploration_id;
       const refined = await session.send('이름순으로 보여줘', { timeoutMs: 120000 });
       check(checks, 'filter and sort stay inside the exploration snapshot',
         refinedExplorationSurface(refined, initialExplorationId),

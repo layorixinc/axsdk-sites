@@ -4049,6 +4049,7 @@ flowTools:
     execute:
       kind: runtime
       implementation: lua
+      entry: run
       lua: |
         function run(args)
           return { next = "restore", identity_change_request = args.identity_change_request }

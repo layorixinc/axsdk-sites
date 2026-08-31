@@ -244,6 +244,31 @@ test('a current exploration number locks a new revision but a stale number is re
   assert.equal(stale.identity_approval, undefined);
 });
 
+test('the flow-state exploration index crosses the runtime wrapper', () => {
+  const first = runtime();
+  const built = first.call('AX_RPC_OFFERS.build_exploration', {
+    discovery_results: discoveryResults,
+    exploration_query: 'wireless mouse',
+    product_category: 'wireless mouse',
+    identity_kind: 'standardized_model',
+  });
+  first.close();
+
+  const second = runtime();
+  const selected = second.call('AX_RPC_OFFERS.resolve_exploration', {
+    exploration_state: built.exploration_state,
+    exploration_id: built.exploration_id,
+    choice_exploration_id: built.exploration_id,
+    choice_exploration_index: 1,
+    identity_revision: 4,
+  });
+  second.close();
+
+  assert.equal(selected.next, 'lock');
+  assert.equal(selected.identity_revision, 5);
+});
+
+
 test('a comparison follow-up can return to exploration or directly select a known model', () => {
   const exploration = runtime();
   const built = exploration.call('AX_RPC_OFFERS.build_exploration', {

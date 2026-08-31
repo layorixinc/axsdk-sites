@@ -719,12 +719,15 @@ function O.refine_exploration(args)
   return shown
 end
 
+
 function O.resolve_exploration(args)
   args = type(args) == "table" and args or {}
   local snapshot = restore_exploration_state(args.exploration_state)
   if not snapshot then return { next = "error", error = "exploration_unreadable" } end
   local call = {}
   for key, value in pairs(args) do call[key] = value end
+  -- The flow state carrier is named choice_exploration_index; the pure resolver consumes choice_index.
+  call.choice_index = args.choice_index or args.choice_exploration_index
   call.groups = snapshot.groups
   call.exploration_id = snapshot.exploration_id
   local result = AX_resolve_product_exploration(call)

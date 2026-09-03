@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'bun:test';
 
-import { extensionStatus, installExtension, uninstallExtension } from './src/ops/extension.mjs';
+import { extensionStatus, installExtension, uninstallExtension } from './src/ops/extension.ts';
 
 /**
  * The install mechanism, decided by measurement on 2026-09-03 rather than by preference:

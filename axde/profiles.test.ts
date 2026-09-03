@@ -6,7 +6,7 @@ import test from 'node:test';
 
 import {
   MANIFEST, attachBuild, createProfile, deleteProfile, detachBuild, listProfiles, profileRootFrom,
-} from './src/ops/profiles.mjs';
+} from './src/ops/profiles.ts';
 
 async function root() {
   const temp = await mkdtemp(join(tmpdir(), 'axde-profiles-'));

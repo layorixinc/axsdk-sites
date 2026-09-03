@@ -22,7 +22,7 @@ import {
   WORKSPACE_ENV_KEYS, credentialsFromEnv, extensionIdFromKey, fingerprintBuild, profileDir,
 } from '../../../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/chrome-launch.mjs';
 import { harnessConfig } from '../../../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/harness-config.mjs';
-import { attachBuild, detachBuild, readManifest } from './profiles.mjs';
+import { attachBuild, detachBuild, readManifest } from './profiles.ts';
 
 export { fingerprintBuild, probeDebugger };
 

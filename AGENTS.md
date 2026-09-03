@@ -3196,10 +3196,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   fresh. Diagnosis discipline worth repeating: when a worker dies silently, `--enable-logging` and
   `chrome_debug.log` hold the uncaught exception verbatim, and an OLD known-good artifact on the same
   fresh profile splits "Chrome regressed" from "our build regressed" in one probe.
-- **`axde` (the TUI dev env) stage 1 shipped 2026-09-03, and its install mechanism is a MEASUREMENT.**
-  `axde/` holds a zero-dependency terminal app (pure `reduce`/`render`/key-decode core + thin driver
-  + capability adapter over the SDK's own launcher) that manages Chrome profiles and the local
-  extension build; `axde/packs/src/` holds the Lua sample packs it develops against. Six facts it
+- **`axde` (the TUI dev env) stage 1 shipped 2026-09-03, on BUN, and its install mechanism is a
+  MEASUREMENT.** `axde/` is a zero-dependency bun + TypeScript terminal app (pure
+  `reduce`/`render`/key-decode core + thin driver + capability adapter over the SDK's own launcher)
+  that manages Chrome profiles and the local extension build; `axde/packs/src/` holds the Lua sample
+  packs it develops against. Bun is not taste: from stage 3 on it imports the SDK's own TypeScript
+  (pack schemas, `fetchVerifiedPackRelease`, the Lua prelude) the way `tools/packs/*.ts` does, which
+  node cannot load without a compile step. Its suites are `bun:test` files asserting with
+  `node:assert/strict` — measured to work, and chosen because rewriting 56 contract assertions into
+  `expect` would have been 56 chances to weaken one. `bun test <dir>` is RECURSIVE, so the
+  orphan-suite gate now accepts a command naming any ANCESTOR directory (mutation-checked: delete
+  `test:axde` and it goes red). Six facts it
   encodes, each probed rather than assumed: a CDP **`loadUnpacked` registration lives only as long as
   that browser session** (install said success, the browser closed, the next `ext status` read
   `installed false`), so install ATTACHES the build to the profile and every launch passes
@@ -3215,4 +3222,4 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   X6 note that "`--load-extension` produced no service worker": that was measured while the external
   pack config was broken (`missing schemaVersion`). Also: the wrapper's static gate refuses forbidden
   tokens **inside a comment** — the sample pack's own comment listed them and stopped being
-  publishable. Live journey and the 56 offline tests are recorded in `axde/DESIGN.md` §3.
+  publishable. Live journey and the 71 offline tests are recorded in `axde/DESIGN.md` §3, including the driver contract (alternate screen and raw mode restored, busy painted DURING the operation, a non-TTY invocation refused by name rather than hanging).

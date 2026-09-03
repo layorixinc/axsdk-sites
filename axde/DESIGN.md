@@ -1,7 +1,7 @@
 # AXSDK Dev Env (`axde`) — staged design
 
-A terminal app for developing and debugging **Agent Packs**: profiles, builds, pack lifecycle, live
-turns, and traces in one place, on one screen, without hand-written CDP probes.
+A **bun** terminal app for developing and debugging **Agent Packs**: profiles, builds, pack
+lifecycle, live turns, and traces in one place, on one screen, without hand-written CDP probes.
 
 Why it exists, stated as measurement rather than preference: the X0–X6 work spent most of its wall
 time on things a dev environment owns — a fresh profile that needs developer mode before the
@@ -13,24 +13,36 @@ operation. `axde` is where they live.
 
 ## 1. Non-negotiables
 
-1. **Zero runtime dependencies.** This repo has none (`fengari` and `yaml` are devDependencies), and
-   a TUI framework would add a build step, a second event model, and a React reconciler to a screen
-   that is a list, a menu, and a log pane. Raw ANSI + `readline` in raw mode is small enough to own.
-2. **Pure core, thin driver.** `reduce(state, event) → { state, effects }` and
+1. **Bun is the runtime, TypeScript is the source.** `bun axde/src/cli.ts` and `bun test axde`, no
+   build step. This is not a taste: from stage 3 on, `axde` must import the SDK's own TypeScript —
+   the pack schemas, `fetchVerifiedPackRelease`, the Lua prelude — the way `tools/packs/*.ts`
+   already does, and node cannot load those without a compile step nobody should own.
+2. **Zero runtime dependencies.** This repo has none (`fengari` and `yaml` are devDependencies), and
+   a TUI framework would add a bundler, a second event model, and a React reconciler to a screen
+   that is a list, a menu, and a log pane. Raw ANSI + raw-mode stdin is small enough to own.
+3. **Pure core, thin driver.** `reduce(state, event) → { state, effects }` and
    `render(state, size) → string[]` are pure and unit-tested with no terminal and no browser. The
    driver does stdin/stdout and executes effects. This is the same shape as `10_form_wizard.lua` and
    `44_pagination.lua`, for the same reason: the decisions are testable offline and the capability
    layer stays boring.
-3. **Never reimplement the SDK's primitives.** `chromeCandidates`, `profileDir`, `chromeArgs`,
+4. **Never reimplement the SDK's primitives.** `chromeCandidates`, `profileDir`, `chromeArgs`,
    `extensionIdFromKey`, `fingerprintBuild`, `credentialsFromEnv`, `launchChrome`, `evaluate`,
    `writeConfig` already exist in `axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/`. `axde`
    imports them. Imports flow sites→SDK, never the reverse (the X6 placement rule).
-4. **Every operation is also non-interactive.** The TUI is a shell over a command core that a script
+5. **Every operation is also non-interactive.** The TUI is a shell over a command core that a script
    or a gate can call. A screen cannot be asserted; a command can.
-5. **No secret ever reaches the screen or a log.** Credentials are seeded from `.env` and the UI
+6. **No secret ever reaches the screen or a log.** Credentials are seeded from `.env` and the UI
    shows only `credentials: written`. The config store is read by field, never printed whole.
-6. **Destructive operations name what they will destroy** and refuse a profile `axde` did not create
+7. **Destructive operations name what they will destroy** and refuse a profile `axde` did not create
    unless forced, because the shared harness profile holds the developer's credentials and chat.
+
+### Testing: the bun runner, `node:assert` assertions
+
+Suites are `bun:test` files that assert with `node:assert/strict`. Bun runs both, measured. The
+reason is not nostalgia: the 56 core assertions each pin a measured contract (an exact effect list,
+an exact refusal, an exact rendered row), and rewriting them into `expect` would have been 56
+opportunities to weaken one for no gain. New assertions may use either; the sample-pack suite under
+`packs/` uses `expect`, which reads better for object shapes.
 
 ## 2. Layout
 
@@ -38,19 +50,21 @@ operation. `axde` is where they live.
 axde/
   DESIGN.md · README.md
   src/
-    cli.mjs                 # entry: subcommand or TUI
-    driver.mjs              # raw mode, alternate screen, resize, restore-on-exit
-    core/{keys,state,render}.mjs   # pure: bytes→events, reduce, render
-    ops/{profiles,extension,chrome}.mjs  # inventory/lifecycle, decisions, capability adapter
+    cli.ts                  # entry: subcommand or TUI
+    driver.ts               # raw mode, alternate screen, resize, restore-on-exit
+    core/{keys,state,render}.ts    # pure: bytes→events, reduce, render
+    ops/{profiles,extension,chrome}.ts  # inventory/lifecycle, decisions, capability adapter
   packs/src/                # the sample packs axde develops against (Lua)
-  *.test.mjs                # offline suites (node --test)
+  *.test.ts                 # offline suites (bun test)
   packs/*.test.ts           # sample-pack suites (bun test)
 ```
 
-Root scripts: `axde`, `test:axde` (`node --test "axde/*.test.mjs"`), and `test:packs` extended to
-`bun test tools/packs axde/packs`. `tools/scenarios/runner-contract.test.mjs` walks `axde/` too, so
-an unreachable suite here fails the same way it does under `tools/` (the orphan-suite lesson, twice
-paid for).
+Root scripts: `axde` (`bun axde/src/cli.ts`) and `test:axde` (`bun test axde`, which covers the
+sample packs too — `bun test <dir>` is recursive). `test:packs` stays the product packs
+(`bun test tools/packs`). `tools/scenarios/runner-contract.test.mjs` walks `axde/` as a second root
+and accepts a `bun test` command naming any ANCESTOR directory, so an unreachable suite here fails
+the same way it does under `tools/` (the orphan-suite lesson, twice paid for) — mutation-checked by
+deleting `test:axde` and watching the gate go red.
 
 ## 3. Stage 1 — profiles and builds — **DONE 2026-09-03**
 
@@ -93,18 +107,18 @@ nobody read says `attached`, never a fabricated fingerprint — unknown stays un
 ### Commands (the same core the TUI calls)
 
 ```text
-axde                                  the TUI
+bun axde/src/cli.ts                       # or: npm run axde
 axde profile ls | new <name> [--port <n>] | rm <name> [--force]
 axde ext install <profile> [--dist <path>] | uninstall <profile> | status <profile>
 ```
 
-### Measured acceptance (2026-09-03, one live journey)
+### Measured acceptance (2026-09-03, one live journey — re-run under bun after the migration)
 
 ```text
 profile new packdev             → created (port assigned, manifest written)
 ext install packdev             → attached · relaunched · devMode on · allow-user-scripts on
                                   installed 7caf9283 · user scripts on · credentials: written
-profile ls                      → packdev  axde  down:57354  ext attached
+profile ls                      → packdev  axde  down:61077  ext attached
 ext status packdev (new proc)   → installed true · stale false · userScripts true
 ext install packdev (again)     → up-to-date   (no relaunch: a relaunch kills a live session)
 ext uninstall packdev           → detached · uninstalled, verified absent
@@ -114,9 +128,13 @@ profile rm axsdk-extension-cdp  → refused: axde did not create it (pass --forc
 ext install axsdk-extension-cdp → refused: it manages only its own profiles
 ```
 
-Offline: `npm run test:axde` — 56 tests over the reducer, the renderer at three widths, key decoding,
-the profile manifest/inventory, and every extension op against a fake that refuses what the real
-thing refuses and persists what it persists.
+Offline: `npm run test:axde` — **70 tests** (56 over the reducer, the renderer at three widths, key
+decoding, the profile manifest/inventory, and every extension op against a fake that refuses what
+the real thing refuses and persists what it persists; 6 over the driver — alternate screen and raw
+mode both restored, busy painted WHILE an operation runs, a thrown operation becoming a readable log
+line, an idle poll writing no frames, and a non-TTY invocation refusing BY NAME instead of hanging
+forever — measured: it used to take the alternate screen and poll an input that never arrives; and 8
+for the sample packs).
 
 ### Development sample packs — `axde/packs/src/`
 
@@ -128,10 +146,10 @@ The packs `axde` develops AGAINST, authored as Lua like every other pack:
 - `dev-probe/provider.lua` — reads the page it stands on (url parts, match count, bounded samples),
   so "the provider did not run" and "it ran and matched nothing" stop looking alike.
 
-Both are proven to run through the real wrapper and the real prelude (`npm run test:packs`), and the
-suite pins that neither names a click, a write, or a navigation. One finding worth keeping: the
-wrapper's static gate refuses forbidden tokens even inside a COMMENT — an earlier version of
-`dev-echo`'s own comment listed them and the sample stopped being publishable.
+Both are proven to run through the real wrapper and the real prelude, and the suite pins that neither
+names a click, a write, or a navigation. One finding worth keeping: the wrapper's static gate refuses
+forbidden tokens even inside a COMMENT — an earlier version of `dev-echo`'s own comment listed them
+and the sample stopped being publishable.
 
 ## 4. Later stages (scope sketch, not commitments)
 
@@ -143,6 +161,7 @@ wrapper's static gate refuses forbidden tokens even inside a COMMENT — an earl
 | 5 | pack authoring loop: wrap/verify a `.lua` artifact, run it through the packaged prelude, call `pack.catalog`/`pack.invoke`, watch the executor document | the last hand-driven surface after stage 4 |
 | 6 | record and replay a session (inputs + effects) so a bug report is a file a gate can replay | a defect nobody can re-run is a defect that gets re-diagnosed |
 
+Stages 3–5 are where non-negotiable 1 pays for itself: each imports SDK TypeScript directly.
 Each stage gets its own section here, with the same "what it encodes because it was measured" and
 "acceptance" pair, written before its code.
 

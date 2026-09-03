@@ -54,16 +54,22 @@ test('every test suite under tools/ and axde/ is reachable from an npm script', 
       if (entry.isDirectory()) { walk(path); continue; }
       const suffix = ['.test.mjs', '.test.ts'].find((candidate) => entry.name.endsWith(candidate));
       if (suffix === undefined) continue;
+      // `bun test <dir>` is RECURSIVE, so a suite is reachable when the command names it or any of
+      // its ancestors — `bun test axde` really does run `axde/packs/*.test.ts`. A gate that demanded
+      // the exact directory reported a false orphan the moment axde grew a subdirectory.
+      const ancestors = dir.split('/').map((_, index, parts) => parts.slice(0, index + 1).join('/'));
       const reachable = commands.includes(path)
         || commands.includes(`${dir}/*${suffix}`)
-        || new RegExp(`(?:^|\\s)bun test [^&|]*${dir.replaceAll('/', '\\/')}(?:\\s|$)`).test(commands);
+        || ancestors.some((candidate) => new RegExp(
+          `(?:^|\\s)bun test [^&|]*${candidate.replaceAll('/', '\\/')}(?:\\s|$)`,
+        ).test(commands));
       if (!reachable) orphans.push(path);
     }
   };
   walk('tools');
-  // 2026-09-03: `axde/` (the dev environment) is a second tree with both runners in it — its core
-  // suites are `node --test`, its sample-pack suite is `bun test`. Adding the root here is cheaper
-  // than rediscovering the orphan-suite lesson in a new directory.
+  // 2026-09-03: `axde/` (the dev environment) is a second tree, and a bun-only one — its suites run
+  // under `bun test axde`. Adding the root here is cheaper than rediscovering the orphan-suite
+  // lesson in a new directory.
   walk('axde');
   assert.deepEqual(orphans, [], 'suites no npm script runs — they are green because nothing looks at them');
 });

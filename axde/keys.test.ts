@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'bun:test';
 
-import { decodeKeys } from './src/core/keys.mjs';
+import { decodeKeys } from './src/core/keys.ts';
 
 const names = (chunk) => decodeKeys(chunk).map((event) => event.name);
 

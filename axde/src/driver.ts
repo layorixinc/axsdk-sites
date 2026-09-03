@@ -6,9 +6,9 @@
  * leaving raw mode on makes the shell unusable, which is why the restore runs from one place and is
  * registered before the first byte is read.
  */
-import { decodeKeys } from './core/keys.mjs';
-import { render } from './core/render.mjs';
-import { reduce } from './core/state.mjs';
+import { decodeKeys } from './core/keys.ts';
+import { render } from './core/render.ts';
+import { reduce } from './core/state.ts';
 
 const ALT_SCREEN_ON = '\u001b[?1049h';
 const ALT_SCREEN_OFF = '\u001b[?1049l';
@@ -53,8 +53,16 @@ export function createDriver({ input = process.stdin, output = process.stdout, i
   };
 
   const run = async () => {
+    // Without a TTY there is no input to poll and no screen to keep: entering the alternate screen
+    // and looping would hang a piped or CI invocation with nothing on stdout to explain it. The
+    // commands are the non-interactive answer, so the refusal names them.
+    if (!input.isTTY) {
+      throw new Error(
+        'the TUI needs a terminal (stdin is not a TTY) — use `axde profile ls` or `axde ext status <profile>`',
+      );
+    }
     output.write(`${ALT_SCREEN_ON}${HIDE_CURSOR}`);
-    if (input.isTTY) input.setRawMode?.(true);
+    input.setRawMode?.(true);
     input.resume?.();
     output.on?.('resize', paint);
     process.on('exit', restore);

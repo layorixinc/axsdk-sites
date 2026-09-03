@@ -1,12 +1,17 @@
 # `axde` — AXSDK Dev Env
 
-A terminal app for developing and debugging Agent Packs. Stage 1 manages **Chrome profiles** and the
-**local extension build** in them; later stages add pack lifecycle, turns and traces (`DESIGN.md`).
+A **bun** terminal app for developing and debugging Agent Packs. Stage 1 manages **Chrome profiles**
+and the **local extension build** in them; later stages add pack lifecycle, turns and traces
+(`DESIGN.md`).
+
+Bun is the runtime and TypeScript is the source, with no build step — from stage 3 on `axde` imports
+the SDK's own TypeScript (pack schemas, the registry verifier, the Lua prelude) the way
+`tools/packs/*.ts` already does.
 
 ## Run it
 
 ```bash
-npm run axde                      # the TUI
+npm run axde                      # the TUI  (= bun axde/src/cli.ts)
 npm run axde -- profile ls
 npm run axde -- profile new packdev
 npm run axde -- ext install packdev
@@ -14,6 +19,11 @@ npm run axde -- ext status packdev
 npm run axde -- ext uninstall packdev
 npm run axde -- profile rm packdev
 ```
+
+`bun axde/src/cli.ts <args>` works identically if you would rather skip npm.
+
+Run without a terminal (piped, CI) and the TUI refuses by name and points at the commands instead
+of hanging.
 
 Keys in the TUI: `j`/`k` or arrows move, `n` new profile, `d` delete (type the name to confirm),
 `i` install, `u` uninstall, `r` refresh, `q` quit.
@@ -49,9 +59,12 @@ it did not create — the shared harness profile holds your credentials and chat
 ## Tests
 
 ```bash
-npm run test:axde     # reducer, renderer, key decoding, profiles, extension ops (offline)
-npm run test:packs    # includes the axde/packs/src sample packs
+npm run test:axde     # bun test axde — core, ops, driver and the sample packs (71 tests, offline)
 ```
+
+Suites are `bun:test` files that assert with `node:assert/strict`: bun runs both, and each core
+assertion pins a measured contract that `expect` would have been an opportunity to weaken. New
+assertions may use either; the sample-pack suite uses `expect`, which reads better for object shapes.
 
 ## Sample packs
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * `axde` — the entry point. One command core, two faces: a TUI (default) and subcommands.
  *
@@ -9,11 +9,11 @@ import { existsSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-import { createDriver } from './driver.mjs';
-import { initialState } from './core/state.mjs';
-import { extensionStatus, installExtension, uninstallExtension } from './ops/extension.mjs';
-import { availablePort, createBrowser, fingerprintBuild, probeDebugger } from './ops/chrome.mjs';
-import { createProfile, deleteProfile, listProfiles, profileRootFrom } from './ops/profiles.mjs';
+import { createDriver } from './driver.ts';
+import { initialState } from './core/state.ts';
+import { extensionStatus, installExtension, uninstallExtension } from './ops/extension.ts';
+import { availablePort, createBrowser, fingerprintBuild, probeDebugger } from './ops/chrome.ts';
+import { createProfile, deleteProfile, listProfiles, profileRootFrom } from './ops/profiles.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const SITES_ROOT = resolve(here, '..', '..');

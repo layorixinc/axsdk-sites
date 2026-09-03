@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'bun:test';
 
-import { initialState, reduce } from './src/core/state.mjs';
+import { initialState, reduce } from './src/core/state.ts';
 
 const key = (name, char) => ({ type: 'key', name, ...(char === undefined ? {} : { char }) });
 const type = (state, text) => text.split('').reduce((acc, char) => reduce(acc, key('char', char)).state, state);

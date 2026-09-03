@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import { test } from 'bun:test';
 
-import { initialState, reduce } from './src/core/state.mjs';
-import { render } from './src/core/render.mjs';
+import { initialState, reduce } from './src/core/state.ts';
+import { render } from './src/core/render.ts';
 
 const PROFILES = [
   { name: 'packdev', kind: 'axde', chrome: 'up', port: 39701, ext: { id: 'ihdaghii', fingerprint: '9f3c2a1e' }, userScripts: true, stale: false },

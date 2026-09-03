@@ -3196,3 +3196,23 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   fresh. Diagnosis discipline worth repeating: when a worker dies silently, `--enable-logging` and
   `chrome_debug.log` hold the uncaught exception verbatim, and an OLD known-good artifact on the same
   fresh profile splits "Chrome regressed" from "our build regressed" in one probe.
+- **`axde` (the TUI dev env) stage 1 shipped 2026-09-03, and its install mechanism is a MEASUREMENT.**
+  `axde/` holds a zero-dependency terminal app (pure `reduce`/`render`/key-decode core + thin driver
+  + capability adapter over the SDK's own launcher) that manages Chrome profiles and the local
+  extension build; `axde/packs/src/` holds the Lua sample packs it develops against. Six facts it
+  encodes, each probed rather than assumed: a CDP **`loadUnpacked` registration lives only as long as
+  that browser session** (install said success, the browser closed, the next `ext status` read
+  `installed false`), so install ATTACHES the build to the profile and every launch passes
+  **`--load-extension` + `--disable-features=DisableLoadExtensionCommandLineSwitch`**, which is
+  durable and whose service worker registers; a **flag-loaded extension cannot be removed by CDP
+  `Extensions.uninstall`** ("still reachable", every time) so uninstall is detach + relaunch, while
+  CDP uninstall IS the working removal for a `loadUnpacked` install and
+  `chrome.management.uninstallSelf()` removes it but destroys the caller mid-call so it can never be
+  awaited; **developer mode + the Allow-User-Scripts row persist across a graceful close** (so the
+  toggles are set once, at install) while **killing the browser loses the registration AND both
+  toggles** because Chrome writes `Preferences` during shutdown — `close()` is therefore a graceful
+  `Browser.close` plus a settle, never a kill and never the harness's bare release. This RETIRES the
+  X6 note that "`--load-extension` produced no service worker": that was measured while the external
+  pack config was broken (`missing schemaVersion`). Also: the wrapper's static gate refuses forbidden
+  tokens **inside a comment** — the sample pack's own comment listed them and stopped being
+  publishable. Live journey and the 56 offline tests are recorded in `axde/DESIGN.md` §3.

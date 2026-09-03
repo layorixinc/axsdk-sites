@@ -44,14 +44,16 @@
     "dead:lua": "node tools/dead-lua.mjs",
     "test:playground:live": "node tools/scenarios/playground-live.mjs",
     "test:scenarios": "node --test \"tools/scenarios/*.test.mjs\"",
-    "test:packs": "bun test tools/packs",
+    "test:packs": "bun test tools/packs axde/packs",
     "test:commerce:live:cart": "node tools/scenarios/cart-live.mjs",
     "test:extraction:live": "node tools/scenarios/extraction-audit-live.mjs",
     "check:listing": "node tools/listing.mjs",
     "build:tile": "node tools/store-tile.mjs",
     "build:pack-registry": "bun tools/packs/registry.ts",
     "check:pack-registry": "bun tools/packs/registry.ts --check",
-    "test:packs:external:live": "node tools/scenarios/pack-external-live.mjs"
+    "test:packs:external:live": "node tools/scenarios/pack-external-live.mjs",
+    "axde": "node axde/src/cli.mjs",
+    "test:axde": "node --test \"axde/*.test.mjs\""
   },
   "devDependencies": {
     "fengari": "^0.1.4",

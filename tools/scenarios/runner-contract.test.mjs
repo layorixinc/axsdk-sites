@@ -42,7 +42,7 @@ test('a runner reports failure through the exit code, not only on screen', () =>
 // `commerce-all-sites.test.mjs` and `multi-store-total-cost.test.mjs` were in NO npm script at all, and
 // `checkout.test.mjs` was carrying two real failures while every gate was green. Globs are the fix; this is the
 // check that keeps them honest.
-test('every test suite under tools/ is reachable from an npm script', () => {
+test('every test suite under tools/ and axde/ is reachable from an npm script', () => {
   const pkg = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
   const commands = Object.values(pkg.scripts ?? {}).join(' ');
   const orphans = [];
@@ -61,5 +61,9 @@ test('every test suite under tools/ is reachable from an npm script', () => {
     }
   };
   walk('tools');
+  // 2026-09-03: `axde/` (the dev environment) is a second tree with both runners in it — its core
+  // suites are `node --test`, its sample-pack suite is `bun test`. Adding the root here is cheaper
+  // than rediscovering the orphan-suite lesson in a new directory.
+  walk('axde');
   assert.deepEqual(orphans, [], 'suites no npm script runs — they are green because nothing looks at them');
 });

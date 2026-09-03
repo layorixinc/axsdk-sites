@@ -3175,3 +3175,24 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   shape (the `memory.set_bulk` trap, third occurrence); and an incompletely reverted probe string
   shipped one revision of garbage prose in a refusal message — a probe revert is a diff to READ, not
   a replace to trust.
+- **X6 shipped (2026-09-03): the production Pack lifecycle ran against the LIVE unsigned registry,
+  12/12 in 87 s** (`test:packs:external:live`, throwaway profile, external build). Stage-install
+  preview → byte-exact two-phase approval → install of the published `layorix.service-quotes`
+  release (`sha256:36abcece…`) → enable → product-shaped teardown (closing the agent tab group
+  releases the session pin) → disable/remove/reset → deep-equal baseline. The one recorded
+  MEASUREMENT: with a composition active the session goes pack-mode and today's backend does not
+  open it — the platform Pack-protocol blocker, now measured through the whole production path.
+  Five paid-for findings: **a validator/parser drift whose only symptom is a service worker that
+  never registers on a fresh profile** (build-time external-config validator passed a config the
+  runtime parser refuses — `missing schemaVersion` — and `chrome_debug.log` was the ONLY place the
+  sentence existed; the config test now runs BOTH validators); **`PACK_REGISTRY_FETCH` captured the
+  bare global `fetch`** and every install died as `registry_unreachable: Illegal invocation` in the
+  worker (wrapper keeps the receiver); **a refused pack-mode session still CLAIMS the client pin**
+  (disable/remove/reset refused until the tab group closes); **`packs:reset` writes an empty state
+  rather than deleting the key** (the gate resets first so both baselines share one representation);
+  and on a FRESH profile the Allow-User-Scripts toggle needs developer mode first, takes effect
+  IMMEDIATELY (a restart is harmful — `Extensions.loadUnpacked` re-install RESETS the toggle), and a
+  session-restored extension tab after a restart is a DEAD document that `openOptions` now navigates
+  fresh. Diagnosis discipline worth repeating: when a worker dies silently, `--enable-logging` and
+  `chrome_debug.log` hold the uncaught exception verbatim, and an OLD known-good artifact on the same
+  fresh profile splits "Chrome regressed" from "our build regressed" in one probe.

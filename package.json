@@ -50,7 +50,8 @@
     "check:listing": "node tools/listing.mjs",
     "build:tile": "node tools/store-tile.mjs",
     "build:pack-registry": "bun tools/packs/registry.ts",
-    "check:pack-registry": "bun tools/packs/registry.ts --check"
+    "check:pack-registry": "bun tools/packs/registry.ts --check",
+    "test:packs:external:live": "node tools/scenarios/pack-external-live.mjs"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

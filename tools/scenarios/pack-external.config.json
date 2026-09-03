@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "registries": [
+    {
+      "id": "layorix-packs",
+      "baseUrl": "https://layorixinc.github.io/axsdk-sites/packs/registry/",
+      "trustRoots": [],
+      "unsigned": true
+    }
+  ],
+  "executorUrl": "https://layorixinc.github.io/axsdk-sites/pack-executor.html"
+}

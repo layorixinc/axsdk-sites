@@ -347,7 +347,37 @@ Original scope, for reference:
   `pack.catalog` → classify → one model call → `pack.invoke`, and the reply is the Pack's own result. With
   no Pack installed the same utterance answers honestly and names nothing it cannot do.
 
-### X6 — live gate and documentation (1 day)
+### X6 — live gate — **DONE 2026-09-03** (`test:packs:external:live`, 12/12 in 87 s)
+
+Gate: `tools/scenarios/pack-external-live.mjs` (SITES, not the SDK — chat turns belong to this
+repo's harness and imports flow sites→SDK; the plan's placement is amended). One run proves, on a
+THROWAWAY profile with an EXTERNAL build (live unsigned registry + executor defines):
+
+- the empty catalog answers honestly through a real chat turn BEFORE any install;
+- the PRODUCTION lifecycle against the LIVE Pages registry: `packs:stage-install` preview
+  (approvalDigest `sha256:933b584d…`), byte-exact two-phase approval, install of the published
+  release `sha256:36abcece…`, enable → active composition `sha256:707349ab…`;
+- teardown by the PRODUCT's own paths: closing the agent tab group releases the session pin, then
+  disable → remove → reset, and the profile baseline is deep-equal (registrations, pack storage
+  keys, installed count, active digest);
+- no persistent userScripts registration at any point.
+
+One stage is a recorded MEASUREMENT, not an assertion: with the composition active, a chat session
+goes pack-mode and TODAY'S BACKEND does not open it (60 s, no session; the executor tab is therefore
+never requested). That is the platform Pack-protocol blocker (§13), now measured through the whole
+production path rather than a capability probe — the ONLY missing piece between this gate and the
+full in-chat pack turn. Findings the gate paid for, each now pinned or recorded: the build-time
+external-config validator accepted a config the RUNTIME parser refuses (missing `schemaVersion`) and
+the only symptom was a service worker that NEVER REGISTERS on a fresh profile — `chrome_debug.log`
+carried the real sentence, and the config test now runs BOTH validators; `PACK_REGISTRY_FETCH`
+captured the bare global `fetch` and every stage-install died as `registry_unreachable: Illegal
+invocation` in the worker; a refused pack-mode session still CLAIMS the client-side pin (released by
+closing the group); `packs:reset` writes an empty state rather than deleting the key; and on a fresh
+profile the Allow-User-Scripts toggle needs developer mode first, takes effect IMMEDIATELY (no
+reload — a restart is harmful: `Extensions.loadUnpacked` re-install resets the toggle), and a
+restored-after-restart extension tab is a dead document `openOptions` now navigates.
+
+Original scope, for reference:
 
 - `test:packs:external:live` in the SDK, beside the other phase gates: install the **published** release
   through the production Options handlers, acquire the executor, drive one real turn through the flow,

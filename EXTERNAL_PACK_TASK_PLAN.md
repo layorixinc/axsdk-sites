@@ -264,19 +264,30 @@ sequences stay fully enforced.
   extensions WebUI the way a user would, then reloads the extension — the namespace is computed at
   extension load.
 
-### X4 — the external Pack itself (3–4 days, scenario-gated — §9)
+### X4 — the external Pack itself — **DONE 2026-09-03** (Lua-authored per `LUA_PACK_DESIGN.md`)
 
-- `packs/<task>/` in SITES: `flow.yaml` fragment (schema-required, **not** the routing surface in this
-  milestone), `src/task.js`, `providers/<site>.js`, manifest inputs beside `tools/packs/first-party.ts`
-  but in their own producer so the embedded set stays frozen.
-- Offline tests extend `tools/packs`: manifest round-trip, composition, real Ed25519 verify, and the
-  sandbox execution harness that asserts **zero forbidden effects** per command call (`loadCommands`
-  replaces `fetch`/`XHR`/`WebSocket`/`sendBeacon`/`location` with throwing stubs).
-- Every read is selector-first with per-field fallbacks and a missing field stays **absent** — no fabricated
-  zero. The repo has paid for the inverse twice (conditional free shipping read as 0; a price written twice
-  in one string).
-- **Acceptance:** `npm run test:packs` covers the new pack at the same standard as the first-party two;
-  `check:pack-registry` signs and verifies it; no store profile or CWS artifact changes.
+- `packs/service-quotes/`: `flow.yaml` fragment (schema-required, NOT the routing surface),
+  `src/task.lua`, `providers/{thumbtack,soomgo,kmong}.lua`; own producer
+  `tools/packs/service-quotes.ts` — the embedded first-party set is untouched beyond shared helper
+  exports. Every script asset is the fixed Lua wrapper with an `authoring` block.
+- Offline suite `tools/packs/service-quotes.test.ts` (10 tests) at the first-party standard: manifest
+  round-trip, sole-pack composition (three providers), wrapper/authoring drift, the throwing-stub
+  effect harness on every provider call, and the three §9.5 assertions FROM THE MEASURED FIXTURES:
+  the review-quoted `$200` produces no claim; the `$155–$290` band renders only as `site_average`
+  and never becomes a candidate's price (the candidate stays `amount_not_published`); an
+  uncomparable stated figure (`월 3회 패키지 5만`) keeps its text with NO amount and NO unit guess.
+- Two composition-gate lessons, measured against `composePackSet`: a flow fragment is DEPTH-BOUNDED
+  at 8 — an `enum`'s ELEMENTS count one level deeper, so a leaf at the boundary uses `pattern` — and
+  `command_schema_mismatch` requires flow-tool parameters to EXACTLY equal the signed command input
+  schema, so per-candidate claims are FLATTENED to one `claim_kind`/`claim_text` pair at every
+  boundary (the measured dominant shape: at most one claim per card) and the rank command takes the
+  provider result as one envelope.
+- **Acceptance measured:** `npm run test:packs` 50/50 including the new pack;
+  `check:pack-registry` ok at sequence 2 (17 files, 3 releases — the changed release set bumped the
+  committed sequence exactly as designed); LIVE: the extension's verifier resolved
+  `layorix.service-quotes@1.0.0` (`sha256:36abcece…`, 6 assets hash-checked, providers
+  thumbtack·soomgo·kmong, task authoring `lua`) from the published GitHub Pages registry. No store
+  profile or CWS artifact change (`check:flows` 245, `test:scenarios` 170).
 
 ### X5 — routing in our document (2 days)
 

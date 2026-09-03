@@ -3136,3 +3136,18 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   (`trustRoots: [], unsigned: true`, literal-true flag, contradictions refused) so the product path can
   name the live registry. What remains of the X track: X4 (the external Pack, authored in Lua),
   X5 (routing bridge), X6 (install→route→remove live gate).
+- **X4 shipped Lua-first (2026-09-03): `layorix.service-quotes@1.0.0` is live on the unsigned
+  registry.** Three marketplace providers (thumbtack · 숨고 · 크몽 — the last two in neither `index.md`
+  nor the store profile, so the Pack demonstrably adds sites without a store review) plus three read
+  task commands, all `.lua`, own producer `tools/packs/service-quotes.ts`. The §9.5 measured
+  assertions are pinned by fixtures carrying the X0-4 sentences: a review's `$200` is never a claim,
+  the `$155–$290` site band renders only as `site_average` (a bandless pro stays
+  `amount_not_published` — never filled from the band), and `월 3회 패키지 5만` keeps its text with no
+  amount/unit guess. Two composition-gate rules worth keeping: a pack flow FRAGMENT is depth-bounded
+  at 8 and an `enum`'s elements count one level deeper (a boundary leaf uses `pattern`), and
+  `command_schema_mismatch` demands flow-tool parameters EXACTLY equal the signed command input
+  schema — so claims are flattened to one `claim_kind`/`claim_text` pair per candidate and rank takes
+  the provider result as one envelope. Registry sequence bumped 1→2 by the designed
+  changed-set rule; live fetch verified 6 assets through the digest chain. Also re-learned at cost:
+  a `node -e` String.replace whose replacement carries `$` silently truncates — the constraint
+  exists, and violating it duplicated a 500-line file tail into garbage.

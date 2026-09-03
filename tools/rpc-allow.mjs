@@ -34,6 +34,11 @@ export const OPS = [
   // The sitemap of the SITE the tab is on — a different document from the app package's own sitemap,
   // which is why the runtime-side version of this was withdrawn.
   'sitemap.search_site',
+  // The Pack wire (EXTERNAL_PACK_TASK_PLAN X1/X5): forwarded by the EXTENSION (`ops/packs.ts`,
+  // SDK `6a74428`), not published by the platform's `/lua/ops` listing. M5 (2026-08-27) measured
+  // that the compiler does not enforce a closed `rpc.allow` vocabulary, so granting these is real.
+  'pack.catalog',
+  'pack.invoke',
 ];
 
 /** Reads only: a batch that could hide a side effect could not promise order or atomicity. */
@@ -53,8 +58,8 @@ export const COMPOSED = {
   'nav.wait_for_navigation': 'dom.get_location_href',
 };
 
-const DIRECT_CALL = /\b(dom|nav|page|memory|sitemap)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
-const PROTECTED_CALL = /\b(?:pcall|xpcall)\s*\(\s*(dom|nav|page|memory|sitemap)\.([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/g;
+const DIRECT_CALL = /\b(dom|nav|page|memory|sitemap|pack)\.([A-Za-z_][A-Za-z0-9_]*)\s*\(/g;
+const PROTECTED_CALL = /\b(?:pcall|xpcall)\s*\(\s*(dom|nav|page|memory|sitemap|pack)\.([A-Za-z_][A-Za-z0-9_]*)\s*[,)]/g;
 
 /** Every op a script needs granted: what it calls, with composed helpers resolved to the op they poll. */
 function requiredOps(lua) {

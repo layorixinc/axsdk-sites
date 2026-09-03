@@ -32,7 +32,10 @@ test('the excluded intents are unroutable, and their feature implementations are
   // Decided 2026-08-27: `community_script` joins them. The store package ROUTED it while the single-purpose
   // sentence does not mention it, and a reviewer finding a surface outside the sentence is the failure P0-3
   // exists to prevent; widening the sentence would risk the "narrow single purpose" judgement instead.
-  assert.deepEqual(STORE_EXCLUDED_INTENTS, ['request_service_quote', 'memory', 'community_script']);
+  // 2026-09-03 (X5): `pack_task` joins for the same reason — the generic installed-Pack route is outside
+  // the shopping sentence, and the reviewed artifact installs no packs at all.
+  assert.deepEqual(STORE_EXCLUDED_INTENTS,
+    ['request_service_quote', 'memory', 'community_script', 'pack_task']);
   for (const intent of STORE_EXCLUDED_INTENTS) {
     assert.ok(!routableIntents(store).includes(intent), `${intent} must not be routable`);
   }
@@ -109,7 +112,7 @@ test('the tools and modules only those flows used are gone; the shared ones stay
     '_common.70_rpc_memory', '_common.71_rpc_zip',
     // The widget renderer goes with them: only the quote flow and the community flow ever declared it —
     // the shopping comparison window is TEXT, which is why dropping it costs the store profile nothing.
-    '_common.69_rpc_widget', '_common.75_rpc_community']) {
+    '_common.69_rpc_widget', '_common.75_rpc_community', '_common.76_rpc_pack']) {
     assert.ok(gone.has(name), `${name} is declared by the authored document`);
     assert.ok(!kept.has(name), `${name} must not be declared by the store document`);
   }
@@ -121,6 +124,7 @@ test('the tools and modules only those flows used are gone; the shared ones stay
   assert.deepEqual(built.report.modules.dropped.sort(), [
     '_common.10_form_wizard', '_common.64_rpc_thumbtack', '_common.65_rpc_quote',
     '_common.69_rpc_widget', '_common.70_rpc_memory', '_common.71_rpc_zip', '_common.75_rpc_community',
+    '_common.76_rpc_pack',
   ]);
 });
 

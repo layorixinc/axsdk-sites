@@ -24,6 +24,7 @@ export const STORE_EXCLUDED_INTENTS = [
   // exists to prevent. Widening the sentence instead would risk the "narrow single purpose" judgement,
   // so the capability stays in the development build only.
   'community_script',
+  'pack_task',
 ];
 
 /**

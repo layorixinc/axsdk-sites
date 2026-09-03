@@ -67,7 +67,7 @@ test('the op vocabulary matches what the server reports', () => {
   // platform's 12th reply with `dom.click_text` and `dom.read_many`, and now by layer F — the four
   // memory ops plus `sitemap.search_site`, shipped in `a8db22a`. D10: the vocabulary is a server fact,
   // not a document fact — this list is a mirror and the live check is what re-validates it.
-  assert.equal(OPS.length, 23);
+  assert.equal(OPS.length, 25);
   assert.ok(OPS.includes('dom.click_text'));
   assert.ok(OPS.includes('dom.read_many'));
   for (const op of ['memory.get', 'memory.set_bulk', 'memory.search', 'memory.delete']) {
@@ -77,6 +77,12 @@ test('the op vocabulary matches what the server reports', () => {
   // that one once and every answer was the extension's own pages.
   assert.ok(OPS.includes('sitemap.search_site'));
   assert.ok(!OPS.includes('sitemap.search'), 'the app-package sitemap op is not ours to call');
+  // The Pack wire (EXTERNAL_PACK_TASK_PLAN X1/X5): forwarded by the EXTENSION (`ops/packs.ts`,
+  // `6a74428`), not published by the platform's op listing — M5 (2026-08-27) measured that the
+  // compiler does not enforce a closed `rpc.allow` vocabulary, which is the file's convention for
+  // an op the platform did not publish.
+  assert.ok(OPS.includes('pack.catalog'));
+  assert.ok(OPS.includes('pack.invoke'));
   assert.deepEqual(COMPOSED['dom.wait_for_selector'], 'dom.exists');
   assert.deepEqual(COMPOSED['nav.wait_for_navigation'], 'dom.get_location_href');
   for (const polled of Object.values(COMPOSED)) assert.ok(OPS.includes(polled), `${polled} must be a real op`);

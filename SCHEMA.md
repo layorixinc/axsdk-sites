@@ -959,7 +959,8 @@
                   "checkout",
                   "memory",
                   "cart_remove_item",
-                  "community_script"
+                  "community_script",
+                  "pack_task"
                 ]
               },
               "segments": {
@@ -1357,6 +1358,164 @@
           ]
         },
         "zip_code": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "pack_classify",
+    "description": "Decide deterministically whether the request names an installed command, matches a route, cancels, or has no match. Never a model's decision.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pack_catalog_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userMessages": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  {
+    "name": "pack_invoke",
+    "description": "Dispatch the catalog-issued binding through pack.invoke. Authority does not move — the extension re-derives everything from its own pinned composition.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pack_binding_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pack_arguments_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "pack_present",
+    "description": "Render the Pack's result deterministically — its own comparisonText verbatim when it states one, bounded key lines otherwise. Never a model's words.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pack_result_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pack_command": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pack_pack_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "pack_propose",
+    "description": "Carry the model's argument values (and nothing else) into flow state. The pack, version, and effect are catalog facts the validator re-derives.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "next",
+        "command"
+      ],
+      "properties": {
+        "next": {
+          "type": "string",
+          "enum": [
+            "propose",
+            "cancel"
+          ]
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "arguments_json": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "maxLength": 4000
+        }
+      }
+    }
+  },
+  {
+    "name": "pack_read_catalog",
+    "description": "Read the installed Agent Pack catalog through the extension's pack.catalog op and publish it as one scalar plus a rendered listing.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requestText": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "pack_validate",
+    "description": "Validate the proposed command against the catalog — the single writer of identity, version, and effect — and refuse a non-read effect BY NAME.",
+    "parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "pack_catalog_json": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pack_command_requested": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pack_arguments_json": {
           "type": [
             "string",
             "null"

@@ -3151,3 +3151,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   changed-set rule; live fetch verified 6 assets through the digest chain. Also re-learned at cost:
   a `node -e` String.replace whose replacement carries `$` silently truncates — the constraint
   exists, and violating it duplicated a 500-line file tail into garbage.
+- **X5 shipped (2026-09-03): `pack_task` is a routable intent, and the catalog is the single writer
+  STRUCTURALLY.** `_common/rpc/76_rpc_pack.lua` + six flow tools: `pack.invoke` takes only the
+  catalog-issued `binding_id` plus the model's `arguments_json`, so a model cannot name a pack — the
+  75_rpc_community `effect_invalid` failure made into an impossibility instead of a rule. Deterministic
+  classify; non-read effects refused BY NAME; store profile excludes the intent. Live: the utterance
+  routed, answered honestly quoting the raw reason, and the shopping control stayed uncaptured. Three
+  facts paid for live, worth never re-paying: **`deadlineMs` lives INSIDE `execute.rpc`** — on
+  `execute` the compiler refuses `client adapter … has unknown keys` and the harness surfaces it only
+  as a session-open timeout until a probe reads `error.data.message`; **a runtime lua tool without
+  `entry: run` compiles and answers `{}`** (the chunk only defines `run`), stalling the flow as a
+  completed tool with no branch; and **the agentv2 runtime projects no `pack` Lua namespace yet** —
+  the compiler accepts the grant, `type(pack) ~= "table"` live, filed as
+  `RPC_LUA_RUNTIME_REQUESTS_22.md` (X6 waits on it). Diagnosis discipline that found them: same-size
+  padded PREVIOUS document → 200 proved content-not-size in one probe.

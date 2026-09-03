@@ -155,6 +155,12 @@ planner:
     - "기억한 내용 보여줘" → replace_current, intents=[{intent:memory, segments:["기억한 내용 보여줘"], state:{requestText:"기억한 내용 보여줘"}}]
     - "이메일 thumbtack-test@example.com을 기억하고 예전 주소는 잊어줘" → replace_current, intents=[{intent:memory, segments:["이메일 thumbtack-test@example.com을 기억하고 예전 주소는 잊어줘"], state:{requestText:"이메일 thumbtack-test@example.com을 기억하고 예전 주소는 잊어줘"}}]
     - "이메일 thumbtack-test@example.com을 기억하고 청소 견적도 받아줘" → replace_current, intents=[{intent:memory, segments:["이메일 thumbtack-test@example.com을 기억하고"], state:{requestText:"내 이메일 thumbtack-test@example.com을 기억해"}}, {intent:request_service_quote, segments:["청소 견적도 받아줘"], state:{requestText:"이메일 thumbtack-test@example.com으로 청소 견적도 받아줘"}}]
+    - PACK TASK: route to pack_task ONLY when the user explicitly names an installed Pack, the pack
+      catalog, or asks to run a "팩"/"pack" task — never for shopping, quotes, checkout, memory, or
+      community-script requests, which keep their own intents above. The flow reads the installed
+      catalog itself and answers honestly when nothing is installed; do not promise any capability.
+      "취소" while pack_task is active is continue_current with requestText "취소" — the flow ends
+      stating that nothing was invoked.
     - "내 이메일은 thumbtack-test@example.com이야" → out_of_scope, intents=[] — declarative value only; NEVER route to memory and NEVER save.
 router:
   mode: fixed
@@ -195,6 +201,16 @@ router:
         - 여기서 쓸 수 있는 스크립트 뭐 있어
         - what does this page say
         - which community scripts are available here
+    - intent: pack_task
+      entry: pack_task.read_catalog
+      description: Run one task from the Agent Packs the user has installed. The flow
+        reads the installed catalog first and answers honestly when nothing is
+        installed or nothing matches; it dispatches read commands only.
+      examples:
+        - 설치된 팩으로 실행해줘
+        - 팩 카탈로그 보여줘
+        - run my installed pack task
+        - use an installed pack for this
     - intent: end_conversation
       entry: end_conversation.done
       description: The user wants to end/stop the conversation (farewell,
@@ -543,6 +559,132 @@ flows:
             page and stop. Do not guess what the page says.
           - Commands marked "needs arguments" require the user to supply them first. Commands marked
             "asks the user first" will prompt before they run.
+  pack_task:
+    goal: Run one task from the Agent Packs the user installed. The catalog is the
+      single writer of pack identity, version, and effect — the model only reads
+      argument values out of the user's sentence. Dispatches read commands only,
+      and answers honestly when nothing is installed or nothing matches.
+    state:
+      requestText: null
+      pack_catalog_json: null
+      pack_catalog_text: null
+      pack_command_count: null
+      pack_named_command: null
+      pack_binding_id: null
+      pack_answer_reason: null
+      pack_command_requested: null
+      pack_arguments_json: null
+      pack_command: null
+      pack_pack_id: null
+      pack_version: null
+      pack_effect: null
+      pack_result_json: null
+      pack_reply: null
+    nodes:
+      read_catalog:
+        kind: action_contract
+        id: pack_read_catalog
+        inputSelector: [ requestText ]
+        next:
+          ok: classify
+          none: answer
+          error: answer
+      classify:
+        kind: action_contract
+        id: pack_classify
+        # Deterministic (the community classifier's lesson): whether the request reaches an
+        # installed command is never a model's decision. Cancel is read here from the CURRENT
+        # message, so "취소" ends the flow before any model call.
+        inputSelector:
+          - pack_catalog_json
+          - requestText
+          - userMessages
+        next:
+          propose: collect
+          answer: answer
+          cancelled: cancelled
+      collect:
+        kind: action_unit
+        llm: { maxCalls: 1 }
+        messagePolicy: { currentUserText: active_node_only }
+        inputSelector:
+          - pack_catalog_text
+          - pack_named_command
+          - requestText
+          - userMessages
+        allowedTools: [ pack_propose ]
+        prompt: |-
+          The user asked to run `pack_named_command`, which the installed pack catalog lists
+          (`pack_catalog_text`). The decision to run it has already been made — yours is only to
+          fill in its argument values.
+
+          Call `pack_propose` once with next="propose", `command` (exactly `pack_named_command`) and
+          `arguments_json` as a JSON object string built from what the user actually said. Nothing
+          else: the pack, the version and the effect are read from the catalog, not from you.
+          NEVER invent a value — a genuinely absent one stays out of the JSON.
+          If the user is refusing or cancelling, call the tool with next="cancel" instead.
+          Do not answer in prose and do not claim anything ran.
+        next:
+          propose: validate
+          cancel: cancelled
+          error: answer
+        fallback: { invalidNext: error, exhaustedNext: error, maxStalledSteps: 2, stalledNext: error }
+      validate:
+        kind: action_contract
+        id: pack_validate
+        # The catalog re-derives identity/effect from the model's command NAME; a non-read effect or
+        # an unlisted command is refused here BY NAME, before any dispatch.
+        inputSelector:
+          - pack_catalog_json
+          - pack_command_requested
+          - pack_arguments_json
+        next:
+          invoke: invoke
+          error: answer
+      invoke:
+        kind: action_contract
+        id: pack_invoke
+        inputSelector:
+          - pack_binding_id
+          - pack_arguments_json
+        next:
+          present: present
+          error: answer
+      present:
+        kind: action_contract
+        id: pack_present
+        inputSelector:
+          - pack_result_json
+          - pack_command
+          - pack_pack_id
+        next:
+          report: report
+      report:
+        kind: terminal
+        inputSelector: [ pack_reply ]
+        respond: |-
+          Reply with `pack_reply` verbatim and nothing else. Do not add reassurance and do not
+          restate the values.
+      answer:
+        kind: terminal
+        inputSelector:
+          - pack_answer_reason
+          - pack_catalog_text
+        respond: |-
+          Reply in the user's language from these two fields and nothing else.
+          - If `pack_answer_reason` starts with "no_packs_installed", say plainly that no Agent
+            Packs are installed, so there is nothing to run. Name nothing else.
+          - If it starts with "pack_channel_unavailable", say the installed-pack channel could not
+            be reached and quote the raw reason in parentheses.
+          - Otherwise state the reason briefly (no match, ambiguous, refused command) and, when
+            `pack_catalog_text` is present, list it verbatim so the user can name one command.
+          NEVER claim anything ran, and NEVER invent a capability.
+      cancelled:
+        kind: terminal
+        inputSelector: [ pack_answer_reason ]
+        respond: |-
+          Say in the user's language that the request was cancelled and that no installed pack
+          command was invoked.
   request_service_quote:
     goal: Collect a service-quote request (service, requirements, ZIP/address, and
       the contact details the pros use to reach the user — first name, last
@@ -4404,7 +4546,8 @@ flowTools:
                       checkout,
                       memory,
                       cart_remove_item,
-                      community_script
+                      community_script,
+                      pack_task
                     ]
                 }
               segments:
@@ -5110,6 +5253,169 @@ flowTools:
       properties:
         command: { type: string }
         arguments_json: { type: string }
+  pack_read_catalog:
+    description: Read the installed Agent Pack catalog through the extension's pack.catalog op and
+      publish it as one scalar plus a rendered listing.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.76_rpc_pack" ]
+      rpc:
+        allow: [ pack.catalog ]
+        opTimeoutMs: 8000
+        deadlineMs: 20000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PACK.read_catalog(args)
+        end
+    output:
+      next: result.next
+      pack_catalog_json: result.pack_catalog_json
+      pack_catalog_text: result.pack_catalog_text
+      pack_command_count: result.pack_command_count
+      pack_answer_reason: result.pack_answer_reason
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        requestText: { type: [ string, "null" ] }
+  pack_classify:
+    description: Decide deterministically whether the request names an installed command, matches a
+      route, cancels, or has no match. Never a model's decision.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.76_rpc_pack" ]
+      # No page, no network: this reads state. The compiler refuses an empty allow, so it names one
+      # op it never calls.
+      rpc:
+        allow: [ dom.get_location_href ]
+        opTimeoutMs: 2000
+        deadlineMs: 10000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PACK.classify(args)
+        end
+    output:
+      next: result.next
+      pack_named_command: result.pack_named_command
+      pack_binding_id: result.pack_binding_id
+      pack_answer_reason: result.pack_answer_reason
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        pack_catalog_json: { type: [ string, "null" ] }
+        requestText: { type: [ string, "null" ] }
+        userMessages:
+          type: [ array, "null" ]
+          items: { type: string }
+  pack_propose:
+    description: Carry the model's argument values (and nothing else) into flow state. The pack,
+      version, and effect are catalog facts the validator re-derives.
+    execute: { kind: runtime, implementation: passthrough }
+    output:
+      next: tool.args.next
+      pack_command_requested: tool.args.command
+      pack_arguments_json: tool.args.arguments_json
+    parameters:
+      type: object
+      additionalProperties: false
+      required: [ next, command ]
+      properties:
+        next: { type: string, enum: [ propose, cancel ] }
+        command: { type: string, minLength: 1, maxLength: 128 }
+        arguments_json: { type: [ string, "null" ], maxLength: 4000 }
+  pack_validate:
+    description: Validate the proposed command against the catalog — the single writer of identity,
+      version, and effect — and refuse a non-read effect BY NAME.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.76_rpc_pack" ]
+      rpc:
+        allow: [ dom.get_location_href ]
+        opTimeoutMs: 2000
+        deadlineMs: 10000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PACK.propose({
+            pack_catalog_json = args.pack_catalog_json,
+            command = args.pack_command_requested,
+            arguments_json = args.pack_arguments_json,
+          })
+        end
+    output:
+      next: result.next
+      pack_binding_id: result.pack_binding_id
+      pack_command: result.pack_command
+      pack_pack_id: result.pack_pack_id
+      pack_version: result.pack_version
+      pack_effect: result.pack_effect
+      pack_arguments_json: result.pack_arguments_json
+      pack_answer_reason: result.pack_answer_reason
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        pack_catalog_json: { type: [ string, "null" ] }
+        pack_command_requested: { type: [ string, "null" ] }
+        pack_arguments_json: { type: [ string, "null" ] }
+  pack_invoke:
+    description: Dispatch the catalog-issued binding through pack.invoke. Authority does not move —
+      the extension re-derives everything from its own pinned composition.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.76_rpc_pack" ]
+      rpc:
+        allow: [ pack.invoke ]
+        opTimeoutMs: 30000
+        deadlineMs: 60000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PACK.invoke(args)
+        end
+    output:
+      next: result.next
+      pack_result_json: result.pack_result_json
+      pack_answer_reason: result.pack_answer_reason
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        pack_binding_id: { type: [ string, "null" ] }
+        pack_arguments_json: { type: [ string, "null" ] }
+  pack_present:
+    description: Render the Pack's result deterministically — its own comparisonText verbatim when it
+      states one, bounded key lines otherwise. Never a model's words.
+    execute:
+      kind: runtime
+      implementation: lua
+      modules: [ "_common.76_rpc_pack" ]
+      rpc:
+        allow: [ dom.get_location_href ]
+        opTimeoutMs: 2000
+        deadlineMs: 10000
+      entry: run
+      lua: |
+        function run(args)
+          return AX_RPC_PACK.present(args)
+        end
+    output:
+      next: result.next
+      pack_reply: result.pack_reply
+    parameters:
+      type: object
+      additionalProperties: false
+      properties:
+        pack_result_json: { type: [ string, "null" ] }
+        pack_command: { type: [ string, "null" ] }
+        pack_pack_id: { type: [ string, "null" ] }
   community_confirm:
     description: Render the confirm button for a community command the model proposed,
       plus the sentence beside it naming the script, the publisher, the effect and

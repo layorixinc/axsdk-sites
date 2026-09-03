@@ -212,6 +212,10 @@ production (`AGENTS.md` §9), so it is not ours to do.
 **Next**: BIZ decides whether R1 ships against `browser-extension` as it stands (overlay shadowing, which
 the gates now pin) or a narrowed app document/app id is created for the store build.
 
+2026-09-03 (X5): one item longer — `pack_task` is now an authored routable intent, so the next app
+push will carry it in the APP document's `routableIntents` while the store package excludes it
+(`STORE_EXCLUDED_INTENTS`), exactly like the three intents above. Recorded here per the X5 plan.
+
 ## 14. The backend module set no longer matches the shipped package
 
 **Status: closed 2026-08-27 by the cart-removal pushes.**

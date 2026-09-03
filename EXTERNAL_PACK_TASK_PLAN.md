@@ -289,7 +289,34 @@ sequences stay fully enforced.
   thumbtack·soomgo·kmong, task authoring `lua`) from the published GitHub Pages registry. No store
   profile or CWS artifact change (`check:flows` 245, `test:scenarios` 170).
 
-### X5 — routing in our document (2 days)
+### X5 — routing in our document — **DONE 2026-09-03** (full dispatch blocked on runtime request 22)
+
+Status, measured:
+
+- `_common/rpc/76_rpc_pack.lua` (11 offline tests) landed as planned; the single-writer rule is
+  STRUCTURAL — `pack.invoke` takes only the catalog-issued `binding_id` plus the model's
+  `arguments_json`, so the model cannot name a pack. Deterministic classify (exact command name →
+  route-example overlap → honest no-match; two matches refuse; cancel read from the current
+  message); non-read effects refused BY NAME.
+- `pack_task` intent, route, planner rule, six flow tools, `answer`/`cancelled` terminals, store
+  exclusion, and the TODO §13 note all landed; `check:flows` 245 · `test:lua` 647 · store closure
+  green.
+- **Two compiler facts paid for live** (a `BadRequest` whose message only surfaced when the probe
+  read `error.data.message`): `deadlineMs` lives INSIDE `execute.rpc`, never on `execute`
+  ("client adapter … has unknown keys: deadlineMs"); and a runtime lua tool without `entry: run`
+  compiles and answers `{}` — the chunk only DEFINES `run` — which stalls the flow as a completed
+  tool with no branch.
+- **Live acceptance (shipping CDP)**: `팩 카탈로그 보여줘` routed to `pack_task`, ran
+  `pack_read_catalog`, and answered honestly in Korean quoting the RAW reason
+  (`pack_channel_unavailable: op table has no pack namespace`); the control utterance ran
+  `shopping_single_site` with `pack_*` untouched.
+- **What blocks full dispatch**: the agentv2 runtime Lua environment projects no `pack` namespace —
+  the compiler accepts the grant, the env lacks the table. Filed as
+  `RPC_LUA_RUNTIME_REQUESTS_22.md` (forward-to-client like `memory.*`; the client handler already
+  ships). X6 waits on it.
+
+Original scope, for reference:
+
 
 - `_common/rpc/76_rpc_pack.lua` (next free number; 72 and 76 are unused): `catalog` → `classify` →
   `propose` validation → `invoke` → `present`. The catalog is the **single writer** of identity, version and

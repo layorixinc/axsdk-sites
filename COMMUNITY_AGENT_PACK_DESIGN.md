@@ -960,8 +960,10 @@ Classify existing Lua by role:
 | cart and checkout modules | excluded from V1 search extension point |
 | flow-state snapshot bridge | Pack 1 task command using scalar JSON flow state |
 
-Do not ship Fengari plus embedded Lua inside the UserScript artifact. Port the logic to TypeScript/JS or
-use a deterministic build-time Lua-to-JavaScript compiler whose exact output is reviewed and signed.
+Superseded 2026-09-03 by `LUA_PACK_DESIGN.md`: pack logic ships as Lua source embedded in the signed
+JavaScript wrapper and runs on the packaged Fengari prelude in the `USER_SCRIPT` world. The former
+rule ("port to JS or compile Lua to JS before review") is retired; review reads the Lua source and a
+gate proves the wrapper is byte-exactly the fixed template around it.
 Passing this subset's live proof does **not** authorize deleting the current shopping flow/Lua path;
 deletion requires the full §2.1 gate.
 

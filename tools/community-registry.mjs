@@ -9,6 +9,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createContext, Script } from 'node:vm';
+import { unwrapLuaArtifact } from './packs/wrap-lua.mjs';
 
 const TOP_LEVEL = ['schemaVersion', 'artifactPath', 'script', 'execution', 'commands', 'disclosures', 'release', 'review'];
 const TOP_LEVEL_OPTIONAL = ['network'];
@@ -221,6 +222,14 @@ export function validateCommunitySource(input, artifactCode) {
   text(review.reviewedAt, 'review.reviewedAt');
   if (Number.isNaN(Date.parse(review.reviewedAt))) throw new Error('review.reviewedAt must be an ISO timestamp');
 
+  // A Lua wrapper is a valid JS artifact by every textual check here, but this registry's runtime has
+  // no Lua prelude: without a named refusal it dies later as "cannot register safely", which points
+  // the author at their registration call instead of at the right registry.
+  if (unwrapLuaArtifact(artifactCode) !== null) {
+    throw new Error(
+      'lua_wrapper_not_supported_here: embedded-Lua artifacts ship through the Agent Pack registry (LUA_PACK_DESIGN.md); the community script registry executes plain JavaScript',
+    );
+  }
   text(artifactCode, 'artifactCode');
   if (Buffer.byteLength(artifactCode) > MAX_ARTIFACT_BYTES) {
     throw new Error(`artifactCode exceeds ${MAX_ARTIFACT_BYTES} bytes`);

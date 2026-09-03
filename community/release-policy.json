@@ -12,7 +12,9 @@
       "javascript",
       "lua"
     ],
-    "luaPublication": "deterministic_javascript_before_review",
+    "luaPublication": "embedded_source_in_signed_wrapper",
+    "luaInterpreter": "packaged",
+    "dynamicLuaLoad": false,
     "remoteInterpreter": false
   },
   "approvals": {

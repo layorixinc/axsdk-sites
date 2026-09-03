@@ -187,6 +187,18 @@ test('source validation enforces the JavaScript artifact size ceiling', async ()
   );
 });
 
+test('a Lua wrapper artifact is refused BY NAME: it belongs to the Agent Pack registry', async () => {
+  // The refusal must carry its raw reason (AGENTS.md §13): without this, a Lua wrapper dies with the
+  // incidental "cannot register safely" and the author is sent to debug their registration call.
+  const source = await loadCommunitySource(fixtureDir);
+  const { wrapLuaSource } = await import('./packs/wrap-lua.mjs');
+  const wrapped = wrapLuaSource('register({ noop = function() return {} end })', { name: 'community-lua' });
+  assert.throws(
+    () => validateCommunitySource(source.manifest, wrapped),
+    /lua_wrapper_not_supported_here/,
+  );
+});
+
 test('the signed index and revocation document fail on tampering', async () => {
   const source = await loadCommunitySource(fixtureDir);
   const registry = buildCommunityRegistry([source], signer);

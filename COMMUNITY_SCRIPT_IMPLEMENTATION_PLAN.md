@@ -37,7 +37,7 @@ No phase is complete because scaffolding exists. Each phase ends with an observa
 The following decisions are inputs to the plan, not topics to reopen during implementation:
 
 - Dynamic community code executes only through `chrome.userScripts` in `USER_SCRIPT` worlds.
-- The registry distributes exact JavaScript artifacts. JavaScript may be authored directly or produced by deterministic Lua conversion before review; the resulting JavaScript bytes are the reviewed, signed, and distributed release.
+- The registry distributes exact JavaScript artifacts. An artifact is authored JavaScript, or Lua embedded as source inside the fixed zero-logic wrapper template (`LUA_PACK_DESIGN.md`); either way the JavaScript bytes are the reviewed, signed, and distributed release, and the packaged interpreter exposes no `load`-family path to any other Lua.
 - The initial CWS product accepts only registry-reviewed and registry-signed releases.
 - Users explicitly approve every install, enable, update, host expansion, and capability expansion, and explicitly initiate disable or removal.
 - The model may recommend a script but cannot install it, grant host access, enable it, or accept an update.
@@ -140,8 +140,8 @@ Tests must defend behavior, not source spelling. Static checks are appropriate o
 
 - Chrome 138+, `chrome.userScripts`, and `USER_SCRIPT`;
 - JavaScript as the execution and distribution language;
-- JavaScript authored directly or produced by deterministic Lua conversion before review;
-- no downloaded Lua or remote interpreter;
+- JavaScript authored directly, or Lua embedded as source in the signed wrapper (`luaPublication: embedded_source_in_signed_wrapper`);
+- the Lua interpreter is packaged, never downloaded, and dynamic Lua loading is disabled;
 - explicit user approval for install, enable, every update, host expansion, and capability expansion;
 - no automatic updates;
 - registry review and registry signature;
@@ -1254,8 +1254,9 @@ data, and every policy gate. Those are not site-specific DOM automation.
 
 This is where P0-1 closes, and it closes by **deletion**, not by a policy answer.
 
-**RED — the exact artifact fails if it contains or exposes:** Fengari or any interpreter for
-downloaded code; a remote Lua/flow/JS/Wasm loader; `raw.githubusercontent.com`; `eval` or
+**RED — the exact artifact fails if it contains or exposes:** any interpreter path for code outside
+signed artifact bytes (the packaged Fengari prelude with `load`-family functions removed is the one
+sanctioned interpreter); a remote Lua/flow/JS/Wasm loader; `raw.githubusercontent.com`; `eval` or
 `new Function` outside a documented dependency exception; community execution through
 `chrome.debugger`, `chrome.scripting`, an offscreen worker or a sandbox page; raw editors, arbitrary
 URL import, recorder export, remote-source toggles or API-key configuration; a permission no packaged
@@ -1350,7 +1351,7 @@ Never push the community overlay to the production `browser-extension` app by ac
 
 | Risk | Consequence | Control | Proof |
 |---|---|---|---|
-| Lua conversion changes executable bytes after review | Review bypass | Convert deterministically before review; sign and distribute the exact JavaScript bytes; ship no Lua interpreter | Deterministic build, signature, and one-byte tamper tests |
+| Embedded Lua diverges from what review read | Review bypass | Sign the wrapped bytes; validator recomputes `wrap(luaSource)` and refuses drift; sandbox has no `load`-family escape | Deterministic wrapper build, signature, and one-byte tamper tests |
 | Automatic code updates are judged insufficiently user-controlled | Rejection or trust failure | Manual update default; explicit update review | UI/browser update scenario |
 | User script performs hidden DOM mutation outside broker | User harm | Registry review, exact source visibility, no autorun, countersigning, host scope, revocation | Review checklist plus pilot behavior tests |
 | Registry compromise | Malicious release | Offline trust roots, signatures, immutable digests, separate reviewer, key rotation, revocation | Tamper and wrong-key tests |
@@ -1378,7 +1379,7 @@ Implementation must pause at these decision boundaries if the required answer is
 6. **Final mutation pilot** — blocks mutation release if a site-originated outcome cannot be proven (Phase 10).
 7. **`community.catalog` / `community.invoke` platform ops** — blocks the direct model tool call only. Channels A–C ship without them (Phase 7).
 
-None of these blocks Phase 4, 5, or 6. Lua conversion and lifecycle approval are already fixed by `community/release-policy.json`; the domain gate, the registrar and the broker need no decision that is not already made.
+None of these blocks Phase 4, 5, or 6. Lua embedding and lifecycle approval are already fixed by `community/release-policy.json`; the domain gate, the registrar and the broker need no decision that is not already made.
 
 ## 21. Completion checklist
 

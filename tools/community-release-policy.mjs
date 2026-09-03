@@ -21,6 +21,8 @@ const EXPECTED = Object.freeze({
     'executionLanguage',
     'acceptedAuthoringLanguages',
     'luaPublication',
+    'luaInterpreter',
+    'dynamicLuaLoad',
     'remoteInterpreter',
   ],
   approvals: ['install', 'enable', 'update', 'hostExpansion', 'capabilityExpansion'],
@@ -80,9 +82,11 @@ export function validateCommunityReleasePolicy(input) {
   );
   equal(
     artifacts.luaPublication,
-    'deterministic_javascript_before_review',
+    'embedded_source_in_signed_wrapper',
     'artifacts.luaPublication',
   );
+  equal(artifacts.luaInterpreter, 'packaged', 'artifacts.luaInterpreter');
+  equal(artifacts.dynamicLuaLoad, false, 'artifacts.dynamicLuaLoad');
   equal(artifacts.remoteInterpreter, false, 'artifacts.remoteInterpreter');
 
   const approvals = closed(policy.approvals, EXPECTED.approvals, 'approvals');

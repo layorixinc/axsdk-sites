@@ -17,6 +17,7 @@ import {
   type PackReleaseEnvelope,
   type ProviderPackManifestV2,
 } from '../../../axsdk-sdk-js/packages/axsdk-packs/src/schemas.ts';
+import { wrapLuaSource } from './wrap-lua.mjs';
 
 const PUBLISHED_AT = '2026-08-24T00:00:00Z';
 const TEST_SIGNATURE = `${'A'.repeat(85)}Q`;
@@ -288,17 +289,33 @@ export async function buildFirstPartyPackInputs(
   root: string,
   sign?: FirstPartyReleaseSigner,
 ): Promise<FirstPartyPackBuild> {
-  const [flowSource, taskSource, amazonSource, storeXSource] = await Promise.all([
+  const [flowSource, taskLua, amazonLua, storeXLua] = await Promise.all([
     readFile(resolve(root, 'packs/shopping/flow.yaml'), 'utf8'),
-    readFile(resolve(root, 'packs/shopping/src/task.js'), 'utf8'),
-    readFile(resolve(root, 'packs/shopping/providers/amazon.js'), 'utf8'),
-    readFile(resolve(root, 'packs/store-x/src/provider.js'), 'utf8'),
+    readFile(resolve(root, 'packs/shopping/src/task.lua'), 'utf8'),
+    readFile(resolve(root, 'packs/shopping/providers/amazon.lua'), 'utf8'),
+    readFile(resolve(root, 'packs/store-x/src/provider.lua'), 'utf8'),
   ]);
+  // Lua is the authored AND distributed form: the signed artifact is the fixed zero-logic wrapper
+  // around the exact Lua source (LUA_PACK_DESIGN.md), still `application/javascript` because
+  // chrome.userScripts executes JavaScript only.
+  const taskSource = wrapLuaSource(taskLua, { name: 'layorix.shopping/task' });
+  const amazonSource = wrapLuaSource(amazonLua, { name: 'layorix.shopping/providers/amazon' });
+  const storeXSource = wrapLuaSource(storeXLua, { name: 'example.store-x/provider' });
+  const luaDescriptor = async (wrapped: string, luaSource: string) => ({
+    ...(await descriptor(wrapped, SCRIPT_MEDIA_TYPE)),
+    // Review metadata: the digest of the LUA bytes reviewers read; the artifact itself is the
+    // fixed wrapper around exactly those bytes (pinned by the drift test beside the suite).
+    authoring: {
+      language: 'lua' as const,
+      wrapper: 'axsdk-lua-wrapper@1' as const,
+      sourceRef: await sha256Digest(new TextEncoder().encode(luaSource)),
+    },
+  });
   const [flow, taskScript, amazonProviderScript, storeXProviderScript] = await Promise.all([
     descriptor(flowSource, FLOW_MEDIA_TYPE),
-    descriptor(taskSource, SCRIPT_MEDIA_TYPE),
-    descriptor(amazonSource, SCRIPT_MEDIA_TYPE),
-    descriptor(storeXSource, SCRIPT_MEDIA_TYPE),
+    luaDescriptor(taskSource, taskLua),
+    luaDescriptor(amazonSource, amazonLua),
+    luaDescriptor(storeXSource, storeXLua),
   ]);
 
   const shoppingManifest = parsePackManifest({

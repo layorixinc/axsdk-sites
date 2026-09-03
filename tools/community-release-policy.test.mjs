@@ -34,7 +34,9 @@ test('the checked-in community release policy locks the launch contract', async 
   assert.deepEqual(policy.artifacts, {
     executionLanguage: 'javascript',
     acceptedAuthoringLanguages: ['javascript', 'lua'],
-    luaPublication: 'deterministic_javascript_before_review',
+    luaPublication: 'embedded_source_in_signed_wrapper',
+    luaInterpreter: 'packaged',
+    dynamicLuaLoad: false,
     remoteInterpreter: false,
   });
   assert.deepEqual(policy.approvals, {
@@ -84,7 +86,19 @@ test('the policy rejects unreviewed Lua or a remote interpreter', async () => {
     () => validateCommunityReleasePolicy(changed(policy, (copy) => {
       copy.artifacts.luaPublication = 'download_lua_source';
     })),
-    /artifacts\.luaPublication must be deterministic_javascript_before_review/,
+    /artifacts\.luaPublication must be embedded_source_in_signed_wrapper/,
+  );
+  assert.throws(
+    () => validateCommunityReleasePolicy(changed(policy, (copy) => {
+      copy.artifacts.luaInterpreter = 'downloaded';
+    })),
+    /artifacts\.luaInterpreter must be packaged/,
+  );
+  assert.throws(
+    () => validateCommunityReleasePolicy(changed(policy, (copy) => {
+      copy.artifacts.dynamicLuaLoad = true;
+    })),
+    /artifacts\.dynamicLuaLoad must be false/,
   );
   assert.throws(
     () => validateCommunityReleasePolicy(changed(policy, (copy) => {

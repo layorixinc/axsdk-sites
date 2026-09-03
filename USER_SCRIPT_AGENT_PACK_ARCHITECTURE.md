@@ -68,10 +68,14 @@ packs.
 A Provider Pack contributes a typed provider record and command implementation. It cannot add a model
 node, planner rule, flow edge, or prompt to the owning Agent Pack.
 
-### AD-006 — No downloaded Lua runtime
+### AD-006 — Lua ships as embedded source inside signed JavaScript wrappers (revised 2026-09-03)
 
-Lua may be an authoring input only when exact JavaScript is produced before review/signing. Agent Pack
-execution never reaches `@axsdk/lua` or Fengari.
+Original decision ("no downloaded Lua runtime; execution never reaches Fengari") is REVERSED by
+`LUA_PACK_DESIGN.md` after the CWS release carrying the packaged Fengari interpreter passed review.
+Pack logic is authored and distributed as Lua, embedded as a string literal inside the signed
+JavaScript artifact (`wrap(luaSource)`, a fixed zero-logic template). The packaged Fengari prelude —
+never downloaded — executes it in the `USER_SCRIPT` world under a closed environment with no
+`load`-family functions, so the only executable Lua is the signed artifact's own bytes.
 
 ### AD-007 — Current local path is removed only after full parity
 

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { resolve } from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 
 import { composePackSet } from '../../../axsdk-sdk-js/packages/axsdk-packs/src/composer.ts';
 import { validatePackInlineValue } from '../../../axsdk-sdk-js/packages/axsdk-packs/src/protocol.ts';
@@ -19,12 +21,19 @@ import {
   fetchVerifiedPackRelease,
 } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/registry.ts';
 import { emptyPackLifecycleState } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/store.ts';
+import { installLuaPrelude } from './lua-prelude.mjs';
+import { verifyLuaArtifact, wrapLuaSource } from './wrap-lua.mjs';
 
 const ROOT = resolve(import.meta.dir, '../..');
 const SCRIPT_GLOBAL = '__AXSDK_PACK_REGISTER__';
 
 type CommandTable = Record<string, (input: any) => unknown | Promise<unknown>>;
 
+/**
+ * Executes an artifact the way the USER_SCRIPT world does: the JS file is imported with the pack
+ * register global present. A `.lua` path is wrapped through the REAL emitter first and executed
+ * through the REAL prelude, so the unit under test is wrapper + prelude + Lua as one artifact.
+ */
 async function loadCommands(
   relativePath: string,
   documentValue?: unknown,
@@ -70,12 +79,24 @@ async function loadCommands(
     globals.WebSocket = function WebSocket() { refused(); };
   };
   globals[SCRIPT_GLOBAL] = (value: CommandTable) => { commands = value; };
+  let importPath = resolve(ROOT, relativePath);
+  let disposePrelude: (() => void) | undefined;
+  let tempDir: string | undefined;
+  if (relativePath.endsWith('.lua')) {
+    const wrapped = wrapLuaSource(await readFile(importPath, 'utf8'), { name: relativePath });
+    tempDir = await mkdtemp(join(tmpdir(), 'axsdk-lua-artifact-'));
+    importPath = join(tempDir, 'artifact.mjs');
+    await writeFile(importPath, wrapped);
+    disposePrelude = installLuaPrelude(globalThis);
+  }
   install();
   try {
-    await import(`${resolve(ROOT, relativePath)}?test=${crypto.randomUUID()}`);
+    await import(`${importPath}?test=${crypto.randomUUID()}`);
   } finally {
     delete globals[SCRIPT_GLOBAL];
+    disposePrelude?.();
     restore();
+    if (tempDir !== undefined) await rm(tempDir, { recursive: true, force: true });
   }
   if (commands === undefined) throw new Error(`${relativePath} did not register Pack commands`);
   if (documentValue === undefined) return commands;
@@ -189,6 +210,29 @@ describe('first-party Pack manifests and composition', () => {
     expect(extended.composition.providerRegistryDigest).not.toBe(baseline.composition.providerRegistryDigest);
     expect(extended.composition.releases.find((release) => release.packId === 'layorix.shopping'))
       .toEqual(baseline.composition.releases.find((release) => release.packId === 'layorix.shopping'));
+  });
+
+  test('every script artifact is byte-exactly the fixed wrapper around its authored Lua', async () => {
+    const built = await buildFirstPartyPackInputs(ROOT);
+    const decode = (ref: string) => new TextDecoder().decode(built.assets[ref] ?? new Uint8Array());
+    const cases = [
+      ['packs/shopping/src/task.lua', 'layorix.shopping/task', built.shopping.manifest.assets.taskScript],
+      ['packs/shopping/providers/amazon.lua', 'layorix.shopping/providers/amazon', built.shopping.manifest.assets.amazonProviderScript],
+      ['packs/store-x/src/provider.lua', 'example.store-x/provider', built.storeX.manifest.assets.providerScript],
+    ] as const;
+    for (const [sourcePath, artifactName, asset] of cases) {
+      const artifact = decode(asset.ref);
+      const luaSource = await readFile(resolve(ROOT, sourcePath), 'utf8');
+      // The signed bytes ARE the template around the authored source — review reads the Lua.
+      expect(artifact).toBe(wrapLuaSource(luaSource, { name: artifactName }));
+      expect(verifyLuaArtifact(artifact)).toEqual({ name: artifactName, source: luaSource });
+      // The manifest names the Lua review reads: sourceRef is the digest of the SOURCE bytes.
+      expect((asset as { authoring?: unknown }).authoring).toEqual({
+        language: 'lua',
+        wrapper: 'axsdk-lua-wrapper@1',
+        sourceRef: await sha256Digest(new TextEncoder().encode(luaSource)),
+      });
+    }
   });
 
   // The composer PARSES release envelopes; it never verifies them. So a manifest that no signed
@@ -343,7 +387,7 @@ describe('first-party Pack manifests and composition', () => {
 
 describe('Shopping task artifact', () => {
   test('ranks known totals first without fabricating missing shipping as zero', async () => {
-    const commands = await loadCommands('packs/shopping/src/task.js');
+    const commands = await loadCommands('packs/shopping/src/task.lua');
     expect(Object.keys(commands).sort()).toEqual(['prepare_search', 'rank_provider_result']);
 
     const ranked = await commands.rank_provider_result({
@@ -364,7 +408,7 @@ describe('Shopping task artifact', () => {
   });
 
   test('rejects contradictory and credential-bearing provider results before ranking', async () => {
-    const commands = await loadCommands('packs/shopping/src/task.js');
+    const commands = await loadCommands('packs/shopping/src/task.lua');
     expect(() => commands.rank_provider_result({
       providerResult: providerResult({ candidates: [] }),
     })).toThrow('provider_result_invalid');
@@ -406,7 +450,7 @@ describe('Shopping task artifact', () => {
 
 describe('Amazon embedded Provider artifact', () => {
   test('reads stable live-measured card fields and keeps absent shipping absent', async () => {
-    const commands = await loadCommands('packs/shopping/providers/amazon.js', amazonDocument([
+    const commands = await loadCommands('packs/shopping/providers/amazon.lua', amazonDocument([
       amazonCard({ asin: 'B0TEST0001', title: 'Logitech M185 Wireless Mouse', price: '$19.99' }),
       amazonCard({ asin: 'B0TEST0002', title: 'Logitech M185 Mouse', price: '$17.50', shipping: '$3.99 delivery' }),
     ]), 'https://www.amazon.com/s?k=Logitech+M185');
@@ -428,7 +472,7 @@ describe('Amazon embedded Provider artifact', () => {
   test('requests only a signed search navigation and classifies CAPTCHA before navigation', async () => {
     const input = { query: 'mouse', page: 1, limit: 6, quantity: 1, query_variants: ['mouse'] };
     const home = await loadCommands(
-      'packs/shopping/providers/amazon.js',
+      'packs/shopping/providers/amazon.lua',
       amazonDocument([]),
       'https://www.amazon.com/',
     );
@@ -437,7 +481,7 @@ describe('Amazon embedded Provider artifact', () => {
       url: 'https://www.amazon.com/s?k=mouse',
     });
     const blocked = await loadCommands(
-      'packs/shopping/providers/amazon.js',
+      'packs/shopping/providers/amazon.lua',
       amazonDocument([], true),
       'https://www.amazon.com/',
     );
@@ -448,7 +492,7 @@ describe('Amazon embedded Provider artifact', () => {
   });
 
   test('never converts conditional free-delivery thresholds into shipping charges or zero', async () => {
-    const commands = await loadCommands('packs/shopping/providers/amazon.js', amazonDocument([
+    const commands = await loadCommands('packs/shopping/providers/amazon.lua', amazonDocument([
       amazonCard({ asin: 'B0TEST0003', title: 'Logitech M185 One', price: '$19.99', shipping: 'FREE delivery on $35 of items shipped by Amazon' }),
       amazonCard({ asin: 'B0TEST0004', title: 'Logitech M185 Two', price: '$18.99', shipping: 'Shipping is free on orders over $35' }),
     ]), 'https://www.amazon.com/s?k=Logitech+M185');
@@ -470,7 +514,7 @@ describe('Store X fixture Provider artifact', () => {
         'data-currency': 'USD',
       } as Record<string, string>)[name] ?? null,
     };
-    const commands = await loadCommands('packs/store-x/src/provider.js', {
+    const commands = await loadCommands('packs/store-x/src/provider.lua', {
       querySelector: () => null,
       querySelectorAll: (selector: string) => selector === '[data-store-x-product]' ? [row] : [],
     }, 'https://www.store-x.example/search?q=mouse');
@@ -504,7 +548,7 @@ describe('Store X fixture Provider artifact', () => {
         'data-currency': 'USD',
       } as Record<string, string>)[name] ?? null,
     };
-    const commands = await loadCommands('packs/store-x/src/provider.js', {
+    const commands = await loadCommands('packs/store-x/src/provider.lua', {
       querySelector: () => null,
       querySelectorAll: () => [row],
     }, 'https://www.store-x.example/search?q=mouse');

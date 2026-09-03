@@ -68,7 +68,29 @@ export function loadLuaModules(relativePaths, { globals = {} } = {}) {
      * A thrown JS error surfaces as a Lua error, which is what a failing op does on the real channel.
      */
     expose(spec) {
+      const pushJsFunction = (fn) => {
+        lua.lua_pushcfunction(L, (state) => {
+          const argc = lua.lua_gettop(state);
+          const args = [];
+          for (let i = 1; i <= argc; i += 1) args.push(readValue(state, i));
+          let result;
+          try {
+            result = fn(...args);
+          } catch (error) {
+            return lauxlib.luaL_error(state, to_luastring(String(error?.message ?? error)));
+          }
+          pushValue(state, result === undefined ? null : result);
+          return 1;
+        });
+      };
       for (const [namespace, members] of Object.entries(spec)) {
+        // A FUNCTION value installs as a callable global — the real runtime's `rpc` is a callable
+        // table, and callability (not table-ness) is the property modules may rely on.
+        if (typeof members === 'function') {
+          pushJsFunction(members);
+          lua.lua_setglobal(L, to_luastring(namespace));
+          continue;
+        }
         lua.lua_createtable(L, 0, Object.keys(members).length);
         for (const [name, fn] of Object.entries(members)) {
           lua.lua_pushcfunction(L, (state) => {

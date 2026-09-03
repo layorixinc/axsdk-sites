@@ -3163,5 +3163,15 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `entry: run` compiles and answers `{}`** (the chunk only defines `run`), stalling the flow as a
   completed tool with no branch; and **the agentv2 runtime projects no `pack` Lua namespace yet** —
   the compiler accepts the grant, `type(pack) ~= "table"` live, filed as
-  `RPC_LUA_RUNTIME_REQUESTS_22.md` (X6 waits on it). Diagnosis discipline that found them: same-size
-  padded PREVIOUS document → 200 proved content-not-size in one probe.
+  `RPC_LUA_RUNTIME_REQUESTS_22.md`. Diagnosis discipline that found them: same-size
+  padded PREVIOUS document → 200 proved content-not-size in one probe. **Resolved same day by the
+  runtime reply**: the generic path is `rpc(op, params)` — a CALLABLE TABLE, so callability is never
+  a `type()` question (our probe misread that) — and the module now falls back to it building the
+  SAME frame, live-verified: the empty catalog crossed end to end and answered honestly. Three more
+  paid-for facts: `pack.invoke` is a MUTATION at the wire level (never batched; the flow adapter
+  carries `effect: mutation + consent: required + idempotent: true` — the compiler REQUIRES
+  idempotent true, refused only at the LAZY first-turn compile — plus a require marker only the
+  deterministic validator writes); the Lua binding is POSITIONAL while the params table is the wire
+  shape (the `memory.set_bulk` trap, third occurrence); and an incompletely reverted probe string
+  shipped one revision of garbage prose in a refusal message — a probe revert is a diff to READ, not
+  a replace to trust.

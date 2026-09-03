@@ -289,7 +289,7 @@ sequences stay fully enforced.
   thumbtack·soomgo·kmong, task authoring `lua`) from the published GitHub Pages registry. No store
   profile or CWS artifact change (`check:flows` 245, `test:scenarios` 170).
 
-### X5 — routing in our document — **DONE 2026-09-03** (full dispatch blocked on runtime request 22)
+### X5 — routing in our document — **DONE 2026-09-03, dispatch UNBLOCKED same day** (generic rpc fallback)
 
 Status, measured:
 
@@ -310,10 +310,16 @@ Status, measured:
   `pack_read_catalog`, and answered honestly in Korean quoting the RAW reason
   (`pack_channel_unavailable: op table has no pack namespace`); the control utterance ran
   `shopping_single_site` with `pack_*` untouched.
-- **What blocks full dispatch**: the agentv2 runtime Lua environment projects no `pack` namespace —
-  the compiler accepts the grant, the env lacks the table. Filed as
-  `RPC_LUA_RUNTIME_REQUESTS_22.md` (forward-to-client like `memory.*`; the client handler already
-  ships). X6 waits on it.
+- **Dispatch unblocked the same day**: the runtime reply named the generic path — `rpc(op, params)`,
+  a CALLABLE TABLE (our probe read `type(rpc) == "table"` correctly and misread callability as a
+  `type()` question). `76_rpc_pack.lua` now tries the `pack.*` sugar and falls back to
+  `rpc(op, params)` building the SAME frame; the sugar parity lands later without touching us. Also
+  reflected: positional `pack.invoke(binding_id, arguments_json)`, key-ABSENT `pack_set_digest`,
+  `effect: mutation + consent: required + idempotent: true` (the compiler REQUIRES idempotent true
+  on a mutation adapter — a lazy first-turn compile refusal) with the approval marker written only
+  by the deterministic validator. LIVE: `팩 카탈로그 보여줘` → `pack_read_catalog` → the extension
+  answered the empty catalog through the generic path → "설치된 에이전트 팩이 없으므로 실행할
+  것이 없습니다." — no channel error, control utterance uncaptured. **X6 is ready now.**
 
 Original scope, for reference:
 

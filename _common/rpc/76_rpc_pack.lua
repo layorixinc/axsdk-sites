@@ -44,13 +44,26 @@ local function decode_json(encoded)
 end
 
 --- The op vocabulary is installed lazily by the runtime; capturing `pack` at load time captures nil,
---- and the static grant audit reads LITERAL `pack.<op>(` calls — so each op is called literally
---- inside a deferred pcall, and a missing channel is a channel outcome, never a pack claim.
-local function pack_op(call)
-  if type(pack) ~= "table" then
-    return nil, "pack_channel_unavailable: op table has no pack namespace" .. type(rpc) .. " rpc_call=" .. tostring(type(rpc) == "table" and type(rpc.call) or "-") .. " rpc_now=" .. tostring(type(rpc) == "table" and type(rpc.now) or "-") .. ")"
+--- and the static grant audit reads LITERAL `pack.<op>(` calls — so the sugar path calls each op
+--- literally inside a deferred pcall. When the sugar table has not landed (parity pending), the
+--- generic `rpc(op, params)` path builds the SAME op frame — the runtime's own guidance on request
+--- 22. `rpc` is a CALLABLE TABLE: callability is not a `type()` question, so it is pcall'd, never
+--- type-checked. A missing channel is a channel outcome, never a pack claim.
+local function pack_op(op, sugar, params)
+  if type(pack) == "table" then
+    local ok, value = pcall(sugar)
+    if not ok then
+      return nil, "pack_channel_unavailable: " .. tostring(value)
+    end
+    if type(value) ~= "table" then
+      return nil, "pack_channel_unavailable: empty op answer"
+    end
+    return value, nil
   end
-  local ok, value = pcall(call)
+  if rpc == nil then
+    return nil, "pack_channel_unavailable: no pack sugar and no generic rpc channel"
+  end
+  local ok, value = pcall(function() return rpc(op, params or {}) end)
   if not ok then
     return nil, "pack_channel_unavailable: " .. tostring(value)
   end
@@ -78,7 +91,7 @@ end
 
 function P.read_catalog(args)
   args = type(args) == "table" and args or {}
-  local catalog, refusal = pack_op(function() return pack.catalog() end)
+  local catalog, refusal = pack_op("pack.catalog", function() return pack.catalog() end, nil)
   if catalog == nil then
     return { next = "error", pack_answer_reason = refusal }
   end
@@ -218,9 +231,12 @@ function P.invoke(args)
   end
   -- POSITIONAL, not a params table: the params table is the WIRE shape, the Lua binding takes the
   -- values (runtime review of request 22 — the `memory.set_bulk` trap, §13, in a new namespace).
-  local answer, refusal = pack_op(function()
+  local answer, refusal = pack_op("pack.invoke", function()
     return pack.invoke(binding_id, args.pack_arguments_json)
-  end)
+  end, {
+    binding_id = binding_id,
+    arguments_json = args.pack_arguments_json,
+  })
   if answer == nil then
     return { next = "error", pack_answer_reason = refusal }
   end

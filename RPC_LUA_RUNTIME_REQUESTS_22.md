@@ -41,7 +41,7 @@ message }`.
 `tools/rpc-allow.mjs`(D10: 어휘는 서버 사실, 라이브 체크로 재검증) 하나이며 bump 관측 시 함께
 갱신하겠습니다.
 
-## 제네릭 `rpc()` 폴백 — 관측 불가, 시그니처를 알려주십시오
+## 제네릭 `rpc()` 폴백 — 채택 완료 (2026-09-03 회신 반영)
 
 회신의 "sugar parity 미비, 제네릭 `rpc()` 폴백으로 우회 가능"을 라이브로 측정했습니다
 (임시 프로브, 원복 완료):
@@ -60,7 +60,7 @@ parity 이전에 진행하겠습니다. 없다면 X6는 parity 착륙을 기다�
 `_common/rpc/76_rpc_pack.lua` 기준:
 
 1. Pack 미설치 클라이언트에서 `pcall(function() return pack.catalog() end)`가
-   `commands == {}`(빈 시퀀스), `routes == {}`, `pack_set_digest` **키 부재**로 답한다.
+   `#catalog.commands == 0`, `#catalog.routes == 0`, `pack_set_digest` **키 부재**로 답한다 (== {} 표현 정정).
 2. 미지원 클라이언트에서 `command_unresolved`류의 명명된 거부로 답한다.
 3. `pack.invoke("b-1", '{"x":1}')` 위치 인자 호출이 wire frame
    `{ op = "pack.invoke", params = { binding_id, arguments_json } }`로 전달된다.

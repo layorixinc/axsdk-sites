@@ -245,3 +245,34 @@ test('present renders the Pack result deterministically, preferring its own text
   assert.equal(generic.next, 'report');
   assert.match(generic.pack_reply, /house cleaning/);
 });
+
+test('without the sugar table, the generic rpc(op, params) path carries the SAME frames', () => {
+  const h = loadLuaModules(MODULES);
+  h.expose({ json: { encode: (value) => JSON.stringify(value), decode: (text) => JSON.parse(String(text)) } });
+  const frames = [];
+  // The real global is a CALLABLE TABLE (type 'table' — callability is not a type() question, the
+  // request-22 misreading); the stub exposes a callable, which is the property the module may rely on.
+  h.expose({ rpc: (op, params) => {
+    frames.push({ op, params: params ?? null });
+    if (op === 'pack.catalog') return CATALOG;
+    if (op === 'pack.invoke') return { ok: true, value: { echoed: true }, provenance: [] };
+    throw new Error('unknown op ' + op);
+  } });
+  const catalog = h.call('AX_RPC_PACK.read_catalog', {});
+  assert.equal(catalog.next, 'ok');
+  assert.equal(catalog.pack_command_count, 2);
+  const invoked = h.call('AX_RPC_PACK.invoke', {
+    pack_binding_id: 'b-compare', pack_arguments_json: '{"candidates":[]}',
+  });
+  assert.equal(invoked.next, 'present');
+  assert.deepEqual(frames[0], { op: 'pack.catalog', params: {} });
+  assert.deepEqual(frames[1], { op: 'pack.invoke', params: { binding_id: 'b-compare', arguments_json: '{"candidates":[]}' } });
+});
+
+test('with NEITHER channel the refusal still carries its raw reason', () => {
+  const h = loadLuaModules(MODULES);
+  h.expose({ json: { encode: (value) => JSON.stringify(value), decode: (text) => JSON.parse(String(text)) } });
+  const out = h.call('AX_RPC_PACK.read_catalog', {});
+  assert.equal(out.next, 'error');
+  assert.match(out.pack_answer_reason, /pack_channel_unavailable/);
+});

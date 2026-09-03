@@ -578,6 +578,7 @@ flows:
       pack_pack_id: null
       pack_version: null
       pack_effect: null
+      pack_dispatch_approval: null
       pack_result_json: null
       pack_reply: null
     nodes:
@@ -647,6 +648,7 @@ flows:
         inputSelector:
           - pack_binding_id
           - pack_arguments_json
+          - pack_dispatch_approval
         next:
           present: present
           error: answer
@@ -5356,6 +5358,7 @@ flowTools:
       pack_version: result.pack_version
       pack_effect: result.pack_effect
       pack_arguments_json: result.pack_arguments_json
+      pack_dispatch_approval: result.pack_dispatch_approval
       pack_answer_reason: result.pack_answer_reason
     parameters:
       type: object
@@ -5367,6 +5370,17 @@ flowTools:
   pack_invoke:
     description: Dispatch the catalog-issued binding through pack.invoke. Authority does not move —
       the extension re-derives everything from its own pinned composition.
+    # pack.invoke is a MUTATION at the wire level (runtime review of request 22): one dispatch runs
+    # installed pack code, so it must never hide in a batch and needs the consent contract. The
+    # marker is written ONLY by pack_validate after the catalog and read-effect checks pass.
+    effect: mutation
+    consent: required
+    # The compiler REQUIRES idempotent: true on a mutation adapter (measured live 2026-09-03: the
+    # session compile — lazy, first-turn — refuses false; the bare POST /sessions probe passes).
+    # Honest here: this flow dispatches catalog-validated READ commands only.
+    idempotent: true
+    require:
+      pack_dispatch_approval: catalog_validated_read_command
     execute:
       kind: runtime
       implementation: lua
@@ -5390,6 +5404,7 @@ flowTools:
       properties:
         pack_binding_id: { type: [ string, "null" ] }
         pack_arguments_json: { type: [ string, "null" ] }
+        pack_dispatch_approval: { type: [ string, "null" ] }
   pack_present:
     description: Render the Pack's result deterministically — its own comparisonText verbatim when it
       states one, bounded key lines otherwise. Never a model's words.

@@ -48,7 +48,7 @@ end
 --- inside a deferred pcall, and a missing channel is a channel outcome, never a pack claim.
 local function pack_op(call)
   if type(pack) ~= "table" then
-    return nil, "pack_channel_unavailable: op table has no pack namespace"
+    return nil, "pack_channel_unavailable: op table has no pack namespace" .. type(rpc) .. " rpc_call=" .. tostring(type(rpc) == "table" and type(rpc.call) or "-") .. " rpc_now=" .. tostring(type(rpc) == "table" and type(rpc.now) or "-") .. ")"
   end
   local ok, value = pcall(call)
   if not ok then
@@ -203,6 +203,10 @@ function P.propose(args)
     pack_version = entry.version,
     pack_effect = entry.effect,
     pack_arguments_json = arguments_json,
+    -- The consent marker the mutation adapter requires: written ONLY here, after the catalog check
+    -- and the read-effect check both passed. `pack.invoke` is a mutation at the wire level
+    -- (runtime review of request 22) even though this flow dispatches read commands only.
+    pack_dispatch_approval = "catalog_validated_read_command",
   }
 end
 
@@ -212,11 +216,10 @@ function P.invoke(args)
   if binding_id == "" then
     return { next = "error", pack_answer_reason = "binding_missing" }
   end
+  -- POSITIONAL, not a params table: the params table is the WIRE shape, the Lua binding takes the
+  -- values (runtime review of request 22 — the `memory.set_bulk` trap, §13, in a new namespace).
   local answer, refusal = pack_op(function()
-    return pack.invoke({
-      binding_id = binding_id,
-      arguments_json = args.pack_arguments_json,
-    })
+    return pack.invoke(binding_id, args.pack_arguments_json)
   end)
   if answer == nil then
     return { next = "error", pack_answer_reason = refusal }

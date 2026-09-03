@@ -1415,6 +1415,12 @@
             "string",
             "null"
           ]
+        },
+        "pack_dispatch_approval": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       }
     }

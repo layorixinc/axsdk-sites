@@ -51,7 +51,8 @@ function harness({ catalog = CATALOG, invoke } = {}) {
   h.expose({
     pack: {
       catalog: () => catalog,
-      invoke: (params) => {
+      invoke: (bindingId, argumentsJson) => {
+        const params = { binding_id: bindingId, arguments_json: argumentsJson };
         calls.push(params);
         if (typeof params?.binding_id !== 'string' || params.binding_id.trim() === '') {
           throw new Error('bad_params: binding_id');
@@ -83,7 +84,7 @@ test('read_catalog renders the installed commands and carries the catalog as ONE
 });
 
 test('an empty composition is an honest none, not an error', () => {
-  const { h } = harness({ catalog: { pack_set_digest: null, commands: [], routes: [] } });
+  const { h } = harness({ catalog: { commands: [], routes: [] } });
   const out = h.call('AX_RPC_PACK.read_catalog', {});
   assert.equal(out.next, 'none');
   assert.match(out.pack_answer_reason, /no_packs_installed/);
@@ -160,6 +161,9 @@ test('propose validates against the catalog and refuses a non-read effect BY NAM
   assert.equal(ok.pack_binding_id, 'b-compare');
   assert.equal(ok.pack_effect, 'read');
   assert.equal(ok.pack_pack_id, 'layorix.service-quotes');
+  // The consent gate's writer: the deterministic validator, and ONLY it, emits the approval marker
+  // the mutation adapter requires (two writers of one approval is how it stops meaning anything).
+  assert.equal(ok.pack_dispatch_approval, 'catalog_validated_read_command');
 
   const unknown = h.call('AX_RPC_PACK.propose', {
     pack_catalog_json: JSON.stringify(CATALOG),
@@ -177,6 +181,7 @@ test('propose validates against the catalog and refuses a non-read effect BY NAM
   assert.equal(mutation.next, 'error');
   assert.match(mutation.pack_answer_reason, /effect_not_invocable/);
   assert.match(mutation.pack_answer_reason, /cart_mutation/);
+  assert.equal(mutation.pack_dispatch_approval, undefined, 'a refusal must not emit the approval');
 
   const badJson = h.call('AX_RPC_PACK.propose', {
     pack_catalog_json: JSON.stringify(CATALOG),

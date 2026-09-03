@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 
-import { installLuaPrelude } from './lua-prelude.mjs';
+import { installLuaPrelude } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/lua-prelude.ts';
 import { LUA_WRAPPER_VERSION, wrapLuaSource } from './wrap-lua.mjs';
 
 type CommandTable = Record<string, (input?: unknown) => unknown>;

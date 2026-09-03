@@ -3084,8 +3084,13 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
 - **The CWS release passed review (2026-09), and packs are Lua-first now (2026-09-03).** AD-006 is
   REVERSED by `LUA_PACK_DESIGN.md`: pack logic is authored AND distributed as Lua, embedded as a string
   inside the signed JavaScript wrapper (`tools/packs/wrap-lua.mjs` — fixed zero-logic template; a gate
-  recomputes `wrap(source)` and refuses any drifted byte). Execution is the packaged fengari prelude
-  (`tools/packs/lua-prelude.mjs` is the executable spec) in a CLOSED environment: no `load` family, no
+  recomputes `wrap(source)` and refuses any drifted byte; the canonical implementation is
+  `@axsdk/packs` `lua-wrapper.ts`, mirrored here byte-for-byte with a pinning test). Execution is the
+  packaged fengari prelude — canonical home `axsdk-extension-cdp/src/packs/lua-prelude.ts`, built as
+  `dist/pack-lua-prelude.js` (233 KiB IIFE, lazily fetched) and injected by `injector.ts` as
+  `[bootstrap, prelude, artifact]` in the same `USER_SCRIPT` world; a Lua artifact with no loadable
+  prelude refuses `prelude_unavailable` BEFORE executing. The sites contract suite imports and pins
+  THAT module. Closed environment: no `load` family, no
   `io/os/debug/coroutine/package`, no `js` interop — the only runnable Lua is the signed artifact's own
   bytes, which is what keeps `remoteInterpreter: false` true. `community/release-policy.json` pins
   `luaPublication: embedded_source_in_signed_wrapper` + `luaInterpreter: packaged` + `dynamicLuaLoad:
@@ -3094,6 +3099,9 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   fixed a latent bug (`task.js` joined comparison lines with a LITERAL two-char `\n`). Manifest asset
   descriptors may carry a closed `authoring` block (`language/wrapper/sourceRef`, axsdk-packs schema,
   refused on non-JS assets); the community single-script registry refuses a Lua wrapper BY NAME
-  (`lua_wrapper_not_supported_here`). Extension-side prelude bundling and the live `USER_SCRIPT` proof
-  remain open — the latter blocked on the platform Pack protocol. Do not reintroduce a Lua→JS compile
+  (`lua_wrapper_not_supported_here`), while the PACK verifier (`fetchVerifiedPackRelease`) recomputes
+  every `authoring` wrapper and refuses `asset_authoring_mismatch` — including a drifted wrapper whose
+  declared digest is its own, the exact review-bypass shape. A built-bundle smoke must shadow
+  `process` (the world has none; bun does — fengari branches on it). Only the live `USER_SCRIPT`
+  proof remains open, blocked on the platform Pack protocol. Do not reintroduce a Lua→JS compile
   step; it survives only as the recorded contingency in `LUA_PACK_DESIGN.md` §9.

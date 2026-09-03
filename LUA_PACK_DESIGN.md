@@ -152,35 +152,42 @@ provider registry, `modelMayManageScripts: false`.
 3. `packs/shopping` rewritten in Lua; `test:packs` green unchanged (§8.4).
 4. SDK verifier + broker acceptance of `authoring.language: lua`; live manual-QA proof (§8.5).
 
-## 11. Delivery status (2026-09-03)
+## 11. Delivery status (2026-09-03, updated same day)
 
-Steps 1–3 are DONE and green, plus the schema half of step 4:
+Steps 1–4 are DONE and green except the platform-blocked live proof:
 
 - Policy/gates: `community/release-policy.json` now pins `luaPublication:
   embedded_source_in_signed_wrapper`, `luaInterpreter: packaged`, `dynamicLuaLoad: false`;
   `tools/community-release-policy.{mjs,test.mjs}` updated (mutations for `download_lua_source`,
   `downloaded` interpreter, and dynamic load stay red). AD-006, the pack-design subset rule, and the
   implementation-plan invariants are rewritten to this design.
-- Wrapper: `tools/packs/wrap-lua.mjs` (+9 tests) — deterministic template, byte-tamper and
-  hand-edit drift refusals, forbidden-token static checks (`load` family, `io os debug coroutine
-  package require _ENV`), multibyte round trip.
-- Prelude: `tools/packs/lua-prelude.mjs` (+9 tests) — fengari, closed environment (every removed
-  global asserted `nil`, `string.dump` removed, no `js` interop), SDK-rule marshaling with
-  `json.array` marker and absent-over-empty, lazy `dom` bridge (handles reset per command call),
-  `text`/`url`/`clock`/`page` helpers implemented over the platform's own primitives.
+- Wrapper: canonical implementation is `@axsdk/packs` `src/lua-wrapper.ts`;
+  `tools/packs/wrap-lua.mjs` mirrors it for Node consumers here, and a mirror test pins the two
+  byte-for-byte (same artifacts, same refusals). Deterministic template, byte-tamper and hand-edit
+  drift refusals, forbidden-token static checks, multibyte round trip.
+- Prelude: canonical implementation is the EXTENSION's
+  `axsdk-extension-cdp/src/packs/lua-prelude.ts`, built as the self-contained packaged bundle
+  `dist/pack-lua-prelude.js` (fengari IIFE, 233 KiB, loaded lazily per session that runs a Lua pack).
+  This repository's contract suite (`tools/packs/lua-prelude.test.ts`) imports and pins THAT module —
+  the shipped prelude is what the offline tests execute; the temporary `.mjs` copy is deleted.
+- Injection: `injector.ts` executes `[bootstrap, packaged prelude, artifact]` in the same
+  `USER_SCRIPT` world whenever the artifact is a Lua wrapper; a Lua artifact with no loadable prelude
+  refuses `prelude_unavailable` BEFORE anything executes; a plain JS artifact never loads it.
+- Verifier: `fetchVerifiedPackRelease` recomputes the wrapper for every asset carrying `authoring` —
+  a drifted wrapper whose declared digest is its own (the exact review-bypass shape) refuses
+  `asset_authoring_mismatch`, as does a `sourceRef` that is not the digest of the embedded Lua.
 - Packs: `packs/shopping/src/task.lua`, `packs/shopping/providers/amazon.lua`,
   `packs/store-x/src/provider.lua` replace the deleted `.js` prototypes; the pre-existing behavior
   suite passes unchanged against the wrapped Lua artifacts, and a drift gate pins
-  `artifact === wrap(source)` byte-exactly plus `authoring.sourceRef === sha256(luaSource)`.
-  The port also fixed a latent bug: `task.js` joined comparison lines with a LITERAL `\n` two-byte
-  sequence; the Lua renders real newlines.
-- Schema: `AssetRefV2Schema` (axsdk-packs) accepts an optional closed `authoring` block
-  (`language: lua`, `wrapper: axsdk-lua-wrapper@1`, `sourceRef`), refused on non-JavaScript assets;
-  the real registry verifier accepts the signed Lua-authored releases end to end (`test:packs`
-  fetch/verify/compose path). The community single-script registry refuses a Lua wrapper BY NAME
-  (`lua_wrapper_not_supported_here`) instead of failing incidentally.
+  `artifact === wrap(source)` plus `authoring.sourceRef === sha256(luaSource)`. The port fixed a
+  latent bug: `task.js` joined comparison lines with a LITERAL `\n` two-byte sequence.
+- Schema: `AssetRefV2Schema` accepts the optional closed `authoring` block, refused on
+  non-JavaScript assets; the community single-script registry refuses a Lua wrapper BY NAME
+  (`lua_wrapper_not_supported_here`).
+- Built-bundle smoke: the real `dist/pack-lua-prelude.js` bytes, executed in a `process`-less realm
+  the way the world runs them, installed `__AXSDK_LUA_RUN__` and ran a wrapped artifact end to end
+  (marshaling, `json.array`, `url.with_params`, Korean round trip). The first smoke attempt also
+  proved the static gate: a probe source naming `load`/`os` was refused by `wrapLuaSource` itself.
 
-Still open, in order: the extension-side prelude bundle for the real `USER_SCRIPT` world (the
-repository prelude is its executable specification), verifier-side wrapper recomputation in
-`packs/registry.ts`, and §8.5 live proof — the last is blocked on the platform advertising a Pack
-protocol (AGENTS.md §13: no live Pack session can be created today).
+Still open: §8.5 live proof in a real Chrome `USER_SCRIPT` world — blocked on the platform
+advertising a Pack protocol (AGENTS.md §13: no live Pack session can be created today).

@@ -21,7 +21,7 @@ import {
   fetchVerifiedPackRelease,
 } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/registry.ts';
 import { emptyPackLifecycleState } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/store.ts';
-import { installLuaPrelude } from './lua-prelude.mjs';
+import { installLuaPrelude } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/lua-prelude.ts';
 import { verifyLuaArtifact, wrapLuaSource } from './wrap-lua.mjs';
 
 const ROOT = resolve(import.meta.dir, '../..');

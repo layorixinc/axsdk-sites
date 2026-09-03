@@ -81,4 +81,24 @@ describe('Lua wrapper emitter', () => {
     expect(unwrapLuaArtifact('console.log(1);')).toBe(null);
     expect(() => verifyLuaArtifact('console.log(1);')).toThrow('lua_wrapper_missing');
   });
+
+  test('this module mirrors the SDK canonical wrapper byte-for-byte', async () => {
+    // Node consumers here cannot import the SDK's .ts, so two implementations exist on purpose.
+    // Mirroring is the contract (the build-rpc-sites pattern): same artifact bytes, same refusals.
+    const sdk = await import('../../../axsdk-sdk-js/packages/axsdk-packs/src/lua-wrapper.ts');
+    expect(sdk.LUA_WRAPPER_VERSION).toBe(LUA_WRAPPER_VERSION);
+    for (const [source, name] of [
+      [SOURCE, 'greeter'],
+      ['return { note = "무료배송 · 배송비 미확인" }\n', 'ko'],
+    ] as const) {
+      expect(sdk.wrapLuaSource(source, { name })).toBe(wrapLuaSource(source, { name }));
+    }
+    expect(() => sdk.validateLuaPackSource('os.time()')).toThrow('forbidden_lua_source');
+    expect(() => validateLuaPackSource('os.time()')).toThrow('forbidden_lua_source');
+    // A drifted artifact is refused identically by both.
+    const artifact = wrapLuaSource(SOURCE, { name: 'greeter' });
+    const edited = artifact.replace('run(', 'run( ');
+    expect(() => sdk.verifyLuaArtifact(edited)).toThrow('lua_wrapper_drift');
+    expect(() => verifyLuaArtifact(edited)).toThrow('lua_wrapper_drift');
+  });
 });

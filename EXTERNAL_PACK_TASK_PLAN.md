@@ -2,7 +2,7 @@
 
 **Status:** design measured 2026-08-27. Scenario decided: comparative service quotes (§9). **X0 closed**
 (all four measured; two corrected the design) and **X1 done** (`6a74428`, `f2dac2b` in `axsdk-sdk-js`).
-Next action is X2 — publish the signed registry, which now also unblocks the first live `pack.catalog`.
+Next action is X2 — publish the UNSIGNED registry (decision 2026-09-03, below), which now also unblocks the first live `pack.catalog`.
 **Scope:** load a Pack from a **published external registry** into the shipping CDP extension, and route a
 user request to the **new agentic task it carries**, without changing the submitted CWS artifact.
 
@@ -220,19 +220,27 @@ none of its own — `CommandContractV1` has no description field, so the classif
 names and the composition's `routes`, exactly as `75_rpc_community.lua` does. And no live turn has
 reached `pack.catalog` yet: with no registry published there is nothing to install, which is X2.
 
-### X2 — SITES: publish a signed registry (2 days)
+### X2 — SITES: publish an UNSIGNED registry (revised 2026-09-03 by user decision)
 
-- `tools/pack-registry.mjs` — build + sign + verify-back + `--check`, modelled on
-  `tools/community-registry.mjs` (485 lines, already does canonical JSON, Ed25519, determinism and a
-  `node:vm` execution check of the artifact's registered command names).
+**Signatures are dropped from the registry.** The trust model is Tampermonkey's, already recorded for the
+community from-URL channel (`TODO.md` §10): the user chose the source, transport is TLS, every document
+and asset is content-addressed, and install approval pins exact digests. What a signature added on top —
+tamper evidence against a compromised registry HOST and revocation authenticity — is consciously
+traded away; what it cost — the "signing key custodian" decision gate that blocked publication — goes
+with it. The digest chain (index → release → manifest → assets, every link `sha256:`) and the rollback
+sequences stay fully enforced.
+
+- `tools/packs/registry.ts` (bun) — build + verify-back + `--check`, emitting UNSIGNED envelopes
+  (`signature` absent; the SDK schema makes it optional and the verifier requires it only for a
+  registry configured with trust roots).
 - Output under `docs/packs/registry/`: `index.json`, `revocations.json`, `releases/<sha256>.json`,
-  `assets/<sha256>`. Published by the existing GitHub Pages deploy.
-- **Key handling:** the private key is never in the repo and never in a log — read from
-  `PACK_SIGNING_KEY` (env) or a gitignored local file; the **public** trust root is committed and is what
-  X1's define carries. A build without the key can still `--check` an existing registry.
-- Gates: `check:pack-registry` verifies every document back with the SDK's own verifier, refuses a stale
-  committed registry (the `62_rpc_sites.lua` lesson: a generated file whose tests serialize in memory
-  passes while the committed bytes drift), and requires two byte-identical builds.
+  `assets/<sha256>`. Published by the existing GitHub Pages deploy. `revocations.json` is published even
+  when empty (the 404 branch, X0-2).
+- Registry config shape: `{ id, baseUrl, trustRoots: [], unsigned: true }` — the verifier refuses the
+  contradictory shapes (unsigned with trust roots; signed config receiving an unsigned document).
+- Gates: `check:pack-registry` verifies every document back with the SDK's own `fetchVerifiedPackRelease`
+  (unsigned mode), refuses a stale committed registry (the `62_rpc_sites.lua` lesson), and requires two
+  byte-identical builds.
 - **Acceptance:** the extension's real `fetchVerifiedPackRelease` resolves the published release from the
   live URL, and a same-length byte tamper answers `asset_hash_mismatch` (the assertion `tools/packs`
   already makes against a fixture, now against the published bytes).
@@ -303,9 +311,9 @@ reached `pack.catalog` yet: with no registry published there is nothing to insta
 |invariant|enforcement|
 |---|---|
 |the submitted CWS artifact is byte-unchanged until a release decision|`__AXSDK_PACK_EXTERNAL__` defaults closed; new CWS gate assertion refusing the registry origin, the executor URL and the define markers in the dist tree (mirrors `assertNoPackManualQa`'s 12 markers)|
-|the embedded first-party packs are frozen|the new pack has its own producer; `tools/packs/first-party.ts` is untouched and its 10 tests must stay green|
+|the embedded first-party packs stay the ones the reviewed artifact carries|the Lua rewrite (2026-09-03, `LUA_PACK_DESIGN.md`) superseded the original "first-party.ts untouched" wording; the frozen thing is the REVIEWED composition, pinned by the pack behavior suite staying green|
 |no order, no payment, no cart mutation|`broker-v2` read-effect-only; `community/release-policy.json` `effects.forbidden`; `check:community-policy`|
-|one verification path|the new registry uses the same `fetchVerifiedPackRelease`; no second verifier, no unsigned path, no local-file Pack|
+|one verification path|the new registry uses the same `fetchVerifiedPackRelease` in its declared UNSIGNED mode (2026-09-03 decision); no second verifier, no local-file Pack — "unsigned" is a registry configuration the one verifier enforces, not a bypass|
 |the store flow profile is unchanged|`STORE_EXCLUDED_INTENTS` + `build-store-flows.test.mjs` (its closure assertions already refuse a leaked intent, flow, tool or module)|
 
 ## 7. Deletion condition for the bridge

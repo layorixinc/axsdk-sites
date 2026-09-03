@@ -20,7 +20,6 @@ import {
 import { wrapLuaSource } from './wrap-lua.mjs';
 
 const PUBLISHED_AT = '2026-08-24T00:00:00Z';
-const TEST_SIGNATURE = `${'A'.repeat(85)}Q`;
 const FLOW_MEDIA_TYPE = 'application/vnd.axsdk.flow-fragment+yaml';
 const SCRIPT_MEDIA_TYPE = 'application/javascript';
 
@@ -237,9 +236,10 @@ async function descriptor(source: string, mediaType: string) {
 }
 
 /**
- * Signs one release envelope. The default is a BUILD PLACEHOLDER, accepted only by callers that never
- * verify provenance (the composer parses envelopes, it does not check signatures). A caller that runs
- * the real registry verifier passes a real Ed25519 signer — see `first-party.test.ts`.
+ * Seals one release envelope. The DEFAULT is UNSIGNED (2026-09-03 decision, EXTERNAL_PACK_TASK_PLAN
+ * X2): trust is the user-chosen registry source plus the content-addressed digest chain, so the
+ * envelope simply omits `signature`. A caller exercising the SIGNED mode passes a real Ed25519
+ * signer — see `first-party.test.ts`.
  */
 export type FirstPartyReleaseSigner = (signed: CanonicalJsonValue) => Promise<{
   readonly algorithm: 'Ed25519';
@@ -268,9 +268,7 @@ async function releaseFor(
     schemaVersion: 2,
     kind: 'release',
     signed,
-    signature: sign === undefined
-      ? { algorithm: 'Ed25519', keyId: 'layorix-first-party-build', value: TEST_SIGNATURE }
-      : await sign(signed as unknown as CanonicalJsonValue),
+    ...(sign === undefined ? {} : { signature: await sign(signed as unknown as CanonicalJsonValue) }),
   } as PackReleaseEnvelope;
   const releaseDigest = await sha256Digest(new TextEncoder().encode(
     canonicalJson(release as unknown as CanonicalJsonValue),

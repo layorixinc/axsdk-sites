@@ -30,7 +30,7 @@
 | 매체 타입 | flow = `application/vnd.axsdk.flow-fragment+yaml`, script = `application/javascript` | `schemas.ts:707,736-737,785` |
 | 생산자 | pack 2종: `layorix.shopping@1.0.0`(agent, flow+task+amazon provider), `example.store-x@1.0.0`(provider) | `tools/packs/first-party.ts` 431줄 |
 | 생산자 원본 | `packs/shopping/flow.yaml` · `packs/shopping/src/task.lua` · `packs/shopping/providers/amazon.lua` · `packs/store-x/src/provider.lua` — **2026-09-03부터 Lua가 저작·배포 형태**이고 서명 대상은 고정 래퍼 JS 바이트다 (`LUA_PACK_DESIGN.md`, `tools/packs/wrap-lua.mjs`) | |
-| 생산자 서명 | **빌드 플레이스홀더** `'A'×85+'Q'`, keyId `layorix-first-party-build`. 실제 Ed25519 서명자는 테스트만 주입 | `first-party.ts:22,270-272` |
+| 생산자 서명 | **무서명 기본** (2026-09-03 결정, `EXTERNAL_PACK_TASK_PLAN.md` X2): envelope이 `signature`를 생략하고 신뢰는 사용자가 고른 소스 + content-addressed digest 체인. Ed25519 서명자는 signed 모드 테스트만 주입 | `first-party.ts` `releaseFor` |
 | 생산자 출력 | **디스크에 쓰지 않는다.** 메모리 반환뿐이고 유일한 호출자는 자기 테스트 | `first-party.test.ts` |
 | 소비자 취득 경로 | **네트워크 레지스트리 하나뿐** (`index.json`/`revocations.json`/`releases/<hex>.json`/`assets/<hex>`) | `packs/registry.ts:200,370-555` |
 | 프로덕션 레지스트리 | `PACK_REGISTRIES = Object.freeze([])` — "Phase 2 deliberately ships no production root" | `packs/config.ts:17-19` |

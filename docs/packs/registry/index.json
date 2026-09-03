@@ -1,0 +1,1 @@
+{"kind":"index","schemaVersion":2,"signed":{"releases":[{"packId":"layorix.shopping","releaseDigest":"sha256:56d4873f14956e0ec3e879fa10cbaeda10683b623d8b9176903f1ee2f89fc57a","version":"1.0.0"},{"packId":"example.store-x","releaseDigest":"sha256:b54d333769730b7e7e28de1aceec3047e8a8df0e1e45661f858550a292870fcb","version":"1.0.0"}],"sequence":1}}

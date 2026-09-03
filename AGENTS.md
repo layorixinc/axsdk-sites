@@ -3105,3 +3105,17 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   `process` (the world has none; bun does — fengari branches on it). Only the live `USER_SCRIPT`
   proof remains open, blocked on the platform Pack protocol. Do not reintroduce a Lua→JS compile
   step; it survives only as the recorded contingency in `LUA_PACK_DESIGN.md` §9.
+- **The pack registry is UNSIGNED (user decision 2026-09-03) — the Tampermonkey trust model, stated
+  end to end.** Trust = the user-chosen source + TLS + the content-addressed digest chain
+  (index → release → manifest → assets, every link `sha256:`) + install approval of exact digests;
+  rollback sequences stay enforced. What was traded away is tamper evidence against a compromised
+  registry HOST and revocation authenticity; what it bought is the death of the "signing key
+  custodian" gate that blocked publication. Envelope `signature` is OPTIONAL in the schema; the
+  VERIFIER decides: `unsigned: true` registry config (trust roots must be empty — the contradictory
+  shape is `registry_invalid`) verifies with `keyId: 'user-source'`, while a registry WITH trust
+  roots refuses an unsigned document as `untrusted_signature` (downgrade, not a mode). Signed mode
+  remains fully supported and tested. `tools/packs/registry.ts` publishes the two first-party packs
+  unsigned under `docs/packs/registry/` (sequence from the committed index: unchanged set keeps it,
+  changed set bumps); `check:pack-registry` refuses stale committed bytes. `community/release-policy.json`
+  is UNCHANGED on purpose: it describes the reviewed CWS artifact, which ships no registry install
+  path at all — flipping `registrySigned` belongs to the R2 revision that actually ships one.

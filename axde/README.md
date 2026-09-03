@@ -99,7 +99,7 @@ own or waits out a port that never opens.
 ## Tests
 
 ```bash
-npm run test:axde        # bun test axde — core, ops, driver, sample packs (98 tests, offline)
+npm run test:axde        # bun test axde — core, ops, driver, sample packs (100 tests, offline)
 npm run test:axde:live   # a real browser: launch outlives the command, stop keeps the toggles
 ```
 

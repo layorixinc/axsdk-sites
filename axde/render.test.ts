@@ -41,6 +41,24 @@ test('there is no profile pane and no key legend — the list is an ANSWER now',
   assert.match(screen, /\/help/, 'the banner names the way in');
 });
 
+test('there is no box: a border around a conversation is furniture, not information', () => {
+  for (const line of render(session(), wide)) {
+    assert.ok(!/[┌┐└┘│─]/.test(line), `box drawing survived: "${line}"`);
+  }
+  assert.ok(!render(session(), wide).join('\n').includes('session'), 'and no frame title');
+});
+
+test('the input line is the LAST line and does not move as the transcript grows', () => {
+  const short = render(initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' }), wide);
+  const long = render(session(), wide);
+  assert.equal(short.length, long.length, 'the prompt stays where the hands expect it');
+  assert.match(short.at(-1), /^axde › /);
+  assert.match(long.at(-1), /^axde › /);
+  // Newest answer sits directly above the prompt, separated by one blank line.
+  assert.equal(long.at(-2), '');
+  assert.match(long.at(-3), /axsdk-extension-cdp/);
+});
+
 test('what you typed and what it answered are both readable, newest last', () => {
   const lines = render(session(), wide).join('\n');
   assert.match(lines, /› \/profiles/, 'the echo of the command');

@@ -288,17 +288,27 @@ operation is a slash command typed into it. The profile list is no longer a pane
 for it and the answer is printed like any other answer.
 
 ```text
- AXSDK Dev Env   build: 7caf9283 ok
- ┌ session ───────────────────────────────────────────────────────────────────────┐
- │ › /profiles                                                                    │
- │   packdev              axde     chrome up :51496 pid 35472  ext 7caf9283  us on │
- │ › /launch packdev --url https://www.amazon.com/                                 │
- │   launch packdev: launched on :51496 pid 35472 · extension up · user scripts on │
- │ › /instal packdev                                                               │
- │ ✗ unknown command: /instal — try /help                                          │
- └────────────────────────────────────────────────────────────────────────────────┘
- axde › /stop packdev▏
+AXSDK Dev Env   build: 7caf9283 ok
+
+  try /help for the vocabulary; /profiles for what is on this machine.
+› /profiles
+  packdev              axde    chrome up :51496 pid 35472  ext 7caf9283  us on
+  axsdk-extension-cdp  foreign chrome down                 ext —         us —
+› /launch packdev --url https://www.amazon.com/
+  launch packdev: launched on :51496 pid 35472 · extension up · user scripts on
+› /instal packdev
+✗ unknown command: /instal — try /help
+
+axde › /stop packdev▏
 ```
+
+**No box, and the prompt does not move.** A border around a conversation is furniture: what tells an
+answer from the question above it is the marker (`›` typed, `✗` refused, two spaces for an answer),
+which costs no columns and cannot be mistaken for structure. The transcript is BOTTOM-anchored in
+whatever the terminal leaves after the header, one blank line, one blank line and the prompt — so
+the newest answer is always the line directly above where you type, and a prompt that wandered as
+output arrived would be a prompt the hands have to look for. The banner is one line, because the
+header already states what the program is.
 
 ### What the target moving from the CURSOR into the COMMAND removes
 
@@ -377,7 +387,7 @@ the text (the harness writes `keys` after `text`) appended `/rm tuidev` to a rec
 and the console refused the concatenation as an unknown command — which is the right answer to a
 line nobody meant to type.
 
-Offline: `npm run test:axde` — **98 tests**. What this stage owns is the parser and its refusals,
+Offline: `npm run test:axde` — **100 tests**. What this stage owns is the parser and its refusals,
 the transcript, history, completion, the busy refusal that KEEPS the line, the renderer at three
 widths (no pane, no legend, a prompt that shows its tail), and the `COMMANDS`↔`HANDLERS` key-set
 conformance. Mutation-checked: swallowing a busy submit, guessing an ambiguous completion, and

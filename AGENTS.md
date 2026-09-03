@@ -3257,7 +3257,7 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
   two Chromes on one profile directory are not two browsers.
 - **`axde`'s TUI is a slash-command CONSOLE (2026-09-04), and the target moved from a cursor into
-  the command.** The screen is a transcript plus one input line: no profile pane, no single-key
+  the command.** The screen is a transcript plus one input line, with NO box around it (a border around a conversation is furniture — the marker `›`/`✗` is what separates a question from its answer, and the transcript is bottom-anchored so the newest answer is the line directly above the prompt): no profile pane, no single-key
   shortcuts, and the inventory is an ANSWER to `/profiles` rather than a cached table. Three
   mechanisms existed only to make cursor-selection safe and were DELETED rather than ported: the
   confirm-by-retyping prompt (`/rm packdev` IS the name typed — the foreign-profile refusal, which
@@ -3276,7 +3276,7 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   packdev`, a shell reads `axde ext install packdev`) and ONE implementation; `--dist`/`--env` stay
   program flags so a command cannot quietly install a different build than the header states.
   Verified by driving the real program in a PTY (`/help`, `/profiles`, `/new`, `/rm` with no retype,
-  an unknown-command refusal, both completion branches, history, `/quit` exit 0) plus **98** offline
+  an unknown-command refusal, both completion branches, history, `/quit` exit 0) plus **100** offline
   tests, three of them mutation-checked. One process finding worth keeping: `hub send` writes `keys`
   AFTER `text`, so an ESC sent "before" a line actually arrives after it — the console refused the
   resulting concatenation, which is the right answer to a line nobody meant to type.

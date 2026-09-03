@@ -64,8 +64,9 @@ const HELP_HINT = 'try /help';
 
 export function initialState({ dist, buildFingerprint }) {
   return {
+    // One line, because the header already states what this program is. A banner that repeats the
+    // title is the same furniture as a box around a conversation.
     transcript: [
-      { kind: 'out', text: 'AXSDK Dev Env — type a slash command.' },
       { kind: 'out', text: `${HELP_HINT} for the vocabulary; /profiles for what is on this machine.` },
     ],
     input: '',

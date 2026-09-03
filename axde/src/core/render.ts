@@ -2,12 +2,16 @@
  * `render(state, size) → lines`, pure and PLAIN TEXT.
  *
  * No SGR codes here on purpose: colour bytes make width arithmetic lie, and the one thing this
- * function must never do is emit a line wider than the terminal — a wrapped line shifts the frame,
- * and the frame is how a reader tells an answer from the question above it.
+ * function must never do is emit a line wider than the terminal — a wrapped line shifts every row
+ * below it. What tells an answer from the question above it is the MARKER (`›` for what you typed,
+ * `✗` for a refusal), not a box: a border around a conversation is furniture.
  *
- * The screen is a transcript plus one input line. `profileLine` and `statusLines` are exported
- * because an ANSWER is text now: the driver prints them into the transcript instead of a pane
- * holding an inventory that could go stale.
+ * The screen is a transcript plus one input line, and the input line is the last row whatever the
+ * transcript holds — a prompt that moves as output arrives is a prompt the hands have to look for.
+ *
+ * `profileLine` and `statusLines` are exported because an ANSWER is text now: the driver prints them
+ * into the transcript, and `profile ls`/`ext status` print the same lines, so one row cannot read
+ * two ways.
  *
  * Unknown facts render as `—`. A default in this table would be a claim about a profile nobody read.
  */
@@ -22,13 +26,6 @@ const cut = (text, width) => {
 };
 
 const pad = (text, width) => cut(text, width).padEnd(width, ' ');
-
-function frame(title, bodyLines, cols) {
-  const inner = Math.max(cols - 4, 8);
-  const head = cut(`┌ ${title} ${'─'.repeat(Math.max(cols - title.length - 4, 0))}┐`, cols);
-  const foot = cut(`└${'─'.repeat(Math.max(cols - 2, 0))}┘`, cols);
-  return [head, ...bodyLines.map((line) => cut(`│ ${pad(line, inner)} │`, cols)), foot];
-}
 
 /** One profile as one line. Attachment comes from the manifest; the rest needs a browser. */
 export function profileLine(profile) {
@@ -69,11 +66,13 @@ export function render(state, { rows, cols }) {
     : `build: ${cut(state.build.fingerprint, 8)} ok`;
   const header = cut(`AXSDK Dev Env${state.busy ? '  (working…)' : ''}   ${build}`, cols);
 
-  // header + frame borders + the input line are four rows; the rest is transcript.
-  const body = Math.max(rows - 4, 1);
-  const shown = state.transcript.slice(-body)
-    .map((entry) => `${MARKERS[entry.kind] ?? '  '}${entry.text}`);
+  // header, one blank under it, one blank over the prompt, the prompt: four rows that are not
+  // transcript. The transcript is BOTTOM-anchored in what is left, so the newest answer is always
+  // the line directly above where you type.
+  const height = Math.max(rows - 4, 1);
+  const shown = state.transcript.slice(-height)
+    .map((entry) => cut(`${MARKERS[entry.kind] ?? '  '}${entry.text}`, cols));
+  const body = [...Array(Math.max(height - shown.length, 0)).fill(''), ...shown];
 
-  return [header, ...frame('session', shown.length === 0 ? [''] : shown, cols), inputLine(state, cols)]
-    .slice(0, rows);
+  return [header, '', ...body, '', inputLine(state, cols)].slice(0, rows);
 }

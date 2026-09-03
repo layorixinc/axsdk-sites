@@ -2,14 +2,19 @@
  * `render(state, size) → lines`, pure and PLAIN TEXT.
  *
  * No SGR codes here on purpose: colour bytes make width arithmetic lie, and the one thing this
- * function must never do is emit a line wider than the terminal (a wrapped line shifts the frame and
- * the frame is how a reader tells rows apart). The driver applies inverse video to the cursor row,
- * which needs no width maths.
+ * function must never do is emit a line wider than the terminal — a wrapped line shifts the frame,
+ * and the frame is how a reader tells an answer from the question above it.
+ *
+ * The screen is a transcript plus one input line. `profileLine` and `statusLines` are exported
+ * because an ANSWER is text now: the driver prints them into the transcript instead of a pane
+ * holding an inventory that could go stale.
  *
  * Unknown facts render as `—`. A default in this table would be a claim about a profile nobody read.
  */
 
 const UNKNOWN = '—';
+const PROMPT = 'axde › ';
+const CURSOR = '▏';
 
 const cut = (text, width) => {
   const value = String(text ?? '');
@@ -25,48 +30,50 @@ function frame(title, bodyLines, cols) {
   return [head, ...bodyLines.map((line) => cut(`│ ${pad(line, inner)} │`, cols)), foot];
 }
 
-function profileRow(profile, isSelected, cols) {
-  const marker = isSelected ? '>' : ' ';
-  const chrome = profile.chrome === 'up' ? `chrome up :${profile.port ?? UNKNOWN}` : 'chrome down';
-  // Attachment is readable from the manifest; the fingerprint and the toggles need a browser, so an
-  // attached-but-unread profile says `attached` rather than looking empty (unknown stays unknown).
+/** One profile as one line. Attachment comes from the manifest; the rest needs a browser. */
+export function profileLine(profile) {
+  const pid = profile.pid === undefined ? '' : ` pid ${profile.pid}`;
+  const chrome = profile.chrome === 'up'
+    ? `chrome up :${profile.port ?? UNKNOWN}${pid}`
+    : `chrome down${pid}`;
   const extension = profile.ext === null || profile.ext === undefined
     ? `ext ${profile.dist === undefined ? UNKNOWN : 'attached'}`
     : `ext ${cut(profile.ext.fingerprint ?? UNKNOWN, 8)}`;
   const scripts = profile.userScripts === null || profile.userScripts === undefined
     ? `us ${UNKNOWN}`
     : `us ${profile.userScripts ? 'on' : 'off'}`;
-  const flags = profile.stale ? ' STALE' : '';
   const kind = profile.kind === 'axde' ? 'axde' : 'foreign';
-  return cut(`${marker} ${pad(profile.name, 22)} ${pad(kind, 7)} ${pad(chrome, 20)} ${pad(extension, 13)} ${scripts}${flags}`, cols);
+  return `${pad(profile.name, 20)} ${pad(kind, 7)} ${pad(chrome, 27)} ${pad(extension, 13)} ${scripts}`
+    + `${profile.stale ? ' STALE' : ''}`;
 }
 
-// Key-inside-word on purpose: eight actions with `[k] word` spacing measure 92 columns and get cut
-// at 80, and a key nobody can see is a key nobody uses.
-const HINTS = '[n]ew [d]elete [i]nstall [u]ninstall [l]aunch [s]top [r]efresh [q]uit';
+/** A read, one field per line, with an absent field shown as absent rather than as a default. */
+export function statusLines(status) {
+  return Object.entries(status).map(([key, value]) => `${pad(key, 14)} ${value ?? UNKNOWN}`);
+}
+
+const MARKERS = { you: '› ', out: '  ', err: '✗ ' };
+
+function inputLine(state, cols) {
+  const hint = state.input === '' ? '  (/help for the vocabulary)' : '';
+  const room = Math.max(cols - PROMPT.length - CURSOR.length - hint.length, 4);
+  // A prompt shows its TAIL when the line outgrows the terminal: hiding what is being typed right
+  // now would make a long url impossible to check before pressing enter.
+  const shown = state.input.length <= room ? state.input : `…${state.input.slice(-(room - 1))}`;
+  return cut(`${PROMPT}${shown}${CURSOR}${hint}`, cols);
+}
 
 export function render(state, { rows, cols }) {
   const build = state.build.fingerprint === undefined
     ? 'build: no build at dist — run the extension build first'
     : `build: ${cut(state.build.fingerprint, 8)} ok`;
-  const header = cut(`AXSDK Dev Env — profiles${state.busy ? '  (working…)' : ''}   ${build}`, cols);
+  const header = cut(`AXSDK Dev Env${state.busy ? '  (working…)' : ''}   ${build}`, cols);
 
-  const listBody = state.profiles.length === 0
-    ? ['no profiles yet — [n] creates one']
-    : state.profiles.map((profile, index) => profileRow(profile, index === state.cursor, cols - 4));
+  // header + frame borders + the input line are four rows; the rest is transcript.
+  const body = Math.max(rows - 4, 1);
+  const shown = state.transcript.slice(-body)
+    .map((entry) => `${MARKERS[entry.kind] ?? '  '}${entry.text}`);
 
-  const footer = state.prompt === null
-    ? cut(HINTS, cols)
-    : cut(state.prompt.kind === 'new-profile'
-      ? `new profile name: ${state.prompt.value}▏  (enter to create, esc to cancel)`
-      : `delete "${state.prompt.target}" — type the name to confirm: ${state.prompt.value}▏  (esc to cancel)`, cols);
-
-  // The list gets what is left after the header, the footer and the log frame.
-  const logHeight = Math.max(Math.min(4, rows - listBody.length - 5), 1);
-  const listHeight = Math.max(rows - logHeight - 5, 1);
-  const list = frame('profiles', listBody.slice(0, listHeight), cols);
-  const logLines = state.log.slice(-logHeight).map((entry) => entry.text);
-  const log = frame('log', logLines.length === 0 ? [''] : logLines, cols);
-
-  return [header, ...list, footer, ...log].slice(0, rows);
+  return [header, ...frame('session', shown.length === 0 ? [''] : shown, cols), inputLine(state, cols)]
+    .slice(0, rows);
 }

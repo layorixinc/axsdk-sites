@@ -2,26 +2,30 @@ import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
 import { initialState, reduce } from './src/core/state.ts';
-import { render } from './src/core/render.ts';
+import { profileLine, render, statusLines } from './src/core/render.ts';
 
 const PROFILES = [
-  { name: 'packdev', kind: 'axde', chrome: 'up', port: 39701, ext: { id: 'ihdaghii', fingerprint: '9f3c2a1e' }, userScripts: true, stale: false },
-  { name: 'x6-scratch', kind: 'axde', chrome: 'down', port: 39702, ext: { id: 'ihdaghii', fingerprint: '41ab77c2' }, userScripts: false, stale: true },
+  { name: 'packdev', kind: 'axde', chrome: 'up', port: 39701, pid: 35472, dist: 'D:/dist', ext: { id: 'ihdaghii', fingerprint: '9f3c2a1e' }, userScripts: true, stale: false },
+  { name: 'x6-scratch', kind: 'axde', chrome: 'down', port: 39702, dist: 'D:/dist', ext: { id: 'ihdaghii', fingerprint: '41ab77c2' }, userScripts: false, stale: true },
   { name: 'axsdk-extension-cdp', kind: 'foreign', chrome: 'down', port: 9334, ext: null, userScripts: null, stale: false },
 ];
 
-function screen(overrides = {}) {
+function session() {
   let state = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
-  state = reduce(state, { type: 'profiles', profiles: PROFILES }).state;
-  state = reduce(state, { type: 'log', text: 'install packdev: devMode on -> allow-user-scripts on' }).state;
-  return { ...state, ...overrides };
+  state = reduce(state, { type: 'key', name: 'char', char: '/' }).state;
+  for (const char of 'profiles') state = reduce(state, { type: 'key', name: 'char', char }).state;
+  state = reduce(state, { type: 'key', name: 'enter' }).state;
+  for (const profile of PROFILES) {
+    state = reduce(state, { type: 'output', text: profileLine(profile) }).state;
+  }
+  return state;
 }
 
 const wide = { rows: 24, cols: 100 };
 
 test('every line fits the terminal, and the frame never exceeds the row budget', () => {
   for (const size of [wide, { rows: 12, cols: 44 }, { rows: 8, cols: 30 }]) {
-    const lines = render(screen(), size);
+    const lines = render(session(), size);
     assert.ok(lines.length <= size.rows, `rows ${size.rows}: got ${lines.length}`);
     for (const line of lines) {
       assert.ok(line.length <= size.cols, `cols ${size.cols}: "${line}" is ${line.length}`);
@@ -29,90 +33,82 @@ test('every line fits the terminal, and the frame never exceeds the row budget',
   }
 });
 
-test('the selected row is marked, and exactly one row is', () => {
-  const lines = render(reduce(screen(), { type: 'key', name: 'down' }).state, wide);
-  // Scoped to PROFILE ROWS on purpose: a log line reading "devMode on -> …" contains `>` too, and a
-  // screen-wide search for it called the renderer wrong when the renderer was right.
-  const rows = lines.filter((line) => /^│ [>\s]\s/.test(line));
-  const marked = rows.filter((line) => line.startsWith('│ >'));
-  assert.equal(marked.length, 1, `one marked row among ${rows.length}`);
-  assert.match(marked[0], /x6-scratch/);
+test('there is no profile pane and no key legend — the list is an ANSWER now', () => {
+  const fresh = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
+  const screen = render(fresh, wide).join('\n');
+  assert.ok(!screen.includes('packdev'), 'nothing is listed until it is asked for');
+  assert.ok(!/\[n\]|\[i\]|\[q\]/.test(screen), 'single-key hints are gone');
+  assert.match(screen, /\/help/, 'the banner names the way in');
 });
 
-test('each profile row states the facts that were READ, including a stale build', () => {
-  const lines = render(screen(), wide).join('\n');
+test('what you typed and what it answered are both readable, newest last', () => {
+  const lines = render(session(), wide).join('\n');
+  assert.match(lines, /› \/profiles/, 'the echo of the command');
   assert.match(lines, /packdev/);
-  assert.match(lines, /9f3c2a1e/, 'the installed fingerprint');
-  assert.match(lines, /41ab77c2/);
+  assert.match(lines, /9f3c2a1e/);
   assert.match(lines, /STALE/, 'a build that no longer matches dist says so');
-  assert.match(lines, /foreign/, 'a profile axde did not create is labelled');
-  // An unknown fact is shown as unknown, never as a default (absent stays absent).
-  assert.match(lines, /—|-{1}/);
+  assert.match(lines, /foreign/);
 });
 
-test('an attached-but-unread profile is labelled attached, never empty', () => {
-  const attached = { ...PROFILES[0], ext: null, userScripts: null, dist: 'D:/dist' };
-  const lines = render({ ...screen(), profiles: [attached] }, wide).join('\n');
-  assert.match(lines, /ext attached/);
+test('the input line shows the prompt, the typed value and a cursor', () => {
+  const typed = 'abcdefgh'.split('').reduce(
+    (state, char) => reduce(state, { type: 'key', name: 'char', char }).state,
+    initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' }),
+  );
+  const input = render(typed, wide).at(-1);
+  assert.match(input, /axde › abcdefgh▏/);
 });
 
-test('the header carries the build under test and the key hints are visible', () => {
-  const lines = render(screen(), wide);
-  assert.match(lines[0], /AXSDK Dev Env/);
-  assert.match(lines.join('\n'), /9f3c2a1e/);
-  // The rendered tokens, not the bare words: the hint line states the KEY and the action together.
-  for (const hint of ['[n]ew', '[d]elete', '[i]nstall', '[u]ninstall', '[l]aunch', '[s]top', '[q]uit']) {
-    assert.ok(lines.join('\n').includes(hint), hint);
+test('an empty prompt names /help rather than sitting there blank', () => {
+  const input = render(initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' }), wide).at(-1);
+  assert.match(input, /\/help/);
+});
+
+test('a long line is CUT, never wrapped: a wrapped line shifts the whole frame', () => {
+  const long = reduce(session(), { type: 'output', text: 'x'.repeat(400) }).state;
+  for (const line of render(long, { rows: 10, cols: 40 })) {
+    assert.ok(line.length <= 40, `"${line}" is ${line.length}`);
   }
+  const typed = 'y'.repeat(300).split('').reduce(
+    (state, char) => reduce(state, { type: 'key', name: 'char', char }).state, long,
+  );
+  assert.ok(render(typed, { rows: 10, cols: 40 }).at(-1).length <= 40);
 });
 
-test('the log pane shows the most recent lines last', () => {
-  let state = screen();
-  for (const text of ['first line', 'second line', 'third line']) {
-    state = reduce(state, { type: 'log', text }).state;
-  }
-  const body = render(state, wide).join('\n');
-  assert.ok(body.includes('third line'), 'the newest line is on screen');
-  assert.ok(body.indexOf('second line') < body.indexOf('third line'));
+test('a busy screen says so, so a user does not read a finished answer as the current one', () => {
+  const busy = reduce(session(), { type: 'busy', busy: true }).state;
+  assert.match(render(busy, wide)[0], /working/i);
 });
 
-test('a prompt replaces the hints and shows what is being asked, with the typed value', () => {
-  const asked = reduce(screen(), { type: 'key', name: 'char', char: 'd' }).state;
-  const typed = reduce(asked, { type: 'key', name: 'char', char: 'p' }).state;
-  const body = render(typed, wide).join('\n');
-  assert.match(body, /packdev/);
-  assert.match(body, /delete/i);
-  assert.match(body, /\bp\b|p_|p$|p\s*█|p▏/m, 'the typed value is echoed');
-});
-
-test('a busy screen says so, so a user does not read a stale row as the truth', () => {
-  const body = render(screen({ busy: true }), wide).join('\n');
-  assert.match(body, /working|busy/i);
+test('the header carries the build under test, and a missing one is stated', () => {
+  assert.match(render(session(), wide)[0], /AXSDK Dev Env/);
+  assert.match(render(session(), wide)[0], /9f3c2a1e/);
+  const noBuild = initialState({ dist: 'D:/dist', buildFingerprint: undefined });
+  assert.match(render(noBuild, wide)[0], /no build|missing/i);
 });
 
 test('rendering is pure: the same state renders identically and is not mutated', () => {
-  const state = screen();
+  const state = session();
   const before = JSON.stringify(state);
   assert.deepEqual(render(state, wide), render(state, wide));
   assert.equal(JSON.stringify(state), before);
 });
 
-test('an empty inventory explains itself instead of showing an empty frame', () => {
-  const empty = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
-  assert.match(render(empty, wide).join('\n'), /no profiles|\[n\]/i);
+test('a profile line states what was READ and leaves unknown unknown', () => {
+  assert.match(profileLine(PROFILES[0]), /chrome up :39701 pid 35472/);
+  assert.match(profileLine(PROFILES[0]), /us on/);
+  assert.match(profileLine(PROFILES[1]), /chrome down/);
+  assert.match(profileLine(PROFILES[1]), /STALE/);
+  // Attachment is readable from the manifest; the fingerprint needs a browser.
+  assert.match(profileLine({ ...PROFILES[0], ext: null, userScripts: null }), /ext attached/);
+  assert.match(profileLine(PROFILES[2]), /ext —/);
+  assert.match(profileLine(PROFILES[2]), /us —/);
 });
 
-test('a missing local build is stated in the header rather than assumed present', () => {
-  const noBuild = initialState({ dist: 'D:/dist', buildFingerprint: undefined });
-  assert.match(render(noBuild, wide)[0], /no build|missing/i);
-});
-
-test('every key is READABLE at 80 columns — a cut hint line hides a key nobody then uses', () => {
-  const lines = render(screen(), { rows: 24, cols: 80 });
-  const hints = lines.find((line) => line.includes('[q]uit'));
-  assert.ok(hints !== undefined, 'the hint line is on screen');
-  assert.ok(!hints.includes('…'), `truncated: ${hints}`);
-  for (const char of ['n', 'd', 'i', 'u', 'l', 's', 'r', 'q']) {
-    assert.ok(hints.includes(`[${char}`), `key ${char} in: ${hints}`);
-  }
+test('a status answer is one line per field, with absent fields shown as absent', () => {
+  const lines = statusLines({
+    profile: 'packdev', installed: true, userScripts: true, stale: false, lastError: undefined,
+  });
+  assert.ok(lines.some((line) => /installed\s+true/.test(line)), lines.join('|'));
+  assert.ok(lines.some((line) => /lastError\s+—/.test(line)), lines.join('|'));
 });

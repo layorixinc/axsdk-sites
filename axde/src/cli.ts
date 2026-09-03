@@ -11,6 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { createDriver } from './driver.ts';
 import { initialState } from './core/state.ts';
+import { profileLine, statusLines } from './core/render.ts';
 import { extensionStatus, installExtension, uninstallExtension } from './ops/extension.ts';
 import { launchHeaded, stopHeaded } from './ops/session.ts';
 import { availablePort, createBrowser, fingerprintBuild, probeDebugger } from './ops/chrome.ts';
@@ -22,7 +23,7 @@ const DEFAULT_DIST = resolve(SITES_ROOT, '..', 'axsdk-sdk-js', 'packages', 'axsd
 
 const USAGE = `axde — AXSDK Dev Env
 
-  axde                                  the TUI
+  axde                                  the TUI — a slash-command console (/help inside)
   axde profile ls
   axde profile new <name> [--port <n>]
   axde profile rm  <name> [--force]
@@ -133,20 +134,60 @@ async function runStop(ctx, profile, args, log) {
   return result;
 }
 
+/**
+ * What the console performs, keyed by the command name the reducer emits. `/help` and `/quit` are
+ * deliberately absent: the reducer answers the first and the driver owns the second, and a handler
+ * for either would be a second implementation of something already answered. `console.test.ts` pins
+ * this table against `COMMANDS`, because a name the console offers with nothing behind it is a
+ * promise the screen cannot keep.
+ */
+const HANDLERS = {
+  profiles: async (ctx, _args, say) => {
+    const rows = await inventory(ctx);
+    if (rows.length === 0) { say('no profiles yet — /new <name> creates one'); return; }
+    for (const row of rows) say(profileLine(row));
+  },
+  new: async (ctx, { positional: [name], flags }, say) => {
+    const port = Number(flags.port ?? await availablePort());
+    const created = await createProfile({ root: ctx.root, name, port });
+    say(`created ${created.name} (port ${created.port})`);
+  },
+  rm: async (ctx, { positional: [name], flags }, say) => {
+    const removed = await deleteProfile({ root: ctx.root, name, force: flags.force === true });
+    say(`removed ${removed.name}`);
+  },
+  install: async (ctx, { positional: [name] }, say) => { await runInstall(ctx, name, say); },
+  uninstall: async (ctx, { positional: [name] }, say) => {
+    const browser = createBrowser({ root: ctx.root, log: say });
+    const result = await uninstallExtension(browser, await target(ctx, name));
+    say(`uninstall ${name}: ${result.outcome}`);
+  },
+  status: async (ctx, { positional: [name] }, say) => {
+    const browser = createBrowser({ root: ctx.root, log: () => {} });
+    for (const line of statusLines(await extensionStatus(browser, await target(ctx, name)))) say(line);
+  },
+  launch: async (ctx, { positional: [name], flags }, say) => {
+    await runLaunch(ctx, name, flagsToArgv(flags), say);
+  },
+  stop: async (ctx, { positional: [name], flags }, say) => {
+    await runStop(ctx, name, flagsToArgv(flags), say);
+  },
+};
+
+/** The shared handlers read a shell argv; a console has parsed flags. One shape, converted once. */
+function flagsToArgv(flags) {
+  return Object.entries(flags).flatMap(([flag, value]) => (value === true ? [`--${flag}`] : [`--${flag}`, value]));
+}
+
 async function subcommand(args) {
   const ctx = context(args);
   const [group, action, name] = args;
   const say = (text) => console.log(text);
 
   if (group === 'profile' && (action === 'ls' || action === undefined)) {
-    for (const row of await inventory(ctx)) {
-      // Same rule as the screen: attachment is cheap to know, the fingerprint needs a browser.
-      const ext = row.ext === null || row.ext === undefined
-        ? (row.dist === undefined ? '—' : 'attached')
-        : (row.ext.fingerprint ?? '—').slice(0, 8);
-      const running = row.pid === undefined ? '' : ` pid ${row.pid}`;
-      say(`${row.name}\t${row.kind}\t${row.chrome}${row.port ? `:${row.port}` : ''}${running}\text ${ext}${row.stale ? ' STALE' : ''}`);
-    }
+    // One formatter for both surfaces: these are the exact lines the console prints into its
+    // transcript, so a row cannot read one way on a screen and another way in a script.
+    for (const row of await inventory(ctx)) say(profileLine(row));
     return 0;
   }
   if (group === 'profile' && action === 'new') {
@@ -173,7 +214,7 @@ async function subcommand(args) {
   if (group === 'ext' && action === 'status') {
     const browser = createBrowser({ root: ctx.root, log: () => {} });
     const status = await extensionStatus(browser, await target(ctx, name));
-    for (const [key, value] of Object.entries(status)) say(`${key}\t${value ?? '—'}`);
+    for (const line of statusLines(status)) say(line);
     return 0;
   }
   if (group === 'launch') {
@@ -196,25 +237,12 @@ async function tui() {
   const driver = createDriver({
     initial: initialState({ dist: ctx.dist, buildFingerprint: ctx.fingerprint }),
     perform: async (effect, push) => {
-      const log = (text) => push({ type: 'log', text });
-      if (effect.type === 'create-profile') {
-        const created = await createProfile({ root: ctx.root, name: effect.name, port: await availablePort() });
-        log(`created ${created.name} (port ${created.port})`);
-      } else if (effect.type === 'delete-profile') {
-        await deleteProfile({ root: ctx.root, name: effect.name });
-        log(`removed ${effect.name}`);
-      } else if (effect.type === 'install') {
-        await runInstall(ctx, effect.profile, log);
-      } else if (effect.type === 'uninstall') {
-        const browser = createBrowser({ root: ctx.root, log });
-        const result = await uninstallExtension(browser, await target(ctx, effect.profile));
-        log(`uninstall ${effect.profile}: ${result.outcome}`);
-      } else if (effect.type === 'launch') {
-        await runLaunch(ctx, effect.profile, [], log);
-      } else if (effect.type === 'stop') {
-        await runStop(ctx, effect.profile, [], log);
-      }
-      push({ type: 'profiles', profiles: await inventory(ctx) });
+      const say = (text) => push({ type: 'output', text });
+      const handler = HANDLERS[effect.name];
+      // Unreachable while `console.test.ts` is green — and it says so rather than doing nothing,
+      // because a console that silently ignores an accepted command teaches nothing.
+      if (handler === undefined) { push({ type: 'error', text: `nothing performs /${effect.name}` }); return; }
+      await handler(ctx, effect, say);
     },
   });
   await driver.run();
@@ -237,4 +265,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-export { context, inventory, runInstall, runLaunch, runStop, subcommand };
+export { HANDLERS, context, inventory, runInstall, runLaunch, runStop, subcommand };

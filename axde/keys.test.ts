@@ -42,3 +42,9 @@ test('unknown escape sequences are dropped, never mistaken for text', () => {
 test('control characters other than the handled ones are dropped', () => {
   assert.deepEqual(names('\u0000\u0007'), []);
 });
+
+test('tab is a key, because the console completes command names with it', () => {
+  assert.deepEqual(decodeKeys('\t'), [{ type: 'key', name: 'tab' }]);
+  // A tab arriving inside pasted text is still a tab, never typed as whitespace into a name.
+  assert.deepEqual(decodeKeys('a\tb').map((one) => one.name), ['char', 'tab', 'char']);
+});

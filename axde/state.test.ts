@@ -1,149 +1,184 @@
 import assert from 'node:assert/strict';
 import { test } from 'bun:test';
 
-import { initialState, reduce } from './src/core/state.ts';
+import { COMMANDS, initialState, parseLine, reduce } from './src/core/state.ts';
 
 const key = (name, char) => ({ type: 'key', name, ...(char === undefined ? {} : { char }) });
 const type = (state, text) => text.split('').reduce((acc, char) => reduce(acc, key('char', char)).state, state);
+const submit = (state, line) => reduce(type(state, line), key('enter'));
+const start = () => initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
+const last = (state) => state.transcript.at(-1);
 
-const PROFILES = [
-  { name: 'packdev', kind: 'axde', chrome: 'down', port: 39701, ext: { id: 'aaa', fingerprint: '9f3c2a1e' }, userScripts: true, stale: false },
-  { name: 'x6-scratch', kind: 'axde', chrome: 'down', port: 39702, ext: { id: 'aaa', fingerprint: '41ab77c2' }, userScripts: false, stale: true },
-  { name: 'axsdk-extension-cdp', kind: 'foreign', chrome: 'up', port: 9334, ext: { id: 'aaa', fingerprint: '9f3c2a1e' }, userScripts: true, stale: false },
-];
-
-function loaded() {
-  const start = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
-  return reduce(start, { type: 'profiles', profiles: PROFILES }).state;
-}
-
-test('the first event is a refresh: the screen never invents an inventory', () => {
-  const start = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
-  assert.deepEqual(start.profiles, []);
-  assert.deepEqual(reduce(start, { type: 'start' }).effects, [{ type: 'refresh' }]);
+test('the console starts with a banner that names /help, and asks for nothing', () => {
+  const state = start();
+  assert.equal(state.input, '');
+  assert.ok(state.transcript.length >= 1);
+  assert.match(state.transcript.map((entry) => entry.text).join('\n'), /\/help/);
+  // Nothing is fetched on start: the inventory is a command now, not a pane.
+  assert.deepEqual(reduce(state, { type: 'start' }).effects, []);
 });
 
-test('the cursor moves with arrows and jk, clamped at both ends', () => {
-  let state = loaded();
-  assert.equal(state.cursor, 0);
-  state = reduce(state, key('up')).state;
-  assert.equal(state.cursor, 0, 'clamped at the top');
-  state = reduce(state, key('down')).state;
-  state = reduce(state, key('char', 'j')).state;
-  assert.equal(state.cursor, 2);
-  state = reduce(state, key('down')).state;
-  assert.equal(state.cursor, 2, 'clamped at the bottom');
-  state = reduce(state, key('char', 'k')).state;
-  assert.equal(state.cursor, 1);
+test('typing edits one line; backspace and escape are the way back out', () => {
+  const typed = type(start(), '/launch pack');
+  assert.equal(typed.input, '/launch pack');
+  assert.equal(reduce(typed, key('backspace')).state.input, '/launch pac');
+  assert.equal(reduce(typed, key('escape')).state.input, '', 'a prompt with no way out is a trap');
 });
 
-test('install and uninstall act on the SELECTED profile', () => {
-  const state = reduce(loaded(), key('down')).state;
-  assert.deepEqual(reduce(state, key('char', 'i')).effects, [{ type: 'install', profile: 'x6-scratch' }]);
-  assert.deepEqual(reduce(state, key('char', 'u')).effects, [{ type: 'uninstall', profile: 'x6-scratch' }]);
+test('a line must start with a slash, and a bare word is refused BY NAME', () => {
+  const out = submit(start(), 'profiles');
+  assert.deepEqual(out.effects, []);
+  assert.equal(last(out.state).kind, 'err');
+  assert.match(last(out.state).text, /commands start with \//);
+  assert.match(last(out.state).text, /\/help/);
 });
 
-test('an empty inventory refuses every action BY NAME instead of acting on nothing', () => {
-  const empty = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
-  for (const name of ['i', 'u', 'd', 'l', 's']) {
-    const out = reduce(empty, key('char', name));
+test('a submitted line is echoed, then cleared, and kept in history', () => {
+  const out = submit(start(), '/profiles');
+  assert.deepEqual(out.effects, [{ type: 'command', name: 'profiles', positional: [], flags: {} }]);
+  assert.equal(out.state.input, '', 'the line is consumed');
+  const echoed = out.state.transcript.filter((entry) => entry.kind === 'you').at(-1);
+  assert.equal(echoed.text, '/profiles');
+  assert.deepEqual(out.state.history, ['/profiles']);
+});
+
+test('an empty line does nothing at all — a console must not answer a question nobody asked', () => {
+  const out = reduce(start(), key('enter'));
+  assert.deepEqual(out.effects, []);
+  assert.equal(out.state.transcript.length, start().transcript.length);
+});
+
+test('an unknown command is refused by name and points at the vocabulary', () => {
+  const out = submit(start(), '/instal packdev');
+  assert.deepEqual(out.effects, []);
+  assert.match(last(out.state).text, /unknown command: \/instal/);
+  assert.match(last(out.state).text, /\/help/);
+});
+
+test('a command with a missing argument answers its own usage line', () => {
+  for (const name of ['install', 'uninstall', 'status', 'launch', 'stop', 'new', 'rm']) {
+    const out = submit(start(), `/${name}`);
     assert.deepEqual(out.effects, [], name);
-    assert.match(out.state.log.at(-1).text, /no profile selected/i, name);
+    assert.match(last(out.state).text, new RegExp(`/${name}`), name);
+    assert.match(last(out.state).text, /needs/, name);
   }
 });
 
-test('while an operation runs, every action except quit is ignored', () => {
-  // Two overlapping installs would drive one browser from two places.
-  const busy = reduce(loaded(), { type: 'busy', busy: true }).state;
-  for (const name of ['i', 'u', 'n', 'd', 'r', 'l', 's']) {
-    assert.deepEqual(reduce(busy, key('char', name)).effects, [], name);
+test('a profile name is validated with the launcher rule, before any browser is touched', () => {
+  const out = submit(start(), '/new ab/c');
+  assert.deepEqual(out.effects, []);
+  assert.match(last(out.state).text, /not a usable profile name/i);
+});
+
+test('flags are parsed into values and switches, and reach the effect', () => {
+  const launched = submit(start(), '/launch packdev --url https://example.com/ --force');
+  assert.deepEqual(launched.effects, [{
+    type: 'command',
+    name: 'launch',
+    positional: ['packdev'],
+    flags: { url: 'https://example.com/', force: true },
+  }]);
+  const created = submit(start(), '/new packdev --port 39701');
+  assert.deepEqual(created.effects[0].flags, { port: '39701' });
+});
+
+test('a value flag with nothing after it is refused rather than passed as true', () => {
+  const out = submit(start(), '/launch packdev --url');
+  assert.deepEqual(out.effects, []);
+  assert.match(last(out.state).text, /--url needs a value/);
+});
+
+test('/help is answered by the reducer itself — it needs no capability', () => {
+  const out = submit(start(), '/help');
+  assert.deepEqual(out.effects, []);
+  const printed = out.state.transcript.map((entry) => entry.text).join('\n');
+  for (const name of Object.keys(COMMANDS)) {
+    assert.ok(printed.includes(`/${name}`), name);
   }
-  assert.deepEqual(reduce(busy, key('char', 'q')).effects, [{ type: 'quit' }]);
+});
+
+test('/quit is the one command that ends the loop', () => {
+  assert.deepEqual(submit(start(), '/quit').effects, [{ type: 'quit' }]);
+  assert.deepEqual(reduce(start(), key('ctrl-c')).effects, [{ type: 'quit' }]);
+});
+
+test('while an operation runs, a submit is REFUSED and the line is kept', () => {
+  // Two overlapping installs would drive one browser from two places. The old screen swallowed the
+  // keystroke; a console that eats what you typed is worse than one that says no.
+  const busy = reduce(start(), { type: 'busy', busy: true }).state;
+  const typed = type(busy, '/install packdev');
+  const out = reduce(typed, key('enter'));
+  assert.deepEqual(out.effects, []);
+  assert.equal(out.state.input, '/install packdev', 'nothing typed is lost');
+  assert.match(last(out.state).text, /still running/i);
+  // Quitting is never swallowed.
   assert.deepEqual(reduce(busy, key('ctrl-c')).effects, [{ type: 'quit' }]);
 });
 
-test('a new profile is typed into a prompt; an empty name is refused, escape cancels', () => {
-  const opened = reduce(loaded(), key('char', 'n')).state;
-  assert.equal(opened.prompt.kind, 'new-profile');
-  // Typing must not be read as commands while a prompt is open.
-  const typed = type(opened, 'packdev2');
-  assert.equal(typed.prompt.value, 'packdev2');
-  assert.equal(typed.cursor, 0, 'j and k are text here, not movement');
-  assert.deepEqual(reduce(typed, key('enter')).effects, [{ type: 'create-profile', name: 'packdev2' }]);
-
-  const emptied = reduce(opened, key('enter'));
-  assert.deepEqual(emptied.effects, []);
-  assert.match(emptied.state.log.at(-1).text, /name is required/i);
-  assert.equal(reduce(opened, key('escape')).state.prompt, null);
+test('the arrows walk history, because with no list they would be dead keys', () => {
+  let state = submit(start(), '/profiles').state;
+  state = submit(state, '/launch packdev').state;
+  state = reduce(state, key('up')).state;
+  assert.equal(state.input, '/launch packdev', 'the newest first');
+  state = reduce(state, key('up')).state;
+  assert.equal(state.input, '/profiles');
+  state = reduce(state, key('up')).state;
+  assert.equal(state.input, '/profiles', 'clamped at the oldest');
+  state = reduce(state, key('down')).state;
+  assert.equal(state.input, '/launch packdev');
+  state = reduce(state, key('down')).state;
+  assert.equal(state.input, '', 'past the newest is a fresh line, not a repeat');
 });
 
-test('backspace edits the prompt and a rejected name never becomes an effect', () => {
-  const typed = type(reduce(loaded(), key('char', 'n')).state, 'ab/c');
-  const fixed = reduce(typed, key('backspace')).state;
-  assert.equal(fixed.prompt.value, 'ab/');
-  // A separator would put the profile somewhere the caller did not ask for (profileDir's rule).
-  const out = reduce(fixed, key('enter'));
-  assert.deepEqual(out.effects, []);
-  assert.match(out.state.log.at(-1).text, /not a usable profile name/i);
+test('tab completes a unique command and lists an ambiguous one without guessing', () => {
+  const unique = reduce(type(start(), '/lau'), key('tab')).state;
+  assert.equal(unique.input, '/launch ', 'completed, with the space that follows it');
+
+  const ambiguous = reduce(type(start(), '/s'), key('tab'));
+  assert.equal(ambiguous.state.input, '/s', 'an ambiguous prefix is never guessed');
+  assert.match(last(ambiguous.state).text, /\/status/);
+  assert.match(last(ambiguous.state).text, /\/stop/);
+
+  const nothing = reduce(type(start(), '/zz'), key('tab'));
+  assert.match(last(nothing.state).text, /no command starts with \/zz/);
 });
 
-test('deleting a FOREIGN profile is refused by name, with no prompt and no effect', () => {
-  const onForeign = reduce(reduce(loaded(), key('down')).state, key('down')).state;
-  const out = reduce(onForeign, key('char', 'd'));
-  assert.deepEqual(out.effects, []);
-  assert.equal(out.state.prompt, null);
-  assert.match(out.state.log.at(-1).text, /axde did not create/i);
+test('tab leaves a line alone once it carries an argument', () => {
+  const state = reduce(type(start(), '/launch pack'), key('tab')).state;
+  assert.equal(state.input, '/launch pack', 'completion is for command NAMES');
 });
 
-test('deleting an axde profile requires the exact name typed back', () => {
-  const asked = reduce(loaded(), key('char', 'd')).state;
-  assert.deepEqual(asked.prompt, { kind: 'delete-profile', value: '', target: 'packdev' });
-
-  const wrong = reduce(type(asked, 'packde'), key('enter'));
-  assert.deepEqual(wrong.effects, []);
-  assert.match(wrong.state.log.at(-1).text, /does not match/i);
-
-  const right = reduce(type(asked, 'packdev'), key('enter'));
-  assert.deepEqual(right.effects, [{ type: 'delete-profile', name: 'packdev' }]);
+test('output and errors append readable lines, and an error always clears busy', () => {
+  const busy = reduce(start(), { type: 'busy', busy: true }).state;
+  const out = reduce(busy, { type: 'output', text: 'install packdev: installed' }).state;
+  assert.equal(last(out).kind, 'out');
+  const failed = reduce(busy, { type: 'error', text: 'loadUnpacked refused: File path cannot be resolved' });
+  assert.equal(last(failed.state).kind, 'err');
+  assert.match(last(failed.state).text, /File path cannot be resolved/);
+  assert.equal(failed.state.busy, false, 'a screen stuck on "working" hides the reason it stopped');
 });
 
-test('results replace the inventory, keep the cursor in range, and log', () => {
-  const state = reduce(reduce(loaded(), key('down')).state, key('down')).state;
-  const shrunk = reduce(state, { type: 'profiles', profiles: [PROFILES[0]] }).state;
-  assert.equal(shrunk.cursor, 0, 'a cursor past the end is pulled back');
-  const logged = reduce(shrunk, { type: 'log', text: 'install packdev: up to date' }).state;
-  assert.equal(logged.log.at(-1).text, 'install packdev: up to date');
-});
-
-test('an error is kept as a line the user can read, never swallowed', () => {
-  const out = reduce(loaded(), { type: 'error', text: 'loadUnpacked refused: File path cannot be resolved' });
-  assert.match(out.state.log.at(-1).text, /File path cannot be resolved/);
-  assert.equal(out.state.busy, false, 'an error always clears busy');
-});
-
-test('the log is bounded so a long session cannot grow state without limit', () => {
-  let state = loaded();
+test('the transcript is bounded so a long session cannot grow state without limit', () => {
+  let state = start();
   for (let index = 0; index < 500; index += 1) {
-    state = reduce(state, { type: 'log', text: `line ${index}` }).state;
+    state = reduce(state, { type: 'output', text: `line ${index}` }).state;
   }
-  assert.ok(state.log.length <= 200, `bounded, got ${state.log.length}`);
-  assert.equal(state.log.at(-1).text, 'line 499');
+  assert.ok(state.transcript.length <= 200, `bounded, got ${state.transcript.length}`);
+  assert.equal(last(state).text, 'line 499');
 });
 
-test('launch and stop act on the SELECTED profile', () => {
-  const state = reduce(loaded(), key('down')).state;
-  assert.deepEqual(reduce(state, key('char', 'l')).effects, [{ type: 'launch', profile: 'x6-scratch' }]);
-  assert.deepEqual(reduce(state, key('char', 's')).effects, [{ type: 'stop', profile: 'x6-scratch' }]);
+test('parseLine is pure and reports its own refusals rather than throwing', () => {
+  assert.deepEqual(parseLine('/launch packdev --force'),
+    { name: 'launch', positional: ['packdev'], flags: { force: true } });
+  assert.match(parseLine('packdev').error, /commands start with \//);
+  assert.match(parseLine('/nope').error, /unknown command/);
+  // Extra whitespace is a typing accident, not an argument.
+  assert.deepEqual(parseLine('  /profiles   '), { name: 'profiles', positional: [], flags: {} });
 });
 
-test('launching or stopping a FOREIGN profile is refused by name: the screen has no --force', () => {
-  // Two Chromes on one profile directory are not two browsers — the second hands off and exits.
-  let state = loaded();
-  state = reduce(reduce(state, key('down')).state, key('down')).state;
-  assert.equal(state.profiles[state.cursor].kind, 'foreign');
-  for (const char of ['l', 's']) {
-    const out = reduce(state, key('char', char));
-    assert.deepEqual(out.effects, [], char);
-    assert.match(out.state.log.at(-1).text, /axde did not create/, char);
+test('every command in the table states a usage line, so a refusal can always quote one', () => {
+  for (const [name, spec] of Object.entries(COMMANDS)) {
+    assert.ok(spec.usage.startsWith(`/${name}`), name);
+    assert.ok(spec.help.length > 0, name);
   }
 });

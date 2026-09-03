@@ -88,7 +88,7 @@ mechanism:
 This also RETIRES an X6 note: "`--load-extension` produced no service worker" was measured while the
 external pack config was broken (`missing schemaVersion`). With that fixed, the flag path is clean.
 
-### Screen
+### Screen — **superseded by §5** (kept as the record of what stage 1 shipped)
 
 ```text
  AXSDK Dev Env — profiles                                  build: 9f3c2a1e ok
@@ -279,11 +279,119 @@ destructive read above, and a `stop` that reported success while leaving the rec
 no session on that path, so the profile name was `undefined` and a `.catch(() => {})` I had written
 swallowed the refusal. The name travels WITH the call now, and there is no catch.
 
-## 5. Later stages (scope sketch, not commitments)
+## 5. Stage 2b — the TUI is a slash-command console — **DONE 2026-09-04**
+
+Stages 1 and 2a drove the screen with single keys over a permanent profile table: `j`/`k` moved a
+cursor, `i`/`u`/`l`/`s` acted on whatever row it sat on, and the table was refreshed after every
+operation. That is replaced — the screen is now a TRANSCRIPT plus one input line, and every
+operation is a slash command typed into it. The profile list is no longer a pane; `/profiles` asks
+for it and the answer is printed like any other answer.
+
+```text
+ AXSDK Dev Env   build: 7caf9283 ok
+ ┌ session ───────────────────────────────────────────────────────────────────────┐
+ │ › /profiles                                                                    │
+ │   packdev              axde     chrome up :51496 pid 35472  ext 7caf9283  us on │
+ │ › /launch packdev --url https://www.amazon.com/                                 │
+ │   launch packdev: launched on :51496 pid 35472 · extension up · user scripts on │
+ │ › /instal packdev                                                               │
+ │ ✗ unknown command: /instal — try /help                                          │
+ └────────────────────────────────────────────────────────────────────────────────┘
+ axde › /stop packdev▏
+```
+
+### What the target moving from the CURSOR into the COMMAND removes
+
+The old model kept the target in the selection, and three separate mechanisms existed only to make
+that safe. All three are deleted, not ported:
+
+- **The confirm-by-retyping prompt.** `d` asked for the profile name to be typed back because the
+  cursor could be on the wrong row. `/rm packdev` IS the name typed. The protection that mattered
+  stays: a profile `axde` did not create still refuses without `--force`.
+- **The screen-has-no-`--force` guard.** `l`/`s` had to refuse a foreign profile outright because a
+  keystroke cannot carry a flag. A typed command can: `/launch other --force` reaches the same
+  decision layer as the shell, so the screen and the command have one rule instead of two.
+- **The cached inventory.** State held a profiles array plus a cursor, and every operation ended by
+  replacing it. Nothing caches it now, so nothing can go stale and no operation owes a refresh.
+
+### What it decides
+
+- **A line must start with `/`.** Bare text is refused BY NAME and points at `/help`, because a
+  console that silently ignores what you typed teaches nothing. `/help` is answered by the pure
+  reducer — it needs no capability — from the SAME command table the parser and the completer read,
+  so the vocabulary cannot drift between what is accepted, what is listed, and what completes.
+- **A command with a missing argument is refused with its own usage line**, never treated as a
+  no-op: `/install` alone answers ``/install needs a profile: /install <profile>``.
+- **Submitting while an operation runs is refused and KEEPS the line.** Two overlapping installs
+  drive one browser from two places (the stage-1 rule), but the old screen swallowed the keystroke;
+  a console must not eat what you typed.
+- **The arrows are history**, because with no list to move through they would otherwise be dead
+  keys, and `Tab` completes a command name — a unique prefix completes, an ambiguous one prints the
+  candidates, and neither guesses.
+- **`Esc` clears the line.** A prompt with no way out is a trap.
+- **The transcript is bounded** (200 entries) like the log it replaces, and it is plain text: the
+  renderer still emits no SGR codes, so width arithmetic cannot lie.
+
+### The two surfaces keep different spellings and ONE implementation
+
+A prompt reads `/install packdev`; a shell reads `axde ext install packdev`. Both resolve to the same
+handler — `runInstall`, `runLaunch`, `runStop`, `inventory`, `createProfile`, `deleteProfile`,
+`extensionStatus` — and neither surface carries aliases within itself. The one thing that could drift
+is the SET of names, so a test asserts the reducer's command table and the driver's handler table
+have identical keys: a command the console offers and nothing performs is a promise the screen cannot
+keep.
+
+Program-level flags stay program-level: `--dist` and `--env` are read from argv when `axde` starts,
+not per command, so `/install` cannot silently install a different build than the header states.
+
+### Vocabulary
+
+```text
+/help                                  /profiles
+/new <name> [--port <n>]               /rm <name> [--force]
+/install <profile>                     /uninstall <profile>
+/status <profile>                      /launch <profile> [--url <u>] [--force]
+/stop <profile> [--force]              /quit
+```
+
+### Measured acceptance — the program, driven in a real terminal
+
+A screen cannot be asserted by a unit test, so the console was driven in a PTY (2026-09-04) and
+every line below is what it printed:
+
+```text
+/help              → the vocabulary, one line per command
+/profiles          → "no profiles yet — /new <name> creates one"  (empty root)
+/new tuidev2       → "created tuidev2 (port 65439)"
+/rm tuidev2        → "removed tuidev2"   (no retype prompt: the name is in the command)
+/profiles          → empty again
+/instal tuidev     → "✗ unknown command: /instal — try /help"
+/lau  + TAB        → the line becomes "/launch "
+/s    + TAB        → "/status  /stop" printed, the line left at "/s"
+UP, UP             → the two previous lines recalled, newest first
+/quit              → exit 0, terminal restored
+```
+
+One thing that run corrected in the surrounding tooling rather than in `axde`: sending ESC after
+the text (the harness writes `keys` after `text`) appended `/rm tuidev` to a recalled `/profiles`,
+and the console refused the concatenation as an unknown command — which is the right answer to a
+line nobody meant to type.
+
+Offline: `npm run test:axde` — **98 tests**. What this stage owns is the parser and its refusals,
+the transcript, history, completion, the busy refusal that KEEPS the line, the renderer at three
+widths (no pane, no legend, a prompt that shows its tail), and the `COMMANDS`↔`HANDLERS` key-set
+conformance. Mutation-checked: swallowing a busy submit, guessing an ambiguous completion, and
+renaming one handler each turn a suite red.
+
+`npm run test:axde:live` keeps its 21 checks; two of its assertions on the SHELL output were
+retyped because `profile ls` and `ext status` now print through the same formatter the console
+uses (`profileLine`, `statusLines`). That unification is the point — one answer, two surfaces —
+and it was an accidental live run that caught the first attempt at it silently not applying.
+## 6. Later stages (scope sketch, not commitments)
 
 | stage | adds | why it is next |
 |---|---|---|
-| 2b | live status pane (SW alive, `scriptIds`, session id, tab groups) and a log tail with filters, over the browser stage 2a leaves up | every debugging session starts by asking "is the thing I edited the thing that is running" |
+| 2c | live status pane (SW alive, `scriptIds`, session id, tab groups) and a log tail with filters, over the browser stage 2a leaves up | every debugging session starts by asking "is the thing I edited the thing that is running" |
 | 3 | pack lifecycle pane: registry list, refresh, stage-install with the approval DIFF shown, approve, enable/disable/replace/rollback/remove/reset | X6 drove these by hand-typed payloads; the approval diff is the one screen a reviewer needs |
 | 4 | turn console: send an utterance, watch nodes/tool calls/branches stream, expand a tool's args and output | replaces `send` + parsing `:axsdk:chat`, and works around the 4,120-char trace truncation |
 | 5 | pack authoring loop: wrap/verify a `.lua` artifact, run it through the packaged prelude, call `pack.catalog`/`pack.invoke`, watch the executor document | the last hand-driven surface after stage 4 |
@@ -293,7 +401,7 @@ Stages 3–5 are where non-negotiable 1 pays for itself: each imports SDK TypeSc
 Each stage gets its own section here, with the same "what it encodes because it was measured" and
 "acceptance" pair, written before its code.
 
-## 6. Rules this design deliberately does not bend
+## 7. Rules this design deliberately does not bend
 
 - No new dependency without a measurement showing the hand-written version is worse.
 - No screen shows a value the user cannot act on; a refusal quotes its raw reason.

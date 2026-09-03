@@ -15,8 +15,6 @@ const ALT_SCREEN_OFF = '\u001b[?1049l';
 const HIDE_CURSOR = '\u001b[?25l';
 const SHOW_CURSOR = '\u001b[?25h';
 const CLEAR = '\u001b[H\u001b[2J';
-const INVERSE = '\u001b[7m';
-const RESET = '\u001b[0m';
 
 export function createDriver({ input = process.stdin, output = process.stdout, initial, perform }) {
   let state = initial;
@@ -29,12 +27,12 @@ export function createDriver({ input = process.stdin, output = process.stdout, i
   });
 
   const paint = () => {
+    // Plain text, straight through: the console has no cursor row, so nothing here adds colour and
+    // the renderer's width arithmetic is the only arithmetic.
     const lines = render(state, size());
-    // A cursor row is the one place colour is added, AFTER width maths — the renderer stays plain.
-    const decorated = lines.map((line) => (line.startsWith('│ >') ? `${INVERSE}${line}${RESET}` : line));
-    if (decorated.length === painted.length && decorated.every((line, index) => line === painted[index])) return;
-    painted = decorated;
-    output.write(`${CLEAR}${decorated.join('\r\n')}`);
+    if (lines.length === painted.length && lines.every((line, index) => line === painted[index])) return;
+    painted = lines;
+    output.write(`${CLEAR}${lines.join('\r\n')}`);
   };
 
   const restore = () => {
@@ -86,10 +84,10 @@ export function createDriver({ input = process.stdin, output = process.stdout, i
         try {
           await perform(effect, push);
         } catch (error) {
-          push({ type: 'error', text: `${effect.type}: ${error?.message ?? error}` });
+          push({ type: 'error', text: `/${effect.name ?? effect.type}: ${error?.message ?? error}` });
         }
-        // A safety net: `perform` normally pushes a fresh inventory (which clears busy), but a
-        // handler that pushed nothing must not leave the screen stuck on "working".
+        // A safety net: a handler normally pushes output (which clears busy), but one that answered
+        // nothing must not leave the screen stuck on "working".
         push({ type: 'busy', busy: false });
       }
     }

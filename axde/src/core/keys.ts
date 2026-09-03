@@ -46,6 +46,9 @@ export function decodeKeys(chunk) {
 
     if (current === '\r' || current === '\n') events.push(event('enter'));
     else if (current === '\u007f' || current === '\b') events.push(event('backspace'));
+    // Tab is the console's completion key, so it is a NAMED event rather than whitespace typed into
+    // a profile name.
+    else if (current === '\t') events.push(event('tab'));
     else if (current === '\u0003') events.push(event('ctrl-c'));
     else if (current >= ' ') events.push(event('char', current));
     // Every other control character is dropped.

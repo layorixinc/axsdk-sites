@@ -94,12 +94,12 @@ async function main() {
 
     const listed = await expectOk('profile', 'ls');
     ok('the inventory reports it up, with the recorded pid',
-      new RegExp(`up:${port} pid \\d+`).test(listed), listed);
+      new RegExp(`chrome up :${port} pid \\d+`).test(listed), listed);
     // The regression. A read that destroys what it reports on is not a read.
     ok('a read did NOT take the browser down', await answers(port), `port ${port} after profile ls`);
 
     const status = await expectOk('ext', 'status', 'packdev');
-    ok('status reads user scripts on the running browser', /userScripts\ttrue/.test(status), status);
+    ok('status reads user scripts on the running browser', /userScripts\s+true/.test(status), status);
     ok('status did NOT take the browser down either', await answers(port), `port ${port} after status`);
 
     const pidBefore = recordedRun()?.pid;
@@ -121,7 +121,7 @@ async function main() {
     // live there. This launches once more to read them back.
     const after = await expectOk('ext', 'status', 'packdev');
     ok('the graceful stop kept developer mode and the user-scripts row',
-      /userScripts\ttrue/.test(after), after);
+      /userScripts\s+true/.test(after), after);
 
     const foreignRoot = join(profileRoot, 'someone-elses');
     Bun.spawnSync(['cmd', '/c', 'mkdir', foreignRoot.replaceAll('/', '\\')]);

@@ -27,8 +27,27 @@ npm run axde -- profile rm packdev
 Run without a terminal (piped, CI) and the TUI refuses by name and points at the commands instead
 of hanging.
 
-Keys in the TUI: `j`/`k` or arrows move, `n` new profile, `d` delete (type the name to confirm),
-`i` install, `u` uninstall, `l` launch, `s` stop, `r` refresh, `q` quit.
+## The TUI is a slash-command console
+
+The screen is a transcript plus one input line — no profile pane, no single-key shortcuts. You
+type commands and read answers:
+
+```text
+/help                                  /profiles
+/new <name> [--port <n>]               /rm <name> [--force]
+/install <profile>                     /uninstall <profile>
+/status <profile>                      /launch <profile> [--url <u>] [--force]
+/stop <profile> [--force]              /quit
+```
+
+`Tab` completes a command name (an ambiguous prefix prints the candidates and guesses nothing),
+the arrows walk history, `Esc` clears the line, `ctrl-c` quits. A line that does not start with
+`/` is refused by name, and so is a command with a missing argument — the refusal quotes the
+usage. While an operation runs a submit is refused and your line is KEPT.
+
+The profile list is an ANSWER, not a pane: `/profiles` asks for it. Nothing is cached, so nothing
+can go stale, and `--dist`/`--env` stay program flags read when `axde` starts so a command cannot
+quietly use a different build than the header states.
 
 Flags: `--dist <path>` picks the build to attach (default: the sibling SDK's
 `packages/axsdk-extension-cdp/dist`), `--env <path>` picks the workspace `.env` credentials are
@@ -80,7 +99,7 @@ own or waits out a port that never opens.
 ## Tests
 
 ```bash
-npm run test:axde        # bun test axde — core, ops, driver, sample packs (89 tests, offline)
+npm run test:axde        # bun test axde — core, ops, driver, sample packs (98 tests, offline)
 npm run test:axde:live   # a real browser: launch outlives the command, stop keeps the toggles
 ```
 

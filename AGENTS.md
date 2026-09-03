@@ -3254,5 +3254,29 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   ~23 s, throwaway profile root) — and `tools/scenarios/runner-contract.test.mjs` now walks
   `axde/live/*.ts` under the same two rules as `tools/scenarios/*.mjs` (never start on import, fail
   through the exit code; `import.meta.main` accepted as a third guard idiom, both mutation-checked).
-  Offline is **89 tests**. Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
+  Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
   two Chromes on one profile directory are not two browsers.
+- **`axde`'s TUI is a slash-command CONSOLE (2026-09-04), and the target moved from a cursor into
+  the command.** The screen is a transcript plus one input line: no profile pane, no single-key
+  shortcuts, and the inventory is an ANSWER to `/profiles` rather than a cached table. Three
+  mechanisms existed only to make cursor-selection safe and were DELETED rather than ported: the
+  confirm-by-retyping prompt (`/rm packdev` IS the name typed — the foreign-profile refusal, which
+  is the part that mattered, stays), the screen-has-no-`--force` guard (a typed command can carry a
+  flag, so the screen and the shell reach one decision layer instead of two), and the cached
+  profiles array plus cursor that every operation had to refresh (nothing caches it, so nothing can
+  go stale). What the console owes instead: a line must start with `/`; a missing argument is
+  refused with the command's own usage line; a submit WHILE an operation runs is refused and the
+  line is KEPT (the old screen swallowed the keystroke, and a console that eats what you typed is
+  worse than one that says no); arrows walk history and `Tab` completes a command NAME, listing an
+  ambiguous prefix rather than guessing; `Esc` clears the line. `COMMANDS` in `core/state.ts` is the
+  single vocabulary — the parser, `/help` (answered by the reducer, since it needs no capability)
+  and the completer all read it, and `axde/console.test.ts` pins its key set against the driver's
+  `HANDLERS`, because a command the console offers with nothing behind it is a promise the screen
+  cannot keep. The two surfaces keep different spellings on purpose (a prompt reads `/install
+  packdev`, a shell reads `axde ext install packdev`) and ONE implementation; `--dist`/`--env` stay
+  program flags so a command cannot quietly install a different build than the header states.
+  Verified by driving the real program in a PTY (`/help`, `/profiles`, `/new`, `/rm` with no retype,
+  an unknown-command refusal, both completion branches, history, `/quit` exit 0) plus **98** offline
+  tests, three of them mutation-checked. One process finding worth keeping: `hub send` writes `keys`
+  AFTER `text`, so an ESC sent "before" a line actually arrives after it — the console refused the
+  resulting concatenation, which is the right answer to a line nobody meant to type.

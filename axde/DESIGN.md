@@ -55,6 +55,7 @@ axde/
     core/{keys,state,render}.ts    # pure: bytes→events, reduce, render
     ops/{profiles,extension,chrome}.ts  # inventory/lifecycle, decisions, capability adapter
   packs/src/                # the sample packs axde develops against (Lua)
+  workspace/                # axde's OWN workspace: index.md, _common/{flows.yaml,scripts,rpc}, dev/
   *.test.ts                 # offline suites (bun test)
   packs/*.test.ts           # sample-pack suites (bun test)
 ```
@@ -400,164 +401,238 @@ and it was an accidental live run that caught the first attempt at it silently n
 
 ## 6. Stage 2c — the workspace: local flows, Lua and modules in a profile — **DESIGN**
 
-**Scope:** put THIS working copy's flows, Lua, RPC modules, site index and sitemaps into a profile's
-extension stores, and take them back out again. Nothing else: no turn, no pack, no status pane.
+**Scope:** put a working copy's flows, Lua, RPC modules, site index and sitemaps into a profile's
+extension stores, take them back out again, and report exactly what would be or was written.
+Nothing else: no session, no turn, no pack.
 
-It answers the one question every debugging session opens with — *is the thing I edited the thing
-that is running* — which today has no answer inside `axde` at all. A profile it sets up carries the
-PUBLISHED sources; editing `_common/flows.yaml` and re-launching changes nothing, and the only tools
-that deliver a working copy are `npm run cdp` (the SDK harness, which also opens a session and takes
-over the browser) and the legacy `node tools/ax.mjs sync` (the in-page extension, §6.6 of the sites
-guide). Neither is a command a developer can point at one axde profile.
+It answers the question every debugging session opens with — *is the thing I edited the thing that is
+running* — which `axde` cannot answer today. A profile it sets up carries the PUBLISHED sources, so
+editing a flow or a Lua file changes nothing until something delivers it, and the only tools that do
+are `npm run cdp` (the SDK harness, which also opens a session and takes over the browser) and the
+legacy `node tools/ax.mjs sync` (the in-page extension). Neither can be pointed at one axde profile.
 
-### What already exists, and is imported rather than rewritten
+### The workspace is `axde/workspace/`, and that is a decision
 
-Non-negotiable 4 decides most of this stage: the whole mechanism is in
-`axsdk-extension-cdp/scripts/`, measured 2026-09-04.
+`axde` develops against its OWN workspace, laid out exactly like the product's but small:
+
+```text
+axde/workspace/
+  README.md                 what this is, and that it is not the product's data
+  index.md                  `- [dev](https://example.com/)`  → host example.com, site `dev`
+  _common/
+    flows.yaml              scaffold document (see the status note below)
+    scripts/00_dev.lua      AX_dev_echo — proves the common Lua layer arrived
+    rpc/10_dev.lua          one runtime module — proves the module store arrived
+  dev/
+    scripts/00_site.lua     proves a SITE layer arrives, keyed `:dev`
+    sitemap.md              proves the sitemap seeding path
+```
+
+The index grammar is core's, followed exactly: a line's first http(s) link is the HOST, and the site
+directory is the first non-http link's target or that first link's text — so one line declares both
+(`workspace.mjs:52-78`, which restates `axsdk-core/src/sites.ts:108-136`). `example.com` is the host
+on purpose: stable, no bot wall, nothing to break, and it is where `axde/packs/src/dev-probe` already
+reads a page.
+
+Why not the repo root, which is the SDK harness's own convention (`cd` into the sites repo and that
+IS the workspace)? Because delivering the product workspace into a dev profile is a different job
+from developing: it is a 232 KiB canonical flow document, ten site layers and 25 runtime modules,
+and a pack or flow author iterating on one file does not want the whole storefront surface in the
+profile they are debugging. `--workspace <path>` overrides it, so the product workspace is one flag
+away (`--workspace .`), and `dist/playground` — which the sites guide warns must be synced from the
+BUILD output, not the authored one — is reachable the same way.
+
+`--workspace` is a PROGRAM flag like `--dist` and `--env`: read when `axde` starts, so a command
+cannot quietly deliver a different working copy than the header states. The header gains
+`ws: <name>`, the directory's own name — deliberately not the digest, which goes stale the moment a
+file is saved, and a stale fact on screen is a lie. A digest is what `/sources` is for, because it is
+computed when asked.
+
+**Status of the scaffold `flows.yaml`:** the loader accepts it (it parses as an object, which is the
+same rule core applies) and `/up` delivers it. Whether it COMPILES at the backend is unproven and
+stays unproven until the turn console (stage 4) sends the first message — so its own header says so.
+A document nobody has compiled is not evidence, and calling it one would be the "green scaffold"
+failure in a new place.
+
+### What is imported rather than rewritten
+
+Non-negotiable 4 decides most of this stage: the mechanism already exists in
+`axsdk-extension-cdp/scripts/`, and every row below was read there on 2026-09-04.
 
 |function|what it guarantees|
 |---|---|
-|`loadWorkspace(dir, {storeLimits})`|reads the working copy into `{indexMd, entries, domains, flows, lua, sitemaps, modules, digest}`, and REFUSES: not a directory, no `index.md`, an unusable index, a site directory carrying layers that `index.md` does not name (core matches a page to a site through that index, so nothing would ever load them), unusable flows, a slot over `LAYER_MAX_BYTES` (256 KiB) or more than `MAX_LAYERS` (200)|
-|`storeEnvelopes(workspace, {loadedAt})`|the exact `chrome.storage.local` values — zustand persist envelopes, which the SDK rehydrates as an EMPTY store when the shape is wrong and reports nothing|
-|`encodeFlowLayers(flows)`|splits a flow layer into `:` / `:|2` … slots on line boundaries, and throws on the one document no split can rescue (a single line over the cap)|
-|`writeWorkspaceStores(cdp, session, layers)`|writes only what CHANGED, answers `written` or `unchanged`, and sends `axsdk.cdp.restart-host` only when it wrote — the comparison is scoped to what the workspace OWNS, because comparing against the whole live store rewrote on every call and killed the session it was about to reuse|
-|`resetWorkspaceStores(cdp, session)`|removes the workspace keys and answers which ones|
-|`describeWorkspace(workspace)`|the report: root, 12-hex digest, site count, and per layer the flow/Lua/sitemap bytes plus the module count and bytes|
+|`loadWorkspace(dir, {storeLimits})`|reads the working copy into `{indexMd, entries, domains, flows, lua, sitemaps, modules, digest}` and REFUSES: not a directory, no `index.md`, an index naming no site, one host mapped to two sites, `axsdk.ai` mapped at all, a site directory carrying layers that `index.md` does not name, flows that are not an object, a directory under `scripts/` or `rpc/`, a slot over 256 KiB, more than 200 layers, a single module over the slot cap|
+|`bundleLua`|**the merge**: one layer's `scripts/*.lua` concatenated in name order, each file wrapped in an immediately-invoked vararg function so a `local` cannot collide, with a header naming the sources in load order|
+|`rpcModulesOf`|`_common/rpc/<file>.lua` → `{"_common.<file>": source}`, byte-for-byte, nothing wrapped or normalised — the runtime compiles each module as its own chunk|
+|`declaredModuleNames` ∩ `scriptModuleCandidates`|a `scripts/` file is added to the module map only when a flow layer NAMES it in `execute.modules`|
+|`encodeFlowLayers` / `encodeModuleLayers`|per-slot splitting (`:` / `:\|2` …) on line boundaries for flows, per-module for the map, and a refusal for the one payload no split can rescue|
+|`storeEnvelopes`|the exact `chrome.storage.local` values — zustand persist envelopes, which the SDK rehydrates as an EMPTY store when the shape is wrong and reports nothing|
+|`writeWorkspaceStores`|writes only what CHANGED, answers `written` or `unchanged`, and sends `axsdk.cdp.restart-host` only when it wrote — the comparison is scoped to what the workspace OWNS, because comparing against the whole live store rewrote on every call and killed the session it was about to reuse|
+|`resetWorkspaceStores`|removes the workspace keys and answers which ones|
+|`describeWorkspace`|root, 12-hex digest, site count, and per layer the flow/Lua/sitemap bytes plus module count and bytes|
 
-So `axde` writes no encoder, no envelope and no digest of its own. A test pins that: the module store
-shape and the slot arithmetic have already been paid for once.
+So `axde` writes no encoder, no envelope, no digest and no merge of its own. A test pins that: the
+slot arithmetic and the store shapes have been paid for once already.
 
-### The five stores and the four switches, measured
-
-`storeEnvelopes` emits `axsdk:sites` (index + one seeded record per sitemap), `axsdk:flows`,
-`axsdk:lua`, `axsdk:widgets`, and `axsdk:lua-modules` **only when the workspace has RPC modules**.
-Stored layers are read only while the remote sources are off, and `axde ext install` already writes
-that config through `harnessConfig(…, { local: true })`: `remote_sites: false`,
-`storedFlowsEnabled: true`, `storedLuaEnabled: true`, `remoteSiteFlowsEnabled: false`.
-
-That decides who writes them: **`install` stays the single writer of the config, and `/sync` READS
-those four fields by name and refuses when one is wrong**, quoting the field and naming `/install`.
-Two writers of one setting is how a setting stops meaning anything (§5), and storing a workspace
-that will not be read is worse than refusing to store it. Reading by field is also the rule that
-keeps the API key off the screen — the config store is never printed whole.
-
-### Commands
+### The three commands
 
 ```text
-/sync <profile> [--off] [--force]      write this working copy into that profile's stores
-/sources                               what this workspace WOULD store — no browser at all
+/up <profile> [--check] [--force]     this working copy INTO the profile
+/down <profile> [--force]             take it back out; the profile loads published sources
+/sources [--check]                    what would be written — no browser at all
 ```
 
-`--off` is the other direction: remove the workspace and let the profile load the published sources,
-which is what a user gets. The spelling is not invented — `AXSDK_WORKSPACE=off` already means
-exactly that in the SDK's own harness config. `--force` is the foreign-profile escape, as everywhere
-else.
+`/up` and `/down` are the user's naming, and they carry one risk worth stating once: `/launch` and
+`/stop` are the BROWSER, `/up` and `/down` are the SOURCES. The `/help` text says which, in those
+words.
 
-`--workspace <path>` is a PROGRAM flag (default: the current directory, which is the SDK's own rule:
-`cd` into the sites repo and that is the workspace). Like `--dist` and `--env` it is read when `axde`
-starts, so a command cannot quietly deliver a different working copy than the header states, and the
-header gains `ws: <name>` (the directory's own name, or `none`). Deliberately NOT the digest: a
-digest in the header goes stale the moment a file is saved, and a stale fact on screen is a lie.
-`/sources` is where a digest belongs, because it is computed when asked.
+#### `/up <profile>` — step by step
 
-### What `/sync` decides, in order
+1. **Refuse a foreign profile without `--force`.** The shared harness profile's stores are set up by
+   whoever runs `npm run cdp`; overwriting them silently is not ours to do.
+2. **Load the workspace** (`loadWorkspace`). Its refusals are printed RAW — each names a file and a
+   rule, and a paraphrase would lose both.
+3. **Refuse a stale generated file.** `_common/rpc/62_rpc_sites.lua` is generated from the site
+   configs; `/up` regenerates it IN MEMORY (`readSiteConfigs` + `serializeSites` from
+   `tools/build-rpc-sites.mjs`, both pure) and compares bytes. A mismatch refuses and names
+   `npm run build:rpc:sites` — it does not regenerate the file, because a delivery command that
+   edits your working copy is a surprise, and §13 already records what a stale generated file costs
+   (a shipping fix that never reached production and a hand-edit that regeneration erased).
+4. **With `--check`, run the repo's flow gate first** (`npm run check:flows`, measured 4.75 s / 245
+   tests) and refuse on failure. Off by default because 4.75 s on every delivery is a tax on the
+   loop, and because a gate failure is not a delivery failure — the two must not be blurred.
+5. **Open the profile's browser**, adopting one that is up and launching one if not, and require the
+   extension: with nothing installed there is nowhere to write, so refuse and name `/install`.
+6. **Read the four source switches by field** — `remote_sites`, `storedFlowsEnabled`,
+   `storedLuaEnabled`, `remoteSiteFlowsEnabled` — and refuse when one is wrong, quoting it. `install`
+   already writes them through `harnessConfig(…, {local: true})` and stays their single writer; two
+   writers of one setting is how a setting stops meaning anything. Storing a workspace that will not
+   be read is worse than refusing to store it. Reading by field is also what keeps the API key off
+   the screen: the config store is never printed whole.
+7. **Write what changed** (`storeEnvelopes` → `writeWorkspaceStores`) and report `written` or
+   `unchanged` exactly as the SDK answered. An `unchanged` reported as a write is the same lie as a
+   cart add that never happened.
+8. **Read the receipt back** — script ids and the module store's key set — and print it.
+9. **Leave the browser as it was found** (`finish()`, the stage-2a rule): close only what this
+   command started.
 
-1. **A foreign profile is refused without `--force`.** The shared harness profile's stores are set
-   up by whoever uses `npm run cdp`; overwriting them is not ours to do silently.
-2. **The workspace must be one.** `loadWorkspace` refuses first and its RAW reason is what the
-   console prints — those refusals name a file and a rule, and a paraphrase would lose both.
-3. **The extension must be present.** The stores live in its origin, so with nothing installed there
-   is nowhere to write: refuse and name `/install`.
-4. **The four source switches must be in stored mode**, read by field. Otherwise refuse, quoting the
-   field.
-5. **Write only what changed**, and report `written` or `unchanged` as the SDK answered it. An
-   `unchanged` reported as a write is the same lie as a cart add that never happened.
-6. **Leave the browser as it was found** — `finish()`, the stage-2a rule: adopt one that is up,
-   launch one if not, and close only what this command started.
+#### `/down <profile>` — step by step
 
-### What the receipt must say
+1. Same foreign-profile refusal.
+2. Open the browser and require the extension (there is nothing to remove otherwise).
+3. `resetWorkspaceStores`, plus the module store — see the SDK gap below — and report the keys that
+   were actually removed, in the order they are named, not the order storage answered.
+4. State what the profile now loads: the published sources, which is what a user gets.
+5. `finish()`.
 
-The point of the command is evidence, so the answer is a receipt, not an "ok":
+`/down` is not a rollback to a previous workspace: nothing here keeps one. It is "no local
+workspace", which is why `--off` was the first spelling considered and why the receipt says
+`published sources` rather than `restored`.
+
+#### `/sources` — step by step
+
+No browser, no profile, no writes. It loads the workspace and prints `describeWorkspace` plus the
+same staleness check `/up` performs, so it is the cheapest possible answer to "is my file in the
+bundle" and to "why did `/up` refuse". With `--check` it also runs the flow gate. It is the one
+command that can be run with no Chrome on the machine at all.
+
+### When the builds and checks happen — measured, because most of them do not
+
+|thing|when|why|
+|---|---|---|
+|**the Lua merge**|inside `loadWorkspace`, on every `/up` and `/sources`|`bundleLua` IS the merge, and it runs from the working copy at delivery time. `npm run build:lua` writes `dist/`, which is the PUBLISHED/self-contained path and is not read by this one — a `dist/` from yesterday cannot be delivered by accident|
+|**`_common/rpc/*` modules**|read byte-for-byte at delivery|nothing to build: the map is `{name: source}` straight off disk|
+|**`_common/rpc/62_rpc_sites.lua`** (generated)|CHECKED in memory on `/up` and `/sources`; regenerated only by `npm run build:rpc:sites`, which the refusal names|the file is committed and the site configs are its source; delivering it stale ships old store data with no symptom until a storefront reads wrong|
+|**`check:flows`** (245 tests, 4.75 s)|opt-in `--check`, and named as NOT RUN in every receipt without it|it is a gate on the product document, not a step in a delivery, and 4.75 s per iteration is a tax. What it catches that the loader cannot: a dangling `next`, an undeclared module, a `require` that compares to `true`, the canonical document against the 512 KiB session limit|
+|**`test:lua`, `build:bundle`, `check:bundle`**|never here|unit gates and the CWS package path; neither touches a dev profile|
+|**flow COMPILATION**|not in this stage at all|it happens when a session opens, which is stage 4. `/up` proves delivery and says so; a receipt that implied a working turn would be the worse lie|
+
+The receipt therefore ends with one line naming what was not checked, so a green `/up` is never
+mistaken for a green gate.
+
+### The receipt
 
 ```text
-/sync packdev
-  workspace  D:/PROJECTS/keiosai/axsdk-sites  digest 2b95acc54f57  sites 10
-  :          flows 241.1 KiB (2 slots)   lua 201.2 KiB   modules 25
-  :amazon    lua 1.4 KiB                 sitemap 0.8 KiB
+/up packdev
+  workspace  axde/workspace   digest 2b95acc54f57   sites 1
+  :          flows 0.4 KiB          lua 1.2 KiB      modules 1
+  :dev       lua 0.3 KiB            sitemap 0.2 KiB
+  generated  62_rpc_sites.lua up to date
   stores     written · host restarted
-  loaded     stored-lua:  stored-lua:amazon         (script ids, read back)
-  modules    axsdk:lua-modules: 1 layer, 25 names
+  loaded     stored-lua:  stored-lua:dev            (script ids, read back)
+  modules    axsdk:lua-modules: 1 layer, 1 name
+  not run    check:flows (pass --check), test:lua
 ```
 
-Three of those lines are there because of a measured trap. The slot count, because a flow layer over
-256 KiB is split and a reader who does not know that cannot tell a chunked layer from a truncated
-one. The script ids read back AFTER the write, because that is the only proof the extension took
-them — and §13's warning applies: script ids prove the durable Lua layer and say NOTHING about
-runtime module closure, which is why the module store gets its own line. And `host restarted`,
-because a write that did not restart the host is a write the running session has not read.
+Four of those lines exist because of a measured trap. The **slot count** (shown when a layer splits),
+because a flow layer over 256 KiB is split and a reader who does not know that cannot tell a chunked
+layer from a truncated one. The **script ids read back after the write**, because that is the only
+proof the extension took them — and §13's warning applies: script ids prove the durable Lua layer
+and say NOTHING about runtime module closure, which is why the module store gets its own line.
+**`host restarted`**, because a write that did not restart the host is a write the running session
+has not read. And **`not run`**, because the most expensive failure in this repo's history is a green
+instrument mistaken for a green product.
 
 ### Boundaries this stage must not blur
 
 - **The store is the DEVELOPMENT path; production module delivery is the backend app package.** A
   flow tool whose modules come from the backend will not see these bytes — that still needs
   `npm run build:rpc` plus `node tools/rpc-package.mjs push . --app=<app> --modules-only`. The
-  receipt therefore names the module layers it wrote and claims nothing about any app.
-- **`/sync` delivers what is on disk and does not build.** `_common/rpc/62_rpc_sites.lua` is
-  generated, and a stale committed copy is `check:flows`'s job, not a silent regeneration here.
+  receipt names the module layers it wrote and claims nothing about any app.
 - **`_common` layers take effect on the restarted host; a SITE flow layer may not.** Core sends a
   site's client flows once after that site becomes current, so a re-stored `<domain>/flows.yaml` can
-  need a fresh session. Until the turn console (stage 4) owns a `/reset`, the honest instruction is
-  `/stop` then `/launch`, and the receipt says which layers changed so a developer knows whether
-  they are in that case.
+  need a fresh session. Until stage 4 owns a `/reset`, the honest instruction is `/stop` then
+  `/launch`, and the receipt says which layers changed so a developer knows whether they are in that
+  case.
+- **No session is opened, no message is sent, no page is navigated.** Mixing the two would make a
+  delivery failure look like a flow failure, which is the trap §6.1 of the sites guide exists to
+  name.
 
 ### The gap this stage exposes in the SDK, and its fix
 
 `storeEnvelopes` emits five keys; `resetWorkspaceStores`'s `WORKSPACE_KEYS` lists **four** —
 `axsdk:lua-modules` is absent (measured: `['axsdk:sites', 'axsdk:flows', 'axsdk:lua',
-'axsdk:widgets']`). So a reset today leaves local RPC modules in the profile, and `/sync --off`
-would report "published sources" while the module store still served this working copy's bytes. The
-one thing that clears it is unrelated — `background/workspace-assets.ts` empties legacy source
-caches when the PACKAGE digest changes.
+'axsdk:widgets']`). So a reset leaves local RPC modules in the profile, and `/down` would report
+"published sources" while the module store still served this working copy's bytes. The only thing
+that clears it today is unrelated: `background/workspace-assets.ts` empties legacy source caches when
+the PACKAGE digest changes.
 
-The fix belongs in the SDK, not in a second key list here: add the key to `WORKSPACE_KEYS` so every
-caller (`npm run cdp -- reset`, the playground harness, `/sync --off`) removes what a write created.
-It needs its own SDK test and one live check, and it is the first thing to do in this stage because
-the `--off` path cannot be honest without it.
+The fix belongs in the SDK rather than in a second key list here — add the key to `WORKSPACE_KEYS`,
+so `npm run cdp -- reset`, the playground harness and `/down` all remove what a write created. It
+needs its own SDK test and one live check, and it is the FIRST thing to do in this stage, because
+`/down` cannot be honest without it.
 
 ### Planned tests, before the code
 
-Offline, against a fake browser and a temp workspace on disk:
+Offline, against a fake browser and temp workspaces on disk:
 
-- the receipt formatter: one line per layer with bytes, slot count, module count; `unchanged`
+- the scaffold at `axde/workspace/` loads clean, and its index resolves `example.com` → `dev`;
+- the receipt formatter: one line per layer with bytes, slot count and module count; `unchanged`
   reported as unchanged;
-- each refusal, by name and in order: foreign without `--force`, not a workspace (raw reason
-  quoted), extension absent (names `/install`), a source switch in remote mode (names the field);
+- every refusal, by name and in order: foreign without `--force`, not a workspace (raw reason
+  quoted), a stale generated file (names `build:rpc:sites`), extension absent (names `/install`), a
+  source switch in remote mode (names the field);
 - the decision layer hands `storeEnvelopes`' output straight to the adapter — no re-encoding, no
-  digest of its own;
+  digest, no merge of its own;
 - a one-writer pin like `console.test.ts`: `axde/src` contains no second envelope shape, no
   `encodeFlowLayers` copy and no `axsdk:` key list.
 
 Live (`axde/live/stage2c.ts`, its own npm script, throwaway profile root):
 
-- fresh profile → `install` → `/sync` → read the store KEY SETS and byte counts back and compare
-  them to what `/sources` reported, digest included;
-- the script ids afterwards are `stored-lua:` plus `stored-lua:<domain>` for a site that has Lua;
-- a second `/sync` answers `unchanged` and does NOT restart the host (the measured reason the
+- fresh profile → `install` → `/up` → read the store KEY SETS and byte counts back and compare them
+  to what `/sources` reported, digest included;
+- launch on `https://example.com/` and read the script ids: `stored-lua:` plus `stored-lua:dev`,
+  which is the site layer proving itself on the domain its index declares;
+- a second `/up` answers `unchanged` and does NOT restart the host (the measured reason the
   comparison is scoped);
-- `/sync --off` removes all five keys — the assertion that fails today, and the reason the SDK fix
-  comes first — and a launched browser then reports no stored layers;
+- `/down` removes all five keys — the assertion that fails today, and the reason the SDK fix comes
+  first;
 - a foreign profile is refused with exit code 1.
 
 Mutation checks that must turn something red: dropping the switch check (a workspace stored where
-nothing will read it), reporting `written` for `unchanged`, and removing `axsdk:lua-modules` from the
-reset list again.
+nothing will read it), reporting `written` for `unchanged`, skipping the generated-file comparison,
+and removing `axsdk:lua-modules` from the reset list again.
 
-### Not in this stage
-
-No session is opened, no message is sent, no page is navigated. `/sync` writes stores and restarts
-the host; whether a TURN then behaves is the turn console's question, and mixing the two would make
-a delivery failure look like a flow failure — which is the trap §6.1 of the sites guide exists to
-name.
 
 ## 7. Later stages (scope sketch, not commitments)
 

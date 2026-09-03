@@ -1,0 +1,91 @@
+flowTools:
+  prepare_service_query:
+    description: Prepare one bounded service comparison query.
+    effect: read
+    execute:
+      kind: community.task
+      target: self
+      command: prepare_service_query
+    parameters: {"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":240},"region":{"type":"string","maxLength":40}},"required":["query"]}
+    output:
+      next: done
+      query: result.query
+      region: result.region
+      limit: result.limit
+  read_marketplace:
+    description: Read one enabled service marketplace's published candidates.
+    effect: read
+    execute:
+      kind: community.provider
+      extensionPoint: service_marketplaces
+      command: read_service_candidates
+    parameters: {"type":"object","additionalProperties":false,"properties":{"query":{"type":"string","minLength":1,"maxLength":240},"region":{"type":"string","maxLength":40},"limit":{"type":"integer","minimum":1,"maximum":6}},"required":["query","limit"]}
+    output:
+      next: done
+      marketplaceResult: result
+  rank_service_estimates:
+    description: Rank published amounts with graded provenance; absent stays absent.
+    effect: read
+    execute:
+      kind: community.task
+      target: self
+      command: rank_service_estimates
+    # Byte-exact with the signed command input schema (command_schema_mismatch is the
+    # composition gate); regenerate from tools/packs/service-quotes.ts when the schema moves.
+    parameters: {"type":"object","additionalProperties":false,"properties":{"marketplaceResult":{"type":"object","additionalProperties":false,"properties":{"schema_version":{"type":"integer","enum":[1]},"status":{"type":"string","enum":["candidates","no_results"]},"query":{"type":"string","minLength":1,"maxLength":240},"cards_seen":{"type":"integer","minimum":0,"maximum":1000},"candidates":{"type":"array","maxItems":8,"items":{"type":"object","additionalProperties":false,"properties":{"site":{"type":"string","minLength":1,"maxLength":40},"name":{"type":"string","minLength":1,"maxLength":120},"url":{"type":"string","format":"uri","maxLength":2048},"rating":{"type":"number","minimum":0,"maximum":5},"review_count":{"type":"integer","minimum":0},"hires":{"type":"integer","minimum":0},"experience_years":{"type":"integer","minimum":0},"claim_kind":{"type":"string","pattern":"^(?:pro_stated|listing_price)$"},"claim_text":{"type":"string","minLength":1,"maxLength":240}},"required":["name"]}},"site_claims":{"type":"array","maxItems":2,"items":{"type":"object","additionalProperties":false,"properties":{"site":{"type":"string","minLength":1,"maxLength":40},"kind":{"type":"string","pattern":"^site_average$"},"text":{"type":"string","minLength":1,"maxLength":400}},"required":["kind","text"]}}},"required":["schema_version","status","query","cards_seen"]}},"required":["marketplaceResult"]}
+    output:
+      next: done
+      rows: result.rows
+      site_rows: result.site_rows
+      comparisonText: result.comparisonText
+flows:
+  service_quote_compare:
+    goal: Compare what each service marketplace actually publishes, with graded provenance,
+      and say what is unknown. Read-only by construction.
+    state:
+      requestText: null
+      query: null
+      region: null
+      limit: 6
+      marketplaceResult: null
+      rows: null
+      site_rows: null
+      comparisonText: null
+    nodes:
+      entry:
+        kind: action_unit
+        inputSelector: [requestText]
+        allowedTools: [prepare_service_query]
+        prompt: |
+          Extract the service the user wants compared and an optional region or postal code.
+          Call prepare_service_query once. Never invent a provider, a price, or a region.
+        next:
+          done: search
+        fallback:
+          invalidNext: done
+          exhaustedNext: done
+          maxStalledSteps: 2
+          stalledNext: done
+      search:
+        kind: action_contract
+        id: read_marketplace
+        inputSelector: [query, region, limit]
+        next:
+          done: rank
+        fallback:
+          invalidNext: done
+          exhaustedNext: done
+      rank:
+        kind: action_contract
+        id: rank_service_estimates
+        inputSelector: [marketplaceResult]
+        next:
+          done: report
+        fallback:
+          invalidNext: done
+          exhaustedNext: done
+      report:
+        kind: terminal
+        inputSelector: [comparisonText]
+        respond: Reply with comparisonText exactly in the user's language. State plainly which
+          rows publish no amount; never fill one in.

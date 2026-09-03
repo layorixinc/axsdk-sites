@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson, type CanonicalJsonValue } from '../../../axsdk-sdk-js/packages/axsdk-packs/src/canonical.ts';
 import type { ConfiguredPackRegistry } from '../../../axsdk-sdk-js/packages/axsdk-extension-cdp/src/packs/registry.ts';
 import { buildFirstPartyPackInputs } from './first-party.ts';
+import { buildServiceQuotesPackInputs } from './service-quotes.ts';
 
 export const PACK_REGISTRY_BASE_URL = 'https://layorixinc.github.io/axsdk-sites/packs/registry/';
 export const PACK_REGISTRY_DIRECTORY = 'docs/packs/registry';
@@ -53,16 +54,17 @@ export async function buildPackRegistry(
   { indexSequence, revocationSequence = indexSequence }: { indexSequence: number; revocationSequence?: number },
 ): Promise<PackRegistryBuild> {
   const built = await buildFirstPartyPackInputs(root);
+  const serviceQuotes = await buildServiceQuotesPackInputs(root);
   const files: Record<string, Uint8Array> = {};
-  const releases = [built.shopping, built.storeX].map((pack) => ({
+  const releases = [built.shopping, built.storeX, serviceQuotes.pack].map((pack) => ({
     packId: pack.manifest.pack.id,
     version: pack.manifest.pack.version,
     releaseDigest: pack.releaseDigest,
   }));
-  for (const pack of [built.shopping, built.storeX]) {
+  for (const pack of [built.shopping, built.storeX, serviceQuotes.pack]) {
     files[`releases/${pack.releaseDigest.slice('sha256:'.length)}.json`] = document(pack.release);
   }
-  for (const [ref, bytes] of Object.entries(built.assets)) {
+  for (const [ref, bytes] of Object.entries({ ...built.assets, ...serviceQuotes.assets })) {
     files[`assets/${ref.slice('sha256:'.length)}`] = Uint8Array.from(bytes);
   }
   files['index.json'] = document({

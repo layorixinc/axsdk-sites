@@ -199,4 +199,42 @@ describe('Lua prelude execution', () => {
     delete globals.document;
     expect(commands.where()).toEqual({ href: '' });
   });
+
+  test('dom.query returns a single handle and dom.attr reads a CHILD attribute with a selector', () => {
+    const child = {
+      textContent: 'child',
+      getAttribute: (name: string) => name === 'href' ? 'https://kmong.com/gig/2' : null,
+    };
+    globals.document = {
+      querySelector: (selector: string) => selector === '.only' ? { textContent: 'found', getAttribute: () => null } : null,
+      querySelectorAll: (selector: string) => selector === '.card'
+        ? [{
+          textContent: 'card',
+          getAttribute: (name: string) => name === 'data-id' ? 'card-1' : null,
+          querySelector: (inner: string) => inner === 'a' ? child : null,
+        }]
+        : [],
+    };
+    const commands = runSource([
+      'register({ read = function()',
+      '  local only = dom.query(".only")',
+      '  local missing = dom.query(".absent")',
+      '  local cards = dom.query_all(".card")',
+      '  return {',
+      '    only_text = only ~= nil and dom.text(only) or "none",',
+      '    missing_is_nil = missing == nil,',
+      '    own_attr = dom.attr(cards[1], "data-id"),',
+      '    child_attr = dom.attr(cards[1], "a", "href"),',
+      '    absent_child_attr = dom.attr(cards[1], ".nope", "href") == nil,',
+      '  }',
+      'end })',
+    ].join('\n'));
+    expect(commands.read()).toEqual({
+      only_text: 'found',
+      missing_is_nil: true,
+      own_attr: 'card-1',
+      child_attr: 'https://kmong.com/gig/2',
+      absent_child_attr: true,
+    });
+  });
 });

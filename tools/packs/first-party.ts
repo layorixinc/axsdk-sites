@@ -20,8 +20,8 @@ import {
 import { wrapLuaSource } from './wrap-lua.mjs';
 
 const PUBLISHED_AT = '2026-08-24T00:00:00Z';
-const FLOW_MEDIA_TYPE = 'application/vnd.axsdk.flow-fragment+yaml';
-const SCRIPT_MEDIA_TYPE = 'application/javascript';
+export const FLOW_MEDIA_TYPE = 'application/vnd.axsdk.flow-fragment+yaml';
+export const SCRIPT_MEDIA_TYPE = 'application/javascript';
 
 export const providerSearchInputSchema = {
   type: 'object',
@@ -230,7 +230,7 @@ const rankCommand: CommandContractV1 = {
   dataFlow: { input: rankInputFlow, output: rankOutputFlow },
 };
 
-async function descriptor(source: string, mediaType: string) {
+export async function descriptor(source: string, mediaType: string) {
   const bytes = new TextEncoder().encode(source);
   return { ref: await sha256Digest(bytes), bytes: bytes.byteLength, mediaType } as const;
 }
@@ -247,7 +247,7 @@ export type FirstPartyReleaseSigner = (signed: CanonicalJsonValue) => Promise<{
   readonly value: string;
 }>;
 
-async function releaseFor(
+export async function releaseFor(
   manifest: AgentPackManifestV2 | ProviderPackManifestV2,
   sign?: FirstPartyReleaseSigner,
 ): Promise<{

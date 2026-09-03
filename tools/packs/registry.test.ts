@@ -62,7 +62,7 @@ describe('unsigned pack registry producer', () => {
       expect(result.graph.keyId).toBe('user-source');
     }
     expect(built.summary.releases.map((entry) => entry.packId).sort())
-      .toEqual(['example.store-x', 'layorix.shopping']);
+      .toEqual(['example.store-x', 'layorix.service-quotes', 'layorix.shopping']);
   });
 
   test('a same-length tamper in a published asset answers asset_hash_mismatch', async () => {

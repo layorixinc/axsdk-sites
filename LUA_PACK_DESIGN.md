@@ -189,5 +189,11 @@ Steps 1–4 are DONE and green except the platform-blocked live proof:
   (marshaling, `json.array`, `url.with_params`, Korean round trip). The first smoke attempt also
   proved the static gate: a probe source naming `load`/`os` was refused by `wrapLuaSource` itself.
 
-Still open: §8.5 live proof in a real Chrome `USER_SCRIPT` world — blocked on the platform
-advertising a Pack protocol (AGENTS.md §13: no live Pack session can be created today).
+§8.5 live proof: **CLOSED 2026-09-03** by the X3 executor gate
+(`test:packs:executor:live`, PACK EXECUTOR LIVE PASS): the Lua-authored `layorix.shopping` task,
+fetched and digest-verified from the live unsigned registry by the extension's own verifier, executed
+on the published `pack-executor.html` document through `chrome.userScripts.execute` with the built
+`dist/pack-lua-prelude.js` — `prepare_search` answered correctly, an empty query refused
+`query_required`, the page MAIN world stayed untouched, and `chrome.userScripts.getScripts()` was
+unchanged. The platform Pack protocol remains the blocker only for PRODUCT-SESSION routing (X5/X6),
+not for Lua pack execution itself.

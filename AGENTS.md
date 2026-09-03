@@ -3119,3 +3119,20 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   changed set bumps); `check:pack-registry` refuses stale committed bytes. `community/release-policy.json`
   is UNCHANGED on purpose: it describes the reviewed CWS artifact, which ships no registry install
   path at all — flipping `registrySigned` belongs to the R2 revision that actually ships one.
+- **The Lua pack live proof is CLOSED (2026-09-03): X2+X3 ran end to end on real infrastructure.**
+  `test:packs:executor:live` (SDK) fetched `layorix.shopping@1.0.0` from the live unsigned registry on
+  GitHub Pages with the extension's own verifier (`keyId: user-source`, every asset hash-checked, Lua
+  `authoring` block verified), opened the published inert `pack-executor.html` at its exact URL, and
+  executed `[capture, built pack-lua-prelude.js, verified Lua wrapper, probe]` through the real
+  `chrome.userScripts.execute`: `prepare_search` answered correctly, an empty query refused
+  `query_required`, the page MAIN world stayed untouched, and `getScripts()` was unchanged. Two
+  operational findings: on Chrome 138+ `chrome.userScripts` is an UNDEFINED NAMESPACE until the
+  per-extension "Allow User Scripts" toggle is on — the 2026-08-26 extension-id move reset it on the
+  harness profile, and the gate now flips `extensions-toggle-row#allow-user-scripts` through the
+  extensions WebUI then RELOADS the extension (the namespace is computed at extension load); and
+  `ensureExtension` needs an ABSOLUTE dist path (`Extensions.loadUnpacked` refuses a relative one with
+  the unhelpful "File path cannot be resolved"). The external-config parsers (build-time
+  `pack-external-vite.ts` and runtime `external.ts`) accept an unsigned registry entry
+  (`trustRoots: [], unsigned: true`, literal-true flag, contradictions refused) so the product path can
+  name the live registry. What remains of the X track: X4 (the external Pack, authored in Lua),
+  X5 (routing bridge), X6 (install→route→remove live gate).

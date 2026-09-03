@@ -220,7 +220,7 @@ none of its own — `CommandContractV1` has no description field, so the classif
 names and the composition's `routes`, exactly as `75_rpc_community.lua` does. And no live turn has
 reached `pack.catalog` yet: with no registry published there is nothing to install, which is X2.
 
-### X2 — SITES: publish an UNSIGNED registry (revised 2026-09-03 by user decision)
+### X2 — SITES: publish an UNSIGNED registry — **DONE 2026-09-03** (revised same day by user decision)
 
 **Signatures are dropped from the registry.** The trust model is Tampermonkey's, already recorded for the
 community from-URL channel (`TODO.md` §10): the user chose the source, transport is TLS, every document
@@ -245,17 +245,24 @@ sequences stay fully enforced.
   live URL, and a same-length byte tamper answers `asset_hash_mismatch` (the assertion `tools/packs`
   already makes against a fixture, now against the published bytes).
 
-### X3 — SITES: publish the task executor document (½ day)
+### X3 — SITES: publish the task executor document — **DONE 2026-09-03, live**
 
-- `docs/pack-executor.html`: inert, no scripts of its own, no third-party resources, one sentence stating
-  what the page is and that the extension is driving it. Stable exact URL
-  `https://layorixinc.github.io/axsdk-sites/pack-executor.html` — no redirect, no query, no trailing-slash
-  ambiguity, because the injector requires the landed URL to equal the approved target.
-- The role tab is created inactive in the agent tab group and is user-visible; the page must read honestly
-  to a reviewer who opens it.
-- **Acceptance:** `chrome.userScripts.execute` authenticates a document at that URL and the broker answers
-  one signed read command; `chrome.userScripts.getScripts()` stays empty (one-shot execute, never
-  `register`).
+- `docs/pack-executor.html` published: inert (gated by `tools/packs/executor-page.test.ts` — no
+  `<script`, no handlers, no third-party reference of any kind), bilingual one-paragraph statement of
+  what the page is, exact URL `https://layorixinc.github.io/axsdk-sites/pack-executor.html`.
+- **Acceptance measured** (`test:packs:executor:live` in the SDK, PACK EXECUTOR LIVE PASS): the
+  extension's real verifier resolved `layorix.shopping@1.0.0` from the live unsigned registry
+  (keyId `user-source`), the Lua-wrapper task artifact executed on the published document through
+  `chrome.userScripts.execute` with the built `pack-lua-prelude.js`, `prepare_search` answered
+  `{"query":"Logitech M185","page":1,"limit":6,"quantity":1,"query_variants":["Logitech M185"]}` and
+  refused an empty query with `query_required`; the page MAIN world stayed untouched and
+  `chrome.userScripts.getScripts()` was unchanged (0 entries). This is also the Lua Pack live proof
+  (`LUA_PACK_DESIGN.md` §8.5).
+- Operational finding: on Chrome 138+ the `chrome.userScripts` NAMESPACE is undefined until the
+  per-extension "Allow User Scripts" toggle is on, and the extension-id move (2026-08-26) reset it on
+  the harness profile. The gate flips `extensions-toggle-row#allow-user-scripts` through the
+  extensions WebUI the way a user would, then reloads the extension — the namespace is computed at
+  extension load.
 
 ### X4 — the external Pack itself (3–4 days, scenario-gated — §9)
 

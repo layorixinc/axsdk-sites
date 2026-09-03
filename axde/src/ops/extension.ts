@@ -81,6 +81,12 @@ export async function uninstallExtension(browser, { profile, port, dist }) {
   }
 }
 
+/**
+ * A READ, and therefore the one operation that must leave the browser as it found it: `finish()`
+ * closes only a browser this process launched. Measured 2026-09-04, before that split existed:
+ * `profile ls` read a row as `up` and then closed the browser `axde launch` had deliberately left
+ * running, so the next launch found a dead port and quietly spawned a second Chrome.
+ */
 export async function extensionStatus(browser, { profile, port, dist, fingerprint }) {
   const opened = await browser.open({ profile, port, dist });
   try {
@@ -96,6 +102,6 @@ export async function extensionStatus(browser, { profile, port, dist, fingerprin
       lastError: await browser.lastUncaughtError(),
     };
   } finally {
-    await browser.close();
+    await browser.finish();
   }
 }

@@ -45,7 +45,7 @@ test('install and uninstall act on the SELECTED profile', () => {
 
 test('an empty inventory refuses every action BY NAME instead of acting on nothing', () => {
   const empty = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e' });
-  for (const name of ['i', 'u', 'd']) {
+  for (const name of ['i', 'u', 'd', 'l', 's']) {
     const out = reduce(empty, key('char', name));
     assert.deepEqual(out.effects, [], name);
     assert.match(out.state.log.at(-1).text, /no profile selected/i, name);
@@ -55,7 +55,7 @@ test('an empty inventory refuses every action BY NAME instead of acting on nothi
 test('while an operation runs, every action except quit is ignored', () => {
   // Two overlapping installs would drive one browser from two places.
   const busy = reduce(loaded(), { type: 'busy', busy: true }).state;
-  for (const name of ['i', 'u', 'n', 'd', 'r']) {
+  for (const name of ['i', 'u', 'n', 'd', 'r', 'l', 's']) {
     assert.deepEqual(reduce(busy, key('char', name)).effects, [], name);
   }
   assert.deepEqual(reduce(busy, key('char', 'q')).effects, [{ type: 'quit' }]);
@@ -128,4 +128,22 @@ test('the log is bounded so a long session cannot grow state without limit', () 
   }
   assert.ok(state.log.length <= 200, `bounded, got ${state.log.length}`);
   assert.equal(state.log.at(-1).text, 'line 499');
+});
+
+test('launch and stop act on the SELECTED profile', () => {
+  const state = reduce(loaded(), key('down')).state;
+  assert.deepEqual(reduce(state, key('char', 'l')).effects, [{ type: 'launch', profile: 'x6-scratch' }]);
+  assert.deepEqual(reduce(state, key('char', 's')).effects, [{ type: 'stop', profile: 'x6-scratch' }]);
+});
+
+test('launching or stopping a FOREIGN profile is refused by name: the screen has no --force', () => {
+  // Two Chromes on one profile directory are not two browsers — the second hands off and exits.
+  let state = loaded();
+  state = reduce(reduce(state, key('down')).state, key('down')).state;
+  assert.equal(state.profiles[state.cursor].kind, 'foreign');
+  for (const char of ['l', 's']) {
+    const out = reduce(state, key('char', char));
+    assert.deepEqual(out.effects, [], char);
+    assert.match(out.state.log.at(-1).text, /axde did not create/, char);
+  }
 });

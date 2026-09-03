@@ -53,7 +53,8 @@
     "check:pack-registry": "bun tools/packs/registry.ts --check",
     "test:packs:external:live": "node tools/scenarios/pack-external-live.mjs",
     "axde": "bun axde/src/cli.ts",
-    "test:axde": "bun test axde"
+    "test:axde": "bun test axde",
+    "test:axde:live": "bun axde/live/stage2a.ts"
   },
   "devDependencies": {
     "fengari": "^0.1.4",

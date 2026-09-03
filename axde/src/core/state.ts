@@ -76,6 +76,22 @@ function act(state, name) {
   return answer(state, [{ type: name, profile: profile.name }]);
 }
 
+/**
+ * Launch and stop are refused on a foreign profile FROM THE SCREEN, where there is no `--force`:
+ * two Chromes on one profile directory are not two browsers, so the second process hands off to the
+ * first and exits — a launch there either joins a session axde does not own or waits out a port that
+ * never opens.
+ */
+function actOnOwn(state, name, verb) {
+  const profile = selected(state);
+  if (profile === undefined) return answer(withLog(state, `${name}: no profile selected`));
+  if (profile.kind !== 'axde') {
+    return answer(withLog(state,
+      `${verb} refused: axde did not create "${profile.name}" — use the command with --force if you mean to`));
+  }
+  return answer(state, [{ type: name, profile: profile.name }]);
+}
+
 function onKey(state, keyEvent) {
   const { name, char } = keyEvent;
   if (name === 'ctrl-c') return answer(state, [{ type: 'quit' }]);
@@ -104,6 +120,8 @@ function onKey(state, keyEvent) {
   if (char === 'd') return openPrompt(state, 'delete-profile');
   if (char === 'i') return act(state, 'install');
   if (char === 'u') return act(state, 'uninstall');
+  if (char === 'l') return actOnOwn(state, 'launch', 'launch');
+  if (char === 's') return actOnOwn(state, 'stop', 'stop');
   if (char === 'r') return answer(state, [{ type: 'refresh' }]);
   return answer(state);
 }

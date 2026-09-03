@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
-  MANIFEST, attachBuild, createProfile, deleteProfile, detachBuild, listProfiles, profileRootFrom,
+  MANIFEST, attachBuild, clearRunning, createProfile, deleteProfile, detachBuild, listProfiles,
+  profileRootFrom, recordRunning,
 } from './src/ops/profiles.ts';
 
 async function root() {
@@ -147,4 +148,37 @@ test('attaching to a profile axde did not create is refused', async () => {
     () => attachBuild({ root: base, name: 'axsdk-extension-cdp', dist: 'D:/dist' }),
     /axde did not create/i,
   );
+});
+
+test('a launched browser is RECORDED, and the record is a convenience the probe overrules', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'axde-run-'));
+  await createProfile({ root, name: 'packdev', port: 39701 });
+  await recordRunning({ root, name: 'packdev', pid: 4242, port: 39701 });
+
+  const manifest = JSON.parse(await readFile(join(root, 'packdev', MANIFEST), 'utf8'));
+  assert.equal(manifest.running.pid, 4242);
+  assert.equal(manifest.running.port, 39701);
+
+  // A pid outlives its process; an answering port does not. So the ROW says down.
+  const down = await listProfiles({ root, probe: never });
+  assert.equal(down[0].chrome, 'down');
+  assert.equal(down[0].pid, 4242, 'the pid is still reported, as a fact about the record');
+  const up = await listProfiles({ root, probe: async () => true });
+  assert.equal(up[0].chrome, 'up');
+
+  await clearRunning({ root, name: 'packdev' });
+  const after = JSON.parse(await readFile(join(root, 'packdev', MANIFEST), 'utf8'));
+  assert.ok(!('running' in after), 'cleared means ABSENT, not null');
+  assert.equal((await listProfiles({ root, probe: never }))[0].pid, undefined);
+  await rm(root, { recursive: true, force: true });
+});
+
+test('recording a run against a profile axde did not create is refused', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'axde-run-'));
+  await mkdir(join(root, 'someone-elses'), { recursive: true });
+  await assert.rejects(
+    () => recordRunning({ root, name: 'someone-elses', pid: 1, port: 2 }),
+    /axde did not create/,
+  );
+  await rm(root, { recursive: true, force: true });
 });

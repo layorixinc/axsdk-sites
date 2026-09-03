@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createDriver } from './driver.ts';
 import { initialState } from './core/state.ts';
 import { extensionStatus, installExtension, uninstallExtension } from './ops/extension.ts';
+import { launchHeaded, stopHeaded } from './ops/session.ts';
 import { availablePort, createBrowser, fingerprintBuild, probeDebugger } from './ops/chrome.ts';
 import { createProfile, deleteProfile, listProfiles, profileRootFrom } from './ops/profiles.ts';
 
@@ -28,6 +29,8 @@ const USAGE = `axde — AXSDK Dev Env
   axde ext install   <profile> [--dist <path>]
   axde ext uninstall <profile>
   axde ext status    <profile>
+  axde launch <profile> [--url <u>] [--force]   headed, and it STAYS UP after this returns
+  axde stop   <profile> [--force]               graceful close, so the toggles survive
 
   --dist <path>   extension build to install (default: the sibling SDK's dist)
   --env  <path>   workspace .env to seed credentials from (default: this repo's)
@@ -81,6 +84,7 @@ async function target(ctx, profile) {
   if (row === undefined) throw new Error(`no such profile: ${profile}`);
   return {
     profile,
+    kind: row.kind,
     port: row.port ?? await availablePort(),
     dist: ctx.dist,
     fingerprint: ctx.fingerprint,
@@ -106,6 +110,29 @@ async function runInstall(ctx, profile, log) {
   return result;
 }
 
+async function runLaunch(ctx, profile, args, log) {
+  const browser = createBrowser({ root: ctx.root, log });
+  const at = await target(ctx, profile);
+  const result = await launchHeaded(browser, {
+    ...at, url: flag(args, 'url'), force: args.includes('--force'),
+  });
+  log(`launch ${profile}: ${result.outcome} on :${result.port}`
+    + `${result.pid === undefined ? '' : ` pid ${result.pid}`}`
+    + ` · extension ${result.extension} · user scripts ${result.userScripts ? 'on' : 'off'}`);
+  // A browser that came up without user scripts is not the controllable browser that was asked for,
+  // and the answer names the one command that fixes it rather than repairing it from here.
+  if (result.fix) log(result.fix);
+  return result;
+}
+
+async function runStop(ctx, profile, args, log) {
+  const browser = createBrowser({ root: ctx.root, log });
+  const at = await target(ctx, profile);
+  const result = await stopHeaded(browser, { ...at, force: args.includes('--force') });
+  log(`stop ${profile}: ${result.outcome}`);
+  return result;
+}
+
 async function subcommand(args) {
   const ctx = context(args);
   const [group, action, name] = args;
@@ -117,7 +144,8 @@ async function subcommand(args) {
       const ext = row.ext === null || row.ext === undefined
         ? (row.dist === undefined ? '—' : 'attached')
         : (row.ext.fingerprint ?? '—').slice(0, 8);
-      say(`${row.name}\t${row.kind}\t${row.chrome}${row.port ? `:${row.port}` : ''}\text ${ext}${row.stale ? ' STALE' : ''}`);
+      const running = row.pid === undefined ? '' : ` pid ${row.pid}`;
+      say(`${row.name}\t${row.kind}\t${row.chrome}${row.port ? `:${row.port}` : ''}${running}\text ${ext}${row.stale ? ' STALE' : ''}`);
     }
     return 0;
   }
@@ -148,6 +176,14 @@ async function subcommand(args) {
     for (const [key, value] of Object.entries(status)) say(`${key}\t${value ?? '—'}`);
     return 0;
   }
+  if (group === 'launch') {
+    await runLaunch(ctx, action, args, say);
+    return 0;
+  }
+  if (group === 'stop') {
+    await runStop(ctx, action, args, say);
+    return 0;
+  }
   console.error(USAGE);
   return 1;
 }
@@ -173,6 +209,10 @@ async function tui() {
         const browser = createBrowser({ root: ctx.root, log });
         const result = await uninstallExtension(browser, await target(ctx, effect.profile));
         log(`uninstall ${effect.profile}: ${result.outcome}`);
+      } else if (effect.type === 'launch') {
+        await runLaunch(ctx, effect.profile, [], log);
+      } else if (effect.type === 'stop') {
+        await runStop(ctx, effect.profile, [], log);
       }
       push({ type: 'profiles', profiles: await inventory(ctx) });
     },
@@ -197,4 +237,4 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
   }
 }
 
-export { context, inventory, runInstall, subcommand };
+export { context, inventory, runInstall, runLaunch, runStop, subcommand };

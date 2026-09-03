@@ -18,7 +18,9 @@ import { extensionStatus, installExtension, uninstallExtension } from './src/ops
  * toggles once, and RECORD the fingerprint. The fake below refuses what the real thing refuses and
  * persists what the real thing persists.
  */
-function fakeBrowser({ attachedDist, recorded, toggles = false, failAttach, presentAfterUninstall = false } = {}) {
+function fakeBrowser({
+  attachedDist, recorded, toggles = false, failAttach, presentAfterUninstall = false, reused = false,
+} = {}) {
   const calls = [];
   const state = {
     attachedDist,
@@ -37,6 +39,7 @@ function fakeBrowser({ attachedDist, recorded, toggles = false, failAttach, pres
         present: state.present,
         recordedFingerprint: state.present ? state.recorded : undefined,
         attachedDist: state.attachedDist,
+        reused,
       };
     },
     async attachBuild(dist) {
@@ -63,6 +66,9 @@ function fakeBrowser({ attachedDist, recorded, toggles = false, failAttach, pres
     },
     async lastUncaughtError() { calls.push('log?'); return undefined; },
     async close() { calls.push('close'); },
+    async release() { calls.push('release'); },
+    // "Leave it as you found it": close only a browser this process launched.
+    async finish() { calls.push(reused ? 'release' : 'close'); },
   };
 }
 
@@ -167,4 +173,21 @@ test('status on an empty profile calls nothing stale — unknown stays unknown',
   assert.equal(status.installed, false);
   assert.equal(status.stale, false);
   assert.equal(status.fingerprint, undefined);
+});
+
+test('a READ leaves a browser it did not launch running — stage 2a leaves one up on purpose', async () => {
+  // Measured 2026-09-04: `profile ls` read the row as `up` and then closed the browser `launch` had
+  // deliberately left running, so the very next launch found a dead port and silently spawned a
+  // second Chrome. A read that destroys what it reports on is not a read.
+  const browser = fakeBrowser({ attachedDist: 'D:/dist', recorded: '9f3c2a1e', toggles: true, reused: true });
+  await extensionStatus(browser, target);
+  assert.ok(browser.calls.includes('release'), browser.calls.join(','));
+  assert.ok(!browser.calls.includes('close'), 'closing a browser this command found running is destructive');
+});
+
+test('a browser the read LAUNCHED is closed gracefully, so it leaves nothing behind', async () => {
+  const browser = fakeBrowser({ attachedDist: 'D:/dist', recorded: '9f3c2a1e', toggles: true });
+  await extensionStatus(browser, target);
+  assert.ok(browser.calls.includes('close'), browser.calls.join(','));
+  assert.ok(!browser.calls.includes('release'));
 });

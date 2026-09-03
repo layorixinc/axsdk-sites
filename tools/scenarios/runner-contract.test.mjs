@@ -8,9 +8,19 @@ import { readFileSync, readdirSync } from 'node:fs';
 import test from 'node:test';
 
 const root = new URL('./', import.meta.url);
-const runners = readdirSync(root)
-  .filter((name) => name.endsWith('.mjs') && !name.endsWith('.test.mjs'))
-  .map((name) => ({ name, source: readFileSync(new URL(name, root), 'utf8') }));
+const collect = (dir, keep) => readdirSync(dir)
+  .filter(keep)
+  .map((name) => ({ name, source: readFileSync(new URL(name, dir), 'utf8') }));
+
+// 2026-09-04: `axde/live/` is a SECOND home for browser-driving runners, and the same two rules
+// apply there — a runner that starts on import drives a browser, and one that cannot fail through
+// its exit code is an instrument nobody can gate on. A rule that knows one directory is the
+// hand-maintained list this file exists to refuse.
+const runners = [
+  ...collect(root, (name) => name.endsWith('.mjs') && !name.endsWith('.test.mjs')),
+  ...collect(new URL('../../axde/live/', import.meta.url),
+    (name) => name.endsWith('.ts') && !name.endsWith('.test.ts')),
+];
 
 test('there are runners to check', () => {
   assert.ok(runners.length >= 5, `expected the scenario runners, found ${runners.length}`);
@@ -20,9 +30,11 @@ test('a runner never starts its journey just because something imported it', () 
   const unguarded = [];
   for (const { name, source } of runners) {
     if (!/\basync function main\b/.test(source)) continue;
-    // The invocation must sit behind a "am I the entry point" comparison. Both idioms in this directory are
-    // accepted: `pathToFileURL(process.argv[1])` and a direct `import.meta.url === ...argv[1]` build.
-    const guarded = /import\.meta\.url\s*===/.test(source) || /pathToFileURL\(\s*process\.argv\[1\]/.test(source);
+    // Every idiom in the two directories is accepted: `pathToFileURL(process.argv[1])`, a direct
+    // `import.meta.url === ...argv[1]` build, and bun's own `import.meta.main`.
+    const guarded = /import\.meta\.url\s*===/.test(source)
+      || /pathToFileURL\(\s*process\.argv\[1\]/.test(source)
+      || /import\.meta\.main/.test(source);
     const invokes = /^\s*main\(\)/m.test(source) || /\n\s*await main\(\)/.test(source);
     if (invokes && !guarded) unguarded.push(name);
   }

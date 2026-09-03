@@ -60,8 +60,9 @@ test('the header carries the build under test and the key hints are visible', ()
   const lines = render(screen(), wide);
   assert.match(lines[0], /AXSDK Dev Env/);
   assert.match(lines.join('\n'), /9f3c2a1e/);
-  for (const hint of ['new', 'delete', 'install', 'uninstall', 'quit']) {
-    assert.match(lines.join('\n'), new RegExp(hint, 'i'), hint);
+  // The rendered tokens, not the bare words: the hint line states the KEY and the action together.
+  for (const hint of ['[n]ew', '[d]elete', '[i]nstall', '[u]ninstall', '[l]aunch', '[s]top', '[q]uit']) {
+    assert.ok(lines.join('\n').includes(hint), hint);
   }
 });
 
@@ -104,4 +105,14 @@ test('an empty inventory explains itself instead of showing an empty frame', () 
 test('a missing local build is stated in the header rather than assumed present', () => {
   const noBuild = initialState({ dist: 'D:/dist', buildFingerprint: undefined });
   assert.match(render(noBuild, wide)[0], /no build|missing/i);
+});
+
+test('every key is READABLE at 80 columns — a cut hint line hides a key nobody then uses', () => {
+  const lines = render(screen(), { rows: 24, cols: 80 });
+  const hints = lines.find((line) => line.includes('[q]uit'));
+  assert.ok(hints !== undefined, 'the hint line is on screen');
+  assert.ok(!hints.includes('…'), `truncated: ${hints}`);
+  for (const char of ['n', 'd', 'i', 'u', 'l', 's', 'r', 'q']) {
+    assert.ok(hints.includes(`[${char}`), `key ${char} in: ${hints}`);
+  }
 });

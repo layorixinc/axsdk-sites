@@ -3223,3 +3223,36 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   pack config was broken (`missing schemaVersion`). Also: the wrapper's static gate refuses forbidden
   tokens **inside a comment** — the sample pack's own comment listed them and stopped being
   publishable. Live journey and the 71 offline tests are recorded in `axde/DESIGN.md` §3, including the driver contract (alternate screen and raw mode restored, busy painted DURING the operation, a non-TTY invocation refused by name rather than hanging).
+- **`axde` stage 2a (2026-09-04) added a browser that OUTLIVES its command — and the first thing it
+  found was that a READ was destructive.** `axde launch <profile>` spawns a headed Chrome detached,
+  reports and returns; `axde stop <profile>` closes it gracefully. Four measured facts, in the order
+  they overturned each other:
+  1. `launchChrome` grew an opt-in `detached`, and the old comment there ("detaching left the shell
+     pipeline open on Windows") was the **missing `unref()`**: measured through that function,
+     attached-with-no-unref never returns (killed at 12 s), attached+unref returns and the browser
+     **dies**, detached+unref returns in 0 s and it **survives**.
+  2. **That finding does not survive the CLI path, and the design says so rather than hiding it.**
+     The live gate PASSED 21/21 with `detached: false`, and an attached launch measured straight
+     through the CLI returned in 5 s with its browser alive. Two live measurements of one mechanism
+     disagree, so (§13) neither is the contract: `detached: true` is kept because it is the only
+     combination that survived in EVERY measurement and it states the intent to the OS instead of
+     relying on how a runtime reaps subprocesses. Mutating `detached` alone does not turn the gate
+     red; making `launch` close what it started fails it at the fourth check.
+  3. **`profile ls` killed the browser it had just reported as `up`.** Stage 1's inventory reads the
+     fingerprint and toggles through a browser session and every operation ended with a graceful
+     `Browser.close` — harmless while nothing was ever left running. Measured: launch → alive → `ls`
+     says `up` → **port DEAD** → the next launch finds a dead port and quietly spawns a second
+     Chrome. The adapter now has a third ending, `finish()` = "leave it as you found it" (release
+     when reused, close when this process launched it), used by the READS only; install/uninstall
+     must relaunch anyway and still close so `Preferences` reach disk.
+  4. **A `stop` reported success while leaving the record.** The adapter keeps no session on that
+     path, so the profile name was `undefined` and a `.catch(() => {})` swallowed the refusal — the
+     name travels WITH the record calls now, and there is no catch.
+  The journey hid (3) for one run because it PRINTED the second launch's outcome instead of asserting
+  it: a line reading `launched … pid 43796` where `already-running` was required went straight past.
+  So acceptance is a runnable gate — `npm run test:axde:live` (`axde/live/stage2a.ts`, 21 checks,
+  ~23 s, throwaway profile root) — and `tools/scenarios/runner-contract.test.mjs` now walks
+  `axde/live/*.ts` under the same two rules as `tools/scenarios/*.mjs` (never start on import, fail
+  through the exit code; `import.meta.main` accepted as a third guard idiom, both mutation-checked).
+  Offline is **89 tests**. Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
+  two Chromes on one profile directory are not two browsers.

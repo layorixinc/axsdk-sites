@@ -7,8 +7,12 @@
  * - a build is loaded with `--load-extension` at LAUNCH (durable across restarts), never with CDP
  *   `Extensions.loadUnpacked` (which lives only as long as that browser session);
  * - the browser is closed with `Browser.close` and given time to write `Preferences`, because
- *   killing it loses the extension registration AND both toggles. `close()` here is therefore a
- *   graceful shutdown, not the harness's release-and-leave-running.
+ *   killing it loses the extension registration AND both toggles.
+ *
+ * That gives this adapter TWO endings, and the difference is the whole of stage 2a: `close()` shuts
+ * Chrome down gracefully (what a one-shot operation owes), while `release()` drops only our debugger
+ * connection and leaves a detached browser running (what `launch` owes). `stopAt(port)` is the third
+ * case — a graceful close of a browser this process never launched.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
@@ -16,13 +20,15 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 
 import {
-  BUILD_KEY, evaluate, launchChrome, probeDebugger, writeConfig,
+  BUILD_KEY, connectCdp, evaluate, launchChrome, probeDebugger, writeConfig,
 } from '../../../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/browser-session.mjs';
 import {
   WORKSPACE_ENV_KEYS, credentialsFromEnv, extensionIdFromKey, fingerprintBuild, profileDir,
 } from '../../../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/chrome-launch.mjs';
 import { harnessConfig } from '../../../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/harness-config.mjs';
-import { attachBuild, detachBuild, readManifest } from './profiles.ts';
+import {
+  attachBuild, clearRunning, detachBuild, readManifest, recordRunning,
+} from './profiles.ts';
 
 export { fingerprintBuild, probeDebugger };
 
@@ -57,16 +63,19 @@ export function createBrowser({ root, log = () => {} }) {
   let extensionId;
   let profile;
   let port;
+  let startUrl;
 
   const optionsUrl = () => `chrome-extension://${extensionId}/options/options.html`;
 
-  const start = async () => {
+  const start = async (detached = false) => {
     const manifest = await readManifest(root, profile);
     launched = await launchChrome({
       profileName: profile,
       profileRoot: root,
       port,
+      url: startUrl,
       loadExtension: manifest?.dist,
+      detached,
     });
     optionsSession = undefined;
     webUiTarget = undefined;
@@ -135,16 +144,88 @@ export function createBrowser({ root, log = () => {} }) {
     webUiTarget = undefined;
   };
 
+  const releaseConnection = async () => {
+    launched?.cdp.close();
+    launched = undefined;
+    optionsSession = undefined;
+    webUiTarget = undefined;
+  };
+
+  /**
+   * Leave the browser as this call FOUND it. A read must not take down a browser `launch` left
+   * running, and must not leave one of its own behind: measured 2026-09-04, `profile ls` did the
+   * first and the next launch then quietly spawned a second Chrome.
+   */
+  const finish = async () => {
+    if (launched === undefined) return;
+    if (launched.reused) await releaseConnection();
+    else await shutdown();
+  };
+
   return {
     async open(target) {
       profile = target.profile;
       port = target.port;
+      // Only a SPAWN can carry a start url; a reused browser gets `openTab` instead.
+      startUrl = target.url;
       const manifest = JSON.parse(readFileSync(join(target.dist, 'manifest.json'), 'utf-8'));
       extensionId = extensionIdFromKey(manifest.key);
       if (!extensionId) throw new Error(`${target.dist} declares no manifest key; axde needs a keyed dev build`);
-      const attachedDist = await start();
+      const attachedDist = await start(target.detached === true);
       const probed = await probe();
-      return { extensionId, attachedDist, ...probed };
+      return {
+        extensionId,
+        attachedDist,
+        ...probed,
+        reused: launched.reused,
+        // Absent for a reused browser: this process did not spawn it and cannot claim its pid.
+        pid: launched.chrome?.pid,
+      };
+    },
+
+    async openTab(url) {
+      await launched.cdp.send('Target.createTarget', { url });
+      log(`opened ${url}`);
+    },
+
+    /**
+     * Hand the browser back while it keeps running: close only OUR debugger connection. The child
+     * was spawned detached and unreffed, so nothing here holds it or is held by it.
+     */
+    release: releaseConnection,
+
+    finish,
+
+    /** The authority on "is a browser up": a recorded pid outlives its process, a port does not. */
+    async reachable(at) {
+      return Boolean(await probeDebugger(at ?? port));
+    },
+
+    /**
+     * Stop a browser this process did not launch. Graceful, because Chrome writes `Preferences`
+     * during shutdown and both toggles live there.
+     */
+    async stopAt(at) {
+      const version = await probeDebugger(at);
+      if (!version) return;
+      const cdp = await connectCdp(version.webSocketDebuggerUrl);
+      await cdp.send('Browser.close').catch(() => {});
+      await delay(1_500);
+      cdp.close();
+      log(`closed the browser on :${at}`);
+    },
+
+    /**
+     * The record calls take the profile NAME rather than reading the closure `open` sets: `stop`
+     * never opens a session, so that variable is undefined there. Measured 2026-09-04 — the clear
+     * threw on an undefined name, a catch swallowed it, and a stopped browser kept a recorded pid.
+     */
+    async recordRunning({ profile: name, ...entry }) {
+      await recordRunning({ root, name, ...entry });
+    },
+
+    async clearRunning(name) {
+      await clearRunning({ root, name });
     },
 
     async attachBuild(dist) {

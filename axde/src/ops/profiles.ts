@@ -59,6 +59,9 @@ export async function listProfiles({ root, probe }) {
       port,
       dist: manifest?.dist,
       chrome: up ? 'up' : 'down',
+      // A recorded pid is reported as a fact about the RECORD; `chrome` above stays the probe's
+      // answer, because a pid outlives its process and an answering port does not.
+      pid: manifest?.running?.pid,
       ext: null,
       userScripts: null,
       stale: false,
@@ -109,4 +112,17 @@ export async function attachBuild({ root, name, dist }) {
 
 export async function detachBuild({ root, name }) {
   return withManifest(root, name, ({ dist, ...rest }) => rest);
+}
+
+/**
+ * What `launch` left running. Written for the row to print and for `stop` to quote — never to
+ * decide whether a browser is up, which only the port can answer.
+ */
+export async function recordRunning({ root, name, pid, port, startedAt = new Date().toISOString() }) {
+  return withManifest(root, name, (manifest) => ({ ...manifest, running: { pid, port, startedAt } }));
+}
+
+export async function clearRunning({ root, name }) {
+  // Absent, not null: a null `running` would read as "recorded, with nothing in it".
+  return withManifest(root, name, ({ running, ...rest }) => rest);
 }

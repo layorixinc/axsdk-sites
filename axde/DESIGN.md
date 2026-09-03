@@ -151,11 +151,139 @@ names a click, a write, or a navigation. One finding worth keeping: the wrapper'
 forbidden tokens even inside a COMMENT — an earlier version of `dev-echo`'s own comment listed them
 and the sample stopped being publishable.
 
-## 4. Later stages (scope sketch, not commitments)
+## 4. Stage 2a — a controllable headed browser — **DONE 2026-09-04**
+
+Stage 1's browser is a TOOL: every operation launches Chrome, does one thing, and closes it
+gracefully so `Preferences` reach disk. Pack development needs the opposite lifetime — a headed
+browser that STAYS UP on a dev profile, with the build loaded, a debugging port open and the
+user-scripts row on, so the developer can click through it and later stages can attach to it.
+
+So this stage adds exactly two operations: `launch` starts that browser and RETURNS while it keeps
+running, and `stop` ends it the way stage 1 established.
+
+### The spawn, measured — including the part that refuted the first version of this section
+
+(2026-09-04, Chrome 151.0.7922.34, Windows 11, bun 1.3.14.)
+
+`launchChrome` spawned Chrome ATTACHED and stated why in its own comment: `detached: true` was tried
+so an exiting launcher could leave the browser up, "and on Windows it left the shell pipeline open
+instead". Four combinations through that same function — the launcher's wall time, then the port
+asked again from a NEW process three seconds after it was gone:
+
+|spawn|launcher|browser afterwards|
+|---|---|---|
+|attached, no `unref()`|**never returned** (killed at 12 s)|died with the killed launcher|
+|attached + `child.unref()`|returned in 0 s|**died**|
+|`detached: true` (+ `unref()`)|**returned in 0 s**|**survived**|
+|`detached: true` + a second `unref()`|returned in 0 s|survived|
+
+So the old note was the MISSING `unref()`: a referenced child handle holds the event loop open —
+§13 records the same shape for the commerce sweep, where an attached Chrome kept an already-finished
+runner alive for 40 minutes. `launchChrome` therefore grew an opt-in `detached` that does both, and
+the harness keeps its attached default: a one-shot command wants a browser that cannot outlive it.
+
+**What refuted the first draft of this section.** It claimed "both halves are required and neither
+is sufficient", and the live gate then PASSED with `detached: false` — 21 of 21 checks, including
+"the browser outlived the command". Measured again straight through the CLI, an attached launch
+returned in 5 s and its browser survived too. Two live measurements of one mechanism disagree, so
+per §13 neither is the contract, and nothing here is keyed on their agreement: `detached: true` is
+kept because it is the only configuration that survived in EVERY measurement and because it states
+the intent to the OS instead of relying on how a runtime reaps subprocesses. The consequence for the
+gate is recorded rather than hidden — mutating `detached` alone does NOT turn it red, while making
+`launch` close what it started fails it at the fourth check, which is the property it exists to
+defend.
+
+### What `launch` decides
+
+- **Reuse, never relaunch.** The launcher probes the port first, so a second `launch` attaches to
+  the running browser and answers `already-running`. That is not an optimization: a relaunch kills
+  whatever session the developer is looking at (the §13 reload lesson), and the one command whose
+  whole purpose is "leave it up" must not be the one that takes it down.
+- **It reports, it does not repair.** Extension presence and `chrome.userScripts` are READ and
+  named; when the row is off the answer says so and names `ext install` as the fix. `install` stays
+  the single writer of toggles — two writers of one setting is how a setting stops meaning anything.
+- **A profile `axde` did not create is refused unless forced**, and the reason is mechanical rather
+  than protective: two Chromes on one profile directory are not two browsers. The second process
+  hands off to the first and exits immediately (the launcher's own measurement), so launching the
+  shared harness profile either joins a session `axde` does not own or waits out a port that will
+  never open.
+- **The record is a convenience; the PORT is the authority.** `launch` writes `running: {pid, port,
+  startedAt}` into the profile manifest for the row to print and for `stop` to quote, and nothing
+  reads it to decide whether a browser is up — a pid outlives its process, an answering port does
+  not.
+- **A start URL is applied on both paths or the flag would be a lie**: at spawn it rides
+  `chromeArgs`, and on a reused browser it opens a tab.
+
+### What `stop` decides
+
+`Browser.close`, then the port must go quiet — a browser still answering is a FAILURE, not a
+success, and saying "stopped" while it runs is the false-positive class §13 keeps finding in cart
+adds. It exists so a developer never has to kill a browser: killing loses developer mode and the
+Allow-User-Scripts row, because Chrome writes `Preferences` during shutdown (stage 1). A profile
+whose port is already quiet answers `already-stopped` and clears a stale record.
+
+### Screen and commands
+
+```text
+ [n]ew [d]elete [i]nstall [u]ninstall [l]aunch [s]top [r]efresh [q]uit
+
+axde launch <profile> [--url <u>] [--force]      # headed, stays up after the command returns
+axde stop   <profile>                            # graceful close, so the toggles survive
+```
+
+`launch` and `stop` are refused on a foreign profile from the screen, where there is no `--force`.
+
+### The defect this stage exposed in stage 1: a READ was destructive
+
+`launch` is the first operation that leaves something behind, and it immediately found that
+`profile ls` **killed** it. The inventory reads the recorded fingerprint and the toggle state
+through a browser session, and stage 1's every operation ended with a graceful `Browser.close` —
+which was harmless while nothing was ever left running. Measured: `launch` → port alive → `profile
+ls` reported the row `up` → **port DEAD**, and the next `launch` then found a dead port and quietly
+spawned a second Chrome.
+
+So the adapter has a third ending. `finish()` means "leave it as you found it": release when the
+browser was already running, close when this process launched it. Only the READS use it — `install`
+and `uninstall` must relaunch anyway, and they still close so `Preferences` reach disk.
+
+**The journey hid it for one run.** The first version printed the second launch's outcome instead of
+asserting it, so a line reading `launched … pid 43796` where `already-running` was required went
+straight past. That is why the acceptance below is a runnable gate rather than a transcript.
+
+### Measured acceptance — `npm run test:axde:live`
+
+`axde/live/stage2a.ts`: 21 checks, ~23 s, on a throwaway profile root, through the same subcommands
+a developer types.
+
+```text
+profile new + ext install    → user scripts on
+launch --url                 → launched on :<port> pid <n> · extension up · user scripts on
+                               command RETURNS; a NEW process finds the port and the --url tab
+profile ls                   → up:<port> pid <n>, and the browser is STILL alive afterwards
+ext status                   → userScripts true, and still alive afterwards
+launch (again)               → already-running, no second pid, recorded pid untouched
+stop                         → stopped; the port goes quiet; the record is cleared
+stop (again)                 → already-stopped
+ext status                   → userScripts true — the graceful stop kept both toggles
+launch/stop <foreign>        → refused BY NAME, exit code 1
+profile rm                   → the inventory is empty again
+```
+
+Offline: `npm run test:axde` — **89 tests** (the 70 from stage 1 plus 19: the launch/stop decisions
+against a fake that records every call, the two record-writing calls carrying the profile NAME, the
+non-destructive read in both directions, the launch/stop keys and their foreign-profile refusal, and
+every key readable at 80 columns).
+
+Two bugs the offline suite could not have caught, both found by the live gate on its first run: the
+destructive read above, and a `stop` that reported success while leaving the record — the adapter had
+no session on that path, so the profile name was `undefined` and a `.catch(() => {})` I had written
+swallowed the refusal. The name travels WITH the call now, and there is no catch.
+
+## 5. Later stages (scope sketch, not commitments)
 
 | stage | adds | why it is next |
 |---|---|---|
-| 2 | launch/attach mode (a browser deliberately left up), live status pane (SW alive, `scriptIds`, session id, tab groups), log tail with filters | every debugging session starts by asking "is the thing I edited the thing that is running" |
+| 2b | live status pane (SW alive, `scriptIds`, session id, tab groups) and a log tail with filters, over the browser stage 2a leaves up | every debugging session starts by asking "is the thing I edited the thing that is running" |
 | 3 | pack lifecycle pane: registry list, refresh, stage-install with the approval DIFF shown, approve, enable/disable/replace/rollback/remove/reset | X6 drove these by hand-typed payloads; the approval diff is the one screen a reviewer needs |
 | 4 | turn console: send an utterance, watch nodes/tool calls/branches stream, expand a tool's args and output | replaces `send` + parsing `:axsdk:chat`, and works around the 4,120-char trace truncation |
 | 5 | pack authoring loop: wrap/verify a `.lua` artifact, run it through the packaged prelude, call `pack.catalog`/`pack.invoke`, watch the executor document | the last hand-driven surface after stage 4 |
@@ -165,7 +293,7 @@ Stages 3–5 are where non-negotiable 1 pays for itself: each imports SDK TypeSc
 Each stage gets its own section here, with the same "what it encodes because it was measured" and
 "acceptance" pair, written before its code.
 
-## 5. Rules this design deliberately does not bend
+## 6. Rules this design deliberately does not bend
 
 - No new dependency without a measurement showing the hand-written version is worse.
 - No screen shows a value the user cannot act on; a refusal quotes its raw reason.

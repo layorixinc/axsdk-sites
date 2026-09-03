@@ -41,7 +41,9 @@ function profileRow(profile, isSelected, cols) {
   return cut(`${marker} ${pad(profile.name, 22)} ${pad(kind, 7)} ${pad(chrome, 20)} ${pad(extension, 13)} ${scripts}${flags}`, cols);
 }
 
-const HINTS = '[n] new  [d] delete  [i] install  [u] uninstall  [r] refresh  [q] quit';
+// Key-inside-word on purpose: eight actions with `[k] word` spacing measure 92 columns and get cut
+// at 80, and a key nobody can see is a key nobody uses.
+const HINTS = '[n]ew [d]elete [i]nstall [u]ninstall [l]aunch [s]top [r]efresh [q]uit';
 
 export function render(state, { rows, cols }) {
   const build = state.build.fingerprint === undefined

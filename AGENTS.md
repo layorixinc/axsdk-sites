@@ -3256,6 +3256,27 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   through the exit code; `import.meta.main` accepted as a third guard idiom, both mutation-checked).
   Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
   two Chromes on one profile directory are not two browsers.
+- **`axde ext install` BUILDS first, and a changed build is applied by REFRESHING the extension
+  (2026-09-04).** Three measurements decide it: `chrome.runtime.reload()` from the options page
+  **re-reads the unpacked build from disk** (a `short_name` planted in `dist/manifest.json` was
+  visible to `chrome.runtime.getManifest()` afterwards, `chrome.storage.session` cleared and the
+  service-worker target changed, while the browser stayed UP); the chrome://extensions control is
+  `cr-icon-button#dev-reload-button` and renders **twice** with a **locale** label (`새로고침`), so
+  the runtime call is the safer path and needs no WebUI at all; and the build is **core THEN
+  extension** (2.8 s + 3.8 s) because `@axsdk/core` resolves to `dist/lib.js`. The rules that
+  follow: attachment change → relaunch (Chrome reads `--load-extension` only at launch), content
+  change → refresh; the fingerprint is computed AFTER the build, because recording the pre-build one
+  tells the next `ext status` that a build nobody installed is current; only the sibling SDK dist is
+  built and any other `--dist` answers `build skipped`; a refreshed extension has its toggles
+  RE-VERIFIED because a NEW worker answers `chrome.userScripts`; `--no-build` skips, and a failed
+  build refuses with the raw tail rather than installing a stale dist. **The defect this exposed,
+  twice in one afternoon:** `installExtension` and the credential-seeding session both ended with a
+  graceful `close()`, so the refresh applied the new build and the very next line took down the
+  browser `axde launch` had left running — "a changed build without a relaunch" was true and
+  useless. Both use `finish()` now (close what this process LAUNCHED, which is what makes the
+  toggles reach disk; release what it ADOPTED), which is stage 2c's read rule in two more places.
+  Live: stage2a is **28 checks**, including a dist COPY whose bytes are changed to prove the refresh
+  keeps the browser up.
 - **An axde profile REPLACES the workspace embedded in the build (2026-09-04), and "replace" is
   three mechanisms.** The artifact carries a packaged workspace (`workspace-manifest.json` +
   `workspace-assets/`, verified per realm and installed in memory, never written to storage), and a

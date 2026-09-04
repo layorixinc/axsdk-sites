@@ -114,6 +114,18 @@ stale `dist/` cannot be delivered by accident. The flow gate is opt-in — `--ch
 `check:flows` (4.75 s, 245 tests) and refuses on failure; without it, the receipt names it as not
 run, because a green delivery is not a green gate.
 
+**An axde profile REPLACES the baseline embedded in the build.** The artifact carries a packaged
+workspace — flows, Lua and runtime modules — and a product profile merges the persisted layers on
+top of it. That is wrong for a dev environment: measured, a 75 B workspace flow layer travelled
+inside a 139,101 B document because a 136 KiB product document sat underneath, and that baseline
+was five days older than the workspace. So `ext install` writes replace mode, `/up` reports it
+(`baseline package:: replaced`), and `ext install --merge` opts back into the product-like
+layering, where the receipt names the baseline and its date instead.
+
+Replace mode covers three different mechanisms, because they are three: flow layers deep-merge,
+runtime modules union by name, and the durable Lua bundles BOTH run (packaged first). With the
+switch off, none of the packaged three is used at all.
+
 One boundary: nothing here opens a session. A client flow document is compiled when one opens, so
 `/up` proves the bytes are in the stores, not that a turn will work.
 
@@ -130,8 +142,8 @@ own or waits out a port that never opens.
 ## Tests
 
 ```bash
-npm run test:axde        # bun test axde — core, ops, driver, workspace, packs (121 tests, offline)
-npm run test:axde:live   # two real-browser gates: the headed browser (21) and the workspace (25)
+npm run test:axde        # bun test axde — core, ops, driver, workspace, packs (125 tests, offline)
+npm run test:axde:live   # three real-browser gates: headed browser (21), workspace (25), replace (11)
 ```
 
 The live gate drives the same subcommands on a throwaway profile root and asserts the 21 facts no

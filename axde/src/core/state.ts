@@ -41,7 +41,7 @@ export const COMMANDS = {
     usage: '/rm <name> [--force]', help: 'remove a profile (--force for one axde did not create)', takes: 'name', flags: { force: 'switch' },
   },
   install: {
-    usage: '/install <profile>', help: 'attach the build, relaunch, turn on both toggles', takes: 'name', flags: {},
+    usage: '/install <profile> [--merge]', help: 'attach the build, relaunch, turn on both toggles', takes: 'name', flags: { merge: 'switch' },
   },
   uninstall: {
     usage: '/uninstall <profile>', help: 'detach the build and relaunch without it', takes: 'name', flags: {},

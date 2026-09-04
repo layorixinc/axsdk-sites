@@ -242,6 +242,7 @@ export function createBrowser({ root, log = () => {} }) {
           storedFlowsEnabled: config.storedFlowsEnabled ?? null,
           storedLuaEnabled: config.storedLuaEnabled ?? null,
           remoteSiteFlowsEnabled: config.remoteSiteFlowsEnabled ?? null,
+          packagedSourcesEnabled: config.packagedSourcesEnabled ?? null,
         };
       })()`);
     },
@@ -360,13 +361,13 @@ export function createBrowser({ root, log = () => {} }) {
     },
 
     /** Seeds the extension's settings from a workspace `.env`; values are never returned or logged. */
-    async seedCredentials(envPath) {
+    async seedCredentials(envPath, { packaged = false } = {}) {
       if (optionsSession === undefined) return 'no-options-page';
       if (!existsSync(envPath)) return 'no-env';
       const found = credentialsFromEnv(readFileSync(envPath, 'utf-8'), WORKSPACE_ENV_KEYS);
       if (!found) return 'no-credentials';
       const outcome = await writeConfig(launched.cdp, optionsSession,
-        { ...harnessConfig(found, process.env, { local: true }), credentialsFrom: envPath },
+        { ...harnessConfig(found, process.env, { local: true, packaged }), credentialsFrom: envPath },
         { overwrite: true });
       return typeof outcome === 'string' ? outcome : 'written';
     },

@@ -685,7 +685,7 @@ receipt named the SCRIPT IDS read back as proof the extension had taken the laye
 answer comes from the harness's `lua()` helper, which sends `axsdk.cdp.run-lua` with a `groupId` —
 so it needs an OPEN SESSION, and this stage opens none by design. Delivery is proven by the store;
 consumption is stage 2d's.
-## 7. Stage 2d — the workspace REPLACES the packaged baseline — **DESIGN**
+## 7. Stage 2d — the workspace REPLACES the packaged baseline — **DONE 2026-09-04**
 
 **Scope:** one declared switch that makes a profile use the workspace INSTEAD of the sources embedded
 in the extension artifact, and axde profiles default to it. Nothing else: no new delivery path, no
@@ -838,6 +838,46 @@ The staleness of the embedded baseline is reported, not fixed: rebuilding it is
 something a delivery command should do behind a developer's back.
 
 
+### Measured acceptance — `npm run test:axde:live`
+
+`axde/live/stage2d.ts`: **11 checks**, ~40 s, and the payload store read from a realm that did not
+write it. Before this stage the same profile sent 139,101 B; after it:
+
+```text
+ext install repdev            → sources workspace only
+up repdev --workspace <ws>    → baseline   package:: replaced
+session payload               → composed from 1 layers: store:: only
+                                the workspace marker present
+                                shopping_multi_store_total_cost ABSENT
+                                clientFlows 49 B (nothing underneath it)
+                                clientLuaModules: _common.10_dev, and only that
+ext install repdev --merge    → sources package + workspace
+up repdev                     → baseline   package:: 133.0 KiB  digest 999ca95c5d67  2026-08-30
+```
+
+That last line is the other half of the stage: in merge mode the receipt now names the baseline it
+merged AND its date, which is how a reader learns the embedded document is five days older than
+the workspace. It is read from the BUILD (`<dist>/workspace-manifest.json`), so it costs no
+browser and cannot be a claim about a profile nobody opened.
+
+Offline: **125 tests** in axde, **860** in `axsdk-core`, **1382** in `axsdk-extension-cdp`, **246**
+in `axsdk-react`. Five mutation checks, each red: merging the baseline back into flows (2), unioning
+the packaged module layers again (2), letting the packaged Lua bundle run again (2), flipping the
+default so every profile replaces (4), and letting the installer wipe the stored layers anyway (1).
+
+**Two defects the live gate found that no offline test could.** `ext install --merge` did nothing at
+all on an already-current profile: the config is written by the credential-seeding step, and that
+step was skipped for `up-to-date` — so the writer of a setting was not writing it. And the flag was
+only ever written FALSE (`...(packaged ? {} : { packagedSourcesEnabled: false })`), so nothing could
+undo replace mode; it is stated in both directions now. An option that can only be turned on is a
+trap.
+
+**One thing the design got wrong and the tests corrected.** Adding `packagedSourcesEnabled` to
+`packageSourcesSelected` looked right — it is a source flag — and it made every worker start
+rewrite a replace-mode profile's config, because that predicate answers "is the config already what
+this installer would write" and the installer deliberately does NOT write that field. §6.3 of the
+sites guide records what a needless rewrite costs: a restart-host that killed the session it was
+about to reuse.
 ## 8. Later stages (scope sketch, not commitments)
 
 | stage | adds | why it is next |

@@ -3256,6 +3256,37 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   through the exit code; `import.meta.main` accepted as a third guard idiom, both mutation-checked).
   Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
   two Chromes on one profile directory are not two browsers.
+- **An axde profile REPLACES the workspace embedded in the build (2026-09-04), and "replace" is
+  three mechanisms.** The artifact carries a packaged workspace (`workspace-manifest.json` +
+  `workspace-assets/`, verified per realm and installed in memory, never written to storage), and a
+  product profile MERGES the persisted layers onto it. Measured: a 75 B workspace flow layer went
+  out inside a **139,101 B** document — `package:: 136,146 B` + `store:: 75 B` — carrying
+  `shopping_multi_store_total_cost`, and that baseline was **five days older** than the workspace
+  (dist manifest `999ca95c…` 2026-08-30, 19 modules; the repo builds `9b0adce2…`, 286,801 B, 27).
+  What wins per asset kind, all read rather than assumed: **flows** deep-merge (`mergeWith`: objects
+  recurse, scalars overwrite, ARRAYS replace wholesale, comments dropped on re-emit); **runtime
+  modules** union by NAME with stored winning per name (19 + `_common.10_dev` = 20 sent); **durable
+  Lua** does not merge at all — `packaged-lua:` and `stored-lua:` BOTH RUN, packaged first, so a
+  stale `_common` bundle keeps executing beside the workspace one and only colliding globals are
+  overwritten; the **sites index** already replaces; **sitemaps** are one store, last writer per
+  domain. So the switch (`packagedSourcesEnabled`, default TRUE → core `clientFlows.packaged`) is
+  honoured at THREE composition points, and a YAML-shaped fix would have left the Lua one running.
+  `ext install` writes replace mode for axde profiles, `--merge` opts back, and `/up` REPORTS the
+  mode rather than refusing either — a mode is not a misconfiguration. Live: `axde/live/stage2d.ts`
+  **11 checks** — one layer, the workspace marker present, the product document ABSENT, 49 B of
+  flows, one module — plus a merge-mode receipt naming the baseline and its DATE (read from the
+  build, so it costs no browser). Five mutation checks, each red.
+  **Three traps this stage measured.** (1) The installer empties
+  `axsdk:sites/flows/lua/lua-modules/widgets` whenever the manifest digest CHANGES, so the first
+  launch after an extension rebuild silently deleted what `/up` had written — in replace mode it now
+  keeps them (they are the only source) while still recording the digest. (2) Adding the flag to
+  `packageSourcesSelected` made every worker start rewrite a replace-mode profile: that predicate
+  answers "is the config already what this installer would write", and the installer deliberately
+  does not write that field (§6.3: a needless rewrite sent restart-host and killed the session it was
+  about to reuse). (3) `ext install --merge` did nothing on an already-current profile — the config
+  is written by the credential-seeding step, which was skipped for `up-to-date`, and the flag was
+  only ever written FALSE. A writer that does not write, and an option that can only be turned on,
+  are both traps; both were found by the live gate and neither by any offline test.
 - **`axde` delivers a WORKSPACE into a profile now (2026-09-04): `/up`, `/down`, `/sources`.**
   Its default working copy is its OWN — `axde/workspace/` (index.md mapping example.com to a `dev`
   site, `_common/{flows.yaml,scripts,rpc}`, `dev/{scripts,sitemap.md}`) — because delivering the

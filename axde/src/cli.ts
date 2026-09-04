@@ -14,7 +14,9 @@ import { initialState } from './core/state.ts';
 import { profileLine, statusLines } from './core/render.ts';
 import { extensionStatus, installExtension, uninstallExtension } from './ops/extension.ts';
 import { launchHeaded, stopHeaded } from './ops/session.ts';
-import { downWorkspace, inspectWorkspace, receipt, upWorkspace } from './ops/workspace.ts';
+import {
+  downWorkspace, inspectWorkspace, readPackagedBaseline, receipt, upWorkspace,
+} from './ops/workspace.ts';
 import { availablePort, createBrowser, fingerprintBuild, probeDebugger } from './ops/chrome.ts';
 import { createProfile, deleteProfile, listProfiles, profileRootFrom } from './ops/profiles.ts';
 
@@ -31,7 +33,7 @@ const USAGE = `axde — AXSDK Dev Env
   axde profile ls
   axde profile new <name> [--port <n>]
   axde profile rm  <name> [--force]
-  axde ext install   <profile> [--dist <path>]
+  axde ext install   <profile> [--dist <path>] [--merge]
   axde ext uninstall <profile>
   axde ext status    <profile>
   axde launch <profile> [--url <u>] [--force]   headed, and it STAYS UP after this returns
@@ -101,21 +103,25 @@ async function target(ctx, profile) {
   };
 }
 
-async function runInstall(ctx, profile, log) {
+async function runInstall(ctx, profile, log, { packaged = false } = {}) {
   const browser = createBrowser({ root: ctx.root, log });
   const at = await target(ctx, profile);
   const result = await installExtension(browser, at);
-  log(`install ${profile}: ${result.outcome} ${(result.fingerprint ?? '').slice(0, 8)} · user scripts ${result.userScripts ? 'on' : 'off'}`);
-  if (result.outcome !== 'up-to-date') {
-    // Seeded in its own short session, after the build is attached and therefore present on launch.
-    // Values are never echoed: this is the one place a secret could reach a screen.
-    const seeding = createBrowser({ root: ctx.root, log: () => {} });
-    try {
-      await seeding.open(at);
-      log(`credentials: ${await seeding.seedCredentials(ctx.envPath)}`);
-    } finally {
-      await seeding.close();
-    }
+  log(`install ${profile}: ${result.outcome} ${(result.fingerprint ?? '').slice(0, 8)} · user scripts ${result.userScripts ? 'on' : 'off'}`
+    + ` · sources ${packaged ? 'package + workspace' : 'workspace only'}`);
+  // ALWAYS, not only when the build changed. `install` is the single writer of this profile's
+  // config (§5), and the source MODE is part of it — measured 2026-09-04, the live gate caught
+  // `ext install --merge` doing nothing at all on an already-current profile, because the seeding
+  // step it writes through was skipped for `up-to-date`. One short session is the price of a writer
+  // that actually writes.
+  //
+  // Values are never echoed: this is the one place a secret could reach a screen.
+  const seeding = createBrowser({ root: ctx.root, log: () => {} });
+  try {
+    await seeding.open(at);
+    log(`credentials: ${await seeding.seedCredentials(ctx.envPath, { packaged })}`);
+  } finally {
+    await seeding.close();
   }
   return result;
 }
@@ -165,7 +171,9 @@ const HANDLERS = {
     const removed = await deleteProfile({ root: ctx.root, name, force: flags.force === true });
     say(`removed ${removed.name}`);
   },
-  install: async (ctx, { positional: [name] }, say) => { await runInstall(ctx, name, say); },
+  install: async (ctx, { positional: [name], flags }, say) => {
+    await runInstall(ctx, name, say, { packaged: flags.merge === true });
+  },
   uninstall: async (ctx, { positional: [name] }, say) => {
     const browser = createBrowser({ root: ctx.root, log: say });
     const result = await uninstallExtension(browser, await target(ctx, name));
@@ -234,7 +242,8 @@ async function runUp(ctx, profile, { check = false, force = false }, log) {
   const checked = check ? await runFlowGate(log) : 'skipped';
   const browser = createBrowser({ root: ctx.root, log: () => {} });
   const result = await upWorkspace(browser, { ...(await target(ctx, profile)), force, inspected });
-  for (const line of receipt({ inspected, ...result, checked })) log(line);
+  const baseline = readPackagedBaseline(ctx.dist);
+  for (const line of receipt({ inspected, ...result, baseline, checked })) log(line);
   return result;
 }
 
@@ -261,7 +270,7 @@ async function subcommand(args) {
     return 0;
   }
   if (group === 'ext' && action === 'install') {
-    await runInstall(ctx, name, say);
+    await runInstall(ctx, name, say, { packaged: args.includes('--merge') });
     return 0;
   }
   if (group === 'ext' && action === 'uninstall') {

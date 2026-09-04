@@ -54,6 +54,30 @@ function generatedState(dir: string) {
   }
 }
 
+/**
+ * The baseline embedded in a build: what a merged document has underneath it.
+ *
+ * A fact about the BUILD, so it is read from the dist and needs no browser. Measured 2026-09-04:
+ * the artifact in use carried a manifest five days older than the workspace, 136,146 B of flows
+ * and 19 modules against the workspace's 286,801 B and 27 — and no screen said so.
+ */
+export function readPackagedBaseline(dist: string) {
+  const file = join(dist, 'workspace-manifest.json');
+  if (!existsSync(file)) return undefined;
+  try {
+    const manifest = JSON.parse(readFileSync(file, 'utf8'));
+    const ref = manifest?.workspace?.flows?.[':'];
+    return {
+      bytes: ref === undefined ? 0 : (manifest.assets?.[ref]?.bytes ?? 0),
+      digest: String(manifest?.digest ?? '').replace(/^sha256:/, '').slice(0, 12),
+      generatedAt: String(manifest?.generatedAt ?? ''),
+      modules: Object.keys(manifest?.workspace?.modules?.[':'] ?? {}).length,
+    };
+  } catch {
+    // A build whose manifest cannot be read is reported as none rather than as a claim.
+    return undefined;
+  }
+}
 /** Everything a receipt needs, computed from disk and nothing else. No browser, no writes. */
 export async function inspectWorkspace(dir: string) {
   const workspace = await loadWorkspace(dir);
@@ -84,6 +108,7 @@ const foreign = (verb: string, profile: string) =>
   + 'up; pass --force only if you mean to overwrite them';
 
 /** The four fields that decide whether a stored layer is read at all. */
+/** The four that decide whether a stored layer is READ.  is a MODE. */
 const SWITCHES: Record<string, boolean> = {
   remote_sites: false,
   storedFlowsEnabled: true,
@@ -128,10 +153,13 @@ export async function upWorkspace(browser, {
     }
 
     const wrote = await browser.writeWorkspace(inspected.envelopes);
+    // Reported, never refused: replace and merge are both legal, and which one a profile is in
+    // is the first thing a reader needs when the document that went out is not the one they wrote.
+    const packaged = switches.packagedSourcesEnabled !== false;
     // The read-back is the proof: the answer of the call that wrote is not evidence that the store
     // holds it.
     const readBack = await browser.readWorkspace();
-    return { profile, wrote, restarted: wrote === 'written', readBack };
+    return { profile, wrote, restarted: wrote === 'written', readBack, packaged };
   } finally {
     await browser.finish();
   }
@@ -155,7 +183,7 @@ export async function downWorkspace(browser, { profile, port, dist, kind = 'axde
  * running session has not read), and `not run` — because the most expensive failure in this repo's
  * history is a green instrument mistaken for a green product.
  */
-export function receipt({ inspected, wrote, restarted, readBack, checked }) {
+export function receipt({ inspected, wrote, restarted, readBack, checked, packaged, baseline }) {
   const { report, slots, generated } = inspected;
   const lines = [
     `workspace  ${report.root}   digest ${report.digest}   sites ${report.sites}`,
@@ -178,6 +206,17 @@ export function receipt({ inspected, wrote, restarted, readBack, checked }) {
     lines.push(`  ${layer.key.padEnd(column, ' ')}${parts.join('   ')}`);
   }
   if (generated.state !== 'absent') lines.push(`  generated  ${generated.name} ${generated.state}`);
+  // What is UNDER the workspace, which is the question a merged document raises and no screen
+  // answered: measured 2026-09-04, a 75 B layer travelled inside a 139,101 B document.
+  if (packaged === false) lines.push('  baseline   package:: replaced');
+  else if (baseline !== undefined) {
+    const day = String(baseline.generatedAt ?? '').slice(0, 10);
+    lines.push(`  baseline   package:: ${KiB(baseline.bytes)}   digest ${baseline.digest}${day ? `   ${day}` : ''}`);
+  }
+  const flowBytes = report.layers.reduce((total, layer) => total + layer.flows, 0);
+  if (flowBytes === 0 && packaged === false) {
+    lines.push('  flows      0 B — the session will run the app document alone');
+  }
   lines.push(`  stores     ${wrote}${restarted ? ' · host restarted' : ''}`);
   const back = Object.entries(readBack.bytes ?? {}).map(([key, value]) => `${key} ${KiB(value as number)}`);
   if (back.length > 0) lines.push(`  read back  ${back.join(' · ')}`);
@@ -185,6 +224,6 @@ export function receipt({ inspected, wrote, restarted, readBack, checked }) {
     lines.push(`  modules    ${readBack.moduleNames.join(' ')}`);
   }
   lines.push(`  ${checked === 'pass' ? 'checked    check:flows pass' : 'not run    check:flows (pass --check)'}`
-    + ' · script ids need a session (stage 2d)');
+    + ' · script ids need a session (stage 2e)');
   return lines;
 }

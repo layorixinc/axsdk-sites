@@ -7,7 +7,7 @@ import {
   loadWorkspace, storeEnvelopes, workspaceIndexEntries,
 } from '../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/workspace.mjs';
 import {
-  downWorkspace, inspectWorkspace, receipt, upWorkspace,
+  downWorkspace, inspectWorkspace, readPackagedBaseline, receipt, upWorkspace,
 } from './src/ops/workspace.ts';
 
 const AXDE = dirname(fileURLToPath(import.meta.url));
@@ -238,4 +238,67 @@ test('a long layer key still leaves a gap before its value', async () => {
   for (const line of lines.filter((one) => /^\s+:/.test(one))) {
     assert.match(line, /^\s+:\S*\s{2,}\S/, line);
   }
+});
+
+/**
+ * Replace mode. An axde profile uses the workspace INSTEAD of the sources embedded in the artifact:
+ * measured 2026-09-04, a 75 B workspace layer went out inside a 139,101 B document because a
+ * 136 KiB packaged baseline was merged underneath it, and that baseline was five days old.
+ */
+test('up REPORTS the mode instead of refusing it — a mode is not a misconfiguration', async () => {
+  const inspected = await inspectWorkspace(SCAFFOLD);
+  for (const packaged of [false, true]) {
+    const browser = fakeBrowser({ switches: { ...STORED, packagedSourcesEnabled: packaged } });
+    const result = await upWorkspace(browser, { ...at, inspected });
+    assert.equal(result.packaged, packaged, String(packaged));
+  }
+});
+
+test('the receipt names the baseline: replaced, or its size and DATE when it is merged', async () => {
+  const inspected = await inspectWorkspace(SCAFFOLD);
+  const replaced = receipt({
+    inspected, wrote: 'written', restarted: true, packaged: false,
+    readBack: { bytes: {}, moduleNames: [] }, checked: 'skipped',
+  }).join('\n');
+  assert.match(replaced, /baseline\s+package:: replaced/);
+
+  const merged = receipt({
+    inspected, wrote: 'written', restarted: true, packaged: true,
+    baseline: { bytes: 136146, digest: '999ca95c5d67', generatedAt: '2026-08-30T11:43:45.164Z' },
+    readBack: { bytes: {}, moduleNames: [] }, checked: 'skipped',
+  }).join('\n');
+  // The date is the point: a baseline five days older than the workspace is the fact a reader needs.
+  assert.match(merged, /baseline\s+package:: 133\.0 KiB/);
+  assert.match(merged, /999ca95c5d67/);
+  assert.match(merged, /2026-08-30/);
+});
+
+test('a workspace with no flows says what the session will run instead', async () => {
+  const inspected = await inspectWorkspace(SCAFFOLD);
+  const noFlows = {
+    ...inspected,
+    report: {
+      ...inspected.report,
+      layers: inspected.report.layers.map((layer) => ({ ...layer, flows: 0 })),
+    },
+  };
+  const lines = receipt({
+    inspected: noFlows, wrote: 'written', restarted: true, packaged: false,
+    readBack: { bytes: {}, moduleNames: [] }, checked: 'skipped',
+  }).join('\n');
+  // With no flows and no baseline there is no client document at all.
+  assert.match(lines, /app document alone/);
+});
+
+test('the packaged baseline is read from the BUILD, and an unreadable one is none', async () => {
+  const dist = resolve(AXDE, '..', '..', 'axsdk-sdk-js', 'packages', 'axsdk-extension-cdp', 'dist');
+  const baseline = readPackagedBaseline(dist);
+  // The build in use carries one; its digest is 12 hex and its size is the flow asset's.
+  assert.ok(baseline !== undefined, 'the sibling build carries a manifest');
+  assert.match(baseline.digest, /^[0-9a-f]{12}$/);
+  assert.ok(baseline.bytes > 0, String(baseline.bytes));
+  assert.match(baseline.generatedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+  // A directory with no manifest is reported as NONE, never as a zero-sized baseline.
+  assert.equal(readPackagedBaseline(resolve(AXDE, 'workspace')), undefined);
 });

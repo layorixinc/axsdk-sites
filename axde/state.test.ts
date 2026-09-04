@@ -182,3 +182,25 @@ test('every command in the table states a usage line, so a refusal can always qu
     assert.ok(spec.help.length > 0, name);
   }
 });
+
+test('the workspace commands parse their own flags', () => {
+  assert.deepEqual(submit(start(), '/up packdev --check').effects, [{
+    type: 'command', name: 'up', positional: ['packdev'], flags: { check: true },
+  }]);
+  assert.deepEqual(submit(start(), '/down packdev --force').effects, [{
+    type: 'command', name: 'down', positional: ['packdev'], flags: { force: true },
+  }]);
+  // `/sources` names no profile: it reads the working copy and touches no browser at all.
+  assert.deepEqual(submit(start(), '/sources').effects, [{
+    type: 'command', name: 'sources', positional: [], flags: {},
+  }]);
+  assert.match(submit(start(), '/up').state.transcript.at(-1).text, /\/up needs a profile/);
+});
+
+test('a program-level flag cannot be passed per command', () => {
+  // `--dist`, `--env` and `--workspace` are read when axde starts, so a command cannot quietly
+  // deliver a different working copy than the header states.
+  const out = submit(start(), '/up packdev --workspace .');
+  assert.deepEqual(out.effects, []);
+  assert.match(out.state.transcript.at(-1).text, /has no --workspace/);
+});

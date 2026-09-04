@@ -130,3 +130,12 @@ test('a status answer is one line per field, with absent fields shown as absent'
   assert.ok(lines.some((line) => /installed\s+true/.test(line)), lines.join('|'));
   assert.ok(lines.some((line) => /lastError\s+—/.test(line)), lines.join('|'));
 });
+
+test('the header names the workspace, because /up delivers THAT one', () => {
+  const state = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e', workspace: 'workspace' });
+  // The name, never the digest: a digest goes stale the moment a file is saved, and a stale fact on
+  // screen is a lie. `/sources` computes one when asked.
+  assert.match(render(state, wide)[0], /ws: workspace/);
+  const none = initialState({ dist: 'D:/dist', buildFingerprint: '9f3c2a1e', workspace: undefined });
+  assert.match(render(none, wide)[0], /ws: none/);
+});

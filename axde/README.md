@@ -19,6 +19,9 @@ npm run axde -- ext status packdev
 npm run axde -- ext uninstall packdev
 npm run axde -- launch packdev --url https://www.amazon.com/   # headed, and it STAYS UP
 npm run axde -- stop packdev
+npm run axde -- sources                                        # what would be delivered
+npm run axde -- up packdev                                     # deliver it into the profile
+npm run axde -- down packdev                                   # take it back out
 npm run axde -- profile rm packdev
 ```
 
@@ -36,6 +39,8 @@ type commands and read answers:
 /help                                  /profiles
 /new <name> [--port <n>]               /rm <name> [--force]
 /install <profile>                     /uninstall <profile>
+/up <profile> [--check]                /down <profile>
+/sources [--check]
 /status <profile>                      /launch <profile> [--url <u>] [--force]
 /stop <profile> [--force]              /quit
 ```
@@ -86,6 +91,32 @@ those toggles.
 `axde stop` closes it gracefully, which is the only way the two toggles survive — never kill it.
 A `stop` whose port keeps answering is reported as a failure, not as a stop.
 
+## What "up" and "down" mean here
+
+A workspace is flows, Lua, runtime modules, a site index and sitemaps. `/up <profile>` writes
+this working copy into that profile's extension stores; `/down <profile>` removes it, and the
+profile goes back to the published sources. `/sources` says what would be written and touches no
+browser at all — the cheapest answer to "is my file in the bundle".
+
+The default working copy is **`axde/workspace/`** — axde's own, small, laid out exactly like the
+product's (see its README). The product workspace is one flag away: `axde --workspace .`.
+
+What `/up` refuses, and why: a profile axde did not create (`--force` if you mean it), a
+workspace the loader will not accept (its raw reason names the file and the rule), a stale
+`_common/rpc/62_rpc_sites.lua` (it names `npm run build:rpc:sites` and never regenerates your
+working copy for you), a profile with no extension (the stores live in its origin), and a profile
+whose source switches are in remote mode — storing a workspace nothing will read is worse than
+refusing to store it.
+
+The merge is not a build step: the SDK loader concatenates each layer at delivery time, so
+`npm run build:lua` (which writes `dist/` for the published path) is never on this path and a
+stale `dist/` cannot be delivered by accident. The flow gate is opt-in — `--check` runs
+`check:flows` (4.75 s, 245 tests) and refuses on failure; without it, the receipt names it as not
+run, because a green delivery is not a green gate.
+
+One boundary: nothing here opens a session. A client flow document is compiled when one opens, so
+`/up` proves the bytes are in the stores, not that a turn will work.
+
 ## Safety
 
 `axde` marks the profiles it creates (`axde-profile.json`) and refuses to delete or install into one
@@ -99,8 +130,8 @@ own or waits out a port that never opens.
 ## Tests
 
 ```bash
-npm run test:axde        # bun test axde — core, ops, driver, sample packs (100 tests, offline)
-npm run test:axde:live   # a real browser: launch outlives the command, stop keeps the toggles
+npm run test:axde        # bun test axde — core, ops, driver, workspace, packs (121 tests, offline)
+npm run test:axde:live   # two real-browser gates: the headed browser (21) and the workspace (25)
 ```
 
 The live gate drives the same subcommands on a throwaway profile root and asserts the 21 facts no

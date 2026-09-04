@@ -18,9 +18,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
-
 import {
-  BUILD_KEY, connectCdp, evaluate, launchChrome, probeDebugger, writeConfig,
+  BUILD_KEY, CONFIG_KEY, WORKSPACE_KEYS, connectCdp, evaluate, launchChrome, probeDebugger,
+  resetWorkspaceStores, writeConfig, writeWorkspaceStores,
 } from '../../../../axsdk-sdk-js/packages/axsdk-extension-cdp/scripts/browser-session.mjs';
 import {
   WORKSPACE_ENV_KEYS, credentialsFromEnv, extensionIdFromKey, fingerprintBuild, profileDir,
@@ -226,6 +226,60 @@ export function createBrowser({ root, log = () => {} }) {
 
     async clearRunning(name) {
       await clearRunning({ root, name });
+    },
+
+    /**
+     * The four fields that decide whether a stored layer is read, by NAME. The config store also
+     * holds the API key, so it is never read whole and never printed.
+     */
+    async sourceSwitches() {
+      if (optionsSession === undefined) throw new Error('sourceSwitches: no options page to read');
+      return evaluate(launched.cdp, optionsSession, `(async () => {
+        const stored = (await chrome.storage.local.get(${JSON.stringify(CONFIG_KEY)}))[${JSON.stringify(CONFIG_KEY)}] ?? {};
+        const config = typeof stored === 'string' ? JSON.parse(stored) : stored;
+        return {
+          remote_sites: config.remote_sites ?? null,
+          storedFlowsEnabled: config.storedFlowsEnabled ?? null,
+          storedLuaEnabled: config.storedLuaEnabled ?? null,
+          remoteSiteFlowsEnabled: config.remoteSiteFlowsEnabled ?? null,
+        };
+      })()`);
+    },
+
+    async writeWorkspace(envelopes) {
+      if (optionsSession === undefined) throw new Error('writeWorkspace: no options page to write into');
+      return writeWorkspaceStores(launched.cdp, optionsSession, envelopes);
+    },
+
+    /**
+     * What the store HOLDS, which is the only proof a write landed: sizes and the module names.
+     *
+     * The key list is the SDK's own `WORKSPACE_KEYS`, never a copy — a copy is exactly what left
+     * the module store out of a reset for as long as that reset existed. The one key named here is
+     * named because this call has to look INSIDE it, which is a fact about the module store rather
+     * than a second list of stores.
+     */
+    async readWorkspace(moduleKey = 'axsdk:lua-modules') {
+      if (optionsSession === undefined) throw new Error('readWorkspace: no options page to read');
+      return evaluate(launched.cdp, optionsSession, `(async () => {
+        const keys = ${JSON.stringify(WORKSPACE_KEYS)};
+        const held = await chrome.storage.local.get(keys);
+        const bytes = {};
+        for (const key of keys) {
+          if (typeof held[key] === 'string') bytes[key] = new TextEncoder().encode(held[key]).length;
+        }
+        let moduleNames = [];
+        try {
+          const layers = JSON.parse(held[${JSON.stringify(moduleKey)}]).state.lua ?? {};
+          moduleNames = [...new Set(Object.values(layers).flatMap((slot) => Object.keys(JSON.parse(slot))))].sort();
+        } catch { moduleNames = []; }
+        return { bytes, moduleNames };
+      })()`);
+    },
+
+    async clearWorkspace() {
+      if (optionsSession === undefined) throw new Error('clearWorkspace: no options page to clear');
+      return resetWorkspaceStores(launched.cdp, optionsSession);
     },
 
     async attachBuild(dist) {

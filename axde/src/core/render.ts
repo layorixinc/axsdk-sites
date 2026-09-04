@@ -64,7 +64,10 @@ export function render(state, { rows, cols }) {
   const build = state.build.fingerprint === undefined
     ? 'build: no build at dist — run the extension build first'
     : `build: ${cut(state.build.fingerprint, 8)} ok`;
-  const header = cut(`AXSDK Dev Env${state.busy ? '  (working…)' : ''}   ${build}`, cols);
+  // The workspace by NAME, never its digest: a digest goes stale the moment a file is saved, and a
+  // stale fact on screen is a lie. `/sources` computes one when asked.
+  const workspace = `ws: ${state.workspace ?? 'none'}`;
+  const header = cut(`AXSDK Dev Env${state.busy ? '  (working…)' : ''}   ${build}   ${workspace}`, cols);
 
   // header, one blank under it, one blank over the prompt, the prompt: four rows that are not
   // transcript. The transcript is BOTTOM-anchored in what is left, so the newest answer is always

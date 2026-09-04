@@ -1,0 +1,13 @@
+# axde's own common flow layer — A SCAFFOLD.
+#
+# What is proven about this file: the SDK loader accepts it (it parses as an object, which is the
+# same rule core applies), `/up` delivers it into `axsdk:flows[":"]`, and `/down` removes it.
+#
+# What is NOT proven: that it COMPILES. A client flow document is compiled when a session opens, and
+# this stage opens none — so nothing here has been compiled yet, and that is stage 4's first
+# measurement. A delivered document is not a working one; do not read a green `/up` as a green turn.
+#
+# Edit this file to iterate on a flow against one axde profile, then `/up <profile>` again. The
+# product's own document is one flag away: `axde --workspace .`.
+
+contexts: {}

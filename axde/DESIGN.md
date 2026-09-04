@@ -399,7 +399,7 @@ retyped because `profile ls` and `ext status` now print through the same formatt
 uses (`profileLine`, `statusLines`). That unification is the point — one answer, two surfaces —
 and it was an accidental live run that caught the first attempt at it silently not applying.
 
-## 6. Stage 2c — the workspace: local flows, Lua and modules in a profile — **DESIGN**
+## 6. Stage 2c — the workspace: local flows, Lua and modules in a profile — **DONE 2026-09-04**
 
 **Scope:** put a working copy's flows, Lua, RPC modules, site index and sitemaps into a profile's
 extension stores, take them back out again, and report exactly what would be or was written.
@@ -512,7 +512,7 @@ words.
 7. **Write what changed** (`storeEnvelopes` → `writeWorkspaceStores`) and report `written` or
    `unchanged` exactly as the SDK answered. An `unchanged` reported as a write is the same lie as a
    cart add that never happened.
-8. **Read the receipt back** — script ids and the module store's key set — and print it.
+8. **Read the store back** — key set, byte counts and the module layer's names — and print it.
 9. **Leave the browser as it was found** (`finish()`, the stage-2a rule): close only what this
    command started.
 
@@ -559,19 +559,27 @@ mistaken for a green gate.
   :dev       lua 0.3 KiB            sitemap 0.2 KiB
   generated  62_rpc_sites.lua up to date
   stores     written · host restarted
-  loaded     stored-lua:  stored-lua:dev            (script ids, read back)
-  modules    axsdk:lua-modules: 1 layer, 1 name
-  not run    check:flows (pass --check), test:lua
+  read back  axsdk:sites 1.1 KiB · axsdk:flows 0.4 KiB · axsdk:lua 1.5 KiB · axsdk:widgets 40 B
+  modules    axsdk:lua-modules 1 slot, names: _common.10_dev
+  not run    check:flows (pass --check) · script ids need a session (stage 2d)
 ```
 
-Four of those lines exist because of a measured trap. The **slot count** (shown when a layer splits),
-because a flow layer over 256 KiB is split and a reader who does not know that cannot tell a chunked
-layer from a truncated one. The **script ids read back after the write**, because that is the only
-proof the extension took them — and §13's warning applies: script ids prove the durable Lua layer
-and say NOTHING about runtime module closure, which is why the module store gets its own line.
+Four of those lines exist because of a measured trap. The **slot count**, because a layer over
+256 KiB is split and a reader who does not know that cannot tell a chunked layer from a truncated
+one. The **read-back**, because the only thing that proves a write landed is reading the store the
+extension reads — not the answer of the call that wrote it.
 **`host restarted`**, because a write that did not restart the host is a write the running session
-has not read. And **`not run`**, because the most expensive failure in this repo's history is a green
-instrument mistaken for a green product.
+has not read. And **`not run`**, because the most expensive failure in this repo's history is a
+green instrument mistaken for a green product.
+
+**A correction the implementation forced, before any code was written.** The first draft of this
+receipt promised the SCRIPT IDS read back (`stored-lua:`, `stored-lua:dev`) as the proof the
+extension had taken the layers. Measured: that answer comes from `harness.mjs`'s `lua()` helper,
+which sends `axsdk.cdp.run-lua` with a `groupId` — so it needs an OPEN SESSION
+(`findSession`/`startSessionOn`). This stage opens none, on purpose. So delivery is proven by the
+store and CONSUMPTION is stage 2d's, where a session exists; §13's warning survives the move
+intact, because script ids would have proven the durable Lua layer and said nothing about runtime
+module closure anyway.
 
 ### Boundaries this stage must not blur
 
@@ -621,8 +629,8 @@ Live (`axde/live/stage2c.ts`, its own npm script, throwaway profile root):
 
 - fresh profile → `install` → `/up` → read the store KEY SETS and byte counts back and compare them
   to what `/sources` reported, digest included;
-- launch on `https://example.com/` and read the script ids: `stored-lua:` plus `stored-lua:dev`,
-  which is the site layer proving itself on the domain its index declares;
+- the module store carries the runtime module by NAME (`_common.10_dev`), which is the half of the
+  delivery that a durable-layer check cannot see;
 - a second `/up` answers `unchanged` and does NOT restart the host (the measured reason the
   comparison is scoped);
 - `/down` removes all five keys — the assertion that fails today, and the reason the SDK fix comes
@@ -634,6 +642,49 @@ nothing will read it), reporting `written` for `unchanged`, skipping the generat
 and removing `axsdk:lua-modules` from the reset list again.
 
 
+### Measured acceptance — `npm run test:axde:live`
+
+`axde/live/stage2c.ts`: **25 checks, ~24 s**, throwaway profile root, and every store read back
+through a fresh CDP connection that shares nothing with the writer — a wrong envelope shape is
+rehydrated as an EMPTY store and reports nothing, which is the failure a fake cannot have.
+
+```text
+sources                 → digest + every layer, with no browser at all
+up packdev              → written · host restarted; the receipt carries the same digest
+                          and names the module IN the store (_common.10_dev)
+read back (fresh CDP)   → all five stores; flow layer `:`; Lua layers `:` and `:dev`;
+                          the common layer MERGED (one vararg function per file);
+                          index source `local`; the site record carrying its sitemap
+up packdev (again)      → unchanged, and the host is NOT restarted
+down packdev            → all five removed, and the profile really holds none
+down packdev (again)    → "nothing stored"
+up packdev --workspace .→ the product workspace: 62_rpc_sites.lua up-to-date, flows reported
+                          as 2 SLOTS, the store holding `:` and `:|2`, 11 site layers,
+                          27 runtime modules named (including _common.62_rpc_sites)
+up/down someone-elses   → refused BY NAME, exit code 1
+```
+
+Offline: **121 tests** (`npm run test:axde`). Stage 2c owns 22 of them: the scaffold loading clean
+and becoming the five stores, the receipt (layers, slot counts, the key column sized to the widest
+key), every refusal in order, and the one-writer pin — `axde/src` builds no store envelope,
+re-implements no splitter, digest or merge, and carries no list of store keys.
+
+Five mutation checks, each red: dropping the switch check, reporting `unchanged` as `written`,
+skipping the generated-file comparison, dropping the extension-present check, and giving the
+adapter its own list of store keys.
+
+**Two defects this stage found in code that was already green.** `resetWorkspaceStores` listed
+four of the five keys, so a reset left the module store behind — fixed in the SDK, mutation-checked,
+and `WORKSPACE_KEYS` is now exported so the read-back cannot grow a second copy. And an import edit
+in `ops/chrome.ts` had silently dropped `node:net`, `node:fs/promises` and `node:path`: every
+offline test passed (they run against fakes) and the first live command died on
+`createServer is not defined`.
+
+**One promise the implementation retracted before any code was written.** The first draft of the
+receipt named the SCRIPT IDS read back as proof the extension had taken the layers. Measured: that
+answer comes from the harness's `lua()` helper, which sends `axsdk.cdp.run-lua` with a `groupId` —
+so it needs an OPEN SESSION, and this stage opens none by design. Delivery is proven by the store;
+consumption is stage 2d's.
 ## 7. Later stages (scope sketch, not commitments)
 
 | stage | adds | why it is next |

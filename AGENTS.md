@@ -3256,6 +3256,32 @@ See the empty-table-→-object gotcha in §9. Use scalars for tool-validated sta
   through the exit code; `import.meta.main` accepted as a third guard idiom, both mutation-checked).
   Live launch/stop refuse a foreign profile BY NAME for a mechanical reason:
   two Chromes on one profile directory are not two browsers.
+- **`axde` delivers a WORKSPACE into a profile now (2026-09-04): `/up`, `/down`, `/sources`.**
+  Its default working copy is its OWN — `axde/workspace/` (index.md mapping example.com to a `dev`
+  site, `_common/{flows.yaml,scripts,rpc}`, `dev/{scripts,sitemap.md}`) — because delivering the
+  product's 280 KiB flow document and ten site layers into a debugging profile is a different job
+  from developing; `axde --workspace .` is the product one. Everything mechanical is the SDK's
+  (`loadWorkspace`, `bundleLua`, `storeEnvelopes`, `encodeFlowLayers`, `writeWorkspaceStores`,
+  `resetWorkspaceStores`, `describeWorkspace`) and a test pins that `axde/src` builds no store
+  envelope, re-implements no splitter/digest/merge, and carries no list of store keys.
+  **When the builds happen, measured:** the Lua MERGE is `bundleLua`, inside the loader, at delivery
+  time — so `npm run build:lua` (which writes `dist/` for the published path) is never on this path
+  and a stale `dist/` cannot be delivered by accident; `_common/rpc/*` modules are delivered
+  byte-for-byte; the one GENERATED file (`62_rpc_sites.lua`) is regenerated IN MEMORY (48 ms,
+  `readSiteConfigs`+`serializeSites`, LF-normalised exactly as `build-rpc-sites.test.mjs` compares)
+  and a mismatch REFUSES naming `npm run build:rpc:sites` rather than editing your working copy;
+  `check:flows` (245 tests, 4.75 s) is opt-in `--check` and is named as NOT RUN in every other
+  receipt, because a green delivery is not a green gate. **Two defects found in already-green code:**
+  `resetWorkspaceStores` listed four of the five keys, so a reset left `axsdk:lua-modules` behind and
+  `/down` would have reported published sources while the module store still served a working copy
+  (fixed in the SDK, `WORKSPACE_KEYS` now exported so the read-back cannot grow a second copy); and
+  an import edit in `ops/chrome.ts` silently dropped `node:net`/`node:fs/promises`/`node:path` —
+  every offline test passed against fakes and the first live command died on `createServer is not
+  defined`. **One promise retracted before any code:** the receipt was to prove delivery with the
+  SCRIPT IDS read back, but that answer needs an open session (`lua()` sends `run-lua` with a
+  `groupId`), and this stage opens none — so the store read-back is the proof and consumption is
+  stage 2d's. Live: `axde/live/stage2c.ts` **25 checks / 24 s**, including the product workspace
+  splitting its flow layer into `:` + `:|2` and 27 modules named in the module store. Offline 121.
 - **`axde`'s TUI is a slash-command CONSOLE (2026-09-04), and the target moved from a cursor into
   the command.** The screen is a transcript plus one input line, with NO box around it (a border around a conversation is furniture — the marker `›`/`✗` is what separates a question from its answer, and the transcript is bottom-anchored so the newest answer is the line directly above the prompt): no profile pane, no single-key
   shortcuts, and the inventory is an ANSWER to `/profiles` rather than a cached table. Three

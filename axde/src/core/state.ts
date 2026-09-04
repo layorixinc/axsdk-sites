@@ -55,6 +55,15 @@ export const COMMANDS = {
   stop: {
     usage: '/stop <profile> [--force]', help: 'close it gracefully, so the toggles survive', takes: 'name', flags: { force: 'switch' },
   },
+  up: {
+    usage: '/up <profile> [--check]', help: 'this working copy INTO the profile (flows, Lua, modules)', takes: 'name', flags: { check: 'switch', force: 'switch' },
+  },
+  down: {
+    usage: '/down <profile>', help: 'take the working copy back out; published sources return', takes: 'name', flags: { force: 'switch' },
+  },
+  sources: {
+    usage: '/sources [--check]', help: 'what would be written — no browser at all', takes: 'none', flags: { check: 'switch' },
+  },
   quit: {
     usage: '/quit', help: 'leave (ctrl-c does too)', takes: 'none', flags: {}, local: true,
   },
@@ -62,7 +71,7 @@ export const COMMANDS = {
 
 const HELP_HINT = 'try /help';
 
-export function initialState({ dist, buildFingerprint }) {
+export function initialState({ dist, buildFingerprint, workspace }) {
   return {
     // One line, because the header already states what this program is. A banner that repeats the
     // title is the same furniture as a box around a conversation.
@@ -74,6 +83,7 @@ export function initialState({ dist, buildFingerprint }) {
     historyAt: null,
     busy: false,
     build: { dist, fingerprint: buildFingerprint },
+    workspace,
   };
 }
 

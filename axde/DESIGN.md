@@ -685,11 +685,164 @@ receipt named the SCRIPT IDS read back as proof the extension had taken the laye
 answer comes from the harness's `lua()` helper, which sends `axsdk.cdp.run-lua` with a `groupId` —
 so it needs an OPEN SESSION, and this stage opens none by design. Delivery is proven by the store;
 consumption is stage 2d's.
-## 7. Later stages (scope sketch, not commitments)
+## 7. Stage 2d — the workspace REPLACES the packaged baseline — **DESIGN**
+
+**Scope:** one declared switch that makes a profile use the workspace INSTEAD of the sources embedded
+in the extension artifact, and axde profiles default to it. Nothing else: no new delivery path, no
+change to what the backend app document provides.
+
+### Why, measured
+
+`/up` delivers a workspace and the session still opens on something else. Measured 2026-09-04 on a
+dev profile, with a probe workspace whose values collide with the packaged document's:
+
+|what| |
+|---|---|
+|stored layer|`axdeWorkspaceMarker: axde-marker-7f3a`, `maxSteps: 7`, **75 B**|
+|sent `clientFlows`|**139,101 B**, carries the marker, carries `maxSteps: 7`, carries `maxSteps: 64` NOT at all|
+|and also carries|`shopping_multi_store_total_cost`, `request_service_quote`, `record_memory`|
+|composed from|`package:: 136,146 B` + `store:: 75 B`|
+
+So the workspace is not ignored — its overrides land exactly. What lands with them is a 136 KiB
+product document nobody asked for, and a planner that sees eight product intents beside whatever is
+being authored is not the environment a small workspace exists to provide.
+
+Two further measurements decide the shape of the fix rather than its motivation:
+
+- **The embedded baseline is a snapshot, and it is stale.** The artifact's manifest is from
+  2026-08-30 (`sha256:999ca95c…`, 22 assets, flows 136,146 B, 19 modules) while the workspace this
+  repo builds today is `sha256:9b0adce2…`, 31 assets, flows 286,801 B, 27 modules. A developer is
+  debugging against a document that is neither the product's current one nor their own.
+- **A digest change WIPES the stored layers.** `installPackagedWorkspace` writes
+  `EMPTY_LEGACY_STORES` (`axsdk:sites/flows/lua/lua-modules/widgets`) whenever the installed digest
+  differs, and forces five source flags whenever `packageSourcesSelected` reads false. So the first
+  launch after an extension rebuild silently deletes what `/up` put there.
+
+### What wins today, per asset kind — the review
+
+"Replace" is not one mechanism. Three of these five are not YAML merges at all:
+
+|asset|packaged|stored|what happens today|
+|---|---|---|---|
+|flows `:`|layer 2, `package::`|layer 3, `store::`|**deep MERGE** (`mergeWith`): objects recurse, scalars overwrite, **arrays are replaced wholesale**, and the result is re-emitted so **comments are dropped**|
+|runtime modules|`getPackagedModuleLayer(':')`|`axsdk:lua-modules` chunks|**UNION by NAME** into one `Map`, stored wins per name — measured: 19 packaged + `_common.10_dev` = 20 sent|
+|durable Lua `:`/`:<domain>`|`packaged-lua:` script|`stored-lua:` script|**BOTH RUN**, packaged first: two bundles load, and a global defined in both ends up the stored one's. Nothing replaces anything|
+|sites index|projected into `sitesStore`|a populated stored index wins|already **REPLACE**|
+|sitemaps|seeded site records|the records `/up` writes|one store, per domain, last writer wins|
+
+The flows row is what the user saw. The Lua row is the one that will surprise the next reader: a
+five-day-old `_common` bundle is still EXECUTING beside the workspace's, and only the names that
+collide are overwritten.
+
+### Options considered
+
+- **Empty the package layer.** Impossible: the assets are files in the artifact, verified by digest
+  before core sees them. There is nothing in storage to clear.
+- **A dist built without the pair.** Costs no SDK code — `fetchPackagedWorkspace` answers
+  `no-artifact` and `installPackagedWorkspace` then neither wipes nor forces anything. But it forks a
+  7 MiB artifact per axde profile, or adds a second build variant, and two artifacts agree only until
+  the first fix lands in one of them (§13, twice).
+- **A magic key in the flow document** (`axsdkReplaceBaseline: true`). Self-describing and travels
+  with the workspace, but it is data controlling code, and the key rides into the document the
+  backend compiles unless something strips it — one more boundary to get wrong.
+- **CHOSEN: one declared switch**, honoured at the three composition points. It costs real plumbing
+  and buys a single word that means the same thing everywhere, including for `npm run cdp`, which has
+  exactly the same problem.
+
+### The switch
+
+`packagedSourcesEnabled` in the extension config, **default `true`** so nothing about the product
+changes, derived into core's `clientFlows.packaged`. One name, one meaning: *use the sources embedded
+in this artifact*.
+
+The seams, each already read:
+
+|file|change|
+|---|---|
+|`shared/config.ts`|`packagedSourcesEnabled: flag('packagedSourcesEnabled', true)`|
+|`shared/sdk-config.ts`|`clientFlows.packaged = config.packagedSourcesEnabled`|
+|`core/types.ts` + `clientflowsconfig.ts`|`packaged: config?.packaged !== false`|
+|`core/contextvalues.ts`|`buildCommonClientFlowLayers`: include `package::` only when packaged|
+|`core/contextvalues.ts`|`buildClientLuaModules`: include the packaged layers only when packaged|
+|`core/lua/stored-scripts.ts`|`getLocalCommonLuaScripts` / `getLocalSiteLuaScripts`: include the `packaged-lua:` script only when packaged (it reads `AXSDK.config?.clientFlows`, as `buildClientLuaModules` already does)|
+|`background/workspace-assets.ts`|`packageSourcesSelected` gains the field, and `installPackagedWorkspace` **must not** empty the legacy stores while packaged is off — they are the only source then — while still recording the new digest so the next change is still detectable|
+
+That last row is the one a careless implementation gets wrong: without it, the switch works until the
+extension is rebuilt and then the workspace disappears.
+
+### What axde does with it
+
+`ext install` is the single writer of the profile config (§5), so it writes
+`packagedSourcesEnabled: false`: **an axde profile is replace-mode by default**, because that is the
+whole point of a small workspace, and because it is equally right for `--workspace .` (there the
+workspace IS the product). `ext install --merge` writes `true` for the rare case of reproducing what a
+user's profile does.
+
+`/up` gains no refusal. Its switch check today demands stored-on and remote-off; `packaged` is legal
+either way, so it is REPORTED, never refused — a mode is not a misconfiguration.
+
+### What has to be visible, or the mode is undebuggable
+
+- `/up` receipt: `baseline   package:: replaced` — or, in merge mode,
+  `baseline   package:: 136146 B  digest 999ca95c  2026-08-30`, because a baseline that is five days
+  old is the thing a reader most needs and the one thing no screen says today.
+- The Payload tab already prints `composed from N layers`; in replace mode it reads
+  `composed from 1 layers → store:: 75 B`, which is the visible proof at the boundary that matters.
+- The axde header: `ws: workspace (replace)`.
+
+### Two cliffs this design must name
+
+- **A workspace with no flows plus packaged off sends NO client document.** The app document alone
+  then runs. `/up` says so in the receipt (`flows 0 B — the session will run the app document
+  alone`), and the scaffold ships a `flows.yaml` precisely so the default path is not that cliff.
+- **`extends: app` is the workspace's job now.** The packaged document opens with `extends: app`; in
+  replace mode the workspace document is the only client layer, so a workspace that wants the app
+  layer must declare that itself. §13 records what its absence looks like — the turn answers with the
+  raw terminal template. The scaffold gains the line, with the reason in a comment.
+
+### Planned tests, before the code
+
+Offline, core:
+
+- `resolveClientFlowsConfig`: default `packaged: true`; explicit `false` respected;
+- `buildCommonClientFlowLayers`: `applied` is `['store::']` with packaged off and
+  `['package::', 'store::']` with it on;
+- `buildClientLuaModules`: with packaged off, only the stored names are sent — and the count drops by
+  exactly the packaged layer's size;
+- `getLocalCommonLuaScripts`: with packaged off, no `packaged-lua:` script is applied at all (the row
+  above is the one a YAML-shaped fix would miss).
+
+Offline, extension:
+
+- `normalizeCdpConfig` defaults it true; `buildCdpSdkConfig` derives `clientFlows.packaged`;
+- `packageSourcesSelected` reads false when the field drifts, so a replace-mode profile is not
+  rewritten on every start;
+- `installPackagedWorkspace`: with packaged off and a CHANGED digest, the legacy stores are left
+  alone and the digest is still recorded; with packaged on, the existing wipe is pinned unchanged.
+
+Offline, axde: `install` writes the flag, `--merge` writes true, `/up` reports the mode without
+refusing it, and the receipt carries the baseline line in both modes.
+
+Live (`axde/live/stage2d.ts`): install → `/up` a marked workspace → open a session → read the payload
+store and assert `composed from 1 layers`, `store::` only, the marker present and
+`shopping_multi_store_total_cost` ABSENT; then read the script ids and assert `stored-lua:` with no
+`packaged-lua:`; then rebuild-simulate a digest change and assert the stored layers SURVIVE.
+
+Mutation checks that must turn something red: flipping the default, forgetting any ONE of the three
+composition points (flows, modules, durable Lua), and dropping the installer's no-wipe rule.
+
+### Not in this stage
+
+The staleness of the embedded baseline is reported, not fixed: rebuilding it is
+`npm run build:bundle -- --out=…` plus an extension build, which is a release action and not
+something a delivery command should do behind a developer's back.
+
+
+## 8. Later stages (scope sketch, not commitments)
 
 | stage | adds | why it is next |
 |---|---|---|
-| 2d | live status pane (SW alive, `scriptIds`, session id, tab groups) and a log tail with filters, over the browser stage 2a leaves up | every debugging session starts by asking "is the thing I edited the thing that is running" |
+| 2e | live status pane (SW alive, `scriptIds`, session id, tab groups) and a log tail with filters, over the browser stage 2a leaves up | every debugging session starts by asking "is the thing I edited the thing that is running" |
 | 3 | pack lifecycle pane: registry list, refresh, stage-install with the approval DIFF shown, approve, enable/disable/replace/rollback/remove/reset | X6 drove these by hand-typed payloads; the approval diff is the one screen a reviewer needs |
 | 4 | turn console: send an utterance, watch nodes/tool calls/branches stream, expand a tool's args and output | replaces `send` + parsing `:axsdk:chat`, and works around the 4,120-char trace truncation |
 | 5 | pack authoring loop: wrap/verify a `.lua` artifact, run it through the packaged prelude, call `pack.catalog`/`pack.invoke`, watch the executor document | the last hand-driven surface after stage 4 |
@@ -699,7 +852,7 @@ Stages 3–5 are where non-negotiable 1 pays for itself: each imports SDK TypeSc
 Each stage gets its own section here, with the same "what it encodes because it was measured" and
 "acceptance" pair, written before its code.
 
-## 8. Rules this design deliberately does not bend
+## 9. Rules this design deliberately does not bend
 
 - No new dependency without a measurement showing the hand-written version is worse.
 - No screen shows a value the user cannot act on; a refusal quotes its raw reason.

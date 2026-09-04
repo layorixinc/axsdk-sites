@@ -47,6 +47,23 @@ export async function installExtension(browser, { profile, port, dist, fingerpri
       return { profile, outcome: 'repaired', fingerprint, extensionId: opened.extensionId, userScripts };
     }
 
+    // The attachment is right and only the BYTES changed. Measured 2026-09-04:
+    // `chrome.runtime.reload()` re-reads the unpacked build from disk — a `short_name` planted in the
+    // dist manifest was visible afterwards — so this needs no relaunch, and a relaunch would take
+    // down the browser `axde launch` deliberately left running (stage 2a).
+    if (opened.present && opened.attachedDist === dist) {
+      const refreshed = await browser.refresh();
+      if (!refreshed.present) {
+        throw new Error(`install refused: ${opened.extensionId} did not come up after a refresh of ${dist}`);
+      }
+      // Asked again on purpose: the toggles persist on disk, but `chrome.userScripts` is answered by
+      // a NEW worker.
+      const userScripts = await ensureUserScripts(browser);
+      if (!userScripts) throw new Error(refusal());
+      await browser.recordBuild(fingerprint);
+      return { profile, outcome: 'refreshed', fingerprint, extensionId: opened.extensionId, userScripts };
+    }
+
     await browser.attachBuild(dist);
     await browser.relaunch();
     const userScripts = await ensureUserScripts(browser);
@@ -54,7 +71,11 @@ export async function installExtension(browser, { profile, port, dist, fingerpri
     await browser.recordBuild(fingerprint);
     return { profile, outcome: 'installed', fingerprint, extensionId: opened.extensionId, userScripts };
   } finally {
-    await browser.close();
+    // `finish()`, not `close()`: closes a browser this process launched — which is what makes the
+    // toggles reach disk — and RELEASES one it adopted. Measured live 2026-09-04: the refresh applied
+    // a new build without a relaunch and the close then took down the browser `axde launch` had left
+    // running, so the whole point of refreshing was lost one line later.
+    await browser.finish();
   }
 }
 
@@ -77,7 +98,7 @@ export async function uninstallExtension(browser, { profile, port, dist }) {
     }
     return { profile, outcome: 'uninstalled', extensionId: opened.extensionId };
   } finally {
-    await browser.close();
+    await browser.finish();
   }
 }
 

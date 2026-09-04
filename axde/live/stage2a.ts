@@ -11,12 +11,13 @@
  * deliberately left running, so the next launch found a dead port and quietly spawned a second
  * Chrome. The first version of the journey printed that outcome instead of asserting it, and passed.
  */
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const SITES_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const DEFAULT_DIST = resolve(SITES_ROOT, '..', 'axsdk-sdk-js', 'packages', 'axsdk-extension-cdp', 'dist');
 
 type Run = { code: number; out: string };
 
@@ -122,6 +123,38 @@ async function main() {
     const after = await expectOk('ext', 'status', 'packdev');
     ok('the graceful stop kept developer mode and the user-scripts row',
       /userScripts\s+true/.test(after), after);
+
+    // --- the build step, and the refresh that applies a changed build without a relaunch ---
+    ok('install builds the extension first', /build built/.test(installed), installed);
+    const unbuilt = await expectOk('ext', 'install', 'packdev', '--no-build');
+    ok('and --no-build says it did not', /build not asked for/.test(unbuilt), unbuilt);
+
+    // A COPY of the dist, so a content change is safe to make and the build is correctly skipped.
+    const copy = join(dirname(profileRoot), 'dist-copy');
+    Bun.spawnSync(['cmd', '/c', 'xcopy', '/E', '/I', '/Q', '/Y',
+      resolve(DEFAULT_DIST).replaceAll('/', '\\'), copy.replaceAll('/', '\\')]);
+    await expectOk('profile', 'new', 'copydev');
+    const copyPort = JSON.parse(
+      readFileSync(join(profileRoot, 'copydev', 'axde-profile.json'), 'utf8'),
+    ).port as number;
+    const onCopy = await expectOk('ext', 'install', 'copydev', '--dist', copy);
+    ok('a dist that is not the sibling build is installed as it is',
+      /build skipped/.test(onCopy), onCopy);
+    await expectOk('launch', 'copydev', '--dist', copy);
+    ok('that profile has a browser up', await answers(copyPort), `port ${copyPort}`);
+
+    // Change the build's CONTENT without changing which directory is attached.
+    const marker = join(copy, 'axde-refresh-marker.js');
+    writeFileSync(marker, `// ${Date.now()}\n`);
+    const refreshed = await expectOk('ext', 'install', 'copydev', '--dist', copy, '--no-build');
+    ok('a changed build is applied by REFRESHING it', /refreshed/.test(refreshed), refreshed);
+    ok('and the browser it was left running is still up', await answers(copyPort),
+      `port ${copyPort} after the refresh`);
+    ok('with user scripts re-verified from the new worker',
+      /user scripts on/.test(refreshed), refreshed);
+    await expectOk('stop', 'copydev');
+    await expectOk('profile', 'rm', 'copydev');
+    rmSync(copy, { recursive: true, force: true });
 
     const foreignRoot = join(profileRoot, 'someone-elses');
     Bun.spawnSync(['cmd', '/c', 'mkdir', foreignRoot.replaceAll('/', '\\')]);

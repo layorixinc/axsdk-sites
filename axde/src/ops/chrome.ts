@@ -293,6 +293,29 @@ export function createBrowser({ root, log = () => {} }) {
       log('detached the build');
     },
 
+    /**
+     * Reload the extension in place, and confirm it came back.
+     *
+     * Measured 2026-09-04: `chrome.runtime.reload()` from the options page RE-READS the unpacked
+     * build from disk — a `short_name` planted in the dist manifest was visible afterwards — clears
+     * `chrome.storage.session` and replaces the service-worker target, while the browser stays up.
+     * The chrome://extensions control does the same thing (`cr-icon-button#dev-reload-button`), but
+     * its label is the browser's locale (`새로고침` here) and it renders twice, so the id would be
+     * the only safe half of it anyway — and this path needs no WebUI at all.
+     *
+     * The call kills the page that makes it, so its answer is never awaited: what is awaited is the
+     * options page answering again.
+     */
+    async refresh() {
+      if (optionsSession === undefined) throw new Error('refresh: no options page to reload from');
+      await evaluate(launched.cdp, optionsSession, 'chrome.runtime.reload()').catch(() => {});
+      optionsSession = undefined;
+      webUiTarget = undefined;
+      await delay(1_500);
+      const probed = await probe();
+      log(probed.present ? 'refreshed the extension in place' : 'refresh: the extension did not come back');
+      return probed;
+    },
     /** Chrome reads `--load-extension` only at launch, so a changed attachment needs a restart. */
     async relaunch() {
       await shutdown();

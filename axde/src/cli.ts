@@ -33,7 +33,7 @@ const USAGE = `axde — AXSDK Dev Env
   axde profile ls
   axde profile new <name> [--port <n>]
   axde profile rm  <name> [--force]
-  axde ext install   <profile> [--dist <path>] [--merge]
+  axde ext install   <profile> [--dist <path>] [--merge] [--no-build]
   axde ext uninstall <profile>
   axde ext status    <profile>
   axde launch <profile> [--url <u>] [--force]   headed, and it STAYS UP after this returns
@@ -103,11 +103,50 @@ async function target(ctx, profile) {
   };
 }
 
-async function runInstall(ctx, profile, log, { packaged = false } = {}) {
+/**
+ * Build the extension before installing it.
+ *
+ * Core FIRST, then the extension: `@axsdk/core` resolves to `dist/lib.js`, so an extension built
+ * against a stale core dist is the trap §13 records ("the extension suite tests the BUILT core").
+ * Measured 2026-09-04: core 2.8 s, extension 3.8 s.
+ *
+ * Only the sibling SDK's own dist is built, because that is the only directory whose build command
+ * we know. A `--dist` pointing elsewhere is installed as it is, and the answer says so rather than
+ * pretending something was rebuilt.
+ */
+async function buildExtension(ctx, log) {
+  if (resolve(ctx.dist) !== resolve(DEFAULT_DIST)) {
+    log(`build skipped: ${ctx.dist} is not the sibling SDK build`);
+    return 'skipped';
+  }
+  const packages = resolve(SITES_ROOT, '..', 'axsdk-sdk-js', 'packages');
+  for (const [name, cwd] of [['core', join(packages, 'axsdk-core')], ['extension', join(packages, 'axsdk-extension-cdp')]]) {
+    log(`building ${name} …`);
+    const child = Bun.spawn(['bun', 'run', 'build'], { cwd, stdout: 'pipe', stderr: 'pipe' });
+    const [out, err] = await Promise.all([
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    if (await child.exited !== 0) {
+      // The raw tail, because a build refusal names a file and a line and a paraphrase loses both.
+      const tail = `${out}${err}`.split(/\r?\n/).filter(Boolean).slice(-6).join('\n');
+      throw new Error(`${name} build failed:\n${tail}`);
+    }
+  }
+  return 'built';
+}
+
+async function runInstall(ctx, profile, log, { packaged = false, build = true } = {}) {
+  const built = build ? await buildExtension(ctx, log) : 'not asked for';
+  // AFTER the build, never before: the fingerprint is the build's identity, and `context()` computed
+  // it from the bytes that were on disk when axde started. Recording the old one would tell the next
+  // `ext status` that a build it never installed is current.
+  const fingerprint = fingerprintBuild(ctx.dist);
   const browser = createBrowser({ root: ctx.root, log });
-  const at = await target(ctx, profile);
+  const at = { ...(await target(ctx, profile)), fingerprint };
   const result = await installExtension(browser, at);
-  log(`install ${profile}: ${result.outcome} ${(result.fingerprint ?? '').slice(0, 8)} · user scripts ${result.userScripts ? 'on' : 'off'}`
+  log(`install ${profile}: ${result.outcome} ${(result.fingerprint ?? '').slice(0, 8)} · build ${built}`
+    + ` · user scripts ${result.userScripts ? 'on' : 'off'}`
     + ` · sources ${packaged ? 'package + workspace' : 'workspace only'}`);
   // ALWAYS, not only when the build changed. `install` is the single writer of this profile's
   // config (§5), and the source MODE is part of it — measured 2026-09-04, the live gate caught
@@ -121,7 +160,10 @@ async function runInstall(ctx, profile, log, { packaged = false } = {}) {
     await seeding.open(at);
     log(`credentials: ${await seeding.seedCredentials(ctx.envPath, { packaged })}`);
   } finally {
-    await seeding.close();
+    // The same rule as everywhere else: this session ADOPTS a running browser when there is one,
+    // and closing it would take down what `axde launch` left up — measured live, twice in one
+    // afternoon, in two different places.
+    await seeding.finish();
   }
   return result;
 }
@@ -172,7 +214,10 @@ const HANDLERS = {
     say(`removed ${removed.name}`);
   },
   install: async (ctx, { positional: [name], flags }, say) => {
-    await runInstall(ctx, name, say, { packaged: flags.merge === true });
+    await runInstall(ctx, name, say, {
+      packaged: flags.merge === true,
+      build: flags['no-build'] !== true,
+    });
   },
   uninstall: async (ctx, { positional: [name] }, say) => {
     const browser = createBrowser({ root: ctx.root, log: say });
@@ -270,7 +315,10 @@ async function subcommand(args) {
     return 0;
   }
   if (group === 'ext' && action === 'install') {
-    await runInstall(ctx, name, say, { packaged: args.includes('--merge') });
+    await runInstall(ctx, name, say, {
+      packaged: args.includes('--merge'),
+      build: !args.includes('--no-build'),
+    });
     return 0;
   }
   if (group === 'ext' && action === 'uninstall') {

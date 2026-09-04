@@ -14,7 +14,7 @@ the SDK's own TypeScript (pack schemas, the registry verifier, the Lua prelude) 
 npm run axde                      # the TUI  (= bun axde/src/cli.ts)
 npm run axde -- profile ls
 npm run axde -- profile new packdev
-npm run axde -- ext install packdev
+npm run axde -- ext install packdev                             # builds, then installs
 npm run axde -- ext status packdev
 npm run axde -- ext uninstall packdev
 npm run axde -- launch packdev --url https://www.amazon.com/   # headed, and it STAYS UP
@@ -61,6 +61,16 @@ seeded from (default: this repo's), `--port <n>` fixes a profile's debugging por
 point it at a temp directory to experiment without touching your own profiles.
 
 ## What "install" means here
+
+`ext install` **builds the extension first** — core, then the extension, because `@axsdk/core`
+resolves to its own dist — and then installs the result. `--no-build` skips it; a `--dist` that is
+not the sibling SDK build is installed as it is and the answer says `build skipped`.
+
+If the extension is already there and only its BYTES changed, it is applied by **reloading the
+extension in place**, not by relaunching Chrome: measured, `chrome.runtime.reload()` re-reads the
+unpacked build from disk, so the browser `axde launch` left running stays up and keeps its tabs.
+A changed ATTACHMENT (a different `--dist`) still needs a relaunch, because Chrome reads that flag
+only at launch.
 
 The build is **attached** to the profile and loaded by Chrome at launch (`--load-extension`), because
 that is the only form that survives a restart — a CDP `loadUnpacked` registration dies with its
@@ -143,7 +153,7 @@ own or waits out a port that never opens.
 
 ```bash
 npm run test:axde        # bun test axde — core, ops, driver, workspace, packs (125 tests, offline)
-npm run test:axde:live   # three real-browser gates: headed browser (21), workspace (25), replace (11)
+npm run test:axde:live   # three real-browser gates: browser+build (28), workspace (25), replace (11)
 ```
 
 The live gate drives the same subcommands on a throwaway profile root and asserts the 21 facts no

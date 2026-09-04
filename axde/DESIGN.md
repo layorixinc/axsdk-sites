@@ -89,6 +89,44 @@ mechanism:
 This also RETIRES an X6 note: "`--load-extension` produced no service worker" was measured while the
 external pack config was broken (`missing schemaVersion`). With that fixed, the flag path is clean.
 
+### Build first, and apply a changed build by REFRESHING it (2026-09-04)
+
+`ext install` builds the extension before installing it, and a build whose CONTENT changed is
+applied by reloading the extension in place rather than by relaunching Chrome.
+
+Three measurements decide the shape:
+
+- **`chrome.runtime.reload()` re-reads the unpacked build from disk.** A `short_name` planted in
+  `dist/manifest.json` was visible to `chrome.runtime.getManifest()` afterwards; the service-worker
+  target changed and `chrome.storage.session` was cleared, while the browser stayed up. So a
+  content change needs no relaunch — and a relaunch would take down the browser `axde launch`
+  deliberately left running.
+- **The chrome://extensions control is `cr-icon-button#dev-reload-button`**, and it renders TWICE
+  with the label `새로고침` — the browser's locale. Keying on the id would be the only safe half of
+  it, and the runtime call needs no WebUI at all, so that is the path taken.
+- **Build order is core THEN extension** (2.8 s + 3.8 s): `@axsdk/core` resolves to `dist/lib.js`,
+  so an extension built against a stale core dist is §13's "the extension suite tests the BUILT
+  core" trap.
+
+The rules that follow from it:
+
+- **attachment change → relaunch; content change → refresh.** Chrome reads `--load-extension` only
+  at launch, so a different directory still needs a restart.
+- **The fingerprint is computed AFTER the build.** `context()` reads it when axde starts, and
+  recording that one would tell the next `ext status` that a build it never installed is current.
+- **Only the sibling SDK dist is built.** A `--dist` pointing elsewhere is installed as it is and
+  the answer says `build skipped`: we know one directory's build command, not any directory's.
+- **A refreshed extension has its toggles re-verified**, because `chrome.userScripts` is answered
+  by a NEW worker even though the two prefs persist on disk.
+- `--no-build` skips it, and a failed build refuses with the raw tail rather than installing a
+  stale dist.
+
+**The defect this exposed, twice in one afternoon.** `installExtension` ended with a graceful
+`close()`, and so did the credential-seeding session — so the refresh applied the new build and the
+next line took the developer's browser down, which made "a changed build without a relaunch" true
+and useless. Both now use `finish()`: close a browser this process LAUNCHED (which is what makes
+the toggles reach disk), release one it ADOPTED. That is the same rule stage 2c had to learn for
+reads, in two more places.
 ### Screen — **superseded by §5** (kept as the record of what stage 1 shipped)
 
 ```text
